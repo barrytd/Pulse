@@ -1,0 +1,33 @@
+# .gitignore
+# -----------
+# This file tells Git which files to IGNORE (not track or upload).
+# We don't want to push temporary files, secrets, or giant log files
+# to GitHub — just our source code.
+
+# Python cache files (auto-generated when you run code)
+__pycache__/
+*.pyc
+
+# Virtual environment (if you create one)
+venv/
+.venv/
+
+# IDE settings (VS Code stores preferences here)
+.vscode/
+
+# Log files — these can be huge and are specific to each user
+logs/*.evtx
+
+# Generated reports — users will generate their own
+reports/*.txt
+reports/*.json
+
+# OS junk files
+.DS_Store
+Thumbs.db
+
+# Environment variables / secrets (NEVER push these to GitHub)
+.env
+
+# Claude Code settings (local to each developer, not needed in repo)
+.claude/
