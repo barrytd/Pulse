@@ -9,6 +9,7 @@ Pulse is a blue team tool that reads Windows event logs (.evtx files), identifie
 ## Why Pulse?
 
 Windows event logs hold a goldmine of forensic data, but digging through them manually is tedious and error-prone. Pulse automates the boring parts, parsing the logs, flagging the suspicious patterns, and organizing the findings into a clean report. Built as a hands-on learning project to explore threat detection, digital forensics, and Python development.
+
 ---
 
 ## Features
