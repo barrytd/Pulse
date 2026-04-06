@@ -26,6 +26,11 @@ from pulse.detections import (
     detect_user_creation,
     detect_privilege_escalation,
     detect_log_clearing,
+    detect_firewall_rule_change,
+    detect_firewall_disabled,
+    detect_av_disabled,
+    detect_service_installed,
+    detect_rdp_logon,
     run_all_detections,
     BRUTE_FORCE_THRESHOLD,
 )
@@ -121,6 +126,117 @@ def make_log_cleared_event(cleared_by, timestamp="2024-01-15T11:00:00.000Z"):
         "</Event>"
     )
     return {"event_id": 1102, "timestamp": timestamp, "data": xml}
+
+
+def make_firewall_rule_event(event_id, rule_name, timestamp="2024-01-15T12:00:00.000Z"):
+    """
+    Builds a fake Event 4946 (rule added) or 4947 (rule modified) dictionary.
+
+    Parameters:
+        event_id (int):   Either 4946 or 4947.
+        rule_name (str):  The name of the firewall rule that was changed.
+        timestamp (str):  When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        f"    <EventID>{event_id}</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="RuleName">{rule_name}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": event_id, "timestamp": timestamp, "data": xml}
+
+
+def make_firewall_disabled_event(profile, timestamp="2024-01-15T12:30:00.000Z"):
+    """
+    Builds a fake Event 4950 (firewall profile changed) dictionary.
+
+    Parameters:
+        profile (str):  The firewall profile name (e.g., "Domain", "Public").
+        timestamp (str): When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4950</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="ProfileName">{profile}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 4950, "timestamp": timestamp, "data": xml}
+
+
+def make_av_disabled_event(timestamp="2024-01-15T13:00:00.000Z"):
+    """
+    Builds a fake Event 5001 (antivirus real-time protection disabled) dictionary.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>5001</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 5001, "timestamp": timestamp, "data": xml}
+
+
+def make_service_installed_event(service_name, account, timestamp="2024-01-15T14:00:00.000Z"):
+    """
+    Builds a fake Event 7045 (new service installed) dictionary.
+
+    Parameters:
+        service_name (str): Name of the service that was installed.
+        account (str):      The account that installed the service.
+        timestamp (str):    When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>7045</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="ServiceName">{service_name}</Data>'
+        f'    <Data Name="AccountName">{account}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 7045, "timestamp": timestamp, "data": xml}
+
+
+def make_rdp_logon_event(username, logon_type="10", timestamp="2024-01-15T15:00:00.000Z"):
+    """
+    Builds a fake Event 4624 (successful logon) dictionary.
+
+    Parameters:
+        username (str):    The account that logged on.
+        logon_type (str):  The logon type ("10" = RDP, "3" = network, etc.).
+        timestamp (str):   When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4624</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="TargetUserName">{username}</Data>'
+        f'    <Data Name="LogonType">{logon_type}</Data>'
+        '    <Data Name="IpAddress">192.168.1.100</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 4624, "timestamp": timestamp, "data": xml}
 
 
 # ===========================================================================
@@ -310,6 +426,210 @@ def test_log_clearing_ignores_other_events():
 
 
 # ===========================================================================
+# RDP LOGON TESTS
+# ===========================================================================
+
+def test_rdp_logon_flags_type_10():
+    """
+    A 4624 event with LogonType 10 (RDP) should produce a finding.
+    """
+    events = [make_rdp_logon_event("attacker", logon_type="10")]
+
+    findings = detect_rdp_logon(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "RDP Logon Detected"
+    assert findings[0]["severity"] == "MEDIUM"
+    assert "attacker" in findings[0]["details"]
+    # The source IP should be in the finding details.
+    assert "192.168.1.100" in findings[0]["details"]
+
+
+def test_rdp_logon_ignores_other_logon_types():
+    """
+    A 4624 event with LogonType 3 (network) should NOT trigger.
+    This is the key test — we only care about type 10, not all logons.
+    """
+    events = [make_rdp_logon_event("user", logon_type="3")]
+
+    findings = detect_rdp_logon(events)
+
+    assert len(findings) == 0
+
+
+def test_rdp_logon_ignores_other_event_ids():
+    """
+    Non-4624 events should be ignored entirely.
+    """
+    events = [make_user_created_event("newguy", "admin")]
+
+    findings = detect_rdp_logon(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# SERVICE INSTALLED TESTS
+# ===========================================================================
+
+def test_service_installed_flags_event():
+    """
+    A 7045 event should produce a finding with the service name and account.
+    """
+    events = [make_service_installed_event("EvilBackdoor", "LocalSystem")]
+
+    findings = detect_service_installed(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Service Installed"
+    assert findings[0]["severity"] == "MEDIUM"
+    assert "EvilBackdoor" in findings[0]["details"]
+    assert "LocalSystem" in findings[0]["details"]
+
+
+def test_service_installed_flags_multiple():
+    """
+    Multiple new services should each produce their own finding.
+    """
+    events = [
+        make_service_installed_event("LegitService", "NetworkService"),
+        make_service_installed_event("ShadyService", "LocalSystem"),
+    ]
+
+    findings = detect_service_installed(events)
+
+    assert len(findings) == 2
+
+
+def test_service_installed_ignores_other_events():
+    """
+    Non-7045 events should be ignored.
+    """
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_service_installed(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# ANTIVIRUS DISABLED TESTS
+# ===========================================================================
+
+def test_av_disabled_flags_event():
+    """
+    A single 5001 event should produce one HIGH finding.
+    This is the simplest rule — no XML fields to extract, the event IS the alert.
+    """
+    events = [make_av_disabled_event()]
+
+    findings = detect_av_disabled(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Antivirus Disabled"
+    assert findings[0]["severity"] == "HIGH"
+
+
+def test_av_disabled_ignores_other_events():
+    """
+    Non-5001 events should be ignored.
+    """
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_av_disabled(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# FIREWALL DISABLED TESTS
+# ===========================================================================
+
+def test_firewall_disabled_flags_profile_change():
+    """
+    A 4950 event should produce a HIGH finding with the profile name.
+    """
+    events = [make_firewall_disabled_event("Public")]
+
+    findings = detect_firewall_disabled(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Firewall Disabled"
+    assert findings[0]["severity"] == "HIGH"
+    assert "Public" in findings[0]["details"]
+
+
+def test_firewall_disabled_flags_multiple_profiles():
+    """
+    If multiple profiles are changed, each gets its own finding.
+    """
+    events = [
+        make_firewall_disabled_event("Domain"),
+        make_firewall_disabled_event("Private"),
+        make_firewall_disabled_event("Public"),
+    ]
+
+    findings = detect_firewall_disabled(events)
+
+    assert len(findings) == 3
+
+
+def test_firewall_disabled_ignores_other_events():
+    """
+    Non-4950 events should be ignored.
+    """
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_firewall_disabled(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# FIREWALL RULE CHANGED TESTS
+# ===========================================================================
+
+def test_firewall_rule_change_flags_added():
+    """
+    A 4946 event (rule added) should produce a finding that says "added".
+    """
+    events = [make_firewall_rule_event(4946, "Allow Backdoor Port 4444")]
+
+    findings = detect_firewall_rule_change(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Firewall Rule Changed"
+    assert findings[0]["severity"] == "MEDIUM"
+    # Check that the finding mentions the rule name AND the action.
+    assert "Allow Backdoor Port 4444" in findings[0]["details"]
+    assert "added" in findings[0]["details"]
+
+
+def test_firewall_rule_change_flags_modified():
+    """
+    A 4947 event (rule modified) should produce a finding that says "modified".
+    """
+    events = [make_firewall_rule_event(4947, "Remote Desktop")]
+
+    findings = detect_firewall_rule_change(events)
+
+    assert len(findings) == 1
+    assert "modified" in findings[0]["details"]
+    assert "Remote Desktop" in findings[0]["details"]
+
+
+def test_firewall_rule_change_ignores_other_events():
+    """
+    Non-4946/4947 events should be ignored.
+    """
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_firewall_rule_change(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
 # RUN_ALL_DETECTIONS TEST
 # ===========================================================================
 
@@ -328,15 +648,24 @@ def test_run_all_detections_combines_results():
         + [make_privilege_escalation_event("backdoor", "Administrators", "admin")]
         # 1 log clear — should trigger log clearing
         + [make_log_cleared_event("admin")]
+        # 1 RDP logon — should trigger RDP detection
+        + [make_rdp_logon_event("attacker", logon_type="10")]
+        # 1 service installed — should trigger service detection
+        + [make_service_installed_event("EvilSvc", "LocalSystem")]
+        # 1 AV disabled — should trigger AV detection
+        + [make_av_disabled_event()]
+        # 1 firewall disabled — should trigger firewall disabled detection
+        + [make_firewall_disabled_event("Public")]
+        # 1 firewall rule added — should trigger firewall rule change detection
+        + [make_firewall_rule_event(4946, "Allow Port 4444")]
     )
 
     findings = run_all_detections(events)
 
-    # We expect 4 findings total: 1 brute force + 1 user creation +
-    # 1 privilege escalation + 1 log cleared.
-    assert len(findings) == 4
+    # We expect 9 findings total — one from each detection rule.
+    assert len(findings) == 9
 
-    # Check that all four rule names appear in the findings.
+    # Check that all nine rule names appear in the findings.
     # set() removes duplicates, so we get a unique set of rule names.
     rule_names = set(f["rule"] for f in findings)
     assert rule_names == {
@@ -344,4 +673,9 @@ def test_run_all_detections_combines_results():
         "User Account Created",
         "Privilege Escalation",
         "Audit Log Cleared",
+        "RDP Logon Detected",
+        "Service Installed",
+        "Antivirus Disabled",
+        "Firewall Disabled",
+        "Firewall Rule Changed",
     }
