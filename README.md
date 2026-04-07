@@ -132,6 +132,7 @@ All 34 tests run without needing real `.evtx` files — the test suite uses fake
 
 ## Roadmap
 
+### Done
 - [x] Project structure and foundation
 - [x] `.evtx` file parsing
 - [x] Detection rules — 11 rules covering login attacks, persistence, defence evasion
@@ -140,9 +141,31 @@ All 34 tests run without needing real `.evtx` files — the test suite uses fake
 - [x] CLI flags (`--logs`, `--output`, `--format`)
 - [x] Attack chain correlation (connects multiple events into attack patterns)
 - [x] Unit tests (34 tests, all passing)
-- [ ] JSON report output for use with other tools (Splunk, ELK, etc.)
-- [ ] Whitelist/allowlist — suppress known-good accounts and services
-- [ ] SaaS web dashboard (future)
+
+### Near-term
+- [ ] **JSON report output** — machine-readable findings for piping into other tools (Splunk, ELK, Python scripts)
+- [ ] **Severity filter flag** — `--severity HIGH` to only show findings at or above a chosen level, cuts noise when you only care about critical issues
+- [ ] **Scan summary statistics** — show total events parsed, time range covered, and top event types before the findings list so analysts get context at a glance
+- [ ] **Config file support** — load defaults from a `pulse.yaml` file (log folder, thresholds, format) so you don't have to type flags every time
+- [ ] **Whitelist/allowlist** — suppress known-good accounts and service names from findings to reduce false positives in noisy environments
+
+### Medium-term
+- [ ] **More detection rules** — expand coverage with:
+  - PowerShell script block logging (Event 4104) — catch encoded/obfuscated PS commands
+  - Scheduled task creation (Event 4698) — another common persistence method
+  - Pass-the-hash detection (Event 4624, NTLM logon type) — credential abuse pattern
+  - Account lockout (Event 4740) — high volume indicates active brute force
+- [ ] **MITRE ATT&CK tagging** — label each finding with the relevant ATT&CK technique ID (e.g. T1110 for brute force, T1136 for account creation) so findings map directly to the industry-standard threat framework
+- [ ] **Baseline comparison** — compare a log against a "known good" snapshot of the same machine to surface anomalies that wouldn't stand out alone (new account that didn't exist yesterday, service that appeared overnight)
+- [ ] **CSV export** — export findings as a spreadsheet for analysts who prefer working in Excel or sharing with non-technical stakeholders
+- [ ] **Email delivery** — send the finished HTML report via email automatically when a scan completes
+
+### Longer-term
+- [ ] **SQLite database** — store all parsed events and findings locally so Pulse can compare scans over time, track trends, and ask questions like "has this account ever logged in via RDP before?"
+- [ ] **Live monitoring mode** — instead of one-shot analysis, watch a log file for new events and alert in real time as suspicious activity happens
+- [ ] **Interactive terminal mode** — after a scan, let the user drill into individual findings, view raw event XML, and mark findings as investigated or false positive
+- [ ] **REST API** — expose Pulse as a local web service so other tools can submit `.evtx` files and get findings back as JSON, enabling integration into larger pipelines
+- [ ] **Web dashboard** — a browser-based UI to upload logs, view findings, track history across multiple machines, and manage whitelists
 
 ---
 
