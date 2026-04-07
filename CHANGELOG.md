@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-07 (continued)
+
+### Added
+- **Remediation tab** in the HTML report - hardcoded action steps for all 11 detection rules, sorted CRITICAL first
+- **Executive summary** auto-generated based on severity of findings (tone adjusts: CRITICAL compromise detected vs routine monitoring)
+- **Dark mode toggle** in the HTML report navbar - preference persisted in localStorage across reloads
+- **Two-tab layout** - Detections tab (existing filterable table) and Remediation tab
+- Em dashes removed from all report output (replaced with plain hyphens for compatibility)
+
+---
+
 ## 2026-04-07
 
 ### Added
