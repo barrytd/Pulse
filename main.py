@@ -78,6 +78,14 @@ def build_arg_parser():
         help="Report format: txt or html. Default: txt",
     )
 
+    parser.add_argument(
+        "--severity",
+        default="LOW",
+        choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        metavar="LEVEL",
+        help="Only show findings at or above this severity level. Default: LOW (shows everything)",
+    )
+
     return parser
 
 
@@ -110,6 +118,7 @@ def main():
     log_folder = args.logs
     output_path = args.output
     report_format = args.format
+    severity_filter = args.severity
 
     # --- STEP 1: PREFLIGHT CHECKS ---
     if not os.path.exists(log_folder):
@@ -152,8 +161,18 @@ def main():
     # --- STEP 4: RUN DETECTIONS ---
     print("  [*] Running detection rules...")
     findings = run_all_detections(all_events)
+
+    # --- FILTER BY SEVERITY ---
+    # SEVERITY_ORDER is a list where position = rank.
+    # "LOW" is at index 0 (lowest), "CRITICAL" is at index 3 (highest).
+    # We keep a finding only if its severity rank is >= the user's chosen rank.
+    SEVERITY_ORDER = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    findings = [
+        f for f in findings
+        if SEVERITY_ORDER.index(f["severity"]) >= SEVERITY_ORDER.index(severity_filter)
+    ]
+
     print(f"  [*] Findings: {len(findings)}")
-    print()
 
     # --- STEP 5: GENERATE REPORT ---
     if findings:

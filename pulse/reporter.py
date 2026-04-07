@@ -20,10 +20,15 @@ from datetime import datetime
 # CSS colours can be names ("red"), hex codes ("#FF0000"), or rgb() values.
 # These are chosen to be readable but clearly distinct.
 SEVERITY_COLOURS = {
-    "HIGH":   "#e74c3c",   # Red
-    "MEDIUM": "#e67e22",   # Orange
-    "LOW":    "#3498db",   # Blue
+    "CRITICAL": "#8e44ad",  # Purple — most urgent, stands out from red
+    "HIGH":     "#e74c3c",  # Red
+    "MEDIUM":   "#e67e22",  # Orange
+    "LOW":      "#3498db",  # Blue
 }
+
+# The order we want findings displayed — most severe at the top.
+# sorted() uses the index position as the sort key: CRITICAL=0, HIGH=1, etc.
+SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 
 
 def generate_report(findings, output_path=None, fmt="txt"):
@@ -48,9 +53,19 @@ def generate_report(findings, output_path=None, fmt="txt"):
         extension = "html" if fmt == "html" else "txt"
         output_path = os.path.join("reports", f"pulse_report_{timestamp}.{extension}")
 
+    # --- SORT FINDINGS — most severe first ---
+    # sorted() returns a new sorted list without changing the original.
+    # The key= tells it what to sort by.
+    # .index() gives us the position in SEVERITY_ORDER — CRITICAL=0, LOW=3.
+    # Lower index = more severe = sorts to the top.
+    findings = sorted(
+        findings,
+        key=lambda f: SEVERITY_ORDER.index(f.get("severity", "LOW"))
+        if f.get("severity") in SEVERITY_ORDER else len(SEVERITY_ORDER)
+    )
+
     # --- COUNT FINDINGS BY SEVERITY ---
-    # Same logic as before — tally HIGH, MEDIUM, LOW counts for the summary.
-    severity_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
     for finding in findings:
         severity = finding.get("severity", "LOW")
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
@@ -94,9 +109,10 @@ def _build_txt_report(findings, severity_counts):
     lines.append(f"  Total findings: {len(findings)}")
     lines.append("")
     lines.append("  Severity Breakdown:")
-    lines.append(f"    HIGH:   {severity_counts['HIGH']}")
-    lines.append(f"    MEDIUM: {severity_counts['MEDIUM']}")
-    lines.append(f"    LOW:    {severity_counts['LOW']}")
+    lines.append(f"    CRITICAL: {severity_counts['CRITICAL']}")
+    lines.append(f"    HIGH:     {severity_counts['HIGH']}")
+    lines.append(f"    MEDIUM:   {severity_counts['MEDIUM']}")
+    lines.append(f"    LOW:      {severity_counts['LOW']}")
     lines.append("")
     lines.append("-" * 60)
 
@@ -173,6 +189,10 @@ def _build_html_report(findings, severity_counts):
     # Three coloured boxes at the top — one per severity level.
     summary_boxes = f"""
         <div class="summary">
+            <div class="summary-box" style="background-color: {SEVERITY_COLOURS['CRITICAL']};">
+                <div class="summary-count">{severity_counts['CRITICAL']}</div>
+                <div class="summary-label">CRITICAL</div>
+            </div>
             <div class="summary-box" style="background-color: {SEVERITY_COLOURS['HIGH']};">
                 <div class="summary-count">{severity_counts['HIGH']}</div>
                 <div class="summary-label">HIGH</div>
