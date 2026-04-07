@@ -176,6 +176,38 @@ def _build_txt_report(findings, severity_counts):
     return "\n".join(lines)
 
 
+def _calculate_score(severity_counts):
+    """
+    Calculates a security score out of 100 based on findings.
+
+    Each finding deducts points depending on severity:
+      CRITICAL = -25 pts, HIGH = -10 pts, MEDIUM = -5 pts, LOW = -2 pts
+
+    The score is clamped at 0 (can't go below zero).
+
+    Returns:
+        tuple: (score int, label str, hex_colour str)
+    """
+    deductions = (
+        severity_counts.get("CRITICAL", 0) * 25 +
+        severity_counts.get("HIGH",     0) * 10 +
+        severity_counts.get("MEDIUM",   0) *  5 +
+        severity_counts.get("LOW",      0) *  2
+    )
+    score = max(0, 100 - deductions)
+
+    if score >= 90:
+        return score, "SECURE",        "#27ae60"
+    elif score >= 70:
+        return score, "LOW RISK",      "#3498db"
+    elif score >= 50:
+        return score, "MEDIUM RISK",   "#e67e22"
+    elif score >= 25:
+        return score, "HIGH RISK",     "#e74c3c"
+    else:
+        return score, "CRITICAL RISK", "#8e44ad"
+
+
 def _build_executive_summary(findings, severity_counts):
     """
     Generates a short executive summary paragraph based on what was found.
@@ -221,6 +253,7 @@ def _build_html_report(findings, severity_counts):
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(findings)
+    score, score_label, score_colour = _calculate_score(severity_counts)
 
     # --- DETECTIONS TAB: table rows ---
     rows = []
@@ -290,6 +323,8 @@ def _build_html_report(findings, severity_counts):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pulse - Threat Detection Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* ── CSS variables — light mode defaults ── */
         :root {{
@@ -332,7 +367,7 @@ def _build_html_report(findings, severity_counts):
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
             background: var(--bg);
             color: var(--text);
             font-size: 14px;
@@ -618,6 +653,65 @@ def _build_html_report(findings, severity_counts):
             background: var(--text-muted);
         }}
 
+        /* ── Score hero ── */
+        .score-hero {{
+            background: var(--surface);
+            border-radius: 10px;
+            padding: 28px 36px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            gap: 32px;
+        }}
+        .score-ring {{
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            border: 8px solid;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }}
+        .score-number {{
+            font-size: 2.2rem;
+            font-weight: 700;
+            line-height: 1;
+        }}
+        .score-denom {{
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }}
+        .score-info {{
+            flex: 1;
+        }}
+        .score-label {{
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            line-height: 1.2;
+        }}
+        .score-sub {{
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }}
+        .score-breakdown {{
+            display: flex;
+            gap: 20px;
+            margin-top: 14px;
+        }}
+        .score-breakdown-item {{
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }}
+        .score-breakdown-item strong {{
+            font-weight: 700;
+        }}
+
         footer {{
             text-align: center;
             color: var(--text-muted);
@@ -639,6 +733,24 @@ def _build_html_report(findings, severity_counts):
 
     <div class="page">
         <h1>Detection Findings</h1>
+
+        <!-- Security score hero -->
+        <div class="score-hero">
+            <div class="score-ring" style="border-color:{score_colour}; color:{score_colour};">
+                <div class="score-number">{score}</div>
+                <div class="score-denom">/ 100</div>
+            </div>
+            <div class="score-info">
+                <div class="score-label" style="color:{score_colour};">{score_label}</div>
+                <div class="score-sub">Pulse Security Score - based on {total} finding(s) detected</div>
+                <div class="score-breakdown">
+                    <span class="score-breakdown-item"><strong style="color:{SEVERITY_COLOURS['CRITICAL']};">{severity_counts['CRITICAL']}</strong> Critical (-25 pts each)</span>
+                    <span class="score-breakdown-item"><strong style="color:{SEVERITY_COLOURS['HIGH']};">{severity_counts['HIGH']}</strong> High (-10 pts each)</span>
+                    <span class="score-breakdown-item"><strong style="color:{SEVERITY_COLOURS['MEDIUM']};">{severity_counts['MEDIUM']}</strong> Medium (-5 pts each)</span>
+                    <span class="score-breakdown-item"><strong style="color:{SEVERITY_COLOURS['LOW']};">{severity_counts['LOW']}</strong> Low (-2 pts each)</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Summary cards -->
         <div class="cards">

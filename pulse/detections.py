@@ -209,7 +209,7 @@ def detect_brute_force(events):
                         "details": (
                             f"Account '{account}' had {BRUTE_FORCE_THRESHOLD}+ failed "
                             f"login attempts within {BRUTE_FORCE_WINDOW_MINUTES} minutes "
-                            f"(between {window_start.strftime('%H:%M:%S')} and "
+                            f"(between {window_start.strftime('%Y-%m-%dT%H:%M:%S')} and "
                             f"{window_end.strftime('%H:%M:%S')}). "
                             f"This strongly indicates a password guessing attack."
                         ),
@@ -260,7 +260,7 @@ def detect_user_creation(events):
             "details": (
                 f"New account '{new_account or 'Unknown'}' was created "
                 f"by '{created_by or 'Unknown'}' at {event['timestamp']}. "
-                f"Verify this was authorized — attackers create backdoor accounts."
+                f"Verify this was authorized - attackers create backdoor accounts."
             ),
         })
 
@@ -436,7 +436,7 @@ def detect_rdp_logon(events):
                 f"Remote Desktop logon by '{target_user or 'Unknown'}' "
                 f"from IP {source_ip or 'Unknown'} "
                 f"at {event['timestamp']}. "
-                f"RDP access should be monitored closely — attackers use it "
+                f"RDP access should be monitored closely - attackers use it "
                 f"for full interactive control of the machine."
             ),
         })
@@ -536,7 +536,7 @@ def detect_av_disabled(events):
             "details": (
                 f"Windows Defender real-time protection was disabled "
                 f"at {event['timestamp']}. "
-                f"This is a critical finding — attackers disable AV to "
+                f"This is a critical finding - attackers disable AV to "
                 f"run malware undetected. Investigate immediately."
             ),
         })
@@ -641,7 +641,7 @@ def detect_firewall_rule_change(events):
             "details": (
                 f"Firewall rule '{rule_name or 'Unknown'}' was {action} "
                 f"at {event['timestamp']}. "
-                f"Verify this was an authorized change — attackers modify "
+                f"Verify this was an authorized change - attackers modify "
                 f"firewall rules to allow C2 traffic or open backdoor ports."
             ),
         })
@@ -782,9 +782,9 @@ def detect_account_takeover_chain(events):
             "details": (
                 f"ATTACK CHAIN DETECTED for account '{account}': "
                 f"({len(failures)}) failed logins ending at "
-                f"{last_failure.strftime('%H:%M:%S')}, "
+                f"{last_failure.strftime('%Y-%m-%dT%H:%M:%S')}, "
                 f"followed by a successful login at "
-                f"{first_success.strftime('%H:%M:%S')}, "
+                f"{first_success.strftime('%Y-%m-%dT%H:%M:%S')}, "
                 f"followed by creation of new account(s): '{new_usernames}'. "
                 f"This strongly indicates a successful account takeover with "
                 f"backdoor account creation. Investigate immediately."
@@ -865,7 +865,7 @@ def detect_malware_persistence_chain(events):
             "severity": "CRITICAL",
             "details": (
                 f"ATTACK CHAIN DETECTED: Antivirus was disabled at "
-                f"{first_av_disabled.strftime('%H:%M:%S')}, "
+                f"{first_av_disabled.strftime('%Y-%m-%dT%H:%M:%S')}, "
                 f"followed by installation of service(s): '{service_names}'. "
                 f"This matches the pattern of malware disabling defences "
                 f"before installing itself for persistence. Investigate immediately."

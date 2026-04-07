@@ -7,6 +7,18 @@ Format: newest entries at the top, grouped by date.
 
 ## 2026-04-07 (continued)
 
+### Fixed
+- **Timestamp column showing "-"** for brute force and attack chain findings in HTML report - changed `strftime('%H:%M:%S')` to `strftime('%Y-%m-%dT%H:%M:%S')` in `detect_brute_force`, `detect_account_takeover_chain`, and `detect_malware_persistence_chain` so the reporter regex can extract a full date
+- **Em dashes removed** from finding detail text in 4 detection rules (User Account Created, RDP Logon, AV Disabled, Firewall Rule Changed)
+
+### Added
+- **Security Score panel** at the top of the HTML report - a score out of 100 that drops based on severity of findings (CRITICAL -25, HIGH -10, MEDIUM -5, LOW -2), displayed as a circular ring with a color-coded risk label (SECURE / LOW RISK / MEDIUM RISK / HIGH RISK / CRITICAL RISK)
+- **Inter font** loaded from Google Fonts for cleaner, more professional typography matching industry security dashboards
+
+---
+
+## 2026-04-07 (continued)
+
 ### Added
 - **Remediation tab** in the HTML report - hardcoded action steps for all 11 detection rules, sorted CRITICAL first
 - **Executive summary** auto-generated based on severity of findings (tone adjusts: CRITICAL compromise detected vs routine monitoring)
