@@ -55,7 +55,8 @@
 #    because it gives them a full GUI session on the target machine.
 
 
-import xml.etree.ElementTree as ET  # Built-in XML parser — same one we used in parser.py
+import xml.etree.ElementTree as ET          # Built-in XML parser
+from datetime import datetime, timedelta   # For comparing event timestamps
 
 
 # These are the Windows Event IDs we care about.
@@ -72,8 +73,13 @@ EVENT_AV_DISABLED = 5001
 EVENT_SERVICE_INSTALLED = 7045
 EVENT_SUCCESSFUL_LOGON = 4624
 
-# How many failed logins before we call it a brute force attempt?
+# How many failed logins within the time window triggers a brute force alert.
 BRUTE_FORCE_THRESHOLD = 5
+
+# How many minutes to look back when counting failures.
+# 5 failures spread over a week = probably typos.
+# 5 failures within 10 minutes = probably an attack.
+BRUTE_FORCE_WINDOW_MINUTES = 10
 
 # Logon Type 10 = Remote Desktop (RDP). Other types:
 # 2 = Interactive (local keyboard), 3 = Network, 7 = Unlock.
@@ -88,80 +94,127 @@ NS = "{http://schemas.microsoft.com/win/2004/08/events/event}"
 
 def detect_brute_force(events):
     """
-    Looks for accounts with too many failed login attempts.
+    Looks for accounts with too many failed login attempts within a time window.
+
+    WHY A TIME WINDOW?
+    The old version counted ALL failures across the entire log. That meant
+    5 failures spread over 3 weeks looked the same as 5 failures in 30 seconds.
+    Real brute force attacks happen fast. This version only flags failures that
+    cluster together within BRUTE_FORCE_WINDOW_MINUTES minutes.
+
+    HOW IT WORKS:
+    For each account, we collect a list of timestamps for every failure.
+    Then we sort those timestamps and use a "sliding window" — we check
+    every consecutive group of BRUTE_FORCE_THRESHOLD failures and ask:
+    "did all of these happen within our time window?"
 
     Parameters:
         events (list): List of event dictionaries from the parser.
 
     Returns:
-        list: A list of findings. Each finding is a dictionary with:
-              - "rule": Name of the detection rule that triggered
-              - "severity": How serious this is ("LOW", "MEDIUM", "HIGH")
-              - "details": Human-readable description of what was found
+        list: A list of findings (same format as before).
     """
 
-    # This will hold our findings — suspicious things we detect.
     findings = []
 
-    # --- COUNT FAILED LOGINS PER ACCOUNT ---
-    # We need to figure out HOW MANY times each account failed to log in.
-    # A dictionary is perfect for this: the key is the account name,
-    # and the value is how many times we saw a failed login for that account.
-    # Example: {"admin": 12, "jsmith": 2}
-    failed_counts = {}
+    # --- COLLECT FAILURE TIMESTAMPS PER ACCOUNT ---
+    # Instead of a simple count, we now store a LIST of datetime objects.
+    # Example: {"admin": [datetime(2024,1,15,8,0,1), datetime(2024,1,15,8,0,3), ...]}
+    #
+    # datetime objects are Python's way of representing a specific point in time.
+    # Unlike a string like "2024-01-15T08:00:01", a datetime object lets you
+    # do math — you can subtract two datetimes to get the gap between them.
+    failure_times = {}
 
     for event in events:
 
-        # Skip any event that isn't a failed login (4625).
-        # This is like a bouncer at a door — only 4625 events get through.
         if event["event_id"] != EVENT_FAILED_LOGIN:
             continue
 
-        # --- DIG INTO THE XML TO FIND THE ACCOUNT NAME ---
-        # The account that failed to log in is buried in the XML inside
-        # <EventData>. Specifically, it's in a <Data> tag where the
-        # Name attribute is "TargetUserName".
-        #
-        # The XML looks something like this:
-        #   <EventData>
-        #     <Data Name="TargetUserName">admin</Data>
-        #     <Data Name="LogonType">3</Data>
-        #     ...
-        #   </EventData>
         xml_tree = ET.fromstring(event["data"])
 
-        # .findall() returns a LIST of all matching tags (there are many <Data> tags).
-        # We loop through them to find the one with Name="TargetUserName".
         target_user = None
         for data_element in xml_tree.findall(f"{NS}EventData/{NS}Data"):
-            # .get("Name") reads the "Name" attribute on this <Data> tag.
             if data_element.get("Name") == "TargetUserName":
-                # .text is the actual value between the tags (the username).
                 target_user = data_element.text
-                break  # Found it — no need to keep looking.
+                break
 
-        # If we couldn't find a username (rare but possible), skip this event.
         if not target_user:
             continue
 
-        # --- INCREMENT THE COUNT ---
-        # .get(key, default) returns the current count, or 0 if this is
-        # the first time we're seeing this account. Then we add 1.
-        failed_counts[target_user] = failed_counts.get(target_user, 0) + 1
+        # --- PARSE THE TIMESTAMP STRING INTO A DATETIME OBJECT ---
+        # event["timestamp"] is a string like "2024-01-15T08:00:01.000000Z".
+        # strptime() (string parse time) converts it into a datetime object
+        # we can do arithmetic on.
+        #
+        # The format codes:
+        #   %Y = 4-digit year    %m = month    %d = day
+        #   %H = hour (24h)      %M = minute   %S = second
+        #   %f = microseconds    Z at the end = UTC timezone marker (we strip it)
+        timestamp_str = event["timestamp"].rstrip("Z")  # Remove the trailing Z
 
-    # --- CHECK WHICH ACCOUNTS EXCEEDED THE THRESHOLD ---
-    # .items() gives us each key-value pair: (account_name, count).
-    for account, count in failed_counts.items():
-        if count >= BRUTE_FORCE_THRESHOLD:
-            findings.append({
-                "rule": "Brute Force Attempt",
-                "severity": "HIGH",
-                "details": (
-                    f"Account '{account}' had {count} failed login attempts. "
-                    f"Threshold is {BRUTE_FORCE_THRESHOLD}. "
-                    f"This may indicate a password guessing attack."
-                ),
-            })
+        try:
+            # Try the format with microseconds first (most common).
+            event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
+        except ValueError:
+            try:
+                # Fall back to without microseconds.
+                event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                # If we still can't parse it, skip this event rather than crash.
+                continue
+
+        # Add this timestamp to the list for this account.
+        # setdefault() creates an empty list the first time we see an account,
+        # then appends to it every subsequent time.
+        failure_times.setdefault(target_user, []).append(event_time)
+
+    # --- SLIDING WINDOW CHECK PER ACCOUNT ---
+    # Now we check each account's list of failure timestamps.
+    already_flagged = set()  # Tracks accounts we've already flagged
+
+    for account, times in failure_times.items():
+
+        # If there aren't even THRESHOLD failures total, skip immediately.
+        if len(times) < BRUTE_FORCE_THRESHOLD:
+            continue
+
+        # Sort the timestamps oldest-to-newest so we can slide through them.
+        times.sort()
+
+        # The window is a timedelta object — a duration of time.
+        # timedelta(minutes=10) represents "10 minutes".
+        window = timedelta(minutes=BRUTE_FORCE_WINDOW_MINUTES)
+
+        # --- THE SLIDING WINDOW ---
+        # We look at every possible group of THRESHOLD consecutive failures.
+        # For each group, we check if all of them fit within the time window.
+        #
+        # Example: times = [T1, T2, T3, T4, T5, T6]
+        # Iteration 1: look at T1..T5 — is T5 - T1 <= 10 minutes? If yes, flag.
+        # Iteration 2: look at T2..T6 — is T6 - T2 <= 10 minutes? If yes, flag.
+        for i in range(len(times) - BRUTE_FORCE_THRESHOLD + 1):
+
+            # The first and last timestamp in this group.
+            window_start = times[i]
+            window_end   = times[i + BRUTE_FORCE_THRESHOLD - 1]
+
+            if window_end - window_start <= window:
+                # All THRESHOLD failures happened within the window!
+                if account not in already_flagged:
+                    already_flagged.add(account)
+                    findings.append({
+                        "rule": "Brute Force Attempt",
+                        "severity": "HIGH",
+                        "details": (
+                            f"Account '{account}' had {BRUTE_FORCE_THRESHOLD}+ failed "
+                            f"login attempts within {BRUTE_FORCE_WINDOW_MINUTES} minutes "
+                            f"(between {window_start.strftime('%H:%M:%S')} and "
+                            f"{window_end.strftime('%H:%M:%S')}). "
+                            f"This strongly indicates a password guessing attack."
+                        ),
+                    })
+                break  # No need to keep checking this account once flagged.
 
     return findings
 
@@ -596,6 +649,232 @@ def detect_firewall_rule_change(events):
     return findings
 
 
+def detect_account_takeover_chain(events):
+    """
+    Detects a classic account takeover sequence:
+      brute force → successful login → new user created
+
+    WHY THIS MATTERS:
+    Individual events can each be somewhat ambiguous. But when you see
+    all three happen in sequence for the same account, it tells a story:
+      1. Attacker guesses the password (brute force failures)
+      2. Attacker gets in (successful login)
+      3. Attacker creates a backdoor account so they can come back later
+
+    This is called "correlation" — connecting multiple events to reveal
+    a pattern that's more significant than any single event alone.
+    It's how real SIEM platforms (Splunk, Microsoft Sentinel) work.
+
+    HOW IT WORKS:
+    We scan the events for each account and check if they experienced:
+      - 2+ failed logins (4625)  — evidence of password guessing
+      - At least 1 success (4624) after those failures
+      - A new user account created (4720) in the same session
+
+    We track timing to make sure these events happen in a plausible order,
+    not just that they all exist somewhere in the log.
+
+    Parameters:
+        events (list): List of event dictionaries from the parser.
+
+    Returns:
+        list: A list of findings. Severity is CRITICAL — this is the
+              highest-confidence finding Pulse can produce.
+    """
+
+    findings = []
+
+    # --- PASS 1: COLLECT DATA PER ACCOUNT ---
+    # We build a picture of what happened for each account:
+    # when they failed, when they succeeded, and whether a new account appeared.
+
+    failure_times   = {}  # account -> list of failure datetimes
+    success_times   = {}  # account -> list of success datetimes
+    new_users_found = []  # list of (new_username, created_at) tuples
+
+    for event in events:
+
+        # --- PARSE TIMESTAMP (same logic as brute force) ---
+        timestamp_str = event["timestamp"].rstrip("Z")
+        try:
+            event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
+        except ValueError:
+            try:
+                event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                continue
+
+        xml_tree = ET.fromstring(event["data"])
+
+        # --- COLLECT FAILED LOGINS ---
+        if event["event_id"] == EVENT_FAILED_LOGIN:
+            user = None
+            for el in xml_tree.findall(f"{NS}EventData/{NS}Data"):
+                if el.get("Name") == "TargetUserName":
+                    user = el.text
+                    break
+            if user:
+                failure_times.setdefault(user, []).append(event_time)
+
+        # --- COLLECT SUCCESSFUL LOGINS (non-RDP, type 3 = network) ---
+        # We're looking for the attacker getting IN, not just RDP sessions.
+        elif event["event_id"] == EVENT_SUCCESSFUL_LOGON:
+            user = None
+            for el in xml_tree.findall(f"{NS}EventData/{NS}Data"):
+                if el.get("Name") == "TargetUserName":
+                    user = el.text
+                    break
+            if user:
+                success_times.setdefault(user, []).append(event_time)
+
+        # --- COLLECT NEW ACCOUNT CREATION EVENTS ---
+        elif event["event_id"] == EVENT_USER_CREATED:
+            new_user = None
+            for el in xml_tree.findall(f"{NS}EventData/{NS}Data"):
+                if el.get("Name") == "TargetUserName":
+                    new_user = el.text
+                    break
+            if new_user:
+                new_users_found.append((new_user, event_time))
+
+    # --- PASS 2: LOOK FOR THE CHAIN ---
+    # For each account that had failures, check if:
+    #   1. There were 2+ failures
+    #   2. A success happened AFTER those failures
+    #   3. A new user was created AFTER the success
+
+    for account, failures in failure_times.items():
+
+        if len(failures) < 2:
+            continue  # Not enough failures to be suspicious on their own
+
+        # Sort and find the last failure time.
+        failures.sort()
+        last_failure = failures[-1]
+
+        # Check if there's a successful login AFTER the failures.
+        successes_after = [
+            t for t in success_times.get(account, [])
+            if t > last_failure
+        ]
+
+        if not successes_after:
+            continue  # No success after the brute force — chain broken
+
+        first_success = min(successes_after)
+
+        # Check if a new user account was created AFTER the successful login.
+        # new_users_found is a list of (username, time) tuples.
+        new_users_after = [
+            (username, t) for username, t in new_users_found
+            if t > first_success
+        ]
+
+        if not new_users_after:
+            continue  # No new account created — chain incomplete
+
+        # We have all three steps! This is a confirmed attack chain.
+        new_usernames = ", ".join(u for u, _ in new_users_after)
+
+        findings.append({
+            "rule": "Account Takeover Chain",
+            "severity": "CRITICAL",
+            "details": (
+                f"ATTACK CHAIN DETECTED for account '{account}': "
+                f"({len(failures)}) failed logins ending at "
+                f"{last_failure.strftime('%H:%M:%S')}, "
+                f"followed by a successful login at "
+                f"{first_success.strftime('%H:%M:%S')}, "
+                f"followed by creation of new account(s): '{new_usernames}'. "
+                f"This strongly indicates a successful account takeover with "
+                f"backdoor account creation. Investigate immediately."
+            ),
+        })
+
+    return findings
+
+
+def detect_malware_persistence_chain(events):
+    """
+    Detects a classic malware persistence sequence:
+      AV disabled → new service installed
+
+    WHY THIS MATTERS:
+    These two events individually are already suspicious. But when AV is
+    disabled and THEN a new service appears, it's a textbook malware
+    installation pattern:
+      1. Attacker turns off antivirus so it can't block the malware
+      2. Attacker installs the malware as a service so it survives reboots
+
+    The time ordering matters — a service installed BEFORE the AV was
+    disabled is less suspicious (probably just a legitimate app).
+
+    Parameters:
+        events (list): List of event dictionaries from the parser.
+
+    Returns:
+        list: A list of findings with severity CRITICAL.
+    """
+
+    findings = []
+
+    av_disabled_times  = []  # list of datetimes when AV was turned off
+    services_installed = []  # list of (service_name, datetime) tuples
+
+    for event in events:
+
+        timestamp_str = event["timestamp"].rstrip("Z")
+        try:
+            event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
+        except ValueError:
+            try:
+                event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                continue
+
+        if event["event_id"] == EVENT_AV_DISABLED:
+            av_disabled_times.append(event_time)
+
+        elif event["event_id"] == EVENT_SERVICE_INSTALLED:
+            xml_tree = ET.fromstring(event["data"])
+            service_name = None
+            for el in xml_tree.findall(f"{NS}EventData/{NS}Data"):
+                if el.get("Name") == "ServiceName":
+                    service_name = el.text
+                    break
+            if service_name:
+                services_installed.append((service_name, event_time))
+
+    # If we never saw AV disabled or no services were installed, no chain.
+    if not av_disabled_times or not services_installed:
+        return findings
+
+    # Find the earliest time AV was disabled.
+    first_av_disabled = min(av_disabled_times)
+
+    # Find any services installed AFTER AV was turned off.
+    suspicious_services = [
+        (name, t) for name, t in services_installed
+        if t > first_av_disabled
+    ]
+
+    if suspicious_services:
+        service_names = ", ".join(n for n, _ in suspicious_services)
+        findings.append({
+            "rule": "Malware Persistence Chain",
+            "severity": "CRITICAL",
+            "details": (
+                f"ATTACK CHAIN DETECTED: Antivirus was disabled at "
+                f"{first_av_disabled.strftime('%H:%M:%S')}, "
+                f"followed by installation of service(s): '{service_names}'. "
+                f"This matches the pattern of malware disabling defences "
+                f"before installing itself for persistence. Investigate immediately."
+            ),
+        })
+
+    return findings
+
+
 def run_all_detections(events):
     """
     Runs every detection rule against the parsed events.
@@ -624,4 +903,6 @@ def run_all_detections(events):
     findings += detect_av_disabled(events) or []
     findings += detect_firewall_disabled(events) or []
     findings += detect_firewall_rule_change(events) or []
+    findings += detect_account_takeover_chain(events) or []
+    findings += detect_malware_persistence_chain(events) or []
     return findings

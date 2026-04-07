@@ -31,8 +31,11 @@ from pulse.detections import (
     detect_av_disabled,
     detect_service_installed,
     detect_rdp_logon,
+    detect_account_takeover_chain,
+    detect_malware_persistence_chain,
     run_all_detections,
     BRUTE_FORCE_THRESHOLD,
+    BRUTE_FORCE_WINDOW_MINUTES,
 )
 
 
@@ -43,19 +46,18 @@ from pulse.detections import (
 # "data" (the raw XML string). Our detections read the XML to extract
 # details like usernames. So our fake XML needs to have the right structure.
 
-def make_failed_login_event(username, timestamp="2024-01-15T08:00:00.000Z"):
+def make_failed_login_event(username, timestamp="2024-01-15T08:00:00.000000Z"):
     """
     Builds a fake Event 4625 (failed login) dictionary.
 
     Parameters:
         username (str):  The account name that "failed" to log in.
-        timestamp (str): When it happened (defaults to a fixed time).
+        timestamp (str): When it happened. Use ISO format with microseconds,
+                         e.g. "2024-01-15T08:00:01.000000Z"
 
     Returns:
         dict: An event dictionary in the same format parse_evtx() returns.
     """
-    # This XML is a simplified version of what a real 4625 event looks like.
-    # We only include the parts our detection code actually reads.
     xml = (
         '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
         "  <System>"
@@ -69,6 +71,28 @@ def make_failed_login_event(username, timestamp="2024-01-15T08:00:00.000Z"):
         "</Event>"
     )
     return {"event_id": 4625, "timestamp": timestamp, "data": xml}
+
+
+def make_rapid_failures(username, count, start_seconds=0):
+    """
+    Helper that builds multiple failed login events 1 second apart.
+    This simulates a real brute force burst — failures happening rapidly.
+
+    Parameters:
+        username (str):      The account being attacked.
+        count (int):         How many failure events to create.
+        start_seconds (int): Offset the start time (useful for spacing tests).
+
+    Returns:
+        list: A list of event dictionaries.
+    """
+    events = []
+    for i in range(count):
+        # Each failure is 1 second after the previous one.
+        # zfill(6) pads the microseconds to 6 digits: "1" -> "000001"
+        ts = f"2024-01-15T08:{str(start_seconds // 60).zfill(2)}:{str((start_seconds + i) % 60).zfill(2)}.000000Z"
+        events.append(make_failed_login_event(username, timestamp=ts))
+    return events
 
 
 def make_user_created_event(new_user, created_by, timestamp="2024-01-15T09:00:00.000Z"):
@@ -240,67 +264,80 @@ def make_rdp_logon_event(username, logon_type="10", timestamp="2024-01-15T15:00:
 
 
 # ===========================================================================
-# BRUTE FORCE TESTS
+# BRUTE FORCE TESTS (time-windowed)
 # ===========================================================================
 
-def test_brute_force_triggers_above_threshold():
+def test_brute_force_triggers_within_window():
     """
-    If an account has 5+ failed logins, we SHOULD get a finding.
-    This is the core scenario — the whole point of the rule.
+    5 failures within seconds of each other SHOULD trigger an alert.
+    This is the core attack scenario — rapid password guessing.
     """
-    # Create exactly BRUTE_FORCE_THRESHOLD failed logins for "admin".
-    # The list comprehension builds 5 identical events (one per attempt).
-    events = [make_failed_login_event("admin") for _ in range(BRUTE_FORCE_THRESHOLD)]
+    # make_rapid_failures creates events 1 second apart — well within 10 minutes.
+    events = make_rapid_failures("admin", count=BRUTE_FORCE_THRESHOLD)
 
     findings = detect_brute_force(events)
 
-    # We expect exactly 1 finding (one account crossed the threshold).
     assert len(findings) == 1
-    # The finding should be tagged as our brute force rule.
     assert findings[0]["rule"] == "Brute Force Attempt"
-    # Brute force should always be HIGH severity.
     assert findings[0]["severity"] == "HIGH"
-    # The details should mention the account name.
     assert "admin" in findings[0]["details"]
 
 
 def test_brute_force_does_not_trigger_below_threshold():
     """
-    If an account has fewer than 5 failed logins, we should NOT flag it.
-    We don't want false positives — a couple typos shouldn't raise an alarm.
+    Fewer than 5 failures, even if rapid, should NOT trigger.
     """
-    # Create just 2 failed logins — well below the threshold of 5.
-    events = [make_failed_login_event("admin") for _ in range(2)]
+    events = make_rapid_failures("admin", count=BRUTE_FORCE_THRESHOLD - 1)
 
     findings = detect_brute_force(events)
 
-    # No findings expected — 2 failures is normal.
+    assert len(findings) == 0
+
+
+def test_brute_force_does_not_trigger_when_spread_out():
+    """
+    5+ failures spread across hours should NOT trigger — that's just typos
+    over a normal working day, not a brute force attack.
+
+    This is the key new test that the old version would have FAILED.
+    """
+    # Build 5 failures, each 3 hours apart — way outside the 10-minute window.
+    events = [
+        make_failed_login_event("admin", "2024-01-15T08:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T11:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T14:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T17:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T20:00:00.000000Z"),
+    ]
+
+    findings = detect_brute_force(events)
+
+    # 5 failures but spread out over 12 hours — no alert.
     assert len(findings) == 0
 
 
 def test_brute_force_counts_per_account():
     """
-    Failed logins for DIFFERENT accounts should be counted separately.
-    3 failures for "admin" + 3 for "guest" should NOT trigger (neither hit 5).
+    Failures for DIFFERENT accounts are tracked separately.
+    3 rapid failures for "admin" + 3 for "guest" = no alert (neither hit 5).
     """
     events = (
-        [make_failed_login_event("admin") for _ in range(3)]
-        + [make_failed_login_event("guest") for _ in range(3)]
+        make_rapid_failures("admin", count=3)
+        + make_rapid_failures("guest", count=3)
     )
 
     findings = detect_brute_force(events)
 
-    # Neither account hit 5, so no findings.
     assert len(findings) == 0
 
 
 def test_brute_force_multiple_accounts_over_threshold():
     """
-    If TWO accounts each have 5+ failures, we should get TWO findings.
+    If TWO accounts each have 5+ rapid failures, we should get TWO findings.
     """
     events = (
-        [make_failed_login_event("admin") for _ in range(6)]
-        + [make_failed_login_event("guest") for _ in range(7)]
+        make_rapid_failures("admin", count=6)
+        + make_rapid_failures("guest", count=7)
     )
 
     findings = detect_brute_force(events)
@@ -312,7 +349,6 @@ def test_brute_force_ignores_other_event_ids():
     """
     Events that aren't 4625 should be completely ignored by this rule.
     """
-    # A user creation event (4720) should not be counted as a failed login.
     events = [make_user_created_event("newguy", "admin") for _ in range(10)]
 
     findings = detect_brute_force(events)
@@ -630,6 +666,121 @@ def test_firewall_rule_change_ignores_other_events():
 
 
 # ===========================================================================
+# ATTACK CHAIN TESTS
+# ===========================================================================
+
+def test_account_takeover_chain_full_sequence():
+    """
+    The full chain: failures → success → new user = CRITICAL finding.
+    Each event happens 1 minute after the previous so the order is clear.
+    """
+    events = [
+        # Step 1: 3 failed logins (brute force)
+        make_failed_login_event("admin", "2024-01-15T08:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T08:00:01.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T08:00:02.000000Z"),
+        # Step 2: successful login AFTER the failures
+        make_rdp_logon_event("admin", logon_type="3", timestamp="2024-01-15T08:01:00.000000Z"),
+        # Step 3: new user created AFTER the successful login
+        make_user_created_event("backdoor", "admin", "2024-01-15T08:02:00.000000Z"),
+    ]
+
+    findings = detect_account_takeover_chain(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Account Takeover Chain"
+    assert findings[0]["severity"] == "CRITICAL"
+    assert "admin" in findings[0]["details"]
+    assert "backdoor" in findings[0]["details"]
+
+
+def test_account_takeover_chain_no_success():
+    """
+    Failures without a subsequent success should NOT trigger the chain.
+    The attacker tried but didn't get in.
+    """
+    events = [
+        make_failed_login_event("admin", "2024-01-15T08:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T08:00:01.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T08:00:02.000000Z"),
+        # No successful login — chain is broken
+        make_user_created_event("backdoor", "someone", "2024-01-15T08:02:00.000000Z"),
+    ]
+
+    findings = detect_account_takeover_chain(events)
+
+    assert len(findings) == 0
+
+
+def test_account_takeover_chain_no_new_user():
+    """
+    Failures + success but no new user = no chain finding.
+    Maybe just a legitimate user who mistyped their password.
+    """
+    events = [
+        make_failed_login_event("admin", "2024-01-15T08:00:00.000000Z"),
+        make_failed_login_event("admin", "2024-01-15T08:00:01.000000Z"),
+        make_rdp_logon_event("admin", logon_type="3", timestamp="2024-01-15T08:01:00.000000Z"),
+        # No new user created — chain is incomplete
+    ]
+
+    findings = detect_account_takeover_chain(events)
+
+    assert len(findings) == 0
+
+
+def test_malware_persistence_chain_av_then_service():
+    """
+    AV disabled followed by a new service = CRITICAL malware persistence chain.
+    """
+    events = [
+        # AV turned off first
+        make_av_disabled_event("2024-01-15T09:00:00.000000Z"),
+        # New service installed AFTER AV is off
+        make_service_installed_event("EvilMalware", "LocalSystem", "2024-01-15T09:01:00.000000Z"),
+    ]
+
+    findings = detect_malware_persistence_chain(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Malware Persistence Chain"
+    assert findings[0]["severity"] == "CRITICAL"
+    assert "EvilMalware" in findings[0]["details"]
+
+
+def test_malware_persistence_chain_service_before_av():
+    """
+    Service installed BEFORE AV was disabled should NOT trigger.
+    The ordering matters — if the service came first, it's more likely legit.
+    """
+    events = [
+        # Service installed first (probably legitimate)
+        make_service_installed_event("NormalService", "NetworkService", "2024-01-15T08:00:00.000000Z"),
+        # AV disabled later (suspicious on its own, but not the chain)
+        make_av_disabled_event("2024-01-15T09:00:00.000000Z"),
+    ]
+
+    findings = detect_malware_persistence_chain(events)
+
+    # No chain — the service came BEFORE the AV was disabled.
+    assert len(findings) == 0
+
+
+def test_malware_persistence_chain_no_service():
+    """
+    AV disabled alone (no new service) should not trigger the chain rule.
+    The individual detect_av_disabled rule handles that separately.
+    """
+    events = [
+        make_av_disabled_event("2024-01-15T09:00:00.000000Z"),
+    ]
+
+    findings = detect_malware_persistence_chain(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
 # RUN_ALL_DETECTIONS TEST
 # ===========================================================================
 
@@ -640,33 +791,34 @@ def test_run_all_detections_combines_results():
     between the individual functions and the runner actually works.
     """
     events = (
-        # 6 failed logins for "admin" — should trigger brute force
-        [make_failed_login_event("admin") for _ in range(6)]
-        # 1 new user — should trigger user creation
-        + [make_user_created_event("backdoor", "admin")]
-        # 1 priv esc — should trigger privilege escalation
+        # 6 rapid failed logins for "admin" — triggers brute force
+        make_rapid_failures("admin", count=6)
+        # successful login AFTER the failures — helps trigger account takeover chain
+        + [make_rdp_logon_event("admin", logon_type="3", timestamp="2024-01-15T08:01:00.000000Z")]
+        # new user AFTER success — completes account takeover chain + triggers user creation
+        + [make_user_created_event("backdoor", "admin", "2024-01-15T08:02:00.000000Z")]
+        # priv esc — triggers privilege escalation
         + [make_privilege_escalation_event("backdoor", "Administrators", "admin")]
-        # 1 log clear — should trigger log clearing
+        # log clear — triggers log clearing
         + [make_log_cleared_event("admin")]
-        # 1 RDP logon — should trigger RDP detection
+        # RDP logon — triggers RDP detection
         + [make_rdp_logon_event("attacker", logon_type="10")]
-        # 1 service installed — should trigger service detection
-        + [make_service_installed_event("EvilSvc", "LocalSystem")]
-        # 1 AV disabled — should trigger AV detection
-        + [make_av_disabled_event()]
-        # 1 firewall disabled — should trigger firewall disabled detection
+        # AV disabled first — triggers AV detection + starts malware chain
+        + [make_av_disabled_event("2024-01-15T09:00:00.000000Z")]
+        # service after AV off — triggers service detection + completes malware chain
+        + [make_service_installed_event("EvilSvc", "LocalSystem", "2024-01-15T09:01:00.000000Z")]
+        # firewall disabled — triggers firewall disabled
         + [make_firewall_disabled_event("Public")]
-        # 1 firewall rule added — should trigger firewall rule change detection
+        # firewall rule added — triggers firewall rule change
         + [make_firewall_rule_event(4946, "Allow Port 4444")]
     )
 
     findings = run_all_detections(events)
 
-    # We expect 9 findings total — one from each detection rule.
-    assert len(findings) == 9
+    # We expect 11 findings: 9 individual rules + 2 chain detections.
+    # (The chain detections fire because the events we built tell the right story.)
+    assert len(findings) == 11
 
-    # Check that all nine rule names appear in the findings.
-    # set() removes duplicates, so we get a unique set of rule names.
     rule_names = set(f["rule"] for f in findings)
     assert rule_names == {
         "Brute Force Attempt",
@@ -678,4 +830,6 @@ def test_run_all_detections_combines_results():
         "Antivirus Disabled",
         "Firewall Disabled",
         "Firewall Rule Changed",
+        "Account Takeover Chain",
+        "Malware Persistence Chain",
     }

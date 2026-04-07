@@ -5,6 +5,23 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-07
+
+### Added
+- **CLI arguments** (`main.py`) — Pulse is now a proper command-line tool:
+  - `--logs FOLDER` — specify where to find `.evtx` files (default: `logs/`)
+  - `--output FILE` — specify the output report path
+  - `--format txt|html` — choose report format (default: `txt`)
+  - `--help` — auto-generated usage page
+- **HTML report** (`pulse/reporter.py`) — dark-themed browser report with colour-coded severity badges (HIGH=red, MEDIUM=orange, LOW=blue) and a summary panel
+- **Time-windowed brute force** (`pulse/detections.py`) — brute force rule now only fires if 5+ failures happen within a 10-minute window, eliminating false positives from typos spread over days
+- **Attack chain correlation** (`pulse/detections.py`) — two new CRITICAL-severity rules that connect multiple events into attack patterns:
+  - **Account Takeover Chain** — brute force → successful login → new user created
+  - **Malware Persistence Chain** — AV disabled → new service installed (in that order)
+- **Tests expanded from 28 to 34** — new tests cover time-window boundary conditions and chain ordering (service before/after AV, success before/after failures)
+
+---
+
 ## 2026-04-06 (continued)
 
 ### Added — 5 new detection rules

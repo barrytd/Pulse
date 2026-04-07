@@ -1,62 +1,91 @@
 # pulse/reporter.py
 # -------------------
 # This module takes the findings from detections.py and turns them
-# into a clean, human-readable report.
+# into a clean, human-readable report — either plain text or HTML.
 #
-# WHY A SEPARATE MODULE?
-# We keep reporting separate from detection because they're different jobs.
-# Detection answers "what happened?" and reporting answers "how do we
-# present it?" Keeping them separate means we can later add new report
-# formats (JSON, HTML, PDF) without touching the detection logic.
+# WHY TWO FORMATS?
+# - Text (.txt) is quick to read in a terminal, great for servers with no GUI.
+# - HTML (.html) opens in a browser with colour-coded severities. Better for
+#   sharing with managers or clients who want a professional-looking output.
+#
+# Both formats contain the same findings — just presented differently.
 
 
-import os                          # For building file paths
-from datetime import datetime      # For timestamps in the report filename
+import os
+from datetime import datetime
 
 
-def generate_report(findings, output_path=None):
+# --- SEVERITY COLOURS FOR HTML ---
+# Maps each severity level to a CSS colour.
+# CSS colours can be names ("red"), hex codes ("#FF0000"), or rgb() values.
+# These are chosen to be readable but clearly distinct.
+SEVERITY_COLOURS = {
+    "HIGH":   "#e74c3c",   # Red
+    "MEDIUM": "#e67e22",   # Orange
+    "LOW":    "#3498db",   # Blue
+}
+
+
+def generate_report(findings, output_path=None, fmt="txt"):
     """
-    Creates a human-readable text report from detection findings.
+    Creates a report from detection findings in either text or HTML format.
 
     Parameters:
-        findings (list):   List of finding dictionaries from detections.py.
+        findings (list):   List of finding dicts from detections.py.
                            Each has "rule", "severity", and "details" keys.
-        output_path (str): Where to save the report file. If None, we'll
-                           auto-generate a filename with the current timestamp
-                           in the reports/ folder.
+        output_path (str): Where to save the report. Auto-generated if None.
+        fmt (str):         "txt" or "html". Default is "txt".
 
     Returns:
         str: The file path where the report was saved.
     """
 
-    # --- STEP 1: DECIDE WHERE TO SAVE THE REPORT ---
-    # If the caller didn't give us a specific path, we generate one.
-    # datetime.now().strftime() formats the current date/time into a string.
-    # The format codes: %Y=year, %m=month, %d=day, %H=hour, %M=minute, %S=second.
-    # Example result: "reports/pulse_report_20240115_083045.txt"
+    # --- DECIDE WHERE TO SAVE ---
+    # If no path was given, auto-generate one with a timestamp.
+    # We pick the extension based on the format so the file opens correctly.
     if output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join("reports", f"pulse_report_{timestamp}.txt")
+        extension = "html" if fmt == "html" else "txt"
+        output_path = os.path.join("reports", f"pulse_report_{timestamp}.{extension}")
 
-    # --- STEP 2: COUNT FINDINGS BY SEVERITY ---
-    # We loop through all findings and tally up how many are HIGH, MEDIUM, LOW.
-    # This gives the reader a quick "at a glance" summary at the top of the report.
+    # --- COUNT FINDINGS BY SEVERITY ---
+    # Same logic as before — tally HIGH, MEDIUM, LOW counts for the summary.
     severity_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
-
     for finding in findings:
-        # Pull out the severity level from this finding.
         severity = finding.get("severity", "LOW")
-        # Increment the count for that severity level.
-        # We use .get() with a default of 0 in case an unexpected severity
-        # shows up that isn't in our dictionary.
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
 
-    # --- STEP 3: BUILD THE REPORT AS A LIST OF LINES ---
-    # Instead of writing one giant string, we build a list of lines and
-    # join them at the end. This is cleaner and easier to read in code.
+    # --- ROUTE TO THE RIGHT BUILDER ---
+    # We call a different function depending on the format.
+    # This keeps each builder clean and focused on one job.
+    if fmt == "html":
+        report_text = _build_html_report(findings, severity_counts)
+    else:
+        report_text = _build_txt_report(findings, severity_counts)
+
+    # --- WRITE TO FILE ---
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(report_text)
+
+    return output_path
+
+
+def _build_txt_report(findings, severity_counts):
+    """
+    Builds the plain text version of the report.
+    (Functions starting with _ are "private" — meant to be used only inside
+    this module, not called from other files. It's a Python convention.)
+
+    Parameters:
+        findings (list):        List of finding dictionaries.
+        severity_counts (dict): Pre-counted HIGH/MEDIUM/LOW totals.
+
+    Returns:
+        str: The full report as a single string.
+    """
+
     lines = []
 
-    # --- HEADER ---
     lines.append("=" * 60)
     lines.append("  PULSE — Threat Detection Report")
     lines.append("=" * 60)
@@ -64,13 +93,6 @@ def generate_report(findings, output_path=None):
     lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"  Total findings: {len(findings)}")
     lines.append("")
-
-    # --- SEVERITY SUMMARY ---
-    # This block gives the reader a quick picture before they dive into details.
-    # Example output:
-    #   HIGH:   3
-    #   MEDIUM: 1
-    #   LOW:    0
     lines.append("  Severity Breakdown:")
     lines.append(f"    HIGH:   {severity_counts['HIGH']}")
     lines.append(f"    MEDIUM: {severity_counts['MEDIUM']}")
@@ -78,39 +100,243 @@ def generate_report(findings, output_path=None):
     lines.append("")
     lines.append("-" * 60)
 
-    # --- STEP 4: LIST EACH FINDING ---
-    # enumerate() gives us both the index (starting at 1) and the finding.
-    # This is a cleaner alternative to manually tracking a counter variable.
     for i, finding in enumerate(findings, start=1):
         lines.append("")
         lines.append(f"  [{finding['severity']}] Finding #{i}: {finding['rule']}")
         lines.append(f"  {'-' * 40}")
-
-        # textwrap would be nice here, but let's keep it simple.
-        # We just indent the details text.
         lines.append(f"  {finding['details']}")
         lines.append("")
 
-    # --- FOOTER ---
     lines.append("-" * 60)
     lines.append("  End of report.")
     lines.append("=" * 60)
     lines.append("")
 
-    # --- STEP 5: JOIN ALL LINES INTO ONE STRING ---
-    # "\n".join() takes our list of lines and connects them with newline
-    # characters. This turns ["line1", "line2"] into "line1\nline2".
-    report_text = "\n".join(lines)
+    return "\n".join(lines)
 
-    # --- STEP 6: WRITE THE REPORT TO A FILE ---
-    # open() with "w" mode creates the file (or overwrites it if it exists).
-    # The "with" statement ensures the file gets properly closed when we're
-    # done, even if an error happens. This is called a "context manager."
-    # encoding="utf-8" ensures special characters (accents, symbols) are
-    # handled correctly instead of potentially crashing on non-ASCII text.
-    with open(output_path, "w", encoding="utf-8") as report_file:
-        report_file.write(report_text)
 
-    # --- STEP 7: RETURN THE PATH ---
-    # main.py uses this to tell the user where the report was saved.
-    return output_path
+def _build_html_report(findings, severity_counts):
+    """
+    Builds the HTML version of the report.
+
+    HTML is a markup language — you wrap content in tags like <h1>, <p>, <table>.
+    The browser reads those tags and renders them as styled content.
+
+    We build the HTML as one big string using an f-string (a string that can
+    contain Python expressions inside curly braces).
+
+    We also include CSS (Cascading Style Sheets) inside a <style> block.
+    CSS controls colours, fonts, spacing, and layout — it's what makes
+    the page look good instead of just raw unstyled text.
+
+    Parameters:
+        findings (list):        List of finding dictionaries.
+        severity_counts (dict): Pre-counted HIGH/MEDIUM/LOW totals.
+
+    Returns:
+        str: A complete HTML document as a string.
+    """
+
+    # --- BUILD THE FINDINGS HTML ---
+    # We build each finding card as a chunk of HTML, then join them together.
+    # This is the same "build a list, join at the end" pattern from the txt report.
+    finding_cards = []
+
+    for i, finding in enumerate(findings, start=1):
+        severity = finding["severity"]
+
+        # Look up the colour for this severity level.
+        # .get() with a fallback means unknown severities get grey.
+        colour = SEVERITY_COLOURS.get(severity, "#95a5a6")
+
+        # Each finding is a <div> (a box) styled with a left border in the
+        # severity colour. This is a common pattern in security dashboards.
+        card = f"""
+        <div class="finding">
+            <div class="finding-header" style="border-left: 5px solid {colour};">
+                <span class="severity-badge" style="background-color: {colour};">
+                    {severity}
+                </span>
+                <span class="finding-title">Finding #{i}: {finding['rule']}</span>
+            </div>
+            <div class="finding-body">
+                <p>{finding['details']}</p>
+            </div>
+        </div>"""
+
+        finding_cards.append(card)
+
+    # Join all the cards into one big string.
+    all_cards = "\n".join(finding_cards)
+
+    # --- BUILD THE SUMMARY BOXES ---
+    # Three coloured boxes at the top — one per severity level.
+    summary_boxes = f"""
+        <div class="summary">
+            <div class="summary-box" style="background-color: {SEVERITY_COLOURS['HIGH']};">
+                <div class="summary-count">{severity_counts['HIGH']}</div>
+                <div class="summary-label">HIGH</div>
+            </div>
+            <div class="summary-box" style="background-color: {SEVERITY_COLOURS['MEDIUM']};">
+                <div class="summary-count">{severity_counts['MEDIUM']}</div>
+                <div class="summary-label">MEDIUM</div>
+            </div>
+            <div class="summary-box" style="background-color: {SEVERITY_COLOURS['LOW']};">
+                <div class="summary-count">{severity_counts['LOW']}</div>
+                <div class="summary-label">LOW</div>
+            </div>
+        </div>"""
+
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total = len(findings)
+
+    # --- ASSEMBLE THE FULL HTML DOCUMENT ---
+    # This is a complete, self-contained HTML file.
+    # <!DOCTYPE html> tells the browser this is modern HTML5.
+    # <meta charset="UTF-8"> ensures special characters display correctly.
+    # Everything inside <style>...</style> is CSS.
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pulse — Threat Detection Report</title>
+    <style>
+        /* CSS reset — removes browser default margins/padding */
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background-color: #1a1a2e;   /* Dark navy background */
+            color: #e0e0e0;
+            padding: 30px;
+        }}
+
+        /* The main container — centres content and limits width */
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+        }}
+
+        /* Top header bar */
+        header {{
+            background-color: #16213e;
+            border-bottom: 3px solid #e74c3c;
+            padding: 20px 30px;
+            border-radius: 8px 8px 0 0;
+            margin-bottom: 5px;
+        }}
+
+        header h1 {{
+            font-size: 1.8rem;
+            color: #ffffff;
+            letter-spacing: 2px;
+        }}
+
+        header p {{
+            color: #95a5a6;
+            margin-top: 5px;
+            font-size: 0.9rem;
+        }}
+
+        /* The three HIGH / MEDIUM / LOW summary boxes */
+        .summary {{
+            display: flex;           /* Lay boxes out side by side */
+            gap: 15px;
+            margin: 20px 0;
+        }}
+
+        .summary-box {{
+            flex: 1;                 /* Each box takes equal space */
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            color: white;
+        }}
+
+        .summary-count {{
+            font-size: 2.5rem;
+            font-weight: bold;
+        }}
+
+        .summary-label {{
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+            margin-top: 5px;
+        }}
+
+        /* Section heading above the findings list */
+        .section-title {{
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #95a5a6;
+            margin: 25px 0 10px;
+        }}
+
+        /* Individual finding card */
+        .finding {{
+            background-color: #16213e;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;       /* Keeps the border-radius clean */
+        }}
+
+        .finding-header {{
+            padding: 12px 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background-color: #0f3460;
+        }}
+
+        /* The coloured severity pill (HIGH / MEDIUM / LOW) */
+        .severity-badge {{
+            padding: 3px 10px;
+            border-radius: 4px;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            white-space: nowrap;    /* Prevents the badge from wrapping */
+        }}
+
+        .finding-title {{
+            font-weight: 600;
+            color: #ffffff;
+        }}
+
+        .finding-body {{
+            padding: 12px 15px;
+            color: #b0b0b0;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }}
+
+        footer {{
+            text-align: center;
+            color: #555;
+            margin-top: 30px;
+            font-size: 0.8rem;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PULSE</h1>
+            <p>Threat Detection Report &nbsp;|&nbsp; Generated: {generated_at} &nbsp;|&nbsp; {total} findings</p>
+        </header>
+
+        {summary_boxes}
+
+        <p class="section-title">Findings</p>
+
+        {all_cards}
+
+        <footer>Generated by Pulse &mdash; Windows Event Log Analyzer</footer>
+    </div>
+</body>
+</html>"""
+
+    return html

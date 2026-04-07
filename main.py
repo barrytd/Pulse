@@ -3,24 +3,82 @@
 # This is the ENTRY POINT of Pulse — the file you run to kick everything off.
 #
 # HOW TO RUN:
-#   python main.py
+#   python main.py                            (uses defaults: logs/ and reports/)
+#   python main.py --logs /path/to/logs       (custom log folder)
+#   python main.py --output myreport.html     (custom output file)
+#   python main.py --format html              (html or txt, default is txt)
+#   python main.py --help                     (shows all options)
 #
-# WHAT IT DOES (once fully built):
-#   1. Looks in the "logs/" folder for .evtx files
-#   2. Parses each file to extract events
-#   3. Runs detection rules against those events
-#   4. Generates a report and saves it to "reports/"
-#
-# WHY IS THIS FILE SEPARATE?
-# "main.py" is a Python convention. It keeps the startup logic in one
-# obvious place. The actual work happens in the modules inside pulse/.
-# This file just wires them together.
+# WHAT IT DOES:
+#   1. Reads command-line arguments to configure the run
+#   2. Looks in the log folder for .evtx files
+#   3. Parses each file to extract events
+#   4. Runs detection rules against those events
+#   5. Generates a report in the chosen format
 
 
-import os                          # For working with file paths and directories
-from pulse.parser import parse_evtx              # Step 1: Read log files
-from pulse.detections import run_all_detections  # Step 2: Detect threats
-from pulse.reporter import generate_report       # Step 3: Write the report
+import os
+import argparse                                      # NEW: handles command-line arguments
+from pulse.parser import parse_evtx
+from pulse.detections import run_all_detections
+from pulse.reporter import generate_report
+
+
+def build_arg_parser():
+    """
+    Defines what command-line arguments Pulse accepts.
+
+    argparse is Python's built-in module for building CLI tools.
+    You describe your arguments here, and argparse does three things:
+      1. Reads them from the command line when the user runs the script
+      2. Validates them (e.g. checks required ones are present)
+      3. Generates a --help page automatically
+
+    Returns:
+        argparse.ArgumentParser: The configured parser object.
+    """
+
+    # ArgumentParser is the object that knows about all our arguments.
+    # description= is what shows up when the user runs: python main.py --help
+    parser = argparse.ArgumentParser(
+        description="Pulse — Windows Event Log Analyzer for threat detection.",
+        epilog="Example: python main.py --logs C:\\Windows\\System32\\winevt\\Logs --format html",
+    )
+
+    # --- ARGUMENT: --logs ---
+    # This tells Pulse where to find .evtx files.
+    # default="logs" means if the user doesn't supply it, we use "logs/".
+    # metavar is what shows in the --help output instead of the internal variable name.
+    parser.add_argument(
+        "--logs",
+        default="logs",
+        metavar="FOLDER",
+        help="Folder containing .evtx files to analyse. Default: logs/",
+    )
+
+    # --- ARGUMENT: --output ---
+    # Where to save the report. If not supplied, we auto-generate a filename.
+    # default=None means "not specified" — the reporter will create a name.
+    parser.add_argument(
+        "--output",
+        default=None,
+        metavar="FILE",
+        help="Output file path for the report. Default: auto-generated in reports/",
+    )
+
+    # --- ARGUMENT: --format ---
+    # Which report format to generate.
+    # choices= restricts the user to only these values — argparse will error
+    # automatically if they type something else (e.g. --format pdf).
+    parser.add_argument(
+        "--format",
+        default="txt",
+        choices=["txt", "html"],
+        metavar="FORMAT",
+        help="Report format: txt or html. Default: txt",
+    )
+
+    return parser
 
 
 def main():
@@ -28,74 +86,75 @@ def main():
     The main function that orchestrates the entire Pulse workflow.
     """
 
-    # --- CONFIGURATION ---
-    # These variables control where Pulse looks for logs and saves reports.
-    # Later we'll replace these with command-line arguments so the user
-    # can customize them without editing code.
-    log_folder = "logs"
-    report_folder = "reports"
+    # --- STEP 0: PARSE COMMAND-LINE ARGUMENTS ---
+    # build_arg_parser() defines what arguments exist.
+    # .parse_args() actually reads sys.argv (the real command line) and
+    # returns a Namespace object — like a dictionary you access with dots.
+    # e.g. args.logs, args.output, args.format
+    parser = build_arg_parser()
+    args = parser.parse_args()
 
-    # --- STEP 0: PREFLIGHT CHECKS ---
-    # Make sure the folders we need actually exist.
-    # os.path.exists() returns True if the folder is there, False if not.
+    # Pull the values out into plain variables for readability.
+    log_folder = args.logs
+    output_path = args.output
+    report_format = args.format
+
+    # --- STEP 1: PREFLIGHT CHECKS ---
     if not os.path.exists(log_folder):
         print(f"[!] Log folder '{log_folder}' not found. Creating it...")
         os.makedirs(log_folder)
 
-    if not os.path.exists(report_folder):
-        print(f"[!] Report folder '{report_folder}' not found. Creating it...")
-        os.makedirs(report_folder)
+    # Make sure the reports/ folder exists (unless the user gave a full path).
+    # If they gave --output /tmp/report.txt we don't need to create reports/.
+    if output_path is None:
+        report_folder = "reports"
+        if not os.path.exists(report_folder):
+            print(f"[!] Report folder '{report_folder}' not found. Creating it...")
+            os.makedirs(report_folder)
 
-    # --- STEP 1: FIND LOG FILES ---
-    # os.listdir() gives us every filename in the folder.
-    # We filter for files ending in ".evtx" (Windows event logs).
-    # The list comprehension below is a compact way to build a filtered list.
+    # --- STEP 2: FIND LOG FILES ---
     log_files = [f for f in os.listdir(log_folder) if f.endswith(".evtx")]
 
-    if not log_files:
-        print("=" * 50)
-        print("  PULSE — Windows Event Log Analyzer")
-        print("=" * 50)
-        print()
-        print("  No .evtx files found in the 'logs/' folder.")
-        print("  Drop your Windows event log files there and run again.")
-        print()
-        print("  On a Windows machine, you can export logs from:")
-        print("  Event Viewer > Windows Logs > Security > Save All Events As...")
-        print()
-        return  # Exit early — nothing to analyze
-
-    # --- STEP 2: PARSE EACH LOG FILE ---
     print("=" * 50)
     print("  PULSE — Windows Event Log Analyzer")
     print("=" * 50)
     print()
 
-    all_events = []  # We'll collect events from ALL log files into one list
+    if not log_files:
+        print(f"  No .evtx files found in '{log_folder}'.")
+        print("  Drop your Windows event log files there and run again.")
+        print()
+        print("  Export logs from Event Viewer:")
+        print("  Windows Logs > Security > Save All Events As...")
+        print()
+        return
+
+    # --- STEP 3: PARSE EACH LOG FILE ---
+    all_events = []
 
     for log_file in log_files:
-        # os.path.join() safely combines folder + filename for any OS.
-        # It uses the right slash (\ on Windows, / on Mac/Linux).
         file_path = os.path.join(log_folder, log_file)
         print(f"  [*] Parsing: {log_file}")
-
         events = parse_evtx(file_path)
         if events:
-            all_events.extend(events)  # .extend() adds items from one list to another
+            all_events.extend(events)
 
     print(f"  [*] Total events parsed: {len(all_events)}")
     print()
 
-    # --- STEP 3: RUN DETECTIONS ---
+    # --- STEP 4: RUN DETECTIONS ---
     print("  [*] Running detection rules...")
     findings = run_all_detections(all_events)
     print(f"  [*] Findings: {len(findings)}")
     print()
 
-    # --- STEP 4: GENERATE REPORT ---
+    # --- STEP 5: GENERATE REPORT ---
     if findings:
-        print("  [*] Generating report...")
-        report_path = generate_report(findings)
+        print(f"  [*] Generating {report_format.upper()} report...")
+
+        # We pass output_path (may be None) and report_format to the reporter.
+        # The reporter will handle auto-naming if output_path is None.
+        report_path = generate_report(findings, output_path=output_path, fmt=report_format)
         print(f"  [*] Report saved to: {report_path}")
     else:
         print("  [*] No suspicious activity detected. You're clean!")
@@ -106,11 +165,5 @@ def main():
     print("=" * 50)
 
 
-# --- WHAT IS THIS BLOCK? ---
-# This is a Python convention. It means:
-# "Only run main() if this file is executed directly."
-# If someone imports this file from another script, main() won't run
-# automatically — they'd have to call it themselves.
-# This is important for testing and for when Pulse grows into a larger app.
 if __name__ == "__main__":
     main()
