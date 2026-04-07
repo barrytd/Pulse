@@ -81,16 +81,27 @@ def build_arg_parser():
     return parser
 
 
+BANNER = r"""
+   ___  ____  __    ____  ____
+  / _ \/ / / / /   / __/ / __/
+ / ___/ / /_/ /__ _\ \  / _/
+/_/  /_/\____/___//___/ /___/
+
+  Windows Event Log Analyzer  |  Blue Team Edition
+  --------------------------------------------------
+"""
+
+
 def main():
     """
     The main function that orchestrates the entire Pulse workflow.
     """
 
+    # Print the banner first so it's the first thing the user sees.
+    # end="" avoids adding an extra blank line after the banner (it already has one).
+    print(BANNER)
+
     # --- STEP 0: PARSE COMMAND-LINE ARGUMENTS ---
-    # build_arg_parser() defines what arguments exist.
-    # .parse_args() actually reads sys.argv (the real command line) and
-    # returns a Namespace object — like a dictionary you access with dots.
-    # e.g. args.logs, args.output, args.format
     parser = build_arg_parser()
     args = parser.parse_args()
 
@@ -114,11 +125,6 @@ def main():
 
     # --- STEP 2: FIND LOG FILES ---
     log_files = [f for f in os.listdir(log_folder) if f.endswith(".evtx")]
-
-    print("=" * 50)
-    print("  PULSE — Windows Event Log Analyzer")
-    print("=" * 50)
-    print()
 
     if not log_files:
         print(f"  No .evtx files found in '{log_folder}'.")
