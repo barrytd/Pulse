@@ -5,29 +5,6 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
-## 2026-04-07 (continued)
-
-### Fixed
-- **Timestamp column showing "-"** for brute force and attack chain findings in HTML report - changed `strftime('%H:%M:%S')` to `strftime('%Y-%m-%dT%H:%M:%S')` in `detect_brute_force`, `detect_account_takeover_chain`, and `detect_malware_persistence_chain` so the reporter regex can extract a full date
-- **Em dashes removed** from finding detail text in 4 detection rules (User Account Created, RDP Logon, AV Disabled, Firewall Rule Changed)
-
-### Added
-- **Security Score panel** at the top of the HTML report - a score out of 100 that drops based on severity of findings (CRITICAL -25, HIGH -10, MEDIUM -5, LOW -2), displayed as a circular ring with a color-coded risk label (SECURE / LOW RISK / MEDIUM RISK / HIGH RISK / CRITICAL RISK)
-- **Inter font** loaded from Google Fonts for cleaner, more professional typography matching industry security dashboards
-
----
-
-## 2026-04-07 (continued)
-
-### Added
-- **Remediation tab** in the HTML report - hardcoded action steps for all 11 detection rules, sorted CRITICAL first
-- **Executive summary** auto-generated based on severity of findings (tone adjusts: CRITICAL compromise detected vs routine monitoring)
-- **Dark mode toggle** in the HTML report navbar - preference persisted in localStorage across reloads
-- **Two-tab layout** - Detections tab (existing filterable table) and Remediation tab
-- Em dashes removed from all report output (replaced with plain hyphens for compatibility)
-
----
-
 ## 2026-04-07
 
 ### Added
@@ -35,17 +12,28 @@ Format: newest entries at the top, grouped by date.
   - `--logs FOLDER` — specify where to find `.evtx` files (default: `logs/`)
   - `--output FILE` — specify the output report path
   - `--format txt|html` — choose report format (default: `txt`)
+  - `--severity LEVEL` — only show findings at or above this severity (default: `LOW`)
   - `--help` — auto-generated usage page
-- **HTML report** (`pulse/reporter.py`) — dark-themed browser report with colour-coded severity badges (HIGH=red, MEDIUM=orange, LOW=blue) and a summary panel
+- **HTML report** (`pulse/reporter.py`) — dark-themed browser report with colour-coded severity badges and a summary panel
 - **Time-windowed brute force** (`pulse/detections.py`) — brute force rule now only fires if 5+ failures happen within a 10-minute window, eliminating false positives from typos spread over days
 - **Attack chain correlation** (`pulse/detections.py`) — two new CRITICAL-severity rules that connect multiple events into attack patterns:
   - **Account Takeover Chain** — brute force → successful login → new user created
   - **Malware Persistence Chain** — AV disabled → new service installed (in that order)
-- **Tests expanded from 28 to 34** — new tests cover time-window boundary conditions and chain ordering (service before/after AV, success before/after failures)
+- **Two-tab layout** — Detections tab (filterable table) and Remediation tab
+- **Remediation tab** — hardcoded action steps for all 11 detection rules, sorted CRITICAL first
+- **Executive summary** — auto-generated based on severity of findings (tone adjusts: CRITICAL compromise detected vs routine monitoring)
+- **Dark mode toggle** in the HTML report navbar — preference persisted in localStorage across reloads
+- **Security Score panel** at the top of the HTML report — a score out of 100 that drops based on severity of findings (CRITICAL -25, HIGH -10, MEDIUM -5, LOW -2), displayed as a circular ring with a colour-coded risk label (SECURE / LOW RISK / MEDIUM RISK / HIGH RISK / CRITICAL RISK)
+- **Inter font** loaded from Google Fonts for cleaner, more professional typography
+- **Tests expanded from 28 to 34** — new tests cover time-window boundary conditions and chain ordering
+
+### Fixed
+- **Timestamp column showing "-"** for brute force and attack chain findings in HTML report — changed `strftime('%H:%M:%S')` to `strftime('%Y-%m-%dT%H:%M:%S')` so the reporter regex can extract a full date
+- **Em dashes removed** from all finding detail text (replaced with plain hyphens for compatibility)
 
 ---
 
-## 2026-04-06 (continued)
+## 2026-04-06
 
 ### Added — 5 new detection rules
 - **Firewall Rule Changed** (Event 4946/4947) — flags when firewall rules are added or modified, extracts the rule name
