@@ -1438,3 +1438,61 @@ def test_whitelist_none_does_nothing():
     findings = _make_whitelist_findings()
     results = filter_whitelist(findings, None)
     assert len(results) == 5
+
+
+# ---------------------------------------------------------------------------
+# CSV REPORT TESTS
+# ---------------------------------------------------------------------------
+
+import csv as csv_module
+
+
+def test_csv_report_has_header_row(tmp_path):
+    """CSV report must start with a header row."""
+    output = tmp_path / "test.csv"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="csv")
+
+    with open(output, encoding="utf-8") as f:
+        reader = csv_module.reader(f)
+        header = next(reader)
+
+    assert header == ["Timestamp", "Event ID", "Severity", "Rule Name", "Description"]
+
+
+def test_csv_report_has_correct_row_count(tmp_path):
+    """CSV should have one row per finding plus the header."""
+    output = tmp_path / "test.csv"
+    findings = _make_test_findings()
+    generate_report(findings, output_path=str(output), fmt="csv")
+
+    with open(output, encoding="utf-8") as f:
+        reader = csv_module.reader(f)
+        rows = list(reader)
+
+    # 1 header + 3 findings = 4 rows.
+    assert len(rows) == 4
+
+
+def test_csv_report_sorted_by_severity(tmp_path):
+    """CSV findings should be sorted CRITICAL first."""
+    output = tmp_path / "test.csv"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="csv")
+
+    with open(output, encoding="utf-8") as f:
+        reader = csv_module.reader(f)
+        next(reader)  # skip header
+        severities = [row[2] for row in reader]
+
+    assert severities == ["CRITICAL", "HIGH", "MEDIUM"]
+
+
+def test_csv_report_opens_as_valid_csv(tmp_path):
+    """The CSV file must be parseable without errors."""
+    output = tmp_path / "test.csv"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="csv")
+
+    with open(output, encoding="utf-8") as f:
+        reader = csv_module.reader(f)
+        rows = list(reader)  # Will raise if CSV is malformed
+
+    assert len(rows) > 0

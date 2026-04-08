@@ -9,6 +9,8 @@
 #   - Executive summary generated from which rules fired
 
 
+import csv
+import io
 import json
 import os
 import re
@@ -125,12 +127,12 @@ REMEDIATION = {
 
 def generate_report(findings, output_path=None, fmt="txt", scan_stats=None):
     """
-    Creates a report from detection findings in text, HTML, or JSON format.
+    Creates a report from detection findings in text, HTML, JSON, or CSV format.
 
     Parameters:
         findings (list):   List of finding dicts (rule, severity, details).
         output_path (str): Save path. Auto-generated if None.
-        fmt (str):         "txt", "html", or "json". Default: "txt".
+        fmt (str):         "txt", "html", "json", or "csv". Default: "txt".
         scan_stats (dict): Optional scan statistics from the parser:
                            total_events, files_scanned, earliest, latest, top_event_ids.
 
@@ -140,7 +142,7 @@ def generate_report(findings, output_path=None, fmt="txt", scan_stats=None):
 
     if output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        extensions = {"html": "html", "json": "json"}
+        extensions = {"html": "html", "json": "json", "csv": "csv"}
         extension = extensions.get(fmt, "txt")
         output_path = os.path.join("reports", f"pulse_report_{timestamp}.{extension}")
 
@@ -160,6 +162,8 @@ def generate_report(findings, output_path=None, fmt="txt", scan_stats=None):
         report_text = _build_html_report(findings, severity_counts, scan_stats)
     elif fmt == "json":
         report_text = _build_json_report(findings, severity_counts, scan_stats)
+    elif fmt == "csv":
+        report_text = _build_csv_report(findings)
     else:
         report_text = _build_txt_report(findings, severity_counts, scan_stats)
 
@@ -215,6 +219,42 @@ def _build_txt_report(findings, severity_counts, scan_stats=None):
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _build_csv_report(findings):
+    """
+    Builds a CSV (comma-separated values) report.
+
+    CSV is a simple table format that opens directly in Excel, Google Sheets,
+    or any spreadsheet application. Each row is one finding with columns for
+    timestamp, event ID, severity, rule name, and description.
+
+    We use Python's csv module to handle quoting and escaping - it
+    automatically wraps fields in quotes if they contain commas or newlines.
+    """
+
+    output = io.StringIO()
+    # lineterminator='\n' prevents double line breaks on Windows.
+    # Without it, csv.writer uses '\r\n' and then the file write adds another.
+    writer = csv.writer(output, lineterminator="\n")
+
+    # Header row.
+    writer.writerow(["Timestamp", "Event ID", "Severity", "Rule Name", "Description"])
+
+    for finding in findings:
+        ts_match = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", finding["details"])
+        timestamp = ts_match.group().replace("T", " ") if ts_match else ""
+        event_id = RULE_EVENT_IDS.get(finding["rule"], "")
+
+        writer.writerow([
+            timestamp,
+            event_id,
+            finding["severity"],
+            finding["rule"],
+            finding["details"],
+        ])
+
+    return output.getvalue()
 
 
 def _build_json_report(findings, severity_counts, scan_stats=None):

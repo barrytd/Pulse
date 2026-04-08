@@ -113,9 +113,9 @@ def build_arg_parser(config=None):
     parser.add_argument(
         "--format",
         default=config.get("format", "txt"),
-        choices=["txt", "html", "json"],
+        choices=["txt", "html", "json", "csv"],
         metavar="FORMAT",
-        help="Report format: txt, html, or json. Default: txt",
+        help="Report format: txt, html, json, or csv. Default: txt",
     )
 
     parser.add_argument(
