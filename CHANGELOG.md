@@ -5,6 +5,27 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-08
+
+### Added
+- **Security Score panel** - a score out of 100 at the top of every HTML report, displayed as a circular ring with a colour-coded risk label (SECURE / LOW RISK / MEDIUM RISK / HIGH RISK / CRITICAL RISK). Deductions: CRITICAL -25, HIGH -10, MEDIUM -5, LOW -2
+- **Scan summary statistics** - HTML and text reports now show files scanned, total events, time range, and top event IDs before the findings
+- **JSON report format** - `--format json` outputs structured data with metadata, severity summary, security score, and a findings array. Each finding includes rule_name, severity, event_id, timestamp, description, and a mitre_attack_id placeholder
+- **Config file support** - `pulse.yaml` stores default settings (logs, format, severity, output) so you don't need CLI flags every time. CLI flags always override config values
+- **Whitelist/allowlist** - suppress known-good accounts, services, IPs, and rule names from findings via `pulse.yaml` to reduce false positives
+- **Inter font** loaded from Google Fonts for cleaner, more professional report typography
+- **PyYAML** added as a dependency for config file parsing
+
+### Fixed
+- **Timestamp column showing "-"** for brute force and attack chain findings in HTML report - changed time-only format to full ISO datetime so the reporter can extract timestamps
+- **Em dashes removed** from all finding detail text and README (replaced with plain hyphens)
+
+### Tests
+- 26 new tests added (JSON report structure, config loading, whitelist filtering)
+- Test count: 34 -> 60, all passing
+
+---
+
 ## 2026-04-07
 
 ### Added
