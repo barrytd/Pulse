@@ -444,6 +444,101 @@ def detect_rdp_logon(events):
     return findings
 
 
+def detect_pass_the_hash(events):
+    """
+    Detects potential Pass-the-Hash (PtH) attacks (Event ID 4624).
+
+    WHAT IS PASS-THE-HASH?
+    Normally to log in, you type a password. Windows hashes it and compares
+    it to the stored hash. In a PtH attack, an attacker steals the hash
+    itself (often using Mimikatz from memory) and sends THAT directly to
+    Windows — bypassing the need for the real password. Windows sees a
+    valid hash and lets them in.
+
+    HOW WE DETECT IT:
+    A PtH login has three specific characteristics in Event 4624:
+      1. LogonType = 3 (Network logon — attacker connecting over the network)
+      2. AuthenticationPackageName = NTLM (the hash-based auth protocol)
+      3. LogonProcessName = NtLmSsp (the NTLM Security Support Provider)
+
+    Legitimate NTLM network logons happen (printers, file shares), so we
+    add an extra filter: skip machine accounts (those ending in $), and
+    skip logons from localhost (127.0.0.1 or ::1), which are typically
+    internal system processes.
+
+    XML FIELDS WE CHECK:
+      <Data Name="LogonType">3</Data>
+      <Data Name="AuthenticationPackageName">NTLM</Data>
+      <Data Name="LogonProcessName">NtLmSsp</Data>
+      <Data Name="TargetUserName">jsmith</Data>
+      <Data Name="IpAddress">192.168.1.50</Data>
+    """
+
+    findings = []
+
+    for event in events:
+        if event["event_id"] != EVENT_SUCCESSFUL_LOGON:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+
+        logon_type = None
+        auth_package = None
+        logon_process = None
+        target_user = None
+        source_ip = None
+
+        for data_element in xml_tree.findall(f"{NS}EventData/{NS}Data"):
+            name = data_element.get("Name")
+            if name == "LogonType":
+                logon_type = data_element.text
+            elif name == "AuthenticationPackageName":
+                auth_package = data_element.text
+            elif name == "LogonProcessName":
+                logon_process = data_element.text
+            elif name == "TargetUserName":
+                target_user = data_element.text
+            elif name == "IpAddress":
+                source_ip = data_element.text
+
+        # Gate 1: must be a network logon (type 3).
+        if logon_type != "3":
+            continue
+
+        # Gate 2: must use NTLM authentication.
+        if not auth_package or auth_package.upper() != "NTLM":
+            continue
+
+        # Gate 3: must go through NtLmSsp (the NTLM SSP provider).
+        # Kerberos uses a different process name, so this filters out Kerberos.
+        if not logon_process or "NtLmSsp" not in logon_process:
+            continue
+
+        # Gate 4: skip machine accounts (names ending in $).
+        # These are normal Windows background operations, not human logins.
+        if target_user and target_user.endswith("$"):
+            continue
+
+        # Gate 5: skip localhost connections — these are internal processes,
+        # not an attacker coming in from the network.
+        if source_ip in ("127.0.0.1", "::1", "-", None):
+            continue
+
+        findings.append({
+            "rule": "Pass-the-Hash Attempt",
+            "severity": "HIGH",
+            "details": (
+                f"Possible Pass-the-Hash login by '{target_user or 'Unknown'}' "
+                f"from IP {source_ip} at {event['timestamp']}. "
+                f"Network logon (type 3) using NTLM authentication - "
+                f"an attacker may be using a stolen password hash to "
+                f"authenticate without knowing the real password."
+            ),
+        })
+
+    return findings
+
+
 def detect_service_installed(events):
     """
     Flags when a new service is installed on the system (Event 7045).
@@ -1083,6 +1178,7 @@ def run_all_detections(events):
     findings += detect_privilege_escalation(events) or []
     findings += detect_log_clearing(events) or []
     findings += detect_rdp_logon(events) or []
+    findings += detect_pass_the_hash(events) or []
     findings += detect_service_installed(events) or []
     findings += detect_av_disabled(events) or []
     findings += detect_firewall_disabled(events) or []

@@ -23,6 +23,7 @@ from datetime import datetime
 # This lets analysts quickly look up the technique on attack.mitre.org
 # and understand the attacker's goal.
 MITRE_ATTACK_IDS = {
+    "Pass-the-Hash Attempt":     "T1550.002",
     "Brute Force Attempt":       "T1110",
     "Account Lockout":           "T1110",
     "User Account Created":      "T1136.001",
@@ -60,6 +61,7 @@ RULE_EVENT_IDS = {
     "Antivirus Disabled":        "5001",
     "Firewall Disabled":         "4950",
     "Firewall Rule Changed":     "4946 / 4947",
+    "Pass-the-Hash Attempt":     "4624",
     "Account Lockout":           "4740",
     "Scheduled Task Created":    "4698",
     "Suspicious PowerShell":     "4104",
@@ -121,6 +123,13 @@ REMEDIATION = {
         "Confirm with IT whether the account creation was authorized.",
         "Disable the account immediately if it was not requested.",
         "Audit what resources or systems the account accessed after creation.",
+    ],
+    "Pass-the-Hash Attempt": [
+        "Reset the password of the targeted account immediately.",
+        "Check if Mimikatz or credential dumping tools were run on any machine in the environment.",
+        "Enable Protected Users security group for privileged accounts - prevents NTLM authentication.",
+        "Consider enforcing Kerberos-only authentication for sensitive accounts.",
+        "Audit all NTLM logon events (Event 4624 type 3) for the affected account across all machines.",
     ],
     "Suspicious PowerShell": [
         "Review the full script block in Event Viewer (Event 4104) for malicious intent.",
