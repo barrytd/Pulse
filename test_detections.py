@@ -1033,3 +1033,86 @@ def test_json_report_sorted_by_severity(tmp_path):
 
     severities = [f["severity"] for f in data["findings"]]
     assert severities == ["CRITICAL", "HIGH", "MEDIUM"]
+
+
+# ---------------------------------------------------------------------------
+# CONFIG FILE TESTS
+# ---------------------------------------------------------------------------
+# These tests verify that pulse.yaml config loading works correctly,
+# including fallback behavior when the file is missing or invalid.
+
+from main import load_config, build_arg_parser
+
+
+def test_load_config_returns_dict_from_yaml(tmp_path):
+    """A valid YAML config file should return a dictionary."""
+    config_file = tmp_path / "pulse.yaml"
+    config_file.write_text("logs: my_logs\nformat: html\nseverity: HIGH\n")
+
+    config = load_config(str(config_file))
+
+    assert config["logs"] == "my_logs"
+    assert config["format"] == "html"
+    assert config["severity"] == "HIGH"
+
+
+def test_load_config_returns_empty_dict_when_missing(tmp_path):
+    """If the config file doesn't exist, return an empty dict (no crash)."""
+    config = load_config(str(tmp_path / "nonexistent.yaml"))
+    assert config == {}
+
+
+def test_load_config_returns_empty_dict_on_invalid_yaml(tmp_path):
+    """If the YAML file has a syntax error, warn and return empty dict."""
+    config_file = tmp_path / "pulse.yaml"
+    config_file.write_text("logs: [\ninvalid yaml here\n")
+
+    config = load_config(str(config_file))
+    assert config == {}
+
+
+def test_load_config_handles_empty_file(tmp_path):
+    """An empty YAML file should return an empty dict, not None."""
+    config_file = tmp_path / "pulse.yaml"
+    config_file.write_text("")
+
+    config = load_config(str(config_file))
+    assert config == {}
+
+
+def test_config_overrides_argparse_defaults(tmp_path):
+    """Config values should become the new defaults for argparse."""
+    config = {"logs": "custom_logs", "format": "json", "severity": "HIGH"}
+    parser = build_arg_parser(config)
+
+    # Parse with no CLI args - should use config values.
+    args = parser.parse_args([])
+
+    assert args.logs == "custom_logs"
+    assert args.format == "json"
+    assert args.severity == "HIGH"
+
+
+def test_cli_args_override_config():
+    """CLI flags should always win over config values."""
+    config = {"logs": "config_logs", "format": "html", "severity": "LOW"}
+    parser = build_arg_parser(config)
+
+    # Pass CLI flags that differ from config.
+    args = parser.parse_args(["--logs", "cli_logs", "--format", "txt", "--severity", "CRITICAL"])
+
+    assert args.logs == "cli_logs"
+    assert args.format == "txt"
+    assert args.severity == "CRITICAL"
+
+
+def test_config_partial_values():
+    """If config only sets some values, the rest use hardcoded defaults."""
+    config = {"format": "html"}  # Only sets format, not logs or severity.
+    parser = build_arg_parser(config)
+    args = parser.parse_args([])
+
+    assert args.format == "html"    # From config
+    assert args.logs == "logs"      # Hardcoded default
+    assert args.severity == "LOW"   # Hardcoded default
+    assert args.output is None      # Hardcoded default

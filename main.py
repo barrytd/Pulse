@@ -18,14 +18,53 @@
 
 
 import os
-import argparse                                      # NEW: handles command-line arguments
-from collections import Counter                      # Counts how often each event ID appears
+import argparse                                      # Built-in: handles command-line arguments
+from collections import Counter                      # Built-in: counts how often each value appears
+import yaml                                          # Third-party: reads YAML config files
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
 from pulse.reporter import generate_report
 
 
-def build_arg_parser():
+# Path to the config file. Lives in the project root next to main.py.
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pulse.yaml")
+
+
+def load_config(config_path=None):
+    """
+    Loads default settings from a YAML config file.
+
+    YAML is a human-readable data format - it looks like a simple list of
+    key: value pairs. Python's yaml.safe_load() reads it into a dictionary.
+
+    If the file doesn't exist, returns an empty dict (all defaults come from argparse).
+    If the file has a syntax error, prints a warning and returns an empty dict
+    so Pulse can still run with CLI defaults.
+
+    Parameters:
+        config_path (str): Path to the YAML file. Defaults to CONFIG_PATH.
+
+    Returns:
+        dict: The config values, e.g. {"logs": "logs", "format": "html", ...}
+    """
+    if config_path is None:
+        config_path = CONFIG_PATH
+
+    if not os.path.exists(config_path):
+        return {}
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        # safe_load returns None for an empty file.
+        return config if isinstance(config, dict) else {}
+    except yaml.YAMLError as e:
+        print(f"  [!] Warning: Could not parse {config_path}: {e}")
+        print("  [!] Using default settings.")
+        return {}
+
+
+def build_arg_parser(config=None):
     """
     Defines what command-line arguments Pulse accepts.
 
@@ -35,45 +74,45 @@ def build_arg_parser():
       2. Validates them (e.g. checks required ones are present)
       3. Generates a --help page automatically
 
+    Parameters:
+        config (dict): Optional defaults from pulse.yaml. CLI flags override these.
+
     Returns:
         argparse.ArgumentParser: The configured parser object.
     """
+    if config is None:
+        config = {}
 
     # ArgumentParser is the object that knows about all our arguments.
     # description= is what shows up when the user runs: python main.py --help
     parser = argparse.ArgumentParser(
-        description="Pulse — Windows Event Log Analyzer for threat detection.",
+        description="Pulse - Windows Event Log Analyzer for threat detection.",
         epilog="Example: python main.py --logs C:\\Windows\\System32\\winevt\\Logs --format html",
     )
 
     # --- ARGUMENT: --logs ---
-    # This tells Pulse where to find .evtx files.
-    # default="logs" means if the user doesn't supply it, we use "logs/".
-    # metavar is what shows in the --help output instead of the internal variable name.
+    # config.get("logs", "logs") means: use the value from pulse.yaml if it
+    # has a "logs" key, otherwise fall back to "logs" as the hardcoded default.
+    # This pattern repeats for every argument below.
     parser.add_argument(
         "--logs",
-        default="logs",
+        default=config.get("logs", "logs"),
         metavar="FOLDER",
         help="Folder containing .evtx files to analyse. Default: logs/",
     )
 
     # --- ARGUMENT: --output ---
-    # Where to save the report. If not supplied, we auto-generate a filename.
-    # default=None means "not specified" — the reporter will create a name.
     parser.add_argument(
         "--output",
-        default=None,
+        default=config.get("output", None),
         metavar="FILE",
         help="Output file path for the report. Default: auto-generated in reports/",
     )
 
     # --- ARGUMENT: --format ---
-    # Which report format to generate.
-    # choices= restricts the user to only these values — argparse will error
-    # automatically if they type something else (e.g. --format pdf).
     parser.add_argument(
         "--format",
-        default="txt",
+        default=config.get("format", "txt"),
         choices=["txt", "html", "json"],
         metavar="FORMAT",
         help="Report format: txt, html, or json. Default: txt",
@@ -81,7 +120,7 @@ def build_arg_parser():
 
     parser.add_argument(
         "--severity",
-        default="LOW",
+        default=config.get("severity", "LOW"),
         choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
         metavar="LEVEL",
         help="Only show findings at or above this severity level. Default: LOW (shows everything)",
@@ -111,8 +150,16 @@ def main():
     # end="" avoids adding an extra blank line after the banner (it already has one).
     print(BANNER)
 
-    # --- STEP 0: PARSE COMMAND-LINE ARGUMENTS ---
-    parser = build_arg_parser()
+    # --- STEP 0: LOAD CONFIG + PARSE COMMAND-LINE ARGUMENTS ---
+    # First we load pulse.yaml (if it exists) to get default values.
+    # Then argparse reads the CLI flags. If the user typed --format html,
+    # that overrides whatever pulse.yaml says. If they didn't type --format,
+    # the value from pulse.yaml is used. If pulse.yaml doesn't exist either,
+    # the hardcoded defaults kick in (e.g. "txt").
+    config = load_config()
+    if config:
+        print("  [*] Loaded settings from pulse.yaml")
+    parser = build_arg_parser(config)
     args = parser.parse_args()
 
     # Pull the values out into plain variables for readability.

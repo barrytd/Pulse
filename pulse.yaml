@@ -1,0 +1,22 @@
+# pulse.yaml
+# ----------
+# Default settings for Pulse. These are used when you don't pass CLI flags.
+# CLI flags always override these values.
+#
+# Example:
+#   If you set format: html here and run "python main.py", you get HTML.
+#   If you run "python main.py --format txt", you get TXT (CLI wins).
+
+# Where to look for .evtx log files.
+logs: logs
+
+# Report format: txt, html, or json.
+format: txt
+
+# Minimum severity to include in the report.
+# Options: LOW, MEDIUM, HIGH, CRITICAL
+severity: LOW
+
+# Output file path. Set to null to auto-generate a filename.
+# Example: output: reports/my_report.html
+output: null

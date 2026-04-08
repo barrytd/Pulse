@@ -1,3 +1,5 @@
 # Pulse dependencies
 # python-evtx: Reads Windows .evtx event log files so we can parse them in Python
 python-evtx>=0.7.4
+# PyYAML: Reads YAML config files (pulse.yaml) for storing default settings
+PyYAML>=6.0
