@@ -129,6 +129,65 @@ def build_arg_parser(config=None):
     return parser
 
 
+def filter_whitelist(findings, whitelist):
+    """
+    Removes findings that match whitelisted values.
+
+    The whitelist is a dictionary with four optional lists:
+      accounts:  usernames to ignore (matched against finding details)
+      rules:     rule names to skip entirely
+      services:  service names to ignore (matched against finding details)
+      ips:       IP addresses to ignore (matched against finding details)
+
+    A finding is removed if:
+      - Its rule name is in the "rules" list, OR
+      - Any whitelisted account, service, or IP appears in the finding's details text
+
+    Parameters:
+        findings (list):   List of finding dicts from the detection engine.
+        whitelist (dict):  Whitelist config from pulse.yaml.
+
+    Returns:
+        list: Filtered findings with whitelisted items removed.
+    """
+    if not whitelist:
+        return findings
+
+    # Pull out each whitelist category. Use empty lists as defaults.
+    skip_rules = [r.lower() for r in whitelist.get("rules", []) or []]
+    skip_accounts = [a.lower() for a in whitelist.get("accounts", []) or []]
+    skip_services = [s.lower() for s in whitelist.get("services", []) or []]
+    skip_ips = whitelist.get("ips", []) or []
+
+    filtered = []
+    for finding in findings:
+        # Check 1: is the entire rule whitelisted?
+        if finding["rule"].lower() in skip_rules:
+            continue
+
+        # Check 2: does the details text contain any whitelisted value?
+        # We lowercase the details for case-insensitive matching.
+        details_lower = finding["details"].lower()
+
+        # Check accounts - look for the account name inside quotes in the details.
+        # e.g. "Account 'svc_backup' had 5+ failed login attempts..."
+        if any(account in details_lower for account in skip_accounts):
+            continue
+
+        # Check services - same approach.
+        # e.g. "New service 'WindowsUpdateSvc' was installed..."
+        if any(service in details_lower for service in skip_services):
+            continue
+
+        # Check IPs - these are case-sensitive (IPs don't have case).
+        if any(ip in finding["details"] for ip in skip_ips):
+            continue
+
+        filtered.append(finding)
+
+    return filtered
+
+
 BANNER = r"""
   ____  _   _ _     ____  _____
  |  _ \| | | | |   / ___|| ____|
@@ -237,6 +296,16 @@ def main():
         f for f in findings
         if SEVERITY_ORDER.index(f["severity"]) >= SEVERITY_ORDER.index(severity_filter)
     ]
+
+    # --- FILTER BY WHITELIST ---
+    # Remove findings that match known-good accounts, services, IPs, or rules
+    # defined in the whitelist section of pulse.yaml.
+    whitelist = config.get("whitelist", {})
+    before_count = len(findings)
+    findings = filter_whitelist(findings, whitelist)
+    suppressed = before_count - len(findings)
+    if suppressed > 0:
+        print(f"  [*] Whitelist suppressed {suppressed} finding(s)")
 
     print(f"  [*] Findings: {len(findings)}")
 

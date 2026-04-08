@@ -1116,3 +1116,116 @@ def test_config_partial_values():
     assert args.logs == "logs"      # Hardcoded default
     assert args.severity == "LOW"   # Hardcoded default
     assert args.output is None      # Hardcoded default
+
+
+# ---------------------------------------------------------------------------
+# WHITELIST TESTS
+# ---------------------------------------------------------------------------
+# These tests verify that the whitelist filter correctly suppresses
+# known-good accounts, services, IPs, and rules from findings.
+
+from main import filter_whitelist
+
+
+def _make_whitelist_findings():
+    """Helper that returns findings with various accounts, services, and IPs."""
+    return [
+        {
+            "rule": "Brute Force Attempt",
+            "severity": "HIGH",
+            "details": "Account 'svc_backup' had 5+ failed login attempts within 10 minutes.",
+        },
+        {
+            "rule": "Brute Force Attempt",
+            "severity": "HIGH",
+            "details": "Account 'admin' had 5+ failed login attempts within 10 minutes.",
+        },
+        {
+            "rule": "RDP Logon Detected",
+            "severity": "MEDIUM",
+            "details": "Remote Desktop logon by 'jsmith' from IP 10.0.0.50.",
+        },
+        {
+            "rule": "Suspicious Service Installed",
+            "severity": "MEDIUM",
+            "details": "New service 'CrowdStrike Falcon' was installed by 'SYSTEM'.",
+        },
+        {
+            "rule": "Audit Log Cleared",
+            "severity": "HIGH",
+            "details": "Security event log was cleared at 2026-04-07T01:45:00.",
+        },
+    ]
+
+
+def test_whitelist_suppresses_accounts():
+    """Findings with whitelisted accounts should be removed."""
+    whitelist = {"accounts": ["svc_backup"]}
+    results = filter_whitelist(_make_whitelist_findings(), whitelist)
+
+    # svc_backup finding removed, admin finding stays.
+    assert len(results) == 4
+    assert all("svc_backup" not in f["details"] for f in results)
+
+
+def test_whitelist_suppresses_rules():
+    """Findings with whitelisted rule names should be removed."""
+    whitelist = {"rules": ["RDP Logon Detected"]}
+    results = filter_whitelist(_make_whitelist_findings(), whitelist)
+
+    assert len(results) == 4
+    assert all(f["rule"] != "RDP Logon Detected" for f in results)
+
+
+def test_whitelist_suppresses_services():
+    """Findings with whitelisted service names should be removed."""
+    whitelist = {"services": ["CrowdStrike Falcon"]}
+    results = filter_whitelist(_make_whitelist_findings(), whitelist)
+
+    assert len(results) == 4
+    assert all("CrowdStrike" not in f["details"] for f in results)
+
+
+def test_whitelist_suppresses_ips():
+    """Findings with whitelisted IPs should be removed."""
+    whitelist = {"ips": ["10.0.0.50"]}
+    results = filter_whitelist(_make_whitelist_findings(), whitelist)
+
+    assert len(results) == 4
+    assert all("10.0.0.50" not in f["details"] for f in results)
+
+
+def test_whitelist_multiple_categories():
+    """Multiple whitelist categories should all apply at once."""
+    whitelist = {
+        "accounts": ["svc_backup"],
+        "rules": ["RDP Logon Detected"],
+        "services": ["CrowdStrike Falcon"],
+    }
+    results = filter_whitelist(_make_whitelist_findings(), whitelist)
+
+    # 3 removed: svc_backup account, RDP rule, CrowdStrike service.
+    assert len(results) == 2
+
+
+def test_whitelist_is_case_insensitive():
+    """Account and service matching should be case-insensitive."""
+    whitelist = {"accounts": ["SVC_BACKUP"], "services": ["crowdstrike falcon"]}
+    results = filter_whitelist(_make_whitelist_findings(), whitelist)
+
+    # Both should be matched despite different casing.
+    assert len(results) == 3
+
+
+def test_whitelist_empty_does_nothing():
+    """An empty whitelist should not remove any findings."""
+    findings = _make_whitelist_findings()
+    results = filter_whitelist(findings, {})
+    assert len(results) == 5
+
+
+def test_whitelist_none_does_nothing():
+    """A None whitelist should not remove any findings."""
+    findings = _make_whitelist_findings()
+    results = filter_whitelist(findings, None)
+    assert len(results) == 5

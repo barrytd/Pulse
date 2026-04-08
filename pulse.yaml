@@ -20,3 +20,17 @@ severity: LOW
 # Output file path. Set to null to auto-generate a filename.
 # Example: output: reports/my_report.html
 output: null
+
+# Whitelist - suppress known-good items from triggering findings.
+# Any finding that matches a whitelisted value is silently removed.
+# This reduces false positives in noisy environments.
+#
+# accounts: usernames to ignore (e.g. service accounts that always fail logins)
+# rules:    rule names to skip entirely (e.g. RDP Logon Detected)
+# services: service names to ignore (e.g. legitimate services you installed)
+# ips:      IP addresses to ignore (e.g. your jump host IP for RDP)
+whitelist:
+  accounts: []
+  rules: []
+  services: []
+  ips: []
