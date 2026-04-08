@@ -649,6 +649,190 @@ def detect_firewall_rule_change(events):
     return findings
 
 
+def detect_account_lockout(events):
+    """
+    Detects when a user account gets locked out (Event ID 4740).
+
+    WHY THIS MATTERS:
+    Windows can be configured to lock an account after too many failed
+    login attempts (e.g. 5 failures in 10 minutes). When this happens,
+    Event 4740 is logged. A few lockouts might just be a user forgetting
+    their password, but many lockouts in a short time - especially across
+    multiple accounts - is a strong indicator of an active brute force attack.
+
+    Unlike Event 4625 (failed login), a lockout means the system already
+    decided the failures were suspicious enough to take action.
+
+    XML DATA WE EXTRACT:
+      <Data Name="TargetUserName">jsmith</Data>    - the locked out account
+    """
+
+    findings = []
+
+    for event in events:
+        if event["event_id"] != 4740:
+            continue
+
+        ns = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+        xml_tree = ET.fromstring(event["data"])
+        event_data = xml_tree.find(f"{ns}EventData")
+
+        target_user = None
+        if event_data is not None:
+            for data_elem in event_data:
+                if data_elem.get("Name") == "TargetUserName":
+                    target_user = data_elem.text
+
+        findings.append({
+            "rule": "Account Lockout",
+            "severity": "HIGH",
+            "details": (
+                f"Account '{target_user or 'Unknown'}' was locked out "
+                f"at {event['timestamp']}. "
+                f"This may indicate an active brute force attack or "
+                f"a misconfigured service using stale credentials."
+            ),
+        })
+
+    return findings
+
+
+def detect_scheduled_task_created(events):
+    """
+    Detects when a new scheduled task is created (Event ID 4698).
+
+    WHY THIS MATTERS:
+    Scheduled tasks are one of the most common persistence mechanisms
+    attackers use. They create a task that runs their malware on a schedule
+    (e.g. every time the computer boots, or every hour). This way, even
+    if the malware process is killed, the scheduled task brings it back.
+
+    Legitimate scheduled tasks exist too (Windows Update, antivirus scans),
+    but a NEW task being created - especially by an unexpected user - is
+    worth investigating.
+
+    XML DATA WE EXTRACT:
+      <Data Name="TaskName">\\MalwareTask</Data>   - name of the task
+      <Data Name="SubjectUserName">admin</Data>   - who created it
+    """
+
+    findings = []
+
+    for event in events:
+        if event["event_id"] != 4698:
+            continue
+
+        ns = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+        xml_tree = ET.fromstring(event["data"])
+        event_data = xml_tree.find(f"{ns}EventData")
+
+        task_name = None
+        created_by = None
+        if event_data is not None:
+            for data_elem in event_data:
+                if data_elem.get("Name") == "TaskName":
+                    task_name = data_elem.text
+                elif data_elem.get("Name") == "SubjectUserName":
+                    created_by = data_elem.text
+
+        findings.append({
+            "rule": "Scheduled Task Created",
+            "severity": "MEDIUM",
+            "details": (
+                f"Scheduled task '{task_name or 'Unknown'}' was created "
+                f"by '{created_by or 'Unknown'}' at {event['timestamp']}. "
+                f"Verify this is legitimate - attackers use scheduled tasks "
+                f"for persistence (surviving reboots)."
+            ),
+        })
+
+    return findings
+
+
+def detect_suspicious_powershell(events):
+    """
+    Detects suspicious PowerShell script execution (Event ID 4104).
+
+    WHY THIS MATTERS:
+    PowerShell is one of the most powerful tools on a Windows system -
+    and one of the most abused by attackers. Event 4104 logs the actual
+    script text that was run (called "Script Block Logging"). We check
+    for known suspicious patterns:
+
+      - Base64 encoded commands (-EncodedCommand, FromBase64String)
+      - Download cradles (Invoke-WebRequest, DownloadString, Net.WebClient)
+      - Execution bypass (-ExecutionPolicy Bypass)
+      - Credential theft (Mimikatz, Get-Credential, SecureString)
+      - Obfuscation indicators (lots of backticks, string concatenation)
+
+    If ANY of these patterns appear in the script text, we flag it.
+
+    XML DATA WE EXTRACT:
+      <Data Name="ScriptBlockText">the actual PowerShell code</Data>
+    """
+
+    # These are patterns commonly seen in malicious PowerShell.
+    # Each tuple is (pattern_to_search, description_for_the_finding).
+    SUSPICIOUS_PATTERNS = [
+        ("encodedcommand", "encoded command execution"),
+        ("frombase64string", "Base64 decoding"),
+        ("invoke-webrequest", "web download"),
+        ("downloadstring", "web download"),
+        ("net.webclient", "web download"),
+        ("invoke-expression", "dynamic code execution (IEX)"),
+        ("-executionpolicy bypass", "execution policy bypass"),
+        ("mimikatz", "credential theft tool"),
+        ("get-credential", "credential harvesting"),
+        ("invoke-mimikatz", "credential theft tool"),
+        ("set-masterbootrecord", "destructive MBR modification"),
+        ("invoke-shellcode", "shellcode injection"),
+    ]
+
+    findings = []
+
+    for event in events:
+        if event["event_id"] != 4104:
+            continue
+
+        ns = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+        xml_tree = ET.fromstring(event["data"])
+        event_data = xml_tree.find(f"{ns}EventData")
+
+        script_text = None
+        if event_data is not None:
+            for data_elem in event_data:
+                if data_elem.get("Name") == "ScriptBlockText":
+                    script_text = data_elem.text
+
+        if not script_text:
+            continue
+
+        # Check for suspicious patterns in the script text.
+        script_lower = script_text.lower()
+        matched = []
+        for pattern, description in SUSPICIOUS_PATTERNS:
+            if pattern in script_lower:
+                matched.append(description)
+
+        if matched:
+            # Show the first 120 characters of the script for context.
+            preview = script_text[:120].replace("\n", " ")
+            if len(script_text) > 120:
+                preview += "..."
+
+            findings.append({
+                "rule": "Suspicious PowerShell",
+                "severity": "HIGH",
+                "details": (
+                    f"Suspicious PowerShell script detected at {event['timestamp']}. "
+                    f"Matched patterns: {', '.join(matched)}. "
+                    f"Script preview: {preview}"
+                ),
+            })
+
+    return findings
+
+
 def detect_account_takeover_chain(events):
     """
     Detects a classic account takeover sequence:
@@ -903,6 +1087,9 @@ def run_all_detections(events):
     findings += detect_av_disabled(events) or []
     findings += detect_firewall_disabled(events) or []
     findings += detect_firewall_rule_change(events) or []
+    findings += detect_account_lockout(events) or []
+    findings += detect_scheduled_task_created(events) or []
+    findings += detect_suspicious_powershell(events) or []
     findings += detect_account_takeover_chain(events) or []
     findings += detect_malware_persistence_chain(events) or []
     return findings

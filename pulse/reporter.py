@@ -35,6 +35,9 @@ RULE_EVENT_IDS = {
     "Antivirus Disabled":        "5001",
     "Firewall Disabled":         "4950",
     "Firewall Rule Changed":     "4946 / 4947",
+    "Account Lockout":           "4740",
+    "Scheduled Task Created":    "4698",
+    "Suspicious PowerShell":     "4104",
     "Account Takeover Chain":    "Multiple",
     "Malware Persistence Chain": "Multiple",
 }
@@ -93,6 +96,24 @@ REMEDIATION = {
         "Confirm with IT whether the account creation was authorized.",
         "Disable the account immediately if it was not requested.",
         "Audit what resources or systems the account accessed after creation.",
+    ],
+    "Suspicious PowerShell": [
+        "Review the full script block in Event Viewer (Event 4104) for malicious intent.",
+        "Check if the script downloaded or executed anything from the internet.",
+        "If Base64 was used, decode it to reveal the hidden command.",
+        "Investigate the user account that ran the script and check for compromise.",
+    ],
+    "Scheduled Task Created": [
+        "Review the task in Task Scheduler (taskschd.msc) and check its action/trigger.",
+        "Delete the task if it is unrecognized or runs a suspicious binary.",
+        "Check who created the task and whether their account is compromised.",
+        "Search for the binary or script the task runs on VirusTotal.",
+    ],
+    "Account Lockout": [
+        "Check if the account is under active brute force attack (correlate with Event 4625).",
+        "If legitimate, reset the password and unlock the account.",
+        "Review the account lockout policy threshold and adjust if too aggressive.",
+        "If repeated across multiple accounts, investigate the source IP for brute force activity.",
     ],
     "RDP Logon Detected": [
         "Verify the source IP is expected and belongs to a known user.",
