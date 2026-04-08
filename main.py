@@ -19,6 +19,7 @@
 
 import os
 import argparse                                      # NEW: handles command-line arguments
+from collections import Counter                      # Counts how often each event ID appears
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
 from pulse.reporter import generate_report
@@ -73,9 +74,9 @@ def build_arg_parser():
     parser.add_argument(
         "--format",
         default="txt",
-        choices=["txt", "html"],
+        choices=["txt", "html", "json"],
         metavar="FORMAT",
-        help="Report format: txt or html. Default: txt",
+        help="Report format: txt, html, or json. Default: txt",
     )
 
     parser.add_argument(
@@ -158,6 +159,24 @@ def main():
     print(f"  [*] Total events parsed: {len(all_events)}")
     print()
 
+    # --- STEP 3b: BUILD SCAN STATISTICS ---
+    # Counter is a dict subclass that counts how many times each value appears.
+    # Counter([4625, 4625, 4720, 4625]) -> {4625: 3, 4720: 1}
+    # .most_common(10) gives the top 10 as a list of (event_id, count) tuples.
+    event_counts = Counter(e["event_id"] for e in all_events)
+
+    # Collect all timestamps, filter out "Unknown", and sort to find the range.
+    # min() and max() give us the earliest and latest event times.
+    timestamps = sorted(e["timestamp"] for e in all_events if e["timestamp"] != "Unknown")
+
+    scan_stats = {
+        "total_events": len(all_events),
+        "files_scanned": len(log_files),
+        "earliest": timestamps[0] if timestamps else "Unknown",
+        "latest": timestamps[-1] if timestamps else "Unknown",
+        "top_event_ids": event_counts.most_common(10),
+    }
+
     # --- STEP 4: RUN DETECTIONS ---
     print("  [*] Running detection rules...")
     findings = run_all_detections(all_events)
@@ -180,7 +199,7 @@ def main():
 
         # We pass output_path (may be None) and report_format to the reporter.
         # The reporter will handle auto-naming if output_path is None.
-        report_path = generate_report(findings, output_path=output_path, fmt=report_format)
+        report_path = generate_report(findings, output_path=output_path, fmt=report_format, scan_stats=scan_stats)
         print(f"  [*] Report saved to: {report_path}")
     else:
         print("  [*] No suspicious activity detected. You're clean!")

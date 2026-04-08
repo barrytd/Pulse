@@ -833,3 +833,203 @@ def test_run_all_detections_combines_results():
         "Account Takeover Chain",
         "Malware Persistence Chain",
     }
+
+
+# ---------------------------------------------------------------------------
+# JSON REPORT TESTS
+# ---------------------------------------------------------------------------
+# These tests verify that the JSON report builder produces valid, structured
+# output that other tools (Splunk, ELK, Python scripts) can consume.
+
+import json
+from pulse.reporter import generate_report, RULE_EVENT_IDS
+
+
+def _make_test_findings():
+    """Helper that returns a small list of findings for report tests."""
+    return [
+        {
+            "rule": "Brute Force Attempt",
+            "severity": "HIGH",
+            "details": (
+                "Account 'admin' had 5+ failed login attempts within 10 minutes "
+                "(between 2026-04-07T01:00:00 and 01:04:04). "
+                "This strongly indicates a password guessing attack."
+            ),
+        },
+        {
+            "rule": "User Account Created",
+            "severity": "MEDIUM",
+            "details": (
+                "New account 'backdoor' was created by 'admin' "
+                "at 2026-04-07T01:13:00.000000Z. "
+                "Verify this was authorized - attackers create backdoor accounts."
+            ),
+        },
+        {
+            "rule": "Account Takeover Chain",
+            "severity": "CRITICAL",
+            "details": (
+                "ATTACK CHAIN DETECTED for account 'admin': (5) failed logins "
+                "ending at 2026-04-07T01:07:07, followed by a successful login "
+                "at 2026-04-07T01:12:00."
+            ),
+        },
+    ]
+
+
+def test_json_report_is_valid_json(tmp_path):
+    """The JSON report must be parseable as valid JSON."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)  # Will raise if invalid JSON
+
+    assert isinstance(data, dict)
+
+
+def test_json_report_has_top_level_keys(tmp_path):
+    """The report must have metadata, summary, and findings sections."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert "metadata" in data
+    assert "summary" in data
+    assert "findings" in data
+
+
+def test_json_report_metadata_fields(tmp_path):
+    """Metadata must include tool name, version, and generation timestamp."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    meta = data["metadata"]
+    assert meta["tool"] == "Pulse"
+    assert "generated_at" in meta
+    assert "version" in meta
+
+
+def test_json_report_summary_counts(tmp_path):
+    """Summary must show correct severity counts and total."""
+    output = tmp_path / "test.json"
+    findings = _make_test_findings()
+    generate_report(findings, output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    summary = data["summary"]
+    assert summary["total_findings"] == 3
+    assert summary["severity_counts"]["CRITICAL"] == 1
+    assert summary["severity_counts"]["HIGH"] == 1
+    assert summary["severity_counts"]["MEDIUM"] == 1
+    assert summary["severity_counts"]["LOW"] == 0
+
+
+def test_json_report_security_score(tmp_path):
+    """Summary must include the security score and risk level."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    summary = data["summary"]
+    assert "security_score" in summary
+    assert "risk_level" in summary
+    assert isinstance(summary["security_score"], int)
+
+
+def test_json_report_finding_structure(tmp_path):
+    """Each finding must have all required fields."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    required_keys = {"rule_name", "severity", "event_id", "timestamp", "description", "mitre_attack_id"}
+    for finding in data["findings"]:
+        assert required_keys.issubset(finding.keys())
+
+
+def test_json_report_extracts_timestamps(tmp_path):
+    """Findings with ISO timestamps in details should have them extracted."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    # All three test findings have timestamps in their details.
+    for finding in data["findings"]:
+        assert finding["timestamp"] is not None
+        assert finding["timestamp"].startswith("2026-04-07")
+
+
+def test_json_report_maps_event_ids(tmp_path):
+    """Each finding should have the correct event ID from RULE_EVENT_IDS."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    for finding in data["findings"]:
+        expected = RULE_EVENT_IDS.get(finding["rule_name"])
+        assert finding["event_id"] == expected
+
+
+def test_json_report_mitre_field_is_null(tmp_path):
+    """MITRE ATT&CK ID should be null for now (placeholder for future)."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    for finding in data["findings"]:
+        assert finding["mitre_attack_id"] is None
+
+
+def test_json_report_with_scan_stats(tmp_path):
+    """When scan_stats is provided, metadata should include scan details."""
+    output = tmp_path / "test.json"
+    scan_stats = {
+        "total_events": 5000,
+        "files_scanned": 2,
+        "earliest": "2026-04-06T08:00:00.000000Z",
+        "latest": "2026-04-07T23:59:00.000000Z",
+        "top_event_ids": [(4625, 3000), (4624, 1500)],
+    }
+    generate_report(
+        _make_test_findings(), output_path=str(output), fmt="json", scan_stats=scan_stats
+    )
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    meta = data["metadata"]
+    assert meta["total_events"] == 5000
+    assert meta["files_scanned"] == 2
+    assert meta["time_range"]["earliest"] == "2026-04-06T08:00:00.000000Z"
+    assert meta["top_event_ids"]["4625"] == 3000
+
+
+def test_json_report_sorted_by_severity(tmp_path):
+    """Findings should be sorted CRITICAL first, then HIGH, MEDIUM, LOW."""
+    output = tmp_path / "test.json"
+    generate_report(_make_test_findings(), output_path=str(output), fmt="json")
+
+    with open(output, encoding="utf-8") as f:
+        data = json.load(f)
+
+    severities = [f["severity"] for f in data["findings"]]
+    assert severities == ["CRITICAL", "HIGH", "MEDIUM"]

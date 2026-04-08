@@ -9,6 +9,7 @@
 #   - Executive summary generated from which rules fired
 
 
+import json
 import os
 import re
 from datetime import datetime
@@ -101,14 +102,16 @@ REMEDIATION = {
 }
 
 
-def generate_report(findings, output_path=None, fmt="txt"):
+def generate_report(findings, output_path=None, fmt="txt", scan_stats=None):
     """
-    Creates a report from detection findings in text or HTML format.
+    Creates a report from detection findings in text, HTML, or JSON format.
 
     Parameters:
         findings (list):   List of finding dicts (rule, severity, details).
         output_path (str): Save path. Auto-generated if None.
-        fmt (str):         "txt" or "html". Default: "txt".
+        fmt (str):         "txt", "html", or "json". Default: "txt".
+        scan_stats (dict): Optional scan statistics from the parser:
+                           total_events, files_scanned, earliest, latest, top_event_ids.
 
     Returns:
         str: Path where the report was saved.
@@ -116,7 +119,8 @@ def generate_report(findings, output_path=None, fmt="txt"):
 
     if output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        extension = "html" if fmt == "html" else "txt"
+        extensions = {"html": "html", "json": "json"}
+        extension = extensions.get(fmt, "txt")
         output_path = os.path.join("reports", f"pulse_report_{timestamp}.{extension}")
 
     # Sort findings — most severe first.
@@ -132,9 +136,11 @@ def generate_report(findings, output_path=None, fmt="txt"):
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
 
     if fmt == "html":
-        report_text = _build_html_report(findings, severity_counts)
+        report_text = _build_html_report(findings, severity_counts, scan_stats)
+    elif fmt == "json":
+        report_text = _build_json_report(findings, severity_counts, scan_stats)
     else:
-        report_text = _build_txt_report(findings, severity_counts)
+        report_text = _build_txt_report(findings, severity_counts, scan_stats)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(report_text)
@@ -142,7 +148,7 @@ def generate_report(findings, output_path=None, fmt="txt"):
     return output_path
 
 
-def _build_txt_report(findings, severity_counts):
+def _build_txt_report(findings, severity_counts, scan_stats=None):
     """Builds the plain text report."""
 
     lines = []
@@ -153,6 +159,20 @@ def _build_txt_report(findings, severity_counts):
     lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"  Total findings: {len(findings)}")
     lines.append("")
+
+    # Scan summary - shows what was parsed before the findings.
+    if scan_stats:
+        lines.append("  Scan Summary:")
+        lines.append(f"    Files scanned:  {scan_stats['files_scanned']}")
+        lines.append(f"    Total events:   {scan_stats['total_events']}")
+        lines.append(f"    Time range:     {scan_stats['earliest']}")
+        lines.append(f"                    to {scan_stats['latest']}")
+        lines.append("")
+        lines.append("    Top Event IDs:")
+        for event_id, count in scan_stats["top_event_ids"]:
+            lines.append(f"      Event {event_id}: {count}")
+        lines.append("")
+
     lines.append("  Severity Breakdown:")
     lines.append(f"    CRITICAL: {severity_counts['CRITICAL']}")
     lines.append(f"    HIGH:     {severity_counts['HIGH']}")
@@ -174,6 +194,80 @@ def _build_txt_report(findings, severity_counts):
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _build_json_report(findings, severity_counts, scan_stats=None):
+    """
+    Builds a machine-readable JSON report.
+
+    JSON is a standard data format that other tools can easily read.
+    Tools like Splunk, ELK, or Python scripts can ingest this file
+    and process the findings programmatically - no manual parsing needed.
+
+    The output structure:
+    {
+        "metadata": { ... },      # When the report was generated, scan info
+        "summary":  { ... },      # Severity counts and security score
+        "findings": [ ... ]       # Array of individual finding objects
+    }
+    """
+
+    score, score_label, _ = _calculate_score(severity_counts)
+
+    # --- METADATA: information about the scan itself ---
+    metadata = {
+        "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "tool": "Pulse",
+        "version": "1.0.0",
+    }
+
+    # If we have scan stats from the parser, include them in metadata.
+    if scan_stats:
+        metadata["files_scanned"] = scan_stats["files_scanned"]
+        metadata["total_events"] = scan_stats["total_events"]
+        metadata["time_range"] = {
+            "earliest": scan_stats["earliest"],
+            "latest": scan_stats["latest"],
+        }
+        # Convert list of tuples to a dict for cleaner JSON.
+        # [(4625, 100), (4624, 50)] -> {"4625": 100, "4624": 50}
+        metadata["top_event_ids"] = {
+            str(eid): count for eid, count in scan_stats["top_event_ids"]
+        }
+
+    # --- SUMMARY: high-level severity breakdown ---
+    summary = {
+        "total_findings": len(findings),
+        "severity_counts": severity_counts,
+        "security_score": score,
+        "risk_level": score_label,
+    }
+
+    # --- FINDINGS: one object per detection ---
+    findings_list = []
+    for finding in findings:
+        # Extract the timestamp from the details string, same regex as the HTML builder.
+        ts_match = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", finding["details"])
+        timestamp = ts_match.group() if ts_match else None
+
+        findings_list.append({
+            "rule_name": finding["rule"],
+            "severity": finding["severity"],
+            "event_id": RULE_EVENT_IDS.get(finding["rule"], None),
+            "timestamp": timestamp,
+            "description": finding["details"],
+            "mitre_attack_id": None,  # Placeholder - will be filled when we add MITRE mapping
+        })
+
+    report = {
+        "metadata": metadata,
+        "summary": summary,
+        "findings": findings_list,
+    }
+
+    # indent=2 makes the JSON human-readable with nice spacing.
+    # ensure_ascii=False keeps special characters intact.
+    return json.dumps(report, indent=2, ensure_ascii=False)
 
 
 def _calculate_score(severity_counts):
@@ -248,7 +342,7 @@ def _build_executive_summary(findings, severity_counts):
         )
 
 
-def _build_html_report(findings, severity_counts):
+def _build_html_report(findings, severity_counts, scan_stats=None):
     """Builds the full two-tab HTML report (Detections + Remediation)."""
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -274,6 +368,47 @@ def _build_html_report(findings, severity_counts):
                     </tr>"""
         rows.append(row)
     all_rows = "\n".join(rows)
+
+    # --- SCAN STATS PANEL ---
+    # Only shown when scan_stats is provided (i.e. when running from main.py
+    # against real .evtx files, not when generating test reports manually).
+    scan_stats_html = ""
+    if scan_stats:
+        # Build the top event IDs as small inline items.
+        top_ids_html = ""
+        for event_id, count in scan_stats["top_event_ids"]:
+            top_ids_html += f'<span class="stat-event">Event {event_id}: <strong>{count}</strong></span>'
+
+        # Format the timestamps to be more readable (strip the trailing Z and microseconds).
+        earliest = scan_stats["earliest"].replace("Z", "").split(".")[0].replace("T", " ")
+        latest = scan_stats["latest"].replace("Z", "").split(".")[0].replace("T", " ")
+
+        scan_stats_html = f"""
+        <div class="scan-stats">
+            <h2 class="scan-stats-title">Scan Summary</h2>
+            <div class="scan-stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value">{scan_stats['files_scanned']}</div>
+                    <div class="stat-label">Files Scanned</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{scan_stats['total_events']:,}</div>
+                    <div class="stat-label">Total Events</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{total}</div>
+                    <div class="stat-label">Findings</div>
+                </div>
+                <div class="stat-box stat-box-wide">
+                    <div class="stat-label">Time Range</div>
+                    <div class="stat-time">{earliest}  to  {latest}</div>
+                </div>
+            </div>
+            <div class="stat-events-row">
+                <span class="stat-events-label">Top Event IDs:</span>
+                {top_ids_html}
+            </div>
+        </div>"""
 
     # --- SUMMARY CARDS (shared between tabs) ---
     cards_html = ""
@@ -653,6 +788,82 @@ def _build_html_report(findings, severity_counts):
             background: var(--text-muted);
         }}
 
+        /* ── Scan stats panel ── */
+        .scan-stats {{
+            background: var(--surface);
+            border-radius: 10px;
+            padding: 22px 28px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+        }}
+        .scan-stats-title {{
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }}
+        .scan-stats-grid {{
+            display: flex;
+            gap: 16px;
+            margin-bottom: 14px;
+        }}
+        .stat-box {{
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 14px 20px;
+            text-align: center;
+            flex: 1;
+        }}
+        .stat-box-wide {{
+            flex: 2;
+            text-align: left;
+        }}
+        .stat-value {{
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1;
+        }}
+        .stat-label {{
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }}
+        .stat-time {{
+            font-size: 0.88rem;
+            font-family: monospace;
+            color: var(--text);
+            margin-top: 6px;
+        }}
+        .stat-events-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }}
+        .stat-events-label {{
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }}
+        .stat-event {{
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: var(--bg);
+            padding: 3px 10px;
+            border-radius: 12px;
+        }}
+        .stat-event strong {{
+            color: var(--text);
+        }}
+
         /* ── Score hero ── */
         .score-hero {{
             background: var(--surface);
@@ -733,6 +944,9 @@ def _build_html_report(findings, severity_counts):
 
     <div class="page">
         <h1>Detection Findings</h1>
+
+        <!-- Scan summary stats -->
+        {scan_stats_html}
 
         <!-- Security score hero -->
         <div class="score-hero">
