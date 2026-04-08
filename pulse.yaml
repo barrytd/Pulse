@@ -35,8 +35,8 @@ output: null
 email:
   smtp_host: smtp.gmail.com
   smtp_port: 587
-  sender: null
-  recipient: null
+  sender: perezrobert0235249@gmail.com
+  recipient: perezrobert0235249@gmail.com
   password: null
 
 # Whitelist - suppress known-good items from triggering findings.

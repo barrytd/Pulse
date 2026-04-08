@@ -553,7 +553,9 @@ def main():
                 severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
             print(f"  [*] Sending report to {email_config['recipient']}...")
-            success = send_report(report_path, email_config, severity_counts, len(findings))
+            success = send_report(email_config, severity_counts,
+                                  len(findings), findings=findings,
+                                  report_path=report_path)
             if success:
                 print(f"  [*] Email sent successfully.")
     else:

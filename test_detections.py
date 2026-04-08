@@ -1770,7 +1770,11 @@ from pulse.emailer import (
     validate_email_config,
     send_report,
     _build_subject,
-    _build_body,
+    _build_plain_body,
+    _build_html_body,
+    _context_summary,
+    _alert_title,
+    _ensure_html_report,
 )
 
 
@@ -1830,21 +1834,176 @@ def test_build_subject_clean():
     assert "no findings" in subject.lower()
 
 
-def test_build_body_contains_counts():
-    """Email body should include severity counts."""
+def test_build_plain_body_contains_counts():
+    """Plain-text email body should include severity counts and folder note."""
     counts = {"CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 0}
-    body = _build_body("reports/test.html", counts, 6)
+    body = _build_plain_body(counts, 6)
     assert "1" in body   # CRITICAL count
     assert "2" in body   # HIGH count
-    assert "test.html" in body
+    assert "reports/" in body
+
+
+def test_build_html_body_alert_bar_accent_color_critical():
+    """Alert bar left border should use red accent for CRITICAL findings."""
+    counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    html = _build_html_body(counts, 1, [])
+    assert "#c0392b" in html
+
+
+def test_build_html_body_alert_bar_accent_color_green_when_clean():
+    """Alert bar left border should use green accent when no findings."""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    html = _build_html_body(counts, 0, [])
+    assert "#27ae60" in html
+
+
+def test_build_html_body_alert_bar_title():
+    """Alert bar should show the correct severity-level title."""
+    counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    html = _build_html_body(counts, 1, [])
+    assert "Critical severity alert" in html
+
+
+def test_build_html_body_alert_bar_subtitle():
+    """Alert bar subtitle should always be present."""
+    html = _build_html_body({"HIGH": 1}, 1, [])
+    assert "Pulse detected suspicious activity" in html
+
+
+def test_build_html_body_metadata_row_shows_findings_count():
+    """Metadata row should display the total findings count."""
+    html = _build_html_body({"HIGH": 2}, 2, [])
+    assert "Findings" in html
+
+
+def test_build_html_body_renders_finding_rows():
+    """HTML body should include rule name and severity badge for each shown finding."""
+    counts = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 0, "LOW": 0}
+    findings = [
+        {"severity": "HIGH", "rule": "Brute Force Login Attempt",
+         "description": "10 failed logins for account: admin"}
+    ]
+    html = _build_html_body(counts, 1, findings)
+    assert "Brute Force Login Attempt" in html
+    assert "HIGH" in html
+    assert "10 failed logins" in html
+
+
+def test_build_html_body_github_link_present():
+    """HTML footer should contain the GitHub link."""
+    html = _build_html_body({}, 0, [])
+    assert "github.com/barrytd/Pulse" in html
+
+
+def test_build_html_body_footer_saved_text():
+    """Footer should always contain 'Full report saved to'."""
+    html = _build_html_body({}, 0, [])
+    assert "Full report saved to" in html
+
+
+def test_build_html_body_footer_shows_report_path(tmp_path):
+    """Footer should show the absolute report path when report_url is provided."""
+    from pathlib import Path
+    report = tmp_path / "report.html"
+    report.write_text("<html>test</html>")
+    url = Path(report).as_uri()
+    html = _build_html_body({"HIGH": 1}, 1, [], report_url=url)
+    assert "Full report saved to" in html
+    assert "report.html" in html
+
+
+def test_alert_title_critical():
+    """_alert_title should return 'Critical severity alert' for CRITICAL."""
+    counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    assert _alert_title(counts) == "Critical severity alert"
+
+
+def test_alert_title_high():
+    """_alert_title should return 'High severity alert' when no CRITICAL."""
+    counts = {"CRITICAL": 0, "HIGH": 2, "MEDIUM": 0, "LOW": 0}
+    assert _alert_title(counts) == "High severity alert"
+
+
+def test_alert_title_clean():
+    """_alert_title should return 'Scan complete' when there are no findings."""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    assert _alert_title(counts) == "Scan complete"
+
+
+def test_context_summary_critical():
+    """Context summary should mention immediate investigation for CRITICAL."""
+    counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    summary = _context_summary(counts)
+    assert "Immediate investigation" in summary
+
+
+def test_context_summary_high():
+    """Context summary should mention review for HIGH with no CRITICAL."""
+    counts = {"CRITICAL": 0, "HIGH": 2, "MEDIUM": 0, "LOW": 0}
+    summary = _context_summary(counts)
+    assert "review" in summary.lower()
+    assert "Immediate investigation" not in summary
+
+
+def test_context_summary_low_risk():
+    """Context summary should say low-risk for MEDIUM/LOW only."""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 3, "LOW": 1}
+    summary = _context_summary(counts)
+    assert "Low-risk" in summary
+
+
+def test_html_body_shows_only_top_3_findings():
+    """HTML body should show at most 3 findings regardless of total."""
+    counts = {"CRITICAL": 0, "HIGH": 5, "MEDIUM": 0, "LOW": 0}
+    findings = [
+        {"severity": "HIGH", "rule": f"Rule {i}", "description": f"Detail {i}"}
+        for i in range(5)
+    ]
+    html = _build_html_body(counts, 5, findings)
+    assert "Rule 0" in html
+    assert "Rule 1" in html
+    assert "Rule 2" in html
+    assert "Rule 3" not in html
+    assert "Rule 4" not in html
+
+
+def test_html_body_shows_overflow_line():
+    """HTML body should say '...and X more findings' when list exceeds 3."""
+    counts = {"CRITICAL": 0, "HIGH": 5, "MEDIUM": 0, "LOW": 0}
+    findings = [
+        {"severity": "HIGH", "rule": f"Rule {i}", "description": "detail"}
+        for i in range(5)
+    ]
+    html = _build_html_body(counts, 5, findings)
+    assert "2 more findings" in html
+
+
+def test_html_body_no_overflow_when_three_or_fewer():
+    """HTML body should NOT show overflow line when there are 3 or fewer findings."""
+    counts = {"CRITICAL": 0, "HIGH": 3, "MEDIUM": 0, "LOW": 0}
+    findings = [
+        {"severity": "HIGH", "rule": f"Rule {i}", "description": "detail"}
+        for i in range(3)
+    ]
+    html = _build_html_body(counts, 3, findings)
+    assert "more findings" not in html
+
+
+def test_html_body_findings_sorted_by_severity():
+    """HTML body should show CRITICAL before LOW regardless of input order."""
+    counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 1}
+    findings = [
+        {"severity": "LOW",      "rule": "Low Rule",      "description": "low"},
+        {"severity": "CRITICAL", "rule": "Critical Rule",  "description": "crit"},
+    ]
+    html = _build_html_body(counts, 2, findings)
+    assert html.index("Critical Rule") < html.index("Low Rule")
 
 
 def test_send_report_calls_smtp(tmp_path):
     """send_report should connect to SMTP, log in, and send when config is valid."""
-    # Create a fake report file to attach.
     report = tmp_path / "report.html"
     report.write_text("<html>test</html>")
-
     counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
 
     # patch replaces smtplib.SMTP with a fake object for this test only.
@@ -1854,7 +2013,7 @@ def test_send_report_calls_smtp(tmp_path):
         mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
         mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
 
-        result = send_report(str(report), VALID_EMAIL_CONFIG, counts, 1)
+        result = send_report(VALID_EMAIL_CONFIG, counts, 1, report_path=str(report))
 
     assert result is True
     mock_server.starttls.assert_called_once()
@@ -1876,7 +2035,7 @@ def test_send_report_fails_gracefully_on_auth_error(tmp_path):
         mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
         mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
 
-        result = send_report(str(report), VALID_EMAIL_CONFIG, counts, 1)
+        result = send_report(VALID_EMAIL_CONFIG, counts, 1, report_path=str(report))
 
     assert result is False
 
@@ -1886,9 +2045,34 @@ def test_send_report_returns_false_with_invalid_config(tmp_path):
     report = tmp_path / "report.html"
     report.write_text("<html>test</html>")
     counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-
     bad_config = {"smtp_host": "smtp.gmail.com"}  # Missing most fields.
-
-    result = send_report(str(report), bad_config, counts, 0)
-
+    result = send_report(bad_config, counts, 0, report_path=str(report))
     assert result is False
+
+
+def test_ensure_html_report_returns_existing_html(tmp_path):
+    """_ensure_html_report should return the path as-is if it's already an HTML file."""
+    report = tmp_path / "report.html"
+    report.write_text("<html>existing</html>")
+    result = _ensure_html_report(str(report), [], None)
+    assert result == str(report)
+
+
+def test_ensure_html_report_generates_html_for_txt(tmp_path):
+    """_ensure_html_report should generate a companion .html for a .txt report."""
+    import os as _os
+    report = tmp_path / "report.txt"
+    report.write_text("plain text report")
+    result = _ensure_html_report(str(report), [], None)
+    assert result.endswith(".html")
+    assert _os.path.isfile(result)
+
+
+def test_html_body_no_file_url_link(tmp_path):
+    """HTML body should NOT contain a file:// href (stripped by email clients)."""
+    from pathlib import Path
+    report = tmp_path / "report.html"
+    report.write_text("<html>test</html>")
+    url = Path(report).as_uri()
+    html = _build_html_body({"HIGH": 1}, 1, [], report_url=url)
+    assert f'href="{url}"' not in html

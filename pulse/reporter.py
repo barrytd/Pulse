@@ -485,7 +485,7 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
                     <tr data-severity="{severity}">
                         <td class="ts">{timestamp}</td>
                         <td class="event-id">{event_id}</td>
-                        <td><span class="badge" style="background:{colour};">{severity}</span></td>
+                        <td><span class="badge badge-{severity.lower()}">{severity}</span></td>
                         <td class="rule-name">{finding['rule']}</td>
                         <td class="mitre">{mitre_html}</td>
                         <td class="desc">{finding['details']}</td>
@@ -533,17 +533,6 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
                 {top_ids_html}
             </div>
         </div>"""
-
-    # --- SUMMARY CARDS (shared between tabs) ---
-    cards_html = ""
-    for level in SEVERITY_ORDER:
-        colour = SEVERITY_COLOURS[level]
-        count  = severity_counts.get(level, 0)
-        cards_html += f"""
-            <div class="card" style="border-top: 4px solid {colour};">
-                <div class="card-count" style="color:{colour};">{count}</div>
-                <div class="card-label">{level}</div>
-            </div>"""
 
     # --- REMEDIATION TAB: executive summary + cards ---
     exec_summary = _build_executive_summary(findings, severity_counts)
@@ -594,7 +583,7 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
             --text:         #1a1a2e;
             --text-muted:   #7f8c8d;
             --border:       #dde1e7;
-            --row-hover:    #fafbfc;
+            --row-hover:    #f3f6fa;
             --thead-bg:     #f4f6f8;
             --tab-active:   #1a1a2e;
             --tab-text:     #ffffff;
@@ -698,34 +687,6 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
             color: var(--text);
         }}
 
-        /* ── Summary cards ── */
-        .cards {{
-            display: flex;
-            gap: 16px;
-            margin-bottom: 28px;
-        }}
-        .card {{
-            background: var(--surface);
-            border-radius: 6px;
-            padding: 18px 24px;
-            flex: 1;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-            text-align: center;
-        }}
-        .card-count {{
-            font-size: 2rem;
-            font-weight: 700;
-            line-height: 1;
-        }}
-        .card-label {{
-            font-size: 0.72rem;
-            font-weight: 600;
-            letter-spacing: 1.5px;
-            color: var(--text-muted);
-            margin-top: 6px;
-            text-transform: uppercase;
-        }}
-
         /* ── Tabs ── */
         .tabs {{
             display: flex;
@@ -809,52 +770,69 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
         }}
         table {{ width: 100%; border-collapse: collapse; }}
         thead {{
-            background: var(--thead-bg);
-            border-bottom: 2px solid var(--border);
+            border-bottom: 1px solid var(--border);
         }}
         th {{
-            padding: 11px 16px;
+            padding: 12px 18px;
             text-align: left;
-            font-size: 0.72rem;
-            font-weight: 700;
+            font-size: 0.7rem;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.8px;
             color: var(--text-muted);
             white-space: nowrap;
         }}
         td {{
-            padding: 12px 16px;
+            padding: 15px 18px;
             border-bottom: 1px solid var(--border);
             vertical-align: top;
         }}
         tr:last-child td {{ border-bottom: none; }}
-        tr:hover td {{ background: var(--row-hover); }}
+        tr:hover td {{ background: var(--row-hover); transition: background 0.1s; }}
         tr.hidden {{ display: none; }}
 
         .ts        {{ white-space: nowrap; color: var(--text-muted); font-size: 0.82rem; width: 145px; }}
         .event-id  {{ white-space: nowrap; font-family: monospace; width: 100px; }}
         .rule-name {{ font-weight: 600; width: 200px; }}
-        .mitre     {{ white-space: nowrap; width: 100px; }}
+        .mitre     {{ white-space: nowrap; width: 110px; }}
         .mitre-link {{
-            color: #3498db;
+            display: inline-block;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: 0.72rem;
+            background: var(--thead-bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 2px 6px;
+            color: var(--text);
             text-decoration: none;
-            font-family: monospace;
-            font-size: 0.82rem;
+            white-space: nowrap;
         }}
-        .mitre-link:hover {{ text-decoration: underline; }}
-        .desc      {{ color: var(--text-muted); line-height: 1.55; font-size: 0.85rem; }}
+        .mitre-link:hover {{
+            border-color: var(--text-muted);
+            text-decoration: none;
+        }}
+        .desc      {{ color: var(--text-muted); line-height: 1.6; font-size: 0.85rem; }}
 
-        /* ── Severity badge ── */
+        /* ── Severity badge — muted pill style ── */
         .badge {{
             display: inline-block;
             padding: 3px 10px;
             border-radius: 20px;
-            color: #fff;
             font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
             white-space: nowrap;
         }}
+        /* Muted variants for the detections table */
+        .badge-critical {{ background: #fdecea; color: #a93226; }}
+        .badge-high     {{ background: #fef3e2; color: #c0530e; }}
+        .badge-medium   {{ background: #fefce8; color: #7d6608; }}
+        .badge-low      {{ background: #edfaf1; color: #1e8449; }}
+        /* Dark mode adjustments for muted badges */
+        body.dark .badge-critical {{ background: #3d1515; color: #e57373; }}
+        body.dark .badge-high     {{ background: #3d2810; color: #ffab76; }}
+        body.dark .badge-medium   {{ background: #2e2a0e; color: #f9d976; }}
+        body.dark .badge-low      {{ background: #0e2d1a; color: #6fcf97; }}
 
         /* ── Remediation tab ── */
         .exec-summary {{
@@ -1096,11 +1074,6 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
                     <span class="score-breakdown-item"><strong style="color:{SEVERITY_COLOURS['LOW']};">{severity_counts['LOW']}</strong> Low (-2 pts each)</span>
                 </div>
             </div>
-        </div>
-
-        <!-- Summary cards -->
-        <div class="cards">
-            {cards_html}
         </div>
 
         <!-- Tabs -->
