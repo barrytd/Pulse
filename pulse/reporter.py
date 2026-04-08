@@ -23,6 +23,9 @@ from datetime import datetime
 # This lets analysts quickly look up the technique on attack.mitre.org
 # and understand the attacker's goal.
 MITRE_ATTACK_IDS = {
+    "New Account (Baseline)":    "T1136.001",
+    "New Service (Baseline)":    "T1543.003",
+    "New Task (Baseline)":       "T1053.005",
     "Pass-the-Hash Attempt":     "T1550.002",
     "Brute Force Attempt":       "T1110",
     "Account Lockout":           "T1110",
@@ -62,6 +65,9 @@ RULE_EVENT_IDS = {
     "Firewall Disabled":         "4950",
     "Firewall Rule Changed":     "4946 / 4947",
     "Pass-the-Hash Attempt":     "4624",
+    "New Account (Baseline)":    "4720",
+    "New Service (Baseline)":    "7045",
+    "New Task (Baseline)":       "4698",
     "Account Lockout":           "4740",
     "Scheduled Task Created":    "4698",
     "Suspicious PowerShell":     "4104",
@@ -123,6 +129,21 @@ REMEDIATION = {
         "Confirm with IT whether the account creation was authorized.",
         "Disable the account immediately if it was not requested.",
         "Audit what resources or systems the account accessed after creation.",
+    ],
+    "New Account (Baseline)": [
+        "Confirm with IT whether this account was intentionally created after the baseline was taken.",
+        "Disable the account immediately if it was not authorized.",
+        "Check what resources or systems the new account has accessed.",
+    ],
+    "New Service (Baseline)": [
+        "Verify the service name and binary path in services.msc.",
+        "Stop and delete the service if it was not intentionally installed after the baseline.",
+        "Submit the binary to VirusTotal or scan with Defender Offline.",
+    ],
+    "New Task (Baseline)": [
+        "Review the task in Task Scheduler (taskschd.msc) and check its action and trigger.",
+        "Delete the task if it was not intentionally created after the baseline.",
+        "Check what binary or script the task runs.",
     ],
     "Pass-the-Hash Attempt": [
         "Reset the password of the targeted account immediately.",

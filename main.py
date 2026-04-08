@@ -17,6 +17,7 @@
 #   5. Generates a report in the chosen format
 
 
+import json
 import os
 import argparse                                      # Built-in: handles command-line arguments
 from collections import Counter                      # Built-in: counts how often each value appears
@@ -126,6 +127,16 @@ def build_arg_parser(config=None):
         help="Only show findings at or above this severity level. Default: LOW (shows everything)",
     )
 
+    # --- ARGUMENT: --save-baseline ---
+    # This flag captures the current state of accounts, services, and tasks
+    # as a "known good" snapshot. Future scans compare against it and flag
+    # anything new that wasn't there before.
+    parser.add_argument(
+        "--save-baseline",
+        action="store_true",        # No value needed - just --save-baseline
+        help="Save a baseline snapshot of accounts, services, and tasks for future comparison.",
+    )
+
     return parser
 
 
@@ -188,6 +199,167 @@ def filter_whitelist(findings, whitelist):
     return filtered
 
 
+BASELINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pulse_baseline.json")
+
+
+def build_baseline(events):
+    """
+    Extracts a snapshot of "known good" entities from parsed events.
+
+    We record which accounts, services, and scheduled tasks exist right now.
+    On future scans, anything NEW that wasn't in this snapshot is flagged
+    as an anomaly worth investigating.
+
+    Parameters:
+        events (list): Parsed events from the log files.
+
+    Returns:
+        dict: Baseline snapshot with accounts, services, and tasks lists.
+    """
+    import xml.etree.ElementTree as ET
+
+    NS = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+
+    accounts  = set()
+    services  = set()
+    tasks     = set()
+
+    for event in events:
+        try:
+            xml_tree = ET.fromstring(event["data"])
+            event_data = xml_tree.find(f"{NS}EventData")
+            if event_data is None:
+                continue
+
+            fields = {d.get("Name"): d.text for d in event_data}
+
+            if event["event_id"] == 4720:   # User account created
+                name = fields.get("TargetUserName")
+                if name:
+                    accounts.add(name.lower())
+
+            elif event["event_id"] == 7045:  # Service installed
+                name = fields.get("ServiceName")
+                if name:
+                    services.add(name.lower())
+
+            elif event["event_id"] == 4698:  # Scheduled task created
+                name = fields.get("TaskName")
+                if name:
+                    tasks.add(name.lower())
+
+        except Exception:
+            continue
+
+    return {
+        "created_at": __import__("datetime").datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "accounts":  sorted(accounts),
+        "services":  sorted(services),
+        "tasks":     sorted(tasks),
+    }
+
+
+def save_baseline(events, path=None):
+    """Builds and saves the baseline snapshot to a JSON file."""
+    if path is None:
+        path = BASELINE_PATH
+    baseline = build_baseline(events)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(baseline, f, indent=2)
+    return path, baseline
+
+
+def load_baseline(path=None):
+    """
+    Loads the baseline snapshot from disk.
+
+    Returns None if the file doesn't exist (first run, no baseline yet).
+    """
+    if path is None:
+        path = BASELINE_PATH
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def compare_baseline(findings, baseline):
+    """
+    Compares findings against the baseline and tags any finding where the
+    account, service, or task was NOT in the baseline as a new anomaly.
+
+    Instead of removing findings, we add a "new_since_baseline" field so
+    the reporter can highlight them. We also generate extra findings for
+    any new item that appeared in the events but not in the baseline.
+
+    Parameters:
+        findings (list):  Detection findings after all rules have run.
+        baseline (dict):  Loaded baseline snapshot.
+
+    Returns:
+        list: Findings with "new_since_baseline" key added where relevant,
+              plus any new baseline-comparison findings prepended.
+    """
+    import re
+
+    known_accounts = set(baseline.get("accounts", []))
+    known_services = set(baseline.get("services", []))
+    known_tasks    = set(baseline.get("tasks", []))
+
+    extra = []
+
+    for finding in findings:
+        details_lower = finding["details"].lower()
+
+        # Look for newly created accounts not in the baseline.
+        if finding["rule"] == "User Account Created":
+            # Extract the account name from the details string.
+            match = re.search(r"new account '([^']+)'", details_lower)
+            if match:
+                account = match.group(1)
+                if account not in known_accounts:
+                    extra.append({
+                        "rule": "New Account (Baseline)",
+                        "severity": "HIGH",
+                        "details": (
+                            f"Account '{match.group(1)}' did not exist at baseline. "
+                            f"Original finding: {finding['details']}"
+                        ),
+                    })
+
+        # Look for newly installed services not in the baseline.
+        elif finding["rule"] in ("Service Installed", "Malware Persistence Chain"):
+            match = re.search(r"service '([^']+)'", details_lower)
+            if match:
+                service = match.group(1)
+                if service not in known_services:
+                    extra.append({
+                        "rule": "New Service (Baseline)",
+                        "severity": "HIGH",
+                        "details": (
+                            f"Service '{match.group(1)}' did not exist at baseline. "
+                            f"Original finding: {finding['details']}"
+                        ),
+                    })
+
+        # Look for newly created tasks not in the baseline.
+        elif finding["rule"] == "Scheduled Task Created":
+            match = re.search(r"task '([^']+)'", details_lower)
+            if match:
+                task = match.group(1)
+                if task not in known_tasks:
+                    extra.append({
+                        "rule": "New Task (Baseline)",
+                        "severity": "MEDIUM",
+                        "details": (
+                            f"Scheduled task '{match.group(1)}' did not exist at baseline. "
+                            f"Original finding: {finding['details']}"
+                        ),
+                    })
+
+    return extra + findings
+
+
 BANNER = r"""
   ____  _   _ _     ____  _____
  |  _ \| | | | |   / ___|| ____|
@@ -226,6 +398,7 @@ def main():
     output_path = args.output
     report_format = args.format
     severity_filter = args.severity
+    save_baseline_flag = args.save_baseline
 
     # --- STEP 1: PREFLIGHT CHECKS ---
     if not os.path.exists(log_folder):
@@ -283,6 +456,28 @@ def main():
         "top_event_ids": event_counts.most_common(10),
     }
 
+    # --- STEP 3c: SAVE OR LOAD BASELINE ---
+    # If --save-baseline was passed, capture the current state and exit.
+    # The user should do this on a clean, known-good machine before attackers
+    # have made any changes. Then future scans compare against it.
+    if save_baseline_flag:
+        path, baseline = save_baseline(all_events)
+        print(f"  [*] Baseline saved to: {path}")
+        print(f"      Accounts : {len(baseline['accounts'])}")
+        print(f"      Services : {len(baseline['services'])}")
+        print(f"      Tasks    : {len(baseline['tasks'])}")
+        print()
+        print("  Run Pulse normally to compare future scans against this baseline.")
+        print()
+        return
+
+    # Auto-load the baseline if it exists. If it does, any new accounts,
+    # services, or tasks found in this scan that weren't there before
+    # will generate extra findings.
+    baseline = load_baseline()
+    if baseline:
+        print(f"  [*] Baseline loaded (captured {baseline['created_at']})")
+
     # --- STEP 4: RUN DETECTIONS ---
     print("  [*] Running detection rules...")
     findings = run_all_detections(all_events)
@@ -306,6 +501,15 @@ def main():
     suppressed = before_count - len(findings)
     if suppressed > 0:
         print(f"  [*] Whitelist suppressed {suppressed} finding(s)")
+
+    # --- APPLY BASELINE COMPARISON ---
+    # If a baseline was loaded, prepend extra findings for anything new.
+    if baseline:
+        before = len(findings)
+        findings = compare_baseline(findings, baseline)
+        new_count = len(findings) - before
+        if new_count > 0:
+            print(f"  [*] Baseline flagged {new_count} new item(s) not seen before")
 
     print(f"  [*] Findings: {len(findings)}")
 

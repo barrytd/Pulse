@@ -1610,3 +1610,149 @@ def test_csv_report_opens_as_valid_csv(tmp_path):
         rows = list(reader)  # Will raise if CSV is malformed
 
     assert len(rows) > 0
+
+
+# ---------------------------------------------------------------------------
+# BASELINE TESTS
+# ---------------------------------------------------------------------------
+
+from main import build_baseline, save_baseline, load_baseline, compare_baseline
+
+
+def _make_events_for_baseline():
+    """
+    Returns fake events covering account creation, service install,
+    and scheduled task creation - the three things the baseline tracks.
+    """
+    return [
+        make_user_created_event("alice", "admin", "2024-01-15T08:00:00.000Z"),
+        make_user_created_event("bob",   "admin", "2024-01-15T08:01:00.000Z"),
+        make_service_installed_event("PrintSpooler", "LocalSystem"),
+        make_scheduled_task_event("\\BackupTask", "SYSTEM"),
+    ]
+
+
+def test_build_baseline_extracts_accounts():
+    """build_baseline should collect account names from Event 4720."""
+    events = _make_events_for_baseline()
+    baseline = build_baseline(events)
+
+    assert "alice" in baseline["accounts"]
+    assert "bob" in baseline["accounts"]
+
+
+def test_build_baseline_extracts_services():
+    """build_baseline should collect service names from Event 7045."""
+    events = _make_events_for_baseline()
+    baseline = build_baseline(events)
+
+    assert "printspooler" in baseline["services"]
+
+
+def test_build_baseline_extracts_tasks():
+    """build_baseline should collect task names from Event 4698."""
+    events = _make_events_for_baseline()
+    baseline = build_baseline(events)
+
+    assert "\\backuptask" in baseline["tasks"]
+
+
+def test_build_baseline_has_timestamp():
+    """Baseline must include a created_at timestamp."""
+    baseline = build_baseline([])
+    assert "created_at" in baseline
+
+
+def test_save_and_load_baseline_roundtrip(tmp_path):
+    """Saving then loading a baseline should return the same data."""
+    events = _make_events_for_baseline()
+    path = str(tmp_path / "baseline.json")
+
+    save_baseline(events, path=path)
+    loaded = load_baseline(path=path)
+
+    assert loaded is not None
+    assert "alice" in loaded["accounts"]
+    assert "printspooler" in loaded["services"]
+
+
+def test_load_baseline_returns_none_when_missing(tmp_path):
+    """load_baseline should return None if the file doesn't exist."""
+    result = load_baseline(path=str(tmp_path / "nonexistent.json"))
+    assert result is None
+
+
+def test_compare_baseline_flags_new_account():
+    """A new account not in the baseline should generate an extra finding."""
+    baseline = {"accounts": ["alice"], "services": [], "tasks": []}
+    findings = [{
+        "rule": "User Account Created",
+        "severity": "MEDIUM",
+        "details": "New account 'backdoor' was created by 'admin' at 2024-01-15T09:00:00.",
+    }]
+
+    result = compare_baseline(findings, baseline)
+
+    rules = [f["rule"] for f in result]
+    assert "New Account (Baseline)" in rules
+
+
+def test_compare_baseline_ignores_known_account():
+    """An account already in the baseline should NOT generate an extra finding."""
+    baseline = {"accounts": ["alice"], "services": [], "tasks": []}
+    findings = [{
+        "rule": "User Account Created",
+        "severity": "MEDIUM",
+        "details": "New account 'alice' was created by 'admin' at 2024-01-15T09:00:00.",
+    }]
+
+    result = compare_baseline(findings, baseline)
+
+    rules = [f["rule"] for f in result]
+    assert "New Account (Baseline)" not in rules
+
+
+def test_compare_baseline_flags_new_service():
+    """A new service not in the baseline should generate an extra finding."""
+    baseline = {"accounts": [], "services": ["spooler"], "tasks": []}
+    findings = [{
+        "rule": "Service Installed",
+        "severity": "MEDIUM",
+        "details": "New service 'EvilSvc' was installed by 'SYSTEM' at 2024-01-15T09:00:00.",
+    }]
+
+    result = compare_baseline(findings, baseline)
+
+    rules = [f["rule"] for f in result]
+    assert "New Service (Baseline)" in rules
+
+
+def test_compare_baseline_flags_new_task():
+    """A new scheduled task not in the baseline should generate an extra finding."""
+    baseline = {"accounts": [], "services": [], "tasks": ["\\backuptask"]}
+    findings = [{
+        "rule": "Scheduled Task Created",
+        "severity": "MEDIUM",
+        "details": "Scheduled task '\\MalwareTask' was created by 'admin' at 2024-01-15T09:00:00.",
+    }]
+
+    result = compare_baseline(findings, baseline)
+
+    rules = [f["rule"] for f in result]
+    assert "New Task (Baseline)" in rules
+
+
+def test_compare_baseline_returns_all_original_findings():
+    """compare_baseline should keep all original findings, not just new ones."""
+    baseline = {"accounts": ["alice"], "services": [], "tasks": []}
+    findings = [
+        {"rule": "Audit Log Cleared", "severity": "HIGH",
+         "details": "Security event log was cleared at 2024-01-15T09:00:00."},
+        {"rule": "User Account Created", "severity": "MEDIUM",
+         "details": "New account 'backdoor' was created by 'admin' at 2024-01-15T09:00:00."},
+    ]
+
+    result = compare_baseline(findings, baseline)
+
+    # Should have both original findings plus the new baseline finding.
+    assert len(result) == 3
