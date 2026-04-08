@@ -1756,3 +1756,139 @@ def test_compare_baseline_returns_all_original_findings():
 
     # Should have both original findings plus the new baseline finding.
     assert len(result) == 3
+
+
+# ---------------------------------------------------------------------------
+# EMAIL TESTS
+# ---------------------------------------------------------------------------
+# We can't connect to a real SMTP server in tests, so we use
+# unittest.mock to fake the smtplib connection. This lets us verify
+# that the emailer calls the right methods without actually sending anything.
+
+from unittest.mock import patch, MagicMock
+from pulse.emailer import (
+    validate_email_config,
+    send_report,
+    _build_subject,
+    _build_body,
+)
+
+
+VALID_EMAIL_CONFIG = {
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "sender": "test@gmail.com",
+    "recipient": "soc@company.com",
+    "password": "secretpassword",
+}
+
+
+def test_validate_email_config_passes_with_all_fields():
+    """A complete config should return None (no error)."""
+    assert validate_email_config(VALID_EMAIL_CONFIG) is None
+
+
+def test_validate_email_config_fails_when_missing_field():
+    """A config with a missing field should return an error string."""
+    incomplete = {k: v for k, v in VALID_EMAIL_CONFIG.items() if k != "password"}
+    error = validate_email_config(incomplete)
+    assert error is not None
+    assert "password" in error
+
+
+def test_validate_email_config_fails_when_null_field():
+    """A config where a field is None (not set in yaml) should fail."""
+    config = {**VALID_EMAIL_CONFIG, "recipient": None}
+    error = validate_email_config(config)
+    assert error is not None
+
+
+def test_validate_email_config_fails_with_empty_dict():
+    """An empty config dict should return an error."""
+    assert validate_email_config({}) is not None
+
+
+def test_build_subject_critical():
+    """Subject should say CRITICAL when critical findings exist."""
+    counts = {"CRITICAL": 2, "HIGH": 5, "MEDIUM": 3, "LOW": 1}
+    subject = _build_subject(counts, 11)
+    assert "CRITICAL" in subject
+    assert "11" in subject
+
+
+def test_build_subject_high():
+    """Subject should say HIGH when no critical but high findings exist."""
+    counts = {"CRITICAL": 0, "HIGH": 3, "MEDIUM": 1, "LOW": 0}
+    subject = _build_subject(counts, 4)
+    assert "HIGH" in subject
+
+
+def test_build_subject_clean():
+    """Subject should say no findings when total is zero."""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    subject = _build_subject(counts, 0)
+    assert "no findings" in subject.lower()
+
+
+def test_build_body_contains_counts():
+    """Email body should include severity counts."""
+    counts = {"CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 0}
+    body = _build_body("reports/test.html", counts, 6)
+    assert "1" in body   # CRITICAL count
+    assert "2" in body   # HIGH count
+    assert "test.html" in body
+
+
+def test_send_report_calls_smtp(tmp_path):
+    """send_report should connect to SMTP, log in, and send when config is valid."""
+    # Create a fake report file to attach.
+    report = tmp_path / "report.html"
+    report.write_text("<html>test</html>")
+
+    counts = {"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+
+    # patch replaces smtplib.SMTP with a fake object for this test only.
+    # The fake object records what methods were called on it.
+    with patch("pulse.emailer.smtplib.SMTP") as mock_smtp:
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
+        mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = send_report(str(report), VALID_EMAIL_CONFIG, counts, 1)
+
+    assert result is True
+    mock_server.starttls.assert_called_once()
+    mock_server.login.assert_called_once_with("test@gmail.com", "secretpassword")
+    mock_server.sendmail.assert_called_once()
+
+
+def test_send_report_fails_gracefully_on_auth_error(tmp_path):
+    """send_report should return False (not crash) on authentication failure."""
+    import smtplib as _smtplib
+
+    report = tmp_path / "report.html"
+    report.write_text("<html>test</html>")
+    counts = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 0, "LOW": 0}
+
+    with patch("pulse.emailer.smtplib.SMTP") as mock_smtp:
+        mock_server = MagicMock()
+        mock_server.login.side_effect = _smtplib.SMTPAuthenticationError(535, b"Bad credentials")
+        mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
+        mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = send_report(str(report), VALID_EMAIL_CONFIG, counts, 1)
+
+    assert result is False
+
+
+def test_send_report_returns_false_with_invalid_config(tmp_path):
+    """send_report should return False immediately if config is incomplete."""
+    report = tmp_path / "report.html"
+    report.write_text("<html>test</html>")
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+
+    bad_config = {"smtp_host": "smtp.gmail.com"}  # Missing most fields.
+
+    result = send_report(str(report), bad_config, counts, 0)
+
+    assert result is False

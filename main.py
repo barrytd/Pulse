@@ -24,7 +24,8 @@ from collections import Counter                      # Built-in: counts how ofte
 import yaml                                          # Third-party: reads YAML config files
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
-from pulse.reporter import generate_report
+from pulse.reporter import generate_report, SEVERITY_ORDER
+from pulse.emailer import send_report, validate_email_config
 
 
 # Path to the config file. Lives in the project root next to main.py.
@@ -125,6 +126,15 @@ def build_arg_parser(config=None):
         choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
         metavar="LEVEL",
         help="Only show findings at or above this severity level. Default: LOW (shows everything)",
+    )
+
+    # --- ARGUMENT: --email ---
+    # When passed, Pulse sends the finished report to the recipient
+    # configured in the email section of pulse.yaml.
+    parser.add_argument(
+        "--email",
+        action="store_true",
+        help="Send the finished report via email (requires email settings in pulse.yaml).",
     )
 
     # --- ARGUMENT: --save-baseline ---
@@ -397,10 +407,22 @@ def main():
     log_folder = args.logs
     output_path = args.output
     report_format = args.format
-    severity_filter = args.severity
+    severity_filter    = args.severity
     save_baseline_flag = args.save_baseline
+    send_email_flag    = args.email
 
     # --- STEP 1: PREFLIGHT CHECKS ---
+    # Validate email config early so we don't scan for 10 minutes
+    # and then fail at the last step because the password was wrong.
+    email_config = config.get("email", {})
+    if send_email_flag:
+        error = validate_email_config(email_config)
+        if error:
+            print(f"  [!] {error}")
+            print("      Fill in the email section of pulse.yaml and try again.")
+            print()
+            return
+
     if not os.path.exists(log_folder):
         print(f"[!] Log folder '{log_folder}' not found. Creating it...")
         os.makedirs(log_folder)
@@ -521,6 +543,19 @@ def main():
         # The reporter will handle auto-naming if output_path is None.
         report_path = generate_report(findings, output_path=output_path, fmt=report_format, scan_stats=scan_stats)
         print(f"  [*] Report saved to: {report_path}")
+
+        # --- STEP 6: SEND EMAIL ---
+        # Only runs if --email was passed and config is valid (already checked).
+        if send_email_flag:
+            severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for f in findings:
+                sev = f.get("severity", "LOW")
+                severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+            print(f"  [*] Sending report to {email_config['recipient']}...")
+            success = send_report(report_path, email_config, severity_counts, len(findings))
+            if success:
+                print(f"  [*] Email sent successfully.")
     else:
         print("  [*] No suspicious activity detected. You're clean!")
 

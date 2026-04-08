@@ -21,6 +21,24 @@ severity: LOW
 # Example: output: reports/my_report.html
 output: null
 
+# Email delivery - send the finished report automatically after a scan.
+# Use --email flag to trigger. Requires these settings to be filled in.
+#
+# smtp_host: your mail server (e.g. smtp.gmail.com for Gmail)
+# smtp_port: 587 for TLS (most common), 465 for SSL
+# sender:    the address the email is sent FROM
+# recipient: where to send the report
+# password:  your email password or app password
+#
+# Gmail users: generate an App Password at myaccount.google.com/apppasswords
+# (required if you have 2-factor authentication enabled)
+email:
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  sender: null
+  recipient: null
+  password: null
+
 # Whitelist - suppress known-good items from triggering findings.
 # Any finding that matches a whitelisted value is silently removed.
 # This reduces false positives in noisy environments.
