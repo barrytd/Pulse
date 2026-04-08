@@ -17,6 +17,29 @@ import re
 from datetime import datetime
 
 
+# Maps each rule to its MITRE ATT&CK technique ID.
+# ATT&CK is an industry-standard framework that catalogs attacker tactics
+# and techniques. Each technique has an ID like T1110 (Brute Force).
+# This lets analysts quickly look up the technique on attack.mitre.org
+# and understand the attacker's goal.
+MITRE_ATTACK_IDS = {
+    "Brute Force Attempt":       "T1110",
+    "Account Lockout":           "T1110",
+    "User Account Created":      "T1136.001",
+    "Privilege Escalation":      "T1078.002",
+    "Audit Log Cleared":         "T1070.001",
+    "RDP Logon Detected":        "T1021.001",
+    "Service Installed":         "T1543.003",
+    "Antivirus Disabled":        "T1562.001",
+    "Firewall Disabled":         "T1562.004",
+    "Firewall Rule Changed":     "T1562.004",
+    "Scheduled Task Created":    "T1053.005",
+    "Suspicious PowerShell":     "T1059.001",
+    "Account Takeover Chain":    "T1078",
+    "Malware Persistence Chain": "T1543.003",
+}
+
+
 SEVERITY_COLOURS = {
     "CRITICAL": "#8e44ad",
     "HIGH":     "#e74c3c",
@@ -239,18 +262,20 @@ def _build_csv_report(findings):
     writer = csv.writer(output, lineterminator="\n")
 
     # Header row.
-    writer.writerow(["Timestamp", "Event ID", "Severity", "Rule Name", "Description"])
+    writer.writerow(["Timestamp", "Event ID", "Severity", "Rule Name", "MITRE ATT&CK", "Description"])
 
     for finding in findings:
         ts_match = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", finding["details"])
         timestamp = ts_match.group().replace("T", " ") if ts_match else ""
         event_id = RULE_EVENT_IDS.get(finding["rule"], "")
+        mitre_id = MITRE_ATTACK_IDS.get(finding["rule"], "")
 
         writer.writerow([
             timestamp,
             event_id,
             finding["severity"],
             finding["rule"],
+            mitre_id,
             finding["details"],
         ])
 
@@ -317,7 +342,7 @@ def _build_json_report(findings, severity_counts, scan_stats=None):
             "event_id": RULE_EVENT_IDS.get(finding["rule"], None),
             "timestamp": timestamp,
             "description": finding["details"],
-            "mitre_attack_id": None,  # Placeholder - will be filled when we add MITRE mapping
+            "mitre_attack_id": MITRE_ATTACK_IDS.get(finding["rule"], None),
         })
 
     report = {
@@ -419,12 +444,20 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
         ts_match  = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", finding["details"])
         timestamp = ts_match.group().replace("T", " ") if ts_match else "-"
 
+        mitre_id = MITRE_ATTACK_IDS.get(finding["rule"], "-")
+        # Link to the MITRE ATT&CK page for this technique.
+        if mitre_id != "-":
+            mitre_html = f'<a href="https://attack.mitre.org/techniques/{mitre_id.replace(".", "/")}/" target="_blank" class="mitre-link">{mitre_id}</a>'
+        else:
+            mitre_html = "-"
+
         row = f"""
                     <tr data-severity="{severity}">
                         <td class="ts">{timestamp}</td>
                         <td class="event-id">{event_id}</td>
                         <td><span class="badge" style="background:{colour};">{severity}</span></td>
                         <td class="rule-name">{finding['rule']}</td>
+                        <td class="mitre">{mitre_html}</td>
                         <td class="desc">{finding['details']}</td>
                     </tr>"""
         rows.append(row)
@@ -768,9 +801,17 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
         tr:hover td {{ background: var(--row-hover); }}
         tr.hidden {{ display: none; }}
 
-        .ts        {{ white-space: nowrap; color: var(--text-muted); font-size: 0.82rem; width: 155px; }}
+        .ts        {{ white-space: nowrap; color: var(--text-muted); font-size: 0.82rem; width: 145px; }}
         .event-id  {{ white-space: nowrap; font-family: monospace; width: 100px; }}
         .rule-name {{ font-weight: 600; width: 200px; }}
+        .mitre     {{ white-space: nowrap; width: 100px; }}
+        .mitre-link {{
+            color: #3498db;
+            text-decoration: none;
+            font-family: monospace;
+            font-size: 0.82rem;
+        }}
+        .mitre-link:hover {{ text-decoration: underline; }}
         .desc      {{ color: var(--text-muted); line-height: 1.55; font-size: 0.85rem; }}
 
         /* ── Severity badge ── */
@@ -1058,6 +1099,7 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
                             <th>Event ID</th>
                             <th>Severity</th>
                             <th>Rule Name</th>
+                            <th>MITRE ATT&CK</th>
                             <th>Description</th>
                         </tr>
                     </thead>

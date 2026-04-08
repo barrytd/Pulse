@@ -1196,8 +1196,8 @@ def test_json_report_maps_event_ids(tmp_path):
         assert finding["event_id"] == expected
 
 
-def test_json_report_mitre_field_is_null(tmp_path):
-    """MITRE ATT&CK ID should be null for now (placeholder for future)."""
+def test_json_report_mitre_field_has_values(tmp_path):
+    """MITRE ATT&CK IDs should be populated for known rules."""
     output = tmp_path / "test.json"
     generate_report(_make_test_findings(), output_path=str(output), fmt="json")
 
@@ -1205,7 +1205,8 @@ def test_json_report_mitre_field_is_null(tmp_path):
         data = json.load(f)
 
     for finding in data["findings"]:
-        assert finding["mitre_attack_id"] is None
+        assert finding["mitre_attack_id"] is not None
+        assert finding["mitre_attack_id"].startswith("T")
 
 
 def test_json_report_with_scan_stats(tmp_path):
@@ -1456,7 +1457,7 @@ def test_csv_report_has_header_row(tmp_path):
         reader = csv_module.reader(f)
         header = next(reader)
 
-    assert header == ["Timestamp", "Event ID", "Severity", "Rule Name", "Description"]
+    assert header == ["Timestamp", "Event ID", "Severity", "Rule Name", "MITRE ATT&CK", "Description"]
 
 
 def test_csv_report_has_correct_row_count(tmp_path):
