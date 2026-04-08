@@ -8,21 +8,25 @@ Format: newest entries at the top, grouped by date.
 ## 2026-04-08
 
 ### Added
-- **Security Score panel** - a score out of 100 at the top of every HTML report, displayed as a circular ring with a colour-coded risk label (SECURE / LOW RISK / MEDIUM RISK / HIGH RISK / CRITICAL RISK). Deductions: CRITICAL -25, HIGH -10, MEDIUM -5, LOW -2
-- **Scan summary statistics** - HTML and text reports now show files scanned, total events, time range, and top event IDs before the findings
-- **JSON report format** - `--format json` outputs structured data with metadata, severity summary, security score, and a findings array. Each finding includes rule_name, severity, event_id, timestamp, description, and a mitre_attack_id placeholder
-- **Config file support** - `pulse.yaml` stores default settings (logs, format, severity, output) so you don't need CLI flags every time. CLI flags always override config values
-- **Whitelist/allowlist** - suppress known-good accounts, services, IPs, and rule names from findings via `pulse.yaml` to reduce false positives
-- **Inter font** loaded from Google Fonts for cleaner, more professional report typography
+- **3 new detection rules** - Account Lockout (Event 4740), Scheduled Task Created (Event 4698), Suspicious PowerShell (Event 4104 with pattern matching for encoded commands, download cradles, Mimikatz, etc.)
+- **MITRE ATT&CK tagging** - every detection rule maps to its ATT&CK technique ID (e.g. T1110, T1059.001). HTML report shows clickable links to attack.mitre.org
+- **Security Score panel** - a score out of 100 at the top of every HTML report, displayed as a circular ring with a colour-coded risk label
+- **Scan summary statistics** - HTML and text reports now show files scanned, total events, time range, and top event IDs
+- **JSON report format** - `--format json` outputs structured data with metadata, severity summary, security score, and findings array with MITRE IDs
+- **CSV report format** - `--format csv` exports findings as a spreadsheet for Excel or Google Sheets
+- **Config file support** - `pulse.yaml` stores default settings so you don't need CLI flags every time
+- **Whitelist/allowlist** - suppress known-good accounts, services, IPs, and rule names from findings via `pulse.yaml`
+- **Inter font** loaded from Google Fonts for cleaner report typography
 - **PyYAML** added as a dependency for config file parsing
 
 ### Fixed
-- **Timestamp column showing "-"** for brute force and attack chain findings in HTML report - changed time-only format to full ISO datetime so the reporter can extract timestamps
-- **Em dashes removed** from all finding detail text and README (replaced with plain hyphens)
+- **Timestamp column showing "-"** for brute force and attack chain findings in HTML report
+- **Em dashes removed** from all finding detail text and README
 
 ### Tests
-- 26 new tests added (JSON report structure, config loading, whitelist filtering)
-- Test count: 34 -> 60, all passing
+- 41 new tests added (detections, JSON, CSV, config, whitelist)
+- Test count: 34 -> 75, all passing
+- Detection count: 11 -> 14 (12 individual + 2 chains)
 
 ---
 

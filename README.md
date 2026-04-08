@@ -14,31 +14,39 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 
 ## Features
 
-### Detection Rules (11 total)
+### Detection Rules (14 total)
 
-| Rule | Event ID | Severity | What it catches |
-|---|---|---|---|
-| Brute Force Attempt | 4625 | HIGH | 5+ failed logins within a 10-minute window |
-| User Account Created | 4720 | MEDIUM | New accounts - potential backdoors |
-| Privilege Escalation | 4732 | HIGH | Users added to security groups |
-| Audit Log Cleared | 1102 | HIGH | Someone wiping their tracks |
-| RDP Logon Detected | 4624 (type 10) | MEDIUM | Remote Desktop logins with source IP |
-| Service Installed | 7045 | MEDIUM | New services - common malware persistence method |
-| Antivirus Disabled | 5001 | HIGH | Defender real-time protection turned off |
-| Firewall Disabled | 4950 | HIGH | Firewall profile changed or disabled |
-| Firewall Rule Changed | 4946 / 4947 | MEDIUM | Firewall rules added or modified |
-| **Account Takeover Chain** | Multiple | **CRITICAL** | Brute force -> successful login -> new user created |
-| **Malware Persistence Chain** | Multiple | **CRITICAL** | AV disabled -> new service installed |
+| Rule | Event ID | Severity | MITRE ATT&CK | What it catches |
+|---|---|---|---|---|
+| Brute Force Attempt | 4625 | HIGH | T1110 | 5+ failed logins within a 10-minute window |
+| Account Lockout | 4740 | HIGH | T1110 | Account locked out - active brute force indicator |
+| User Account Created | 4720 | MEDIUM | T1136.001 | New accounts - potential backdoors |
+| Privilege Escalation | 4732 | HIGH | T1078.002 | Users added to security groups |
+| Audit Log Cleared | 1102 | HIGH | T1070.001 | Someone wiping their tracks |
+| RDP Logon Detected | 4624 (type 10) | MEDIUM | T1021.001 | Remote Desktop logins with source IP |
+| Service Installed | 7045 | MEDIUM | T1543.003 | New services - common malware persistence method |
+| Scheduled Task Created | 4698 | MEDIUM | T1053.005 | New scheduled tasks - persistence mechanism |
+| Suspicious PowerShell | 4104 | HIGH | T1059.001 | Encoded commands, download cradles, Mimikatz |
+| Antivirus Disabled | 5001 | HIGH | T1562.001 | Defender real-time protection turned off |
+| Firewall Disabled | 4950 | HIGH | T1562.004 | Firewall profile changed or disabled |
+| Firewall Rule Changed | 4946 / 4947 | MEDIUM | T1562.004 | Firewall rules added or modified |
+| **Account Takeover Chain** | Multiple | **CRITICAL** | T1078 | Brute force -> successful login -> new user created |
+| **Malware Persistence Chain** | Multiple | **CRITICAL** | T1543.003 | AV disabled -> new service installed |
 
 ### Reporting
 - **Text report** - clean, readable `.txt` output for terminals and quick triage
-- **HTML report** - dark-themed, colour-coded report you can open in any browser and share with others
-- **Security Score** - a score out of 100 at the top of every HTML report, colour-coded from SECURE to CRITICAL RISK
+- **HTML report** - professional SOC dashboard with security score, scan stats, severity filters, remediation tab, and dark mode
+- **JSON report** - structured machine-readable output for piping into Splunk, ELK, or Python scripts
+- **CSV export** - spreadsheet format that opens in Excel or Google Sheets
+- **Security Score** - a score out of 100 at the top of HTML reports, colour-coded from SECURE to CRITICAL RISK
+- **MITRE ATT&CK tagging** - each finding links to its ATT&CK technique on attack.mitre.org
 
 ### Other
-- **CLI flags** - customise log folder, output path, format, and severity filter without editing code
+- **CLI flags** - customise log folder, output path, format, and severity filter
+- **Config file** - `pulse.yaml` for storing default settings
+- **Whitelist** - suppress known-good accounts, services, IPs, and rules
 - **ASCII banner** on startup
-- **34 unit tests** - every detection rule is tested including edge cases and chain ordering
+- **75 unit tests** - every detection rule, report format, config, and whitelist tested
 
 ---
 
@@ -49,12 +57,13 @@ Pulse/
 ├── pulse/
 │   ├── __init__.py         # Makes "pulse" a Python package
 │   ├── parser.py           # Reads and parses .evtx log files
-│   ├── detections.py       # 11 detection rules + attack chain correlation
-│   └── reporter.py         # Generates text and HTML reports
+│   ├── detections.py       # 14 detection rules + attack chain correlation
+│   └── reporter.py         # Generates text, HTML, JSON, and CSV reports
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
-├── test_detections.py      # 34 unit tests for all detection rules
+├── test_detections.py      # 75 unit tests for all detection rules
 ├── main.py                 # Entry point - run this to analyse logs
+├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
 ├── CHANGELOG.md            # Daily change log
 └── README.md               # You are here
@@ -130,7 +139,7 @@ The HTML report opens in any browser with colour-coded findings:
 python -m pytest test_detections.py -v
 ```
 
-All 34 tests run without needing real `.evtx` files - the test suite uses fake event data that mirrors real Windows log structure.
+All 75 tests run without needing real `.evtx` files - the test suite uses fake event data that mirrors real Windows log structure.
 
 ---
 
@@ -139,28 +148,22 @@ All 34 tests run without needing real `.evtx` files - the test suite uses fake e
 ### Done
 - [x] Project structure and foundation
 - [x] `.evtx` file parsing
-- [x] Detection rules - 11 rules covering login attacks, persistence, defence evasion
+- [x] Detection rules - 14 rules covering login attacks, persistence, defence evasion, credential abuse
 - [x] Human-readable text report output
-- [x] HTML report with colour-coded severity and security score panel
+- [x] HTML report with security score, scan stats, severity filters, remediation tab, dark mode
+- [x] JSON report output - machine-readable findings for Splunk, ELK, Python scripts
+- [x] CSV export - spreadsheet format for Excel and Google Sheets
 - [x] CLI flags (`--logs`, `--output`, `--format`, `--severity`)
+- [x] Config file support (`pulse.yaml`) - store default settings
+- [x] Whitelist/allowlist - suppress known-good accounts, services, IPs, and rules
 - [x] Attack chain correlation (connects multiple events into attack patterns)
-- [x] Unit tests (34 tests, all passing)
+- [x] MITRE ATT&CK tagging - each finding links to its technique on attack.mitre.org
+- [x] Scan summary statistics - files scanned, total events, time range, top event IDs
+- [x] Unit tests (75 tests, all passing)
 
-### Near-term
-- [ ] **JSON report output** - machine-readable findings for piping into other tools (Splunk, ELK, Python scripts)
-- [ ] **Scan summary statistics** - show total events parsed, time range covered, and top event types before the findings list so analysts get context at a glance
-- [ ] **Config file support** - load defaults from a `pulse.yaml` file (log folder, thresholds, format) so you don't have to type flags every time
-- [ ] **Whitelist/allowlist** - suppress known-good accounts and service names from findings to reduce false positives in noisy environments
-
-### Medium-term
-- [ ] **More detection rules** - expand coverage with:
-  - PowerShell script block logging (Event 4104) - catch encoded/obfuscated PS commands
-  - Scheduled task creation (Event 4698) - another common persistence method
-  - Pass-the-hash detection (Event 4624, NTLM logon type) - credential abuse pattern
-  - Account lockout (Event 4740) - high volume indicates active brute force
-- [ ] **MITRE ATT&CK tagging** - label each finding with the relevant ATT&CK technique ID (e.g. T1110 for brute force, T1136 for account creation) so findings map directly to the industry-standard threat framework
-- [ ] **Baseline comparison** - compare a log against a "known good" snapshot of the same machine to surface anomalies that wouldn't stand out alone (new account that didn't exist yesterday, service that appeared overnight)
-- [ ] **CSV export** - export findings as a spreadsheet for analysts who prefer working in Excel or sharing with non-technical stakeholders
+### Next up
+- [ ] **Pass-the-hash detection** (Event 4624, NTLM logon type) - credential abuse pattern
+- [ ] **Baseline comparison** - compare a log against a "known good" snapshot to surface anomalies
 - [ ] **Email delivery** - send the finished HTML report via email automatically when a scan completes
 
 ### Longer-term
