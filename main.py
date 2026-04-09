@@ -565,31 +565,38 @@ def main():
 
     # --- STEP 3: PARSE EACH LOG FILE ---
     # Files are parsed in parallel using multiple CPU cores.
-    # Each worker process handles one file at a time. With many files
-    # (e.g. the full Windows logs folder) this can be several times faster.
+    # A scrolling ECG heartbeat animates in the background while parsing runs.
     import multiprocessing
+    from pulse.animations import HeartbeatMonitor
 
     file_paths = [os.path.join(log_folder, f) for f in log_files]
     cpu_count  = multiprocessing.cpu_count()
     workers    = min(cpu_count, len(file_paths))
 
-    print(f"  [*] Parsing {len(file_paths)} file(s) across {workers} worker(s)...")
-
+    total     = len(file_paths)
+    completed = 0
     all_events = []
+
+    monitor = HeartbeatMonitor()
+    monitor.start(f"Parsing {total} file(s) across {workers} worker(s)...")
+
     if workers > 1:
         with multiprocessing.Pool(processes=workers) as pool:
-            results = pool.map(parse_evtx, file_paths)
-        for events in results:
-            if events:
-                all_events.extend(events)
+            for events in pool.imap_unordered(parse_evtx, file_paths):
+                completed += 1
+                monitor.message = f"Parsing... {completed}/{total} files"
+                if events:
+                    all_events.extend(events)
     else:
-        # Single file — no need to spin up a pool
         for file_path in file_paths:
             events = parse_evtx(file_path)
+            completed += 1
+            monitor.message = f"Parsing... {completed}/{total} files"
             if events:
                 all_events.extend(events)
 
-    print(f"  [*] Total events parsed: {len(all_events)}")
+    monitor.stop()
+    print(f"  [*] Parsed {total} file(s) — {len(all_events)} events total")
     print()
 
     # --- STEP 3b: BUILD SCAN STATISTICS ---
