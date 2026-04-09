@@ -5,6 +5,26 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-09
+
+### Added
+- **Live monitoring mode** (`--watch`) — polls Windows event channels (Security, System) in real time using `wevtutil`. Alerts on new suspicious events within seconds. Use `--interval` to set poll frequency (default 30s)
+- **SQLite scan history** (`--history`) — every scan is saved to `pulse.db`. View past scans with security score trends and trend arrows (↑/↓) using `--history`
+- **Parallel file parsing** — `.evtx` files are now parsed across all available CPU cores using `multiprocessing.Pool`, significantly faster when scanning many files
+- **Built-in known-good service whitelist** (`pulse/known_good.py`) — ~100 entries covering anti-cheat engines, gaming platforms, hardware peripherals (Corsair, Razer, Logitech, NZXT), Google, Microsoft, security software, VPNs, and common apps. Suppressed automatically on every scan with no configuration needed
+- **`record_num` field** added to every parsed event for deduplication in live monitoring
+
+### Fixed
+- **Live file reading** — `parse_evtx` now skips corrupt/partial records instead of crashing, allowing Pulse to read live Windows log files that are actively being written to
+- **`Evtx` context manager** — fixed `TypeError` that occurred when reading live `.evtx` files by wrapping file access in a `with` statement as required by the library
+
+### Tests
+- 10 new tests for monitor module (poll_new_events, print_finding, _apply_whitelist)
+- 11 new tests for database module (init, save, history, findings, sorting)
+- Test count: 75 → 146, all passing
+
+---
+
 ## 2026-04-08
 
 ### Added
