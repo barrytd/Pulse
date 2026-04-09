@@ -501,14 +501,24 @@ def main():
     # --- WATCH MODE ---
     # If --watch was passed, enter live monitoring and never return
     # until the user presses Ctrl+C.
+    #
+    # LIVE MODE: if no custom --logs was given (user is using the default
+    # "logs" folder), use wevtutil to query the live Windows event channels
+    # directly. This sees new events in real time without file-locking issues.
+    #
+    # FILE MODE: if --logs points at a specific folder, poll those .evtx files
+    # instead (useful for watching exported/forensic log files).
     if watch_flag:
         whitelist = config.get("whitelist", {})
+        default_logs = config.get("logs", "logs")
+        use_live = (log_folder == default_logs)
         start_monitor(
             log_folder=log_folder,
             interval=watch_interval,
             severity_filter=severity_filter,
             whitelist=whitelist,
             db_path=db_path if db_path else None,
+            live=use_live,
         )
         return
 
