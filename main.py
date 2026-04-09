@@ -564,14 +564,30 @@ def main():
         return
 
     # --- STEP 3: PARSE EACH LOG FILE ---
-    all_events = []
+    # Files are parsed in parallel using multiple CPU cores.
+    # Each worker process handles one file at a time. With many files
+    # (e.g. the full Windows logs folder) this can be several times faster.
+    import multiprocessing
 
-    for log_file in log_files:
-        file_path = os.path.join(log_folder, log_file)
-        print(f"  [*] Parsing: {log_file}")
-        events = parse_evtx(file_path)
-        if events:
-            all_events.extend(events)
+    file_paths = [os.path.join(log_folder, f) for f in log_files]
+    cpu_count  = multiprocessing.cpu_count()
+    workers    = min(cpu_count, len(file_paths))
+
+    print(f"  [*] Parsing {len(file_paths)} file(s) across {workers} worker(s)...")
+
+    all_events = []
+    if workers > 1:
+        with multiprocessing.Pool(processes=workers) as pool:
+            results = pool.map(parse_evtx, file_paths)
+        for events in results:
+            if events:
+                all_events.extend(events)
+    else:
+        # Single file — no need to spin up a pool
+        for file_path in file_paths:
+            events = parse_evtx(file_path)
+            if events:
+                all_events.extend(events)
 
     print(f"  [*] Total events parsed: {len(all_events)}")
     print()
