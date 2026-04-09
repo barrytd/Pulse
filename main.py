@@ -204,9 +204,14 @@ def filter_whitelist(findings, whitelist):
         return findings
 
     # Pull out each whitelist category. Use empty lists as defaults.
+    # Built-in known-good list is merged with user's pulse.yaml entries.
+    from pulse.known_good import KNOWN_GOOD_SERVICES
     skip_rules = [r.lower() for r in whitelist.get("rules", []) or []]
     skip_accounts = [a.lower() for a in whitelist.get("accounts", []) or []]
-    skip_services = [s.lower() for s in whitelist.get("services", []) or []]
+    skip_services = (
+        KNOWN_GOOD_SERVICES
+        + [s.lower() for s in whitelist.get("services", []) or []]
+    )
     skip_ips = whitelist.get("ips", []) or []
 
     filtered = []

@@ -1471,7 +1471,7 @@ def _make_whitelist_findings():
         {
             "rule": "Suspicious Service Installed",
             "severity": "MEDIUM",
-            "details": "New service 'CrowdStrike Falcon' was installed by 'SYSTEM'.",
+            "details": "New service 'SuspiciousSvc123' was installed by 'SYSTEM'.",
         },
         {
             "rule": "Audit Log Cleared",
@@ -1502,11 +1502,11 @@ def test_whitelist_suppresses_rules():
 
 def test_whitelist_suppresses_services():
     """Findings with whitelisted service names should be removed."""
-    whitelist = {"services": ["CrowdStrike Falcon"]}
+    whitelist = {"services": ["SuspiciousSvc123"]}
     results = filter_whitelist(_make_whitelist_findings(), whitelist)
 
     assert len(results) == 4
-    assert all("CrowdStrike" not in f["details"] for f in results)
+    assert all("SuspiciousSvc123" not in f["details"] for f in results)
 
 
 def test_whitelist_suppresses_ips():
@@ -1523,17 +1523,17 @@ def test_whitelist_multiple_categories():
     whitelist = {
         "accounts": ["svc_backup"],
         "rules": ["RDP Logon Detected"],
-        "services": ["CrowdStrike Falcon"],
+        "services": ["SuspiciousSvc123"],
     }
     results = filter_whitelist(_make_whitelist_findings(), whitelist)
 
-    # 3 removed: svc_backup account, RDP rule, CrowdStrike service.
+    # 3 removed: svc_backup account, RDP rule, SuspiciousSvc123 service.
     assert len(results) == 2
 
 
 def test_whitelist_is_case_insensitive():
     """Account and service matching should be case-insensitive."""
-    whitelist = {"accounts": ["SVC_BACKUP"], "services": ["crowdstrike falcon"]}
+    whitelist = {"accounts": ["SVC_BACKUP"], "services": ["suspicioussvc123"]}
     results = filter_whitelist(_make_whitelist_findings(), whitelist)
 
     # Both should be matched despite different casing.

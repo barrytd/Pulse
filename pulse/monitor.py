@@ -387,9 +387,13 @@ def _collect_new_events(log_folder, seen_keys):
 
 def _apply_whitelist(findings, whitelist):
     """Filters out findings that match the whitelist (same logic as main.py)."""
+    from pulse.known_good import KNOWN_GOOD_SERVICES
     skip_rules    = [r.lower() for r in whitelist.get("rules",    []) or []]
     skip_accounts = [a.lower() for a in whitelist.get("accounts", []) or []]
-    skip_services = [s.lower() for s in whitelist.get("services", []) or []]
+    skip_services = (
+        KNOWN_GOOD_SERVICES
+        + [s.lower() for s in whitelist.get("services", []) or []]
+    )
     skip_ips      = whitelist.get("ips", []) or []
 
     out = []

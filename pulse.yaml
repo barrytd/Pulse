@@ -60,46 +60,8 @@ database:
 whitelist:
   accounts: []
   rules: []
-  services:
-    # --- Anti-cheat (installed/removed every time you launch a game) ---
-    - vgc                        # Valorant anti-cheat
-    - vgk                        # Valorant kernel driver
-    - BattlEye Service           # BattlEye anti-cheat
-    - BEDaisy                    # BattlEye kernel driver
-    - EasyAntiCheat              # Easy Anti-Cheat (Epic)
-    - EasyAntiCheat_EOSSys       # Easy Anti-Cheat kernel driver
-    - EAAntiCheatService         # EA anti-cheat
-    - Player Location Check      # Riot Games service
-
-    # --- Gaming platforms & launchers ---
-    - Gaming Services            # Xbox / Microsoft Gaming Services
-    - GameInput Redist Service   # Xbox GameInput
-    - Battle.net Update Helper   # Blizzard Battle.net
-    - Ubisoft UPC Elevation      # Ubisoft Connect
-
-    # --- Hardware monitoring tools ---
-    - cpuz154                    # CPU-Z hardware probe
-    - cpuz160                    # CPU-Z hardware probe
-    - cpuz161                    # CPU-Z hardware probe
-    - CAM Service                # NZXT CAM
-    - KslD                       # NZXT CAM kernel driver
-
-    # --- Corsair iCUE peripherals ---
-    - Corsair                    # matches all Corsair services
-    - iCUE                       # Corsair iCUE plugin host
-
-    # --- Razer Synapse peripherals ---
-    - Razer                      # matches all Razer services
-    - Haptic Service             # Razer haptics
-
-    # --- Google software ---
-    - Google Updater             # matches all Google Updater versions
-    - Google Play Games          # matches all Google Play Games versions
-
-    # --- Microsoft / system ---
-    - Microsoft Office Click-to-Run  # Office updates
-    - Chrome Remote Desktop          # Google remote access
-
-    # --- Claude desktop app ---
-    - Claude                     # Claude Code / Claude desktop
+  # Add your own known-good service names here.
+  # Common software (gaming, hardware, Google, Microsoft, etc.) is already
+  # suppressed automatically by Pulse's built-in list in pulse/known_good.py.
+  services: []
   ips: []
