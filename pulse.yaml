@@ -39,6 +39,12 @@ email:
   recipient: perezrobert0235249@gmail.com
   password: null
 
+# Database - Pulse saves every scan to a local SQLite file so you can
+# track trends and compare results over time.
+# Set path to null to disable database saving entirely.
+database:
+  path: pulse.db
+
 # Whitelist - suppress known-good items from triggering findings.
 # Any finding that matches a whitelisted value is silently removed.
 # This reduces false positives in noisy environments.

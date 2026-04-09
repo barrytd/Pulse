@@ -167,7 +167,7 @@ All 75 tests run without needing real `.evtx` files - the test suite uses fake e
 - [ ] **Email delivery** - send the finished HTML report via email automatically when a scan completes
 
 ### Longer-term
-- [ ] **SQLite database** - store all parsed events and findings locally so Pulse can compare scans over time, track trends, and ask questions like "has this account ever logged in via RDP before?"
+- [x] **SQLite database** - every scan is saved to `pulse.db`; use `--history` to view past scans with score trends
 - [ ] **Live monitoring mode** - instead of one-shot analysis, watch a log file for new events and alert in real time as suspicious activity happens
 - [ ] **Interactive terminal mode** - after a scan, let the user drill into individual findings, view raw event XML, and mark findings as investigated or false positive
 - [ ] **REST API** - expose Pulse as a local web service so other tools can submit `.evtx` files and get findings back as JSON, enabling integration into larger pipelines

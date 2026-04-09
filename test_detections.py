@@ -2076,3 +2076,147 @@ def test_html_body_no_file_url_link(tmp_path):
     url = Path(report).as_uri()
     html = _build_html_body({"HIGH": 1}, 1, [], report_url=url)
     assert f'href="{url}"' not in html
+
+
+# =============================================================================
+# Database tests
+# =============================================================================
+from pulse.database import init_db, save_scan, get_history, get_scan_findings
+
+
+def test_init_db_creates_tables(tmp_path):
+    """init_db should create the scans and findings tables."""
+    import sqlite3
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    conn = sqlite3.connect(db)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    conn.close()
+    assert "scans"    in tables
+    assert "findings" in tables
+
+
+def test_init_db_is_idempotent(tmp_path):
+    """Calling init_db twice should not raise an error or reset data."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    init_db(db)   # second call should be safe
+
+
+def test_save_scan_returns_scan_id(tmp_path):
+    """save_scan should return an integer scan ID."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    scan_id = save_scan(db, [])
+    assert isinstance(scan_id, int)
+    assert scan_id >= 1
+
+
+def test_save_scan_stores_findings(tmp_path):
+    """save_scan should persist all findings to the findings table."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    findings = [
+        {"severity": "HIGH",   "rule": "Brute Force Login Attempt",
+         "event_id": 4625, "timestamp": "2026-04-08T09:14:22",
+         "mitre": "T1110", "description": "10 failed logins", "details": "..."},
+        {"severity": "MEDIUM", "rule": "Scheduled Task Created",
+         "event_id": 4698, "timestamp": "2026-04-08T09:22:47",
+         "mitre": "T1053.005", "description": "New task", "details": "..."},
+    ]
+    scan_id = save_scan(db, findings)
+    stored = get_scan_findings(db, scan_id)
+    assert len(stored) == 2
+    rules = {f["rule"] for f in stored}
+    assert "Brute Force Login Attempt" in rules
+    assert "Scheduled Task Created"    in rules
+
+
+def test_save_scan_stores_metadata(tmp_path):
+    """save_scan should persist scan metadata (score, label, stats)."""
+    import sqlite3
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    stats = {"files_scanned": 2, "total_events": 500}
+    scan_id = save_scan(db, [], scan_stats=stats, score=72, score_label="MODERATE")
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT files_scanned, total_events, score, score_label FROM scans WHERE id=?",
+                       (scan_id,)).fetchone()
+    conn.close()
+    assert row[0] == 2
+    assert row[1] == 500
+    assert row[2] == 72
+    assert row[3] == "MODERATE"
+
+
+def test_get_history_returns_scans(tmp_path):
+    """get_history should return saved scans newest first."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    save_scan(db, [], score=80, score_label="GOOD")
+    save_scan(db, [], score=60, score_label="MODERATE")
+    history = get_history(db)
+    assert len(history) == 2
+    # newest first — second save should be id=2
+    assert history[0]["id"] == 2
+    assert history[1]["id"] == 1
+
+
+def test_get_history_empty_returns_empty_list(tmp_path):
+    """get_history on an empty database should return an empty list."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    assert get_history(db) == []
+
+
+def test_get_history_missing_db_returns_empty_list(tmp_path):
+    """get_history on a non-existent path should return [] not raise."""
+    db = str(tmp_path / "does_not_exist.db")
+    assert get_history(db) == []
+
+
+def test_get_history_respects_limit(tmp_path):
+    """get_history should return at most `limit` scans."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    for _ in range(5):
+        save_scan(db, [])
+    assert len(get_history(db, limit=3)) == 3
+
+
+def test_save_multiple_scans_have_separate_findings(tmp_path):
+    """Findings from two different scans should not mix."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+
+    findings_a = [{"severity": "HIGH", "rule": "Rule A", "event_id": 4625,
+                   "timestamp": "2026-04-08T09:00:00", "mitre": "-",
+                   "description": "desc", "details": "details"}]
+    findings_b = [{"severity": "LOW",  "rule": "Rule B", "event_id": 4624,
+                   "timestamp": "2026-04-08T10:00:00", "mitre": "-",
+                   "description": "desc", "details": "details"},
+                  {"severity": "LOW",  "rule": "Rule C", "event_id": 4624,
+                   "timestamp": "2026-04-08T10:01:00", "mitre": "-",
+                   "description": "desc", "details": "details"}]
+
+    id_a = save_scan(db, findings_a)
+    id_b = save_scan(db, findings_b)
+
+    assert len(get_scan_findings(db, id_a)) == 1
+    assert len(get_scan_findings(db, id_b)) == 2
+
+
+def test_get_scan_findings_sorted_by_severity(tmp_path):
+    """get_scan_findings should return findings sorted CRITICAL first."""
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    findings = [
+        {"severity": "LOW",      "rule": "Low Rule",      "event_id": 4624,
+         "timestamp": "-", "mitre": "-", "description": "-", "details": "-"},
+        {"severity": "CRITICAL", "rule": "Critical Rule",  "event_id": 4625,
+         "timestamp": "-", "mitre": "-", "description": "-", "details": "-"},
+    ]
+    scan_id = save_scan(db, findings)
+    stored = get_scan_findings(db, scan_id)
+    assert stored[0]["severity"] == "CRITICAL"
+    assert stored[1]["severity"] == "LOW"

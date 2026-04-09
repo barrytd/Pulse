@@ -26,6 +26,8 @@ from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
 from pulse.reporter import generate_report, SEVERITY_ORDER
 from pulse.emailer import send_report, validate_email_config
+from pulse.database import init_db, save_scan, get_history
+from pulse.reporter import _calculate_score
 
 
 # Path to the config file. Lives in the project root next to main.py.
@@ -135,6 +137,14 @@ def build_arg_parser(config=None):
         "--email",
         action="store_true",
         help="Send the finished report via email (requires email settings in pulse.yaml).",
+    )
+
+    # --- ARGUMENT: --history ---
+    # Shows a table of past scans stored in the local database.
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Show a summary of past scans from the local database.",
     )
 
     # --- ARGUMENT: --save-baseline ---
@@ -370,6 +380,47 @@ def compare_baseline(findings, baseline):
     return extra + findings
 
 
+def _print_history(db_path):
+    """
+    Prints a formatted table of past scans from the database.
+
+    Shows scan ID, date, hostname, findings count, score, label, and a
+    trend arrow (↑ better / ↓ worse) compared to the previous scan.
+    """
+    scans = get_history(db_path)
+
+    if not scans:
+        print("  No scan history found. Run a scan first to start building history.")
+        return
+
+    print(f"  {'ID':<5} {'Date':<20} {'Host':<20} {'Findings':<10} {'Score':<7} {'Label':<14} {'Trend'}")
+    print("  " + "-" * 80)
+
+    for i, scan in enumerate(scans):
+        scan_id  = scan["id"]
+        date     = scan["scanned_at"]
+        host     = (scan["hostname"] or "Unknown")[:18]
+        findings = scan["total_findings"]
+        score    = scan["score"] if scan["score"] is not None else "-"
+        label    = (scan["score_label"] or "-")[:13]
+
+        # Trend: compare score to the next row (which is the previous scan,
+        # since results are newest-first).
+        trend = ""
+        if i < len(scans) - 1 and scan["score"] is not None and scans[i + 1]["score"] is not None:
+            diff = scan["score"] - scans[i + 1]["score"]
+            if diff > 0:
+                trend = f"↑ +{diff}"
+            elif diff < 0:
+                trend = f"↓ {diff}"
+            else:
+                trend = "="
+
+        print(f"  {scan_id:<5} {date:<20} {host:<20} {findings:<10} {score:<7} {label:<14} {trend}")
+
+    print()
+
+
 BANNER = r"""
   ____  _   _ _     ____  _____
  |  _ \| | | | |   / ___|| ____|
@@ -404,12 +455,27 @@ def main():
     args = parser.parse_args()
 
     # Pull the values out into plain variables for readability.
-    log_folder = args.logs
-    output_path = args.output
-    report_format = args.format
+    log_folder         = args.logs
+    output_path        = args.output
+    report_format      = args.format
     severity_filter    = args.severity
     save_baseline_flag = args.save_baseline
     send_email_flag    = args.email
+    show_history_flag  = args.history
+
+    # DB path comes from config, defaulting to pulse.db in the project root.
+    db_config = config.get("database", {})
+    db_path   = (db_config or {}).get("path", "pulse.db") if db_config is not None else "pulse.db"
+
+    # Always initialise the DB (creates tables if they don't exist yet).
+    if db_path:
+        init_db(db_path)
+
+    # --- HISTORY MODE ---
+    # If --history was passed, print past scans and exit immediately.
+    if show_history_flag:
+        _print_history(db_path)
+        return
 
     # --- STEP 1: PREFLIGHT CHECKS ---
     # Validate email config early so we don't scan for 10 minutes
@@ -560,6 +626,19 @@ def main():
                 print(f"  [*] Email sent successfully.")
     else:
         print("  [*] No suspicious activity detected. You're clean!")
+
+    # --- STEP 7: SAVE TO DATABASE ---
+    # Always save the scan result so --history works over time.
+    if db_path:
+        severity_counts_db = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for f in findings:
+            sev = f.get("severity", "LOW")
+            severity_counts_db[sev] = severity_counts_db.get(sev, 0) + 1
+
+        score, score_label, _ = _calculate_score(severity_counts_db)
+        scan_id = save_scan(db_path, findings, scan_stats=scan_stats,
+                            score=score, score_label=score_label)
+        print(f"  [*] Scan #{scan_id} saved to database ({db_path})")
 
     print()
     print("=" * 50)
