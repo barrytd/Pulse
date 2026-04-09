@@ -28,6 +28,7 @@ from pulse.reporter import generate_report, SEVERITY_ORDER
 from pulse.emailer import send_report, validate_email_config
 from pulse.database import init_db, save_scan, get_history
 from pulse.reporter import _calculate_score
+from pulse.monitor import start_monitor
 
 
 # Path to the config file. Lives in the project root next to main.py.
@@ -145,6 +146,24 @@ def build_arg_parser(config=None):
         "--history",
         action="store_true",
         help="Show a summary of past scans from the local database.",
+    )
+
+    # --- ARGUMENT: --watch ---
+    # Enters live monitoring mode: polls the log folder every --interval
+    # seconds and alerts on new suspicious events as they appear.
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Enter live monitoring mode. Polls for new events continuously.",
+    )
+
+    # --- ARGUMENT: --interval ---
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=config.get("monitor", {}).get("interval", 30) if config.get("monitor") else 30,
+        metavar="SECONDS",
+        help="How often to check for new events in --watch mode. Default: 30s",
     )
 
     # --- ARGUMENT: --save-baseline ---
@@ -462,6 +481,8 @@ def main():
     save_baseline_flag = args.save_baseline
     send_email_flag    = args.email
     show_history_flag  = args.history
+    watch_flag         = args.watch
+    watch_interval     = args.interval
 
     # DB path comes from config, defaulting to pulse.db in the project root.
     db_config = config.get("database", {})
@@ -475,6 +496,20 @@ def main():
     # If --history was passed, print past scans and exit immediately.
     if show_history_flag:
         _print_history(db_path)
+        return
+
+    # --- WATCH MODE ---
+    # If --watch was passed, enter live monitoring and never return
+    # until the user presses Ctrl+C.
+    if watch_flag:
+        whitelist = config.get("whitelist", {})
+        start_monitor(
+            log_folder=log_folder,
+            interval=watch_interval,
+            severity_filter=severity_filter,
+            whitelist=whitelist,
+            db_path=db_path if db_path else None,
+        )
         return
 
     # --- STEP 1: PREFLIGHT CHECKS ---

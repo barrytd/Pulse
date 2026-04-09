@@ -2220,3 +2220,150 @@ def test_get_scan_findings_sorted_by_severity(tmp_path):
     stored = get_scan_findings(db, scan_id)
     assert stored[0]["severity"] == "CRITICAL"
     assert stored[1]["severity"] == "LOW"
+
+
+# =============================================================================
+# Monitor tests
+# =============================================================================
+from unittest.mock import patch
+from pulse.monitor import poll_new_events, print_finding, _apply_whitelist
+
+
+def _fake_event(record_num, event_id=4625):
+    return {
+        "event_id":   event_id,
+        "timestamp":  "2026-04-09T10:00:00",
+        "data":       "<Event/>",
+        "record_num": record_num,
+    }
+
+
+def test_poll_new_events_returns_only_unseen(tmp_path):
+    """poll_new_events should skip events whose keys are already in seen_keys."""
+    events = [_fake_event(1), _fake_event(2), _fake_event(3)]
+    seen   = {("Security.evtx", 1), ("Security.evtx", 2)}
+
+    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx"]):
+        with patch("pulse.monitor.parse_evtx", return_value=events):
+            result = poll_new_events(str(tmp_path), seen)
+
+    assert len(result) == 1
+    assert result[0]["record_num"] == 3
+
+
+def test_poll_new_events_updates_seen_keys(tmp_path):
+    """poll_new_events should add newly seen keys to seen_keys."""
+    events = [_fake_event(10), _fake_event(11)]
+    seen   = set()
+
+    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx"]):
+        with patch("pulse.monitor.parse_evtx", return_value=events):
+            poll_new_events(str(tmp_path), seen)
+
+    assert ("Security.evtx", 10) in seen
+    assert ("Security.evtx", 11) in seen
+
+
+def test_poll_new_events_empty_folder(tmp_path):
+    """poll_new_events returns an empty list when there are no log files."""
+    seen = set()
+    with patch("pulse.monitor._get_log_files", return_value=[]):
+        result = poll_new_events(str(tmp_path), seen)
+    assert result == []
+
+
+def test_poll_new_events_all_already_seen(tmp_path):
+    """poll_new_events returns nothing if all events were already processed."""
+    events = [_fake_event(1), _fake_event(2)]
+    seen   = {("Security.evtx", 1), ("Security.evtx", 2)}
+
+    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx"]):
+        with patch("pulse.monitor.parse_evtx", return_value=events):
+            result = poll_new_events(str(tmp_path), seen)
+
+    assert result == []
+
+
+def test_poll_new_events_multiple_files(tmp_path):
+    """poll_new_events should deduplicate per filename, not globally."""
+    # Both files have a record_num=1, but they are different files so both are new.
+    events_a = [_fake_event(1)]
+    events_b = [_fake_event(1)]
+    seen     = set()
+
+    def fake_parse(path):
+        if "Security" in path:
+            return events_a
+        return events_b
+
+    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx", "System.evtx"]):
+        with patch("pulse.monitor.parse_evtx", side_effect=fake_parse):
+            result = poll_new_events(str(tmp_path), seen)
+
+    assert len(result) == 2
+
+
+def test_print_finding_outputs_rule_name(capsys):
+    """print_finding should print the rule name to stdout."""
+    finding = {
+        "severity":    "HIGH",
+        "rule":        "Brute Force Login Attempt",
+        "description": "10 failed logins for account: admin",
+        "timestamp":   "2026-04-09T10:00:00",
+        "event_id":    4625,
+        "mitre":       "T1110",
+        "details":     "details here",
+    }
+    print_finding(finding)
+    captured = capsys.readouterr()
+    assert "Brute Force Login Attempt" in captured.out
+    assert "HIGH" in captured.out
+
+
+def test_print_finding_outputs_description(capsys):
+    """print_finding should include the description line."""
+    finding = {
+        "severity":    "MEDIUM",
+        "rule":        "Scheduled Task Created",
+        "description": "New task: MalwareTask",
+        "timestamp":   "-",
+        "event_id":    4698,
+        "mitre":       "T1053.005",
+        "details":     "",
+    }
+    print_finding(finding)
+    captured = capsys.readouterr()
+    assert "New task: MalwareTask" in captured.out
+
+
+def test_apply_whitelist_suppresses_rules():
+    """_apply_whitelist should remove findings whose rule is whitelisted."""
+    findings = [
+        {"rule": "RDP Logon Detected",       "severity": "LOW",  "details": ""},
+        {"rule": "Brute Force Login Attempt", "severity": "HIGH", "details": ""},
+    ]
+    whitelist = {"rules": ["RDP Logon Detected"], "accounts": [], "services": [], "ips": []}
+    result = _apply_whitelist(findings, whitelist)
+    assert len(result) == 1
+    assert result[0]["rule"] == "Brute Force Login Attempt"
+
+
+def test_apply_whitelist_suppresses_accounts():
+    """_apply_whitelist should remove findings mentioning a whitelisted account."""
+    findings = [
+        {"rule": "Brute Force Login Attempt", "severity": "HIGH",
+         "details": "account: svc_backup failed 10 times"},
+        {"rule": "Brute Force Login Attempt", "severity": "HIGH",
+         "details": "account: attacker failed 10 times"},
+    ]
+    whitelist = {"rules": [], "accounts": ["svc_backup"], "services": [], "ips": []}
+    result = _apply_whitelist(findings, whitelist)
+    assert len(result) == 1
+    assert "attacker" in result[0]["details"]
+
+
+def test_apply_whitelist_empty_does_nothing():
+    """_apply_whitelist with empty lists should return findings unchanged."""
+    findings = [{"rule": "Any Rule", "severity": "HIGH", "details": "something"}]
+    result = _apply_whitelist(findings, {})
+    assert len(result) == 1

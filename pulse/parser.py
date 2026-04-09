@@ -54,6 +54,15 @@ def parse_evtx(file_path):
     # because .evtx files can be HUGE (hundreds of MB for a busy server).
     for record in evtx_file.records():
 
+        # --- STEP 3b: CAPTURE THE RECORD NUMBER ---
+        # Windows assigns each event a sequential record number unique to that
+        # log file. We use this in live-monitoring mode to know which events
+        # we've already processed so we don't alert on them again.
+        try:
+            record_num = record.record_num()
+        except Exception:
+            record_num = None
+
         # --- STEP 4: GET THE RAW XML FOR THIS EVENT ---
         # Each record stores its data as XML (a structured text format).
         # record.xml() gives us that XML as a plain string.
@@ -104,9 +113,10 @@ def parse_evtx(file_path):
         # We package everything into a clean dictionary.
         # This is the format the rest of Pulse expects (detections.py, etc.).
         event_dict = {
-            "event_id": event_id,         # e.g., 4625
-            "timestamp": timestamp,        # e.g., "2024-01-15T08:30:00.000Z"
-            "data": xml_string,            # The full raw XML, in case we need it later
+            "event_id":   event_id,    # e.g., 4625
+            "timestamp":  timestamp,   # e.g., "2024-01-15T08:30:00.000Z"
+            "data":       xml_string,  # The full raw XML, in case we need it later
+            "record_num": record_num,  # Sequential Windows record ID (used by monitor)
         }
         events.append(event_dict)
 

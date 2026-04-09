@@ -109,6 +109,12 @@ python main.py --severity HIGH
 
 # See all options
 python main.py --help
+
+# Watch log files live — alerts on new suspicious events as they arrive
+python main.py --watch
+
+# Watch with a custom poll interval (seconds)
+python main.py --watch --interval 10
 ```
 
 ### Getting .evtx files
@@ -139,7 +145,7 @@ The HTML report opens in any browser with colour-coded findings:
 python -m pytest test_detections.py -v
 ```
 
-All 75 tests run without needing real `.evtx` files - the test suite uses fake event data that mirrors real Windows log structure.
+All 146 tests run without needing real `.evtx` files - the test suite uses fake event data that mirrors real Windows log structure.
 
 ---
 
@@ -168,7 +174,7 @@ All 75 tests run without needing real `.evtx` files - the test suite uses fake e
 
 ### Longer-term
 - [x] **SQLite database** - every scan is saved to `pulse.db`; use `--history` to view past scans with score trends
-- [ ] **Live monitoring mode** - instead of one-shot analysis, watch a log file for new events and alert in real time as suspicious activity happens
+- [x] **Live monitoring mode** - use `--watch` to poll log files every 30 seconds and alert in real time as suspicious events appear
 - [ ] **Interactive terminal mode** - after a scan, let the user drill into individual findings, view raw event XML, and mark findings as investigated or false positive
 - [ ] **REST API** - expose Pulse as a local web service so other tools can submit `.evtx` files and get findings back as JSON, enabling integration into larger pipelines
 - [ ] **Web dashboard** - a browser-based UI to upload logs, view findings, track history across multiple machines, and manage whitelists

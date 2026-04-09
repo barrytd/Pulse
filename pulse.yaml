@@ -39,6 +39,10 @@ email:
   recipient: perezrobert0235249@gmail.com
   password: null
 
+# Live monitor - settings for --watch mode.
+monitor:
+  interval: 30   # seconds between polls
+
 # Database - Pulse saves every scan to a local SQLite file so you can
 # track trends and compare results over time.
 # Set path to null to disable database saving entirely.
