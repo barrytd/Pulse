@@ -166,6 +166,18 @@ def build_arg_parser(config=None):
         help="How often to check for new events in --watch mode. Default: 30s",
     )
 
+    # --- ARGUMENT: --days ---
+    # Limits the scan to events from the last N days. Dramatically speeds up
+    # scanning large log files by skipping old events you probably don't need.
+    # Example: --days 30 only looks at events from the past month.
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Only scan events from the last N days. Default: scan all events.",
+    )
+
     # --- ARGUMENT: --interactive ---
     parser.add_argument(
         "--interactive",
@@ -496,6 +508,14 @@ def main():
     watch_flag         = args.watch
     watch_interval     = args.interval
     interactive_flag   = args.interactive
+    days_limit         = args.days
+
+    # Compute the "since" cutoff datetime if --days was provided
+    from datetime import datetime, timezone, timedelta
+    since_dt = (
+        datetime.now(timezone.utc) - timedelta(days=days_limit)
+        if days_limit else None
+    )
 
     # DB path comes from config, defaulting to pulse.db in the project root.
     db_config = config.get("database", {})
@@ -614,7 +634,7 @@ def main():
         pool = multiprocessing.Pool(processes=workers)
         try:
             for fp in file_paths:
-                pool.apply_async(parse_evtx, (fp,),
+                pool.apply_async(parse_evtx, (fp, since_dt),
                                  callback=_on_done, error_callback=_on_error)
             pool.close()
 
@@ -628,7 +648,7 @@ def main():
             pool.join()
     else:
         for file_path in file_paths:
-            events = parse_evtx(file_path)
+            events = parse_evtx(file_path, since_dt)
             completed += 1
             monitor.message = f"Parsing... {completed}/{total} files"
             if events:

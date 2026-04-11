@@ -11,123 +11,245 @@
 #   - Event 4732 = Someone was added to a security group (possible privilege escalation)
 #   - Event 1102 = The audit log was cleared (someone covering their tracks)
 #
-# This module reads those files and pulls out the events we care about.
+# FAST PATH vs FULL PATH:
+#   parse_evtx() tries a fast path first using wevtutil (a Windows built-in
+#   tool) with an event ID filter — and optionally a date filter via --days.
+#   This fetches ONLY the ~13 event IDs that Pulse has detection rules for,
+#   skipping the other 95%+ of events entirely.
+#
+#   For example, Security.evtx might have 67,000 events but only ~500 match
+#   the event IDs Pulse cares about. With --days 30 it might be just ~50.
+#
+#   If wevtutil fails the full python-evtx path is used as a fallback.
 
 
-import xml.etree.ElementTree as ET  # Built-in Python library for parsing XML data
-from Evtx import Evtx              # Third-party library that knows how to read .evtx files
+import os
+import subprocess
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone, timedelta
+from Evtx import Evtx
 
 
-def parse_evtx(file_path):
+# ---------------------------------------------------------------------------
+# Event IDs that Pulse has detection rules for.
+# The fast path only fetches these — everything else is irrelevant.
+# ---------------------------------------------------------------------------
+
+RELEVANT_EVENT_IDS = [
+    1102,   # Audit log cleared
+    4104,   # Suspicious PowerShell (script block logging)
+    4624,   # Successful logon (RDP, Pass-the-Hash)
+    4625,   # Failed logon (brute force)
+    4698,   # Scheduled task created
+    4720,   # User account created
+    4732,   # User added to security group
+    4740,   # Account lockout
+    4946,   # Firewall rule added
+    4947,   # Firewall rule modified
+    4950,   # Firewall setting changed
+    5001,   # Antivirus / Defender disabled
+    7045,   # New service installed
+]
+
+# XML namespace used by all Windows event log files
+_NS = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def parse_evtx(file_path, since=None):
     """
     Reads a .evtx file and returns a list of event dictionaries.
 
+    Tries a fast path using wevtutil (filters to only relevant event IDs,
+    and optionally only events newer than `since`). Falls back to reading
+    every record with python-evtx if wevtutil fails.
+
     Parameters:
-        file_path (str): The path to the .evtx file to read.
+        file_path (str):          Path to the .evtx file to read.
+        since (datetime | None):  If set, only return events after this UTC
+                                  datetime. Pass None to scan all events.
 
     Returns:
-        list: A list of dictionaries, where each dictionary represents
-              one event from the log. Each dict has keys like:
-              - "event_id": The Windows event ID number (e.g., 4625)
-              - "timestamp": When the event happened
-              - "data": The raw XML data from the event
-
-    Example:
-        events = parse_evtx("logs/Security.evtx")
-        for event in events:
-            print(event["event_id"], event["timestamp"])
+        list: A list of dicts with keys:
+              - "event_id"   (int)  e.g. 4625
+              - "timestamp"  (str)  e.g. "2024-01-15T08:30:00.000Z"
+              - "data"       (str)  raw XML string for the event
+              - "record_num" (int)  sequential Windows record number
     """
+    try:
+        return _parse_evtx_fast(file_path, since)
+    except Exception:
+        return _parse_evtx_full(file_path, since)
 
-    # --- STEP 1: OPEN THE .EVTX FILE ---
-    # PyEvtx gives us a class called "Evtx" that knows how to read these files.
-    # We pass it the file path and it gives us an object we can loop through.
-    # --- STEP 2: PREPARE AN EMPTY LIST TO COLLECT EVENTS ---
-    # As we loop through the file, we'll build a dictionary for each event
-    # and append it to this list. When we're done, we return the whole list.
+
+# ---------------------------------------------------------------------------
+# Fast path — wevtutil with event ID + optional date filter
+# ---------------------------------------------------------------------------
+
+def _parse_evtx_fast(file_path, since=None):
+    """
+    Uses wevtutil to fetch ONLY events with relevant IDs from the file,
+    and optionally only events newer than `since`.
+
+    WHY THIS IS FAST:
+      wevtutil applies the filter in native Windows code before sending data,
+      so we only receive the events that actually matter.
+
+    HOW IT WORKS:
+      wevtutil qe "file.evtx" /lf:true /q:"*[System[(EventID=4625 or ...)
+        and TimeCreated[@SystemTime >= '2026-03-01T00:00:00.000Z']]]"
+
+        /lf:true  = read from a log FILE (not a live channel)
+        /q:...    = XPath filter — only return matching events
+        /f:xml    = output as XML
+        /e:Events = wrap output in a root <Events> tag
+    """
+    abs_path = os.path.abspath(file_path)
+
+    # Build the XPath query — event ID filter + optional date filter
+    id_filter = " or ".join(f"EventID={eid}" for eid in RELEVANT_EVENT_IDS)
+
+    if since is not None:
+        # Format as ISO 8601 UTC — wevtutil expects this exact format
+        since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        query = (
+            f"*[System[({id_filter}) and "
+            f"TimeCreated[@SystemTime >= '{since_str}']]]"
+        )
+    else:
+        query = f"*[System[({id_filter})]]"
+
+    result = subprocess.run(
+        [
+            "wevtutil", "qe", abs_path,
+            "/lf:true",
+            f"/q:{query}",
+            "/f:xml",
+            "/e:Events",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"wevtutil error: {result.stderr.strip()}")
+
+    output = result.stdout.strip()
+    if not output:
+        return []
+
+    root = ET.fromstring(output)
     events = []
 
-    # --- STEP 3: OPEN THE FILE AND LOOP THROUGH EVERY RECORD ---
-    # The `with` statement ensures the file is properly closed when we're done,
-    # even if an error occurs mid-way. This is required by the Evtx library.
-    # evtx_file.records() is a generator — it gives us one record at a time
-    # instead of loading the entire file into memory at once. This is important
-    # because .evtx files can be HUGE (hundreds of MB for a busy server).
+    for event_el in root.findall(f"{_NS}Event"):
+        try:
+            xml_string = ET.tostring(event_el, encoding="unicode")
+
+            sys_el = event_el.find(f"{_NS}System")
+            if sys_el is None:
+                continue
+
+            event_id_el = sys_el.find(f"{_NS}EventID")
+            if event_id_el is None:
+                continue
+            event_id = int(event_id_el.text)
+
+            time_el = sys_el.find(f"{_NS}TimeCreated")
+            timestamp = (
+                time_el.get("SystemTime", "Unknown")
+                if time_el is not None else "Unknown"
+            )
+
+            rec_el = sys_el.find(f"{_NS}EventRecordID")
+            record_num = int(rec_el.text) if rec_el is not None else None
+
+            events.append({
+                "event_id":   event_id,
+                "timestamp":  timestamp,
+                "data":       xml_string,
+                "record_num": record_num,
+            })
+        except Exception:
+            continue
+
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Full path — python-evtx (reads every record, used as fallback)
+# ---------------------------------------------------------------------------
+
+def _parse_evtx_full(file_path, since=None):
+    """
+    Reads every record in a .evtx file using python-evtx.
+
+    This is the fallback when wevtutil is unavailable or fails. Slower but
+    works on any system. Filters to relevant event IDs and applies the date
+    filter in Python after reading.
+
+    Parameters:
+        file_path (str):          Path to the .evtx file.
+        since (datetime | None):  Only return events after this UTC datetime.
+
+    Returns:
+        list: Parsed event dicts.
+    """
+    events = []
+
     with Evtx.Evtx(file_path) as evtx_file:
         for record in evtx_file.records():
 
-            # --- STEP 3b: CAPTURE THE RECORD NUMBER ---
-            # Windows assigns each event a sequential record number unique to that
-            # log file. We use this in live-monitoring mode to know which events
-            # we've already processed so we don't alert on them again.
             try:
                 record_num = record.record_num()
             except Exception:
                 record_num = None
 
-            # --- STEP 4: GET THE RAW XML FOR THIS EVENT ---
-            # Live log files can contain partially-written records (Windows was
-            # mid-write when we read the file). We skip those rather than crash.
             try:
                 xml_string = record.xml()
             except Exception:
                 continue
 
-            # --- STEP 5: PARSE THE XML TO EXTRACT FIELDS ---
-            # xml.etree.ElementTree is Python's built-in XML parser.
-            # ET.fromstring() takes an XML string and turns it into a tree
-            # structure we can search through, kind of like a folder structure.
             try:
                 xml_tree = ET.fromstring(xml_string)
             except ET.ParseError:
                 continue
 
-            # --- STEP 6: EXTRACT THE EVENT ID ---
-            # Windows event XML uses "namespaces" — think of them as prefixes
-            # that prevent name collisions (like how two people named "John"
-            # might go by "John from Sales" and "John from Engineering").
-            #
-            # The namespace for Windows event logs is this long URL:
-            ns = "{http://schemas.microsoft.com/win/2004/08/events/event}"
-            #
-            # The Event ID lives at: <System> -> <EventID>
-            # .find() searches the XML tree for a specific tag.
-            # .text gives us the actual text content inside that tag.
-            event_id_element = xml_tree.find(f"{ns}System/{ns}EventID")
-
-            # If we can't find an EventID (shouldn't happen, but let's be safe),
-            # skip this record entirely rather than crashing.
+            event_id_element = xml_tree.find(f"{_NS}System/{_NS}EventID")
             if event_id_element is None:
                 continue
 
-            # .text gives us a string like "4625", but we want an integer
-            # so we can compare it to numbers later (e.g., if event_id == 4625).
             event_id = int(event_id_element.text)
 
-            # --- STEP 7: EXTRACT THE TIMESTAMP ---
-            # The timestamp is stored as an attribute on the <TimeCreated> tag.
-            # An "attribute" is extra info attached to a tag, like:
-            #   <TimeCreated SystemTime="2024-01-15T08:30:00.000Z" />
-            # .get("SystemTime") pulls out the value of that attribute.
-            time_created = xml_tree.find(f"{ns}System/{ns}TimeCreated")
+            # Skip events Pulse has no rules for
+            if event_id not in RELEVANT_EVENT_IDS:
+                continue
 
-            if time_created is not None:
-                timestamp = time_created.get("SystemTime", "Unknown")
-            else:
-                timestamp = "Unknown"
+            time_created = xml_tree.find(f"{_NS}System/{_NS}TimeCreated")
+            timestamp = (
+                time_created.get("SystemTime", "Unknown")
+                if time_created is not None else "Unknown"
+            )
 
-            # --- STEP 8: BUILD THE DICTIONARY AND ADD IT TO OUR LIST ---
-            # We package everything into a clean dictionary.
-            # This is the format the rest of Pulse expects (detections.py, etc.).
-            event_dict = {
-                "event_id":   event_id,    # e.g., 4625
-                "timestamp":  timestamp,   # e.g., "2024-01-15T08:30:00.000Z"
-                "data":       xml_string,  # The full raw XML, in case we need it later
-                "record_num": record_num,  # Sequential Windows record ID (used by monitor)
-            }
-            events.append(event_dict)
+            # Apply date filter if requested
+            if since is not None and timestamp != "Unknown":
+                try:
+                    ts = datetime.fromisoformat(
+                        timestamp.rstrip("Z").replace("+00:00", "")
+                    ).replace(tzinfo=timezone.utc)
+                    if ts < since:
+                        continue
+                except Exception:
+                    pass
 
-    # --- STEP 9: RETURN THE COMPLETE LIST ---
-    # At this point we've looped through every record in the file.
-    # The caller (main.py) gets back a list of dictionaries it can
-    # pass to the detection engine.
+            events.append({
+                "event_id":   event_id,
+                "timestamp":  timestamp,
+                "data":       xml_string,
+                "record_num": record_num,
+            })
+
     return events

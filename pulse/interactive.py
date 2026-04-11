@@ -211,9 +211,9 @@ def _print_header(findings, statuses):
 
 def _print_findings_list(findings, statuses):
     """Numbered findings table."""
-    header = f"  {'#':<4}{'SEVERITY':<12}{'RULE':<36}{'TIME':<10}  STATUS"
+    header = f"  {'#':<4}{'SEVERITY':<12}{'RULE':<36}{'DATE & TIME':<22}  STATUS"
     print(f"  {_C['DIM']}{header.strip()}{_C['RESET']}")
-    print(f"  {'─' * 70}")
+    print(f"  {'─' * 80}")
 
     for i, (finding, status) in enumerate(zip(findings, statuses), start=1):
         severity  = finding.get("severity", "LOW")
@@ -221,19 +221,7 @@ def _print_findings_list(findings, statuses):
         timestamp = finding.get("timestamp", "")
         colour    = _C.get(severity, _C["RESET"])
 
-        # Extract just HH:MM:SS from the timestamp.
-        # Findings don't always have a "timestamp" key — the time is often
-        # embedded in the "details" string as "at 2026-04-11T01:39:02..."
-        time_str = ""
-        if timestamp and "T" in timestamp:
-            time_str = timestamp.split("T")[1][:8]
-        elif timestamp and " " in timestamp:
-            time_str = timestamp.split(" ")[1][:8]
-        if not time_str:
-            details = finding.get("details", "")
-            m = re.search(r"\d{4}-\d{2}-\d{2}[T ](\d{2}:\d{2}:\d{2})", details)
-            if m:
-                time_str = m.group(1)
+        time_str = _extract_time(finding)
 
         # Status label with colour
         if status == "reviewed":
@@ -247,7 +235,7 @@ def _print_findings_list(findings, statuses):
             f"  {i:<4}"
             f"{colour}{severity:<12}{_C['RESET']}"
             f"{rule:<36}"
-            f"{time_str:<10}  "
+            f"{time_str:<22}  "
             f"{status_str}"
         )
 
@@ -394,13 +382,15 @@ def _append_to_whitelist(config_path, bucket, value):
 # ---------------------------------------------------------------------------
 
 def _extract_time(finding):
-    """Extract a readable timestamp from a finding, checking both the
-    'timestamp' field and the embedded timestamp inside 'details'."""
+    """Extract a readable date + time from a finding.
+    Checks the 'timestamp' field first, then the embedded timestamp in 'details'."""
     ts = finding.get("timestamp", "")
     if ts and "T" in ts:
-        return ts.split("T")[1][:8]
+        date, time = ts.split("T")[0], ts.split("T")[1][:8]
+        return f"{date} {time}"
     if ts and " " in ts:
-        return ts.split(" ")[1][:8]
+        parts = ts.split(" ")
+        return f"{parts[0]} {parts[1][:8]}"
     # Fall back to timestamp embedded in details string
     details = finding.get("details", "")
     m = re.search(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", details)

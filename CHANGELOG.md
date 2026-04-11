@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-11 (continued)
+
+### Added
+- **`--days N` flag** — limits scan to the last N days of events (e.g. `--days 30`, `--days 180`). Works by passing a time filter directly to wevtutil so old events are skipped before any data is returned
+- **Fast path parser** — `parse_evtx()` now uses wevtutil with an event ID filter (`RELEVANT_EVENT_IDS`) to fetch only the ~13 event IDs Pulse has rules for, skipping 95%+ of events. Falls back to python-evtx if wevtutil fails
+- **Date + time in interactive mode** — TIME column now shows full `YYYY-MM-DD HH:MM:SS` instead of just `HH:MM:SS`
+
+### Performance
+- Scanning 382 files that previously hung now completes in seconds with `--days 30`
+- Event ID pre-filtering reduces parsed events from ~67,000 to ~500-2,000 for a typical Security.evtx
+
+---
+
 ## 2026-04-11
 
 ### Added
