@@ -59,7 +59,8 @@ Format: newest entries at the top, grouped by date.
 ## 2026-04-08
 
 ### Added
-- **3 new detection rules** - Account Lockout (Event 4740), Scheduled Task Created (Event 4698), Suspicious PowerShell (Event 4104 with pattern matching for encoded commands, download cradles, Mimikatz, etc.)
+- **4 new detection rules** - Account Lockout (Event 4740), Scheduled Task Created (Event 4698), Suspicious PowerShell (Event 4104 with pattern matching for encoded commands, download cradles, Mimikatz, etc.), Pass-the-Hash Attempt (Event 4624, NTLM network logon — detects stolen hash use, T1550.002)
+- **Baseline comparison** (`--save-baseline`) — snapshots current accounts, services, and scheduled tasks on a known-good machine. Future scans auto-load the baseline and flag anything new (`New Account (Baseline)`, `New Service (Baseline)`, `New Task (Baseline)` findings)
 - **MITRE ATT&CK tagging** - every detection rule maps to its ATT&CK technique ID (e.g. T1110, T1059.001). HTML report shows clickable links to attack.mitre.org
 - **Security Score panel** - a score out of 100 at the top of every HTML report, displayed as a circular ring with a colour-coded risk label
 - **Scan summary statistics** - HTML and text reports now show files scanned, total events, time range, and top event IDs
@@ -77,7 +78,7 @@ Format: newest entries at the top, grouped by date.
 ### Tests
 - 41 new tests added (detections, JSON, CSV, config, whitelist)
 - Test count: 34 -> 75, all passing
-- Detection count: 11 -> 14 (12 individual + 2 chains)
+- Detection count: 11 -> 15 (13 individual + 2 chains)
 
 ---
 

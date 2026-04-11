@@ -452,7 +452,7 @@ def detect_pass_the_hash(events):
     Normally to log in, you type a password. Windows hashes it and compares
     it to the stored hash. In a PtH attack, an attacker steals the hash
     itself (often using Mimikatz from memory) and sends THAT directly to
-    Windows — bypassing the need for the real password. Windows sees a
+    Windows bypassing the need for the real password. Windows sees a
     valid hash and lets them in.
 
     HOW WE DETECT IT:

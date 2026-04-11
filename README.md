@@ -14,7 +14,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 
 ## Features
 
-### Detection Rules (14 total)
+### Detection Rules (15 total)
 
 | Rule | Event ID | Severity | MITRE ATT&CK | What it catches |
 |---|---|---|---|---|
@@ -24,6 +24,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 | Privilege Escalation | 4732 | HIGH | T1078.002 | Users added to security groups |
 | Audit Log Cleared | 1102 | HIGH | T1070.001 | Someone wiping their tracks |
 | RDP Logon Detected | 4624 (type 10) | MEDIUM | T1021.001 | Remote Desktop logins with source IP |
+| Pass-the-Hash Attempt | 4624 (type 3, NTLM) | HIGH | T1550.002 | NTLM network logons that may indicate stolen hash use |
 | Service Installed | 7045 | MEDIUM | T1543.003 | New services - common malware persistence method |
 | Scheduled Task Created | 4698 | MEDIUM | T1053.005 | New scheduled tasks - persistence mechanism |
 | Suspicious PowerShell | 4104 | HIGH | T1059.001 | Encoded commands, download cradles, Mimikatz |
@@ -61,6 +62,11 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - **Built-in known-good whitelist** - 100+ entries covering anti-cheat, gaming platforms, hardware peripherals, Google, Microsoft, security software, VPNs, and common apps — suppressed by default with no configuration
 - **Custom whitelist** - add your own entries in `pulse.yaml` (accounts, services, IPs, rules)
 
+### Baseline Comparison
+- **`--save-baseline`** - snapshots the current state of user accounts, services, and scheduled tasks on a known-good machine
+- Future scans automatically compare against the baseline and flag anything new that wasn't there before (`New Account`, `New Service`, `New Task` findings)
+- Baseline stored in `pulse_baseline.json` in the project root
+
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
@@ -75,7 +81,7 @@ Pulse/
 ├── pulse/
 │   ├── __init__.py         # Makes "pulse" a Python package
 │   ├── parser.py           # Reads and parses .evtx log files
-│   ├── detections.py       # 14 detection rules + attack chain correlation
+│   ├── detections.py       # 15 detection rules + attack chain correlation
 │   ├── reporter.py         # Generates text, HTML, JSON, and CSV reports
 │   ├── emailer.py          # SMTP email delivery of HTML reports
 │   ├── monitor.py          # Live monitoring via wevtutil
@@ -141,6 +147,15 @@ python main.py --watch
 # Watch with a faster poll interval
 python main.py --watch --interval 5
 
+# Only scan the last 30 days of events (much faster on large log folders)
+python main.py --days 30
+
+# Scan the last 6 months
+python main.py --days 180
+
+# Save a baseline snapshot of known accounts, services, and tasks
+python main.py --save-baseline
+
 # Send the HTML report by email after the scan
 python main.py --format html --email
 
@@ -185,7 +200,7 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 ### Done
 - [x] Project structure and foundation
 - [x] `.evtx` file parsing (parallel, with per-file timeout)
-- [x] Detection rules - 14 rules covering login attacks, persistence, defence evasion, credential abuse
+- [x] Detection rules - 15 rules covering login attacks, persistence, defence evasion, credential abuse
 - [x] Human-readable text report output
 - [x] HTML report with security score, scan stats, severity filters, remediation tab, dark mode
 - [x] JSON report output - machine-readable findings for Splunk, ELK, Python scripts
@@ -194,6 +209,7 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 - [x] Config file support (`pulse.yaml`) - store default settings
 - [x] Whitelist/allowlist - suppress known-good accounts, services, IPs, and rules
 - [x] Built-in known-good service whitelist (100+ entries, zero config needed)
+- [x] Baseline comparison - snapshot known-good state with `--save-baseline`, flag anything new on future scans
 - [x] Attack chain correlation (connects multiple events into attack patterns)
 - [x] MITRE ATT&CK tagging - each finding links to its technique on attack.mitre.org
 - [x] Scan summary statistics - files scanned, total events, time range, top event IDs
