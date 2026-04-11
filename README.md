@@ -40,13 +40,31 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - **CSV export** - spreadsheet format that opens in Excel or Google Sheets
 - **Security Score** - a score out of 100 at the top of HTML reports, colour-coded from SECURE to CRITICAL RISK
 - **MITRE ATT&CK tagging** - each finding links to its ATT&CK technique on attack.mitre.org
+- **Email delivery** - send the finished HTML report via SMTP after a scan with `--email`
 
-### Other
-- **CLI flags** - customise log folder, output path, format, and severity filter
-- **Config file** - `pulse.yaml` for storing default settings
-- **Whitelist** - suppress known-good accounts, services, IPs, and rules
-- **ASCII banner** on startup
-- **75 unit tests** - every detection rule, report format, config, and whitelist tested
+### Live Monitoring
+- **`--watch` mode** - queries live Windows event channels (Security, System) in real time using `wevtutil`
+- Alerts on new suspicious events within seconds, with ANSI-coloured terminal output
+- `--interval` flag controls poll frequency (default 30s)
+- Findings saved to the database automatically during monitoring
+
+### Scan History
+- **SQLite database** - every scan saved to `pulse.db` automatically
+- **`--history` flag** - view past scans with security scores and trend arrows (↑/↓)
+
+### Interactive Mode
+- **`--interactive` flag** - after a scan, browse findings one by one in the terminal
+- Mark findings as investigated or false positive
+- Add entries directly to the whitelist from the terminal — no manual YAML editing needed
+
+### Noise Reduction
+- **Built-in known-good whitelist** - 100+ entries covering anti-cheat, gaming platforms, hardware peripherals, Google, Microsoft, security software, VPNs, and common apps — suppressed by default with no configuration
+- **Custom whitelist** - add your own entries in `pulse.yaml` (accounts, services, IPs, rules)
+
+### Performance
+- **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
+- **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
+- **146 unit tests** - every detection rule, report format, config, whitelist, database, and monitor tested
 
 ---
 
@@ -58,10 +76,17 @@ Pulse/
 │   ├── __init__.py         # Makes "pulse" a Python package
 │   ├── parser.py           # Reads and parses .evtx log files
 │   ├── detections.py       # 14 detection rules + attack chain correlation
-│   └── reporter.py         # Generates text, HTML, JSON, and CSV reports
+│   ├── reporter.py         # Generates text, HTML, JSON, and CSV reports
+│   ├── emailer.py          # SMTP email delivery of HTML reports
+│   ├── monitor.py          # Live monitoring via wevtutil
+│   ├── database.py         # SQLite scan history
+│   ├── interactive.py      # Interactive terminal mode
+│   ├── animations.py       # ECG heartbeat terminal animation
+│   └── known_good.py       # Built-in known-good service whitelist
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
-├── test_detections.py      # 75 unit tests for all detection rules
+├── pulse.db                # SQLite scan history database
+├── test_detections.py      # 146 unit tests
 ├── main.py                 # Entry point - run this to analyse logs
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
@@ -92,29 +117,35 @@ pip install -r requirements.txt
 ### Usage
 
 ```bash
-# Basic - scans the logs/ folder and saves a .txt report to reports/
+# Basic scan — reads logs/ folder, saves a .txt report to reports/
 python main.py
 
-# Specify a custom log folder
-python main.py --logs C:\Windows\System32\winevt\Logs
+# Scan a custom folder (e.g. live Windows logs)
+python main.py --logs "C:/Windows/System32/winevt/Logs"
 
-# Generate an HTML report instead of plain text
+# Generate an HTML report
 python main.py --format html
-
-# Save the report to a specific file
-python main.py --output my_report.html --format html
 
 # Only show HIGH and above findings
 python main.py --severity HIGH
 
-# See all options
-python main.py --help
+# Browse findings interactively after the scan
+python main.py --interactive
 
-# Watch log files live — alerts on new suspicious events as they arrive
+# View past scan history with score trends
+python main.py --history
+
+# Watch live — alerts on new suspicious events in real time
 python main.py --watch
 
-# Watch with a custom poll interval (seconds)
-python main.py --watch --interval 10
+# Watch with a faster poll interval
+python main.py --watch --interval 5
+
+# Send the HTML report by email after the scan
+python main.py --format html --email
+
+# See all options
+python main.py --help
 ```
 
 ### Getting .evtx files
@@ -153,7 +184,7 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 
 ### Done
 - [x] Project structure and foundation
-- [x] `.evtx` file parsing
+- [x] `.evtx` file parsing (parallel, with per-file timeout)
 - [x] Detection rules - 14 rules covering login attacks, persistence, defence evasion, credential abuse
 - [x] Human-readable text report output
 - [x] HTML report with security score, scan stats, severity filters, remediation tab, dark mode
@@ -162,21 +193,20 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 - [x] CLI flags (`--logs`, `--output`, `--format`, `--severity`)
 - [x] Config file support (`pulse.yaml`) - store default settings
 - [x] Whitelist/allowlist - suppress known-good accounts, services, IPs, and rules
+- [x] Built-in known-good service whitelist (100+ entries, zero config needed)
 - [x] Attack chain correlation (connects multiple events into attack patterns)
 - [x] MITRE ATT&CK tagging - each finding links to its technique on attack.mitre.org
 - [x] Scan summary statistics - files scanned, total events, time range, top event IDs
-- [x] Unit tests (75 tests, all passing)
+- [x] Email delivery - send finished HTML report via SMTP with `--email`
+- [x] SQLite scan history - every scan saved to `pulse.db`; use `--history` for trends
+- [x] Live monitoring mode - `--watch` queries live Windows channels in real time
+- [x] Interactive terminal mode - `--interactive` to browse, investigate, and whitelist findings
+- [x] Parallel file parsing across all CPU cores
+- [x] ECG heartbeat animation during parsing
+- [x] 146 unit tests, all passing
 
 ### Next up
-- [ ] **Pass-the-hash detection** (Event 4624, NTLM logon type) - credential abuse pattern
-- [ ] **Baseline comparison** - compare a log against a "known good" snapshot to surface anomalies
-- [ ] **Email delivery** - send the finished HTML report via email automatically when a scan completes
-
-### Longer-term
-- [x] **SQLite database** - every scan is saved to `pulse.db`; use `--history` to view past scans with score trends
-- [x] **Live monitoring mode** - use `--watch` to poll log files every 30 seconds and alert in real time as suspicious events appear
-- [ ] **Interactive terminal mode** - after a scan, let the user drill into individual findings, view raw event XML, and mark findings as investigated or false positive
-- [ ] **REST API** - expose Pulse as a local web service so other tools can submit `.evtx` files and get findings back as JSON, enabling integration into larger pipelines
+- [ ] **REST API** - expose Pulse as a local web service so other tools can submit `.evtx` files and get findings back as JSON
 - [ ] **Web dashboard** - a browser-based UI to upload logs, view findings, track history across multiple machines, and manage whitelists
 
 ---

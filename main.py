@@ -166,6 +166,13 @@ def build_arg_parser(config=None):
         help="How often to check for new events in --watch mode. Default: 30s",
     )
 
+    # --- ARGUMENT: --interactive ---
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="After scanning, open interactive mode to browse findings and manage the whitelist.",
+    )
+
     # --- ARGUMENT: --save-baseline ---
     # This flag captures the current state of accounts, services, and tasks
     # as a "known good" snapshot. Future scans compare against it and flag
@@ -488,6 +495,7 @@ def main():
     show_history_flag  = args.history
     watch_flag         = args.watch
     watch_interval     = args.interval
+    interactive_flag   = args.interactive
 
     # DB path comes from config, defaulting to pulse.db in the project root.
     db_config = config.get("database", {})
@@ -581,12 +589,43 @@ def main():
     monitor.start(f"Parsing {total} file(s) across {workers} worker(s)...")
 
     if workers > 1:
-        with multiprocessing.Pool(processes=workers) as pool:
-            for events in pool.imap_unordered(parse_evtx, file_paths):
+        import threading
+        import time as _time
+
+        lock = threading.Lock()
+        last_progress = [_time.time()]   # mutable so callback can update it
+        STALL_TIMEOUT = 30               # seconds with no new completions before giving up
+
+        def _on_done(events):
+            with lock:
+                all_events.extend(events or [])
+                nonlocal completed
                 completed += 1
                 monitor.message = f"Parsing... {completed}/{total} files"
-                if events:
-                    all_events.extend(events)
+                last_progress[0] = _time.time()
+
+        def _on_error(__exc):
+            with lock:
+                nonlocal completed
+                completed += 1
+                monitor.message = f"Parsing... {completed}/{total} files"
+                last_progress[0] = _time.time()
+
+        pool = multiprocessing.Pool(processes=workers)
+        try:
+            for fp in file_paths:
+                pool.apply_async(parse_evtx, (fp,),
+                                 callback=_on_done, error_callback=_on_error)
+            pool.close()
+
+            # Wait until all files done OR no progress for STALL_TIMEOUT seconds
+            while completed < total:
+                if _time.time() - last_progress[0] > STALL_TIMEOUT:
+                    break   # stuck on a locked live file — move on
+                _time.sleep(0.2)
+        finally:
+            pool.terminate()
+            pool.join()
     else:
         for file_path in file_paths:
             events = parse_evtx(file_path)
@@ -717,6 +756,11 @@ def main():
     print("=" * 50)
     print("  Scan complete.")
     print("=" * 50)
+
+    # --- STEP 8: INTERACTIVE MODE ---
+    if interactive_flag and findings:
+        from pulse.interactive import run_interactive_mode
+        run_interactive_mode(findings, CONFIG_PATH)
 
 
 if __name__ == "__main__":

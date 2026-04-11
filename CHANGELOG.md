@@ -5,6 +5,24 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-11
+
+### Added
+- **Interactive terminal mode** (`--interactive`) — browse findings after a scan, mark as investigated, add to whitelist directly from the terminal. No manual YAML editing needed
+- **Known-good service whitelist** (`pulse/known_good.py`) — 100+ built-in entries covering anti-cheat, gaming platforms, hardware peripherals, Google, Microsoft, security software, VPNs, and common apps. Automatically merged with user's `pulse.yaml` whitelist on every scan
+- **ECG heartbeat animation** — scrolling green ECG line with live file counter during parsing (`pulse/animations.py`)
+- **Parallel file parsing** — `.evtx` files parsed across all CPU cores using `multiprocessing.Pool` with callbacks for real-time progress updates and a 30-second stall timeout for locked live files
+
+### Fixed
+- **Heartbeat message overlap** — shorter progress messages now padded to fixed width so they fully overwrite longer ones
+- **Interactive mode TIME column blank** — timestamps extracted from embedded `details` string when no explicit `timestamp` field is present on a finding
+- **Parser hanging on live log files** — added per-file stall timeout; files locked by Windows (e.g. live Security.evtx) are skipped automatically after 30 seconds of no progress
+
+### Tests
+- Test count: 146, all passing
+
+---
+
 ## 2026-04-09
 
 ### Added

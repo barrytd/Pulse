@@ -111,12 +111,13 @@ class HeartbeatMonitor:
             frames_since_beat += 1
 
             # --- Render ---
-            line = "".join(buf)
+            # Pad message to 55 chars so shorter updates fully overwrite longer ones
+            line    = "".join(buf)
+            message = self.message.ljust(55)
             sys.stdout.write(
                 f"\r  {_GREEN}{line}{_RESET}  "
                 f"{_RED}♥{_RESET}  "
-                f"{_DIM}{self.message}{_RESET}"
-                f"          "   # padding to overwrite any leftover text
+                f"{_DIM}{message}{_RESET}"
             )
             sys.stdout.flush()
 
