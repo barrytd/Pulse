@@ -238,8 +238,16 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 - [x] REST API (FastAPI) - `--api` exposes Pulse as a local web service with `/api/scan`, `/api/history`, `/api/report/{id}`, `/api/health`, and auto-generated Swagger docs at `/docs`
 - [x] 160 unit tests, all passing
 
-### Next up
-- [ ] **Web dashboard** - a browser-based UI to upload logs, view findings, track history across multiple machines, and manage whitelists
+- [x] Web dashboard - single-page dark-themed UI served at `/`, with sidebar navigation, drag-and-drop upload, score ring, scan history, and light/dark theme toggle
+
+### Sprint 2 — Apr 14–27, 2026
+- [ ] **Functional Settings page** - edit `pulse.yaml` whitelist from the browser (add/remove accounts, services, IPs)
+- [ ] **Live Whitelist page** - display the active whitelist from config, not just built-in defaults
+- [ ] **Report export from dashboard** - download PDF or HTML report for any scan result
+- [ ] **Multi-file upload** - drag multiple `.evtx` files at once for batch scanning
+- [ ] **Email alerts** - send summary email when a scan finds CRITICAL/HIGH severity items
+- [ ] **Scheduled scans** - watch a folder for new `.evtx` files and auto-scan them
+- [ ] **New detection rules** - expand from 15 to 20+ (Kerberoasting, golden ticket, suspicious PowerShell, etc.)
 
 ---
 

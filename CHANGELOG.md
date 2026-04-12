@@ -8,6 +8,14 @@ Format: newest entries at the top, grouped by date.
 ## 2026-04-12
 
 ### Added
+- **Web dashboard** (`pulse/web/index.html`) — single-page dark-themed UI served at `GET /`:
+  - Sidebar navigation: Dashboard, Scans, Findings, History, Whitelist, Settings
+  - Drag-and-drop `.evtx` upload modal with file picker fallback
+  - Security score ring visualization with color-coded risk levels
+  - Score history table (5 most recent on dashboard, full list on History page)
+  - Scan drill-down: click any scan to view its findings
+  - Light/dark theme toggle with `localStorage` persistence
+  - Dashboard test added to `test_api.py`
 - **REST API** (`pulse/api.py`) — FastAPI server with four endpoints:
   - `POST /api/scan` — upload a `.evtx` file, get findings as JSON back. File is parsed in-memory and deleted immediately (ephemeral storage)
   - `GET /api/history` — list recent scans from the local SQLite database (`?limit=N`, capped at 200)
