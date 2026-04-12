@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pulse Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* CSS Variables — light theme default, dark overrides below           */
+    /* ------------------------------------------------------------------ */
+    :root {
+      --bg:          #f0f2f5;
+      --card-bg:     #ffffff;
+      --border:      #d0d7de;
+      --text:        #1f2328;
+      --text-muted:  #656d76;
+      --text-light:  #8b949e;
+      --topbar-bg:   #ffffff;
+      --hover-row:   #f6f8fa;
+      --shadow:      0 1px 3px rgba(0,0,0,0.08);
+      --accent:      #3b82f6;
+      --accent-glow: rgba(59,130,246,0.15);
+    }
+
+    [data-theme="dark"] {
+      --bg:          #0d1117;
+      --card-bg:     #161b22;
+      --border:      #21262d;
+      --text:        #e6edf3;
+      --text-muted:  #8b949e;
+      --text-light:  #484f58;
+      --topbar-bg:   #161b22;
+      --hover-row:   #1c2129;
+      --shadow:      0 1px 3px rgba(0,0,0,0.3);
+      --accent:      #58a6ff;
+      --accent-glow: rgba(88,166,255,0.12);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Reset + base                                                        */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout — sidebar + main                                             */
+    /* ------------------------------------------------------------------ */
+    .app {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Sidebar — always dark navy                                          */
+    /* ------------------------------------------------------------------ */
+    .sidebar {
+      width: 220px;
+      min-height: 100vh;
+      background: #0f1623;
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 100;
+    }
+
+    .sidebar-logo {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .sidebar-logo h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: #e6edf3;
+    }
+
+    .sidebar-logo span {
+      display: block;
+      font-size: 10px;
+      color: #8b949e;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 12px 0;
+    }
+
+    .sidebar-nav a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      color: #8b949e;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+
+    .sidebar-nav a:hover {
+      color: #c9d1d9;
+      background: rgba(255,255,255,0.04);
+    }
+
+    .sidebar-nav a.active {
+      color: #e6edf3;
+      background: rgba(255,255,255,0.06);
+      border-left-color: var(--accent);
+    }
+
+    .sidebar-nav a .icon {
+      width: 18px;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .sidebar-footer .user {
+      font-size: 13px;
+      color: #c9d1d9;
+      font-weight: 500;
+    }
+
+    .sidebar-footer .version {
+      font-size: 11px;
+      color: #484f58;
+      margin-top: 2px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Main area                                                           */
+    /* ------------------------------------------------------------------ */
+    .main {
+      flex: 1;
+      margin-left: 220px;
+      min-height: 100vh;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Top bar                                                             */
+    /* ------------------------------------------------------------------ */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--topbar-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .topbar h2 {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--text);
+    }
+
+    .btn:hover {
+      border-color: var(--accent);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+
+    .theme-toggle {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Content area                                                        */
+    /* ------------------------------------------------------------------ */
+    .content {
+      padding: 24px 32px 48px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Stat cards row                                                       */
+    /* ------------------------------------------------------------------ */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .stat-card .label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-card .value {
+      font-size: 32px;
+      font-weight: 700;
+      margin: 4px 0;
+      line-height: 1.1;
+    }
+
+    .stat-card .sub {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .score-secure  { color: #10b981; }
+    .score-low     { color: #3b82f6; }
+    .score-medium  { color: #f59e0b; }
+    .score-high    { color: #ef4444; }
+    .score-critical { color: #dc2626; }
+
+    /* ------------------------------------------------------------------ */
+    /* Cards                                                               */
+    /* ------------------------------------------------------------------ */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Middle row — score ring + history table                              */
+    /* ------------------------------------------------------------------ */
+    .middle-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    /* Score ring */
+    .score-display {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      max-height: 180px;
+      overflow: hidden;
+    }
+
+    .score-ring-container {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      flex-shrink: 0;
+    }
+
+    .score-ring {
+      width: 140px;
+      height: 140px;
+      max-width: 140px;
+      max-height: 140px;
+    }
+
+    .score-ring .track {
+      fill: none;
+      stroke: var(--border);
+      stroke-width: 8;
+    }
+
+    .score-ring .fill {
+      fill: none;
+      stroke-width: 8;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.8s ease;
+    }
+
+    .score-ring-label {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    .score-ring-label .number {
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .score-ring-label .out-of {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .score-info .risk-label {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .score-info .risk-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* History table */
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .history-table th {
+      text-align: left;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .history-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .history-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .trend-up   { color: #10b981; font-weight: 600; }
+    .trend-down { color: #ef4444; font-weight: 600; }
+    .trend-flat { color: var(--text-muted); }
+
+    /* ------------------------------------------------------------------ */
+    /* Findings table                                                      */
+    /* ------------------------------------------------------------------ */
+    .findings-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .findings-table th {
+      text-align: left;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 10px 14px;
+      border-bottom: 2px solid var(--border);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
+    .findings-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .findings-table tr:hover td {
+      background: var(--hover-row);
+    }
+
+    .findings-table .col-time {
+      white-space: nowrap;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      width: 160px;
+    }
+
+    .findings-table .col-severity { width: 100px; }
+    .findings-table .col-rule     { width: 200px; font-weight: 500; }
+    .findings-table .col-mitre    { width: 110px; }
+
+    /* Severity pills */
+    .pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .pill-critical { background: rgba(220,38,38,0.12); color: #ef4444; }
+    .pill-high     { background: rgba(245,158,11,0.12); color: #f59e0b; }
+    .pill-medium   { background: rgba(59,130,246,0.12); color: #3b82f6; }
+    .pill-low      { background: rgba(16,185,129,0.12); color: #10b981; }
+
+    /* MITRE code tag */
+    .mitre-tag {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      font-size: 12px;
+      background: var(--accent-glow);
+      color: var(--accent);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .mitre-tag a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .mitre-tag a:hover {
+      text-decoration: underline;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Upload modal overlay                                                */
+    /* ------------------------------------------------------------------ */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      width: 440px;
+      max-width: 90vw;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+    }
+
+    .modal h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .modal p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 16px;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+    }
+
+    .drop-zone .drop-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .drop-zone .drop-text {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .drop-zone .drop-text strong {
+      color: var(--accent);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .upload-status {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      min-height: 20px;
+    }
+
+    .upload-status.success { color: #10b981; }
+    .upload-status.error   { color: #ef4444; }
+
+    /* ------------------------------------------------------------------ */
+    /* Empty state                                                         */
+    /* ------------------------------------------------------------------ */
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state .empty-icon {
+      font-size: 40px;
+      margin-bottom: 12px;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Clickable scan rows                                                 */
+    /* ------------------------------------------------------------------ */
+    .scan-row { cursor: pointer; }
+    .scan-row:hover td { background: var(--hover-row); }
+
+    /* Back button */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--accent);
+      cursor: pointer;
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+
+    .back-link:hover { text-decoration: underline; }
+
+    /* Scan detail header */
+    .scan-header {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .scan-header .stat-card { flex: 1; min-width: 150px; }
+
+    /* Settings / placeholder pages */
+    .page-placeholder {
+      text-align: center;
+      padding: 64px 20px;
+      color: var(--text-muted);
+    }
+
+    .page-placeholder .placeholder-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .page-placeholder h3 {
+      font-size: 18px;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .page-placeholder p {
+      font-size: 14px;
+      max-width: 400px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    /* Whitelist items */
+    .whitelist-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
+    .whitelist-section h4 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .whitelist-item {
+      display: inline-block;
+      padding: 4px 12px;
+      background: var(--accent-glow);
+      border-radius: 6px;
+      font-size: 13px;
+      margin: 2px 4px 2px 0;
+      color: var(--text);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Responsive                                                          */
+    /* ------------------------------------------------------------------ */
+    @media (max-width: 1100px) {
+      .stat-row    { grid-template-columns: repeat(2, 1fr); }
+      .middle-row  { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 768px) {
+      .sidebar     { display: none; }
+      .main        { margin-left: 0; }
+      .stat-row    { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- ============================================================= -->
+    <!-- SIDEBAR                                                        -->
+    <!-- ============================================================= -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <h1>PULSE</h1>
+        <span>Threat Detection</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a class="active" onclick="navigate('dashboard')">
+          <span class="icon">&#9632;</span> Dashboard
+        </a>
+        <a onclick="navigate('scans')">
+          <span class="icon">&#9654;</span> Scans
+        </a>
+        <a onclick="navigate('findings')">
+          <span class="icon">&#9888;</span> Findings
+        </a>
+        <a onclick="navigate('history')">
+          <span class="icon">&#9776;</span> History
+        </a>
+        <a onclick="navigate('whitelist')">
+          <span class="icon">&#10003;</span> Whitelist
+        </a>
+        <a onclick="navigate('settings')">
+          <span class="icon">&#9881;</span> Settings
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user">Robert</div>
+        <div class="version">v1.1.0</div>
+      </div>
+    </aside>
+
+    <!-- ============================================================= -->
+    <!-- MAIN AREA                                                      -->
+    <!-- ============================================================= -->
+    <div class="main">
+      <!-- Top bar -->
+      <header class="topbar">
+        <h2 id="page-title">Dashboard</h2>
+        <div class="topbar-actions">
+          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode" id="theme-btn">&#9789;</button>
+          <button class="btn btn-primary" onclick="openUploadModal()">Upload .evtx</button>
+        </div>
+      </header>
+
+      <!-- Content — dynamically rendered by JS based on active page -->
+      <div class="content" id="content">
+        <div style="text-align:center; padding:48px; color:var(--text-muted);">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- UPLOAD MODAL                                                    -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="upload-modal">
+    <div class="modal">
+      <h3>Upload Event Log</h3>
+      <p>Select a Windows .evtx file to scan for threats. The file is analyzed and deleted immediately.</p>
+
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="drop-icon">&#128196;</div>
+        <div class="drop-text">
+          Drop .evtx file here or <strong>browse</strong>
+        </div>
+      </div>
+      <input type="file" id="file-input" accept=".evtx" style="display:none" />
+
+      <div class="upload-status" id="upload-status"></div>
+
+      <div class="modal-actions">
+        <button class="btn" onclick="closeUploadModal()">Cancel</button>
+        <button class="btn btn-primary" id="scan-btn" onclick="uploadAndScan()" disabled>Scan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- JAVASCRIPT                                                      -->
+  <!-- ============================================================= -->
+  <script>
+    // ---------------------------------------------------------------
+    // Shared state — cached API data so pages don't re-fetch every click
+    // ---------------------------------------------------------------
+    var cachedScans    = null;
+    var cachedFindings = null;
+    var currentPage    = 'dashboard';
+
+    // MITRE lookup used by multiple pages
+    var mitreMap = {
+      'Brute Force Attempt': 'T1110', 'Account Lockout': 'T1110',
+      'User Account Created': 'T1136.001', 'Privilege Escalation': 'T1078.002',
+      'Audit Log Cleared': 'T1070.001', 'RDP Logon Detected': 'T1021.001',
+      'Pass-the-Hash Attempt': 'T1550.002', 'Service Installed': 'T1543.003',
+      'Scheduled Task Created': 'T1053.005', 'Suspicious PowerShell': 'T1059.001',
+      'Antivirus Disabled': 'T1562.001', 'Firewall Disabled': 'T1562.004',
+      'Firewall Rule Changed': 'T1562.004', 'Account Takeover Chain': 'T1078',
+      'Malware Persistence Chain': 'T1543.003',
+    };
+
+    // ---------------------------------------------------------------
+    // Theme toggle
+    // ---------------------------------------------------------------
+    function getTheme() { return localStorage.getItem('pulse-theme') || 'dark'; }
+
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      document.getElementById('theme-btn').textContent = theme === 'dark' ? '\u2600' : '\u263D';
+    }
+
+    function toggleTheme() {
+      var next = getTheme() === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('pulse-theme', next);
+      applyTheme(next);
+    }
+
+    applyTheme(getTheme());
+
+    // ---------------------------------------------------------------
+    // Navigation — switches pages by rendering into #content
+    // ---------------------------------------------------------------
+    function navigate(page) {
+      currentPage = page;
+      document.querySelectorAll('.sidebar-nav a').forEach(function (a) { a.classList.remove('active'); });
+      var links = document.querySelectorAll('.sidebar-nav a');
+      var pageNames = ['dashboard','scans','findings','history','whitelist','settings'];
+      var idx = pageNames.indexOf(page);
+      if (idx >= 0 && links[idx]) links[idx].classList.add('active');
+
+      document.getElementById('page-title').textContent =
+        page.charAt(0).toUpperCase() + page.slice(1);
+
+      var renderers = {
+        dashboard: renderDashboardPage,
+        scans:     renderScansPage,
+        findings:  renderFindingsPage,
+        history:   renderHistoryPage,
+        whitelist: renderWhitelistPage,
+        settings:  renderSettingsPage,
+      };
+
+      (renderers[page] || renderDashboardPage)();
+    }
+
+    // ---------------------------------------------------------------
+    // Upload modal
+    // ---------------------------------------------------------------
+    var selectedFile = null;
+
+    function openUploadModal() {
+      document.getElementById('upload-modal').classList.add('open');
+      document.getElementById('upload-status').textContent = '';
+      document.getElementById('upload-status').className = 'upload-status';
+      document.getElementById('scan-btn').disabled = true;
+      document.getElementById('drop-zone').querySelector('.drop-text').innerHTML =
+        'Drop .evtx file here or <strong>browse</strong>';
+      selectedFile = null;
+    }
+
+    function closeUploadModal() {
+      document.getElementById('upload-modal').classList.remove('open');
+      document.getElementById('file-input').value = '';
+      selectedFile = null;
+    }
+
+    document.getElementById('file-input').addEventListener('change', function (e) {
+      if (e.target.files.length > 0) {
+        selectedFile = e.target.files[0];
+        document.getElementById('drop-zone').querySelector('.drop-text').innerHTML =
+          '<strong>' + selectedFile.name + '</strong> (' + formatBytes(selectedFile.size) + ')';
+        document.getElementById('scan-btn').disabled = false;
+      }
+    });
+
+    var dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', function (e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', function ()  { dropZone.classList.remove('drag-over'); });
+    dropZone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      if (e.dataTransfer.files.length > 0) {
+        selectedFile = e.dataTransfer.files[0];
+        document.getElementById('file-input').files = e.dataTransfer.files;
+        dropZone.querySelector('.drop-text').innerHTML =
+          '<strong>' + selectedFile.name + '</strong> (' + formatBytes(selectedFile.size) + ')';
+        document.getElementById('scan-btn').disabled = false;
+      }
+    });
+
+    document.getElementById('upload-modal').addEventListener('click', function (e) {
+      if (e.target === this) closeUploadModal();
+    });
+
+    async function uploadAndScan() {
+      if (!selectedFile) return;
+      var status = document.getElementById('upload-status');
+      var scanBtn = document.getElementById('scan-btn');
+      status.textContent = 'Scanning...';
+      status.className = 'upload-status';
+      scanBtn.disabled = true;
+
+      try {
+        var form = new FormData();
+        form.append('file', selectedFile);
+        var resp = await fetch('/api/scan', { method: 'POST', body: form });
+        var data = await resp.json();
+        if (!resp.ok) {
+          status.textContent = data.detail || 'Scan failed.';
+          status.className = 'upload-status error';
+          scanBtn.disabled = false;
+          return;
+        }
+        status.textContent = 'Scan complete \u2014 ' + data.total_findings + ' finding(s), score ' + data.score + '/100';
+        status.className = 'upload-status success';
+        cachedScans = null;
+        cachedFindings = null;
+        setTimeout(function () { closeUploadModal(); navigate(currentPage); }, 1500);
+      } catch (err) {
+        status.textContent = 'Network error \u2014 is the API server running?';
+        status.className = 'upload-status error';
+        scanBtn.disabled = false;
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // Data fetchers
+    // ---------------------------------------------------------------
+    async function fetchScans(limit) {
+      if (cachedScans && cachedScans.length >= (limit || 10)) return cachedScans;
+      try {
+        var resp = await fetch('/api/history?limit=' + (limit || 50));
+        var data = await resp.json();
+        cachedScans = data.scans || [];
+        return cachedScans;
+      } catch (e) { return []; }
+    }
+
+    async function fetchFindings(scanId) {
+      try {
+        var resp = await fetch('/api/report/' + scanId);
+        var data = await resp.json();
+        return data.findings || [];
+      } catch (e) { return []; }
+    }
+
+    // ---------------------------------------------------------------
+    // PAGE: Dashboard
+    // ---------------------------------------------------------------
+    async function renderDashboardPage() {
+      var c = document.getElementById('content');
+      var scans = await fetchScans(10);
+
+      var latest = scans[0];
+      var totalFindings = scans.reduce(function (s, x) { return s + x.total_findings; }, 0);
+      var score = latest ? (latest.score != null ? latest.score : '--') : '--';
+      var scoreLabel = latest ? (latest.score_label || '') : '';
+      var scoreNum = latest ? (latest.score != null ? latest.score : 0) : 0;
+
+      var scoreDesc = scoreNum >= 90
+        ? 'No critical issues detected. Your security posture is strong. Continue monitoring for changes.'
+        : scoreNum >= 70
+          ? 'Minor issues found. Review findings and address high-severity items when possible.'
+          : scoreNum >= 50
+            ? 'Significant findings detected. Several items need attention to improve your security posture.'
+            : 'Critical issues detected. Immediate investigation recommended. Review all findings below.';
+
+      var circumference = 2 * Math.PI * 58;
+      var dashOffset = circumference * (1 - scoreNum / 100);
+
+      c.innerHTML =
+        '<div class="stat-row">' +
+          statCard('Security Score', score, scoreLabel, scoreColorClass(scoreNum)) +
+          statCard('Critical Findings', '0', 'Requires immediate action', 'score-critical') +
+          statCard('Total Findings', totalFindings, 'Across all scans', '') +
+          statCard('Scans Run', scans.length, 'Since first install', '') +
+        '</div>' +
+        '<div class="middle-row">' +
+          '<div class="card"><div class="card-title">Latest Security Score</div>' +
+            '<div class="score-display">' +
+              '<div class="score-ring-container">' +
+                '<svg class="score-ring" width="140" height="140" viewBox="0 0 140 140">' +
+                  '<circle class="track" cx="70" cy="70" r="58" />' +
+                  '<circle class="fill" cx="70" cy="70" r="58" ' +
+                    'stroke-dasharray="' + circumference + '" ' +
+                    'stroke-dashoffset="' + dashOffset + '" ' +
+                    'style="stroke:' + scoreColor(scoreNum) + '" ' +
+                    'transform="rotate(-90 70 70)" />' +
+                '</svg>' +
+                '<div class="score-ring-label">' +
+                  '<div class="number" style="color:' + scoreColor(scoreNum) + '">' + score + '</div>' +
+                  '<div class="out-of">/ 100</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="score-info">' +
+                '<div class="risk-label" style="color:' + scoreColor(scoreNum) + '">' + scoreLabel + '</div>' +
+                '<div class="risk-desc">' + scoreDesc + '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="card"><div class="card-title">Score History</div>' +
+            buildHistoryTable(scans.slice(0, 5)) +
+            '<div style="text-align:center; padding:8px 0 0;"><a href="#" onclick="navigate(\'history\'); return false;" style="color:var(--accent); font-size:13px; text-decoration:none;">View full history</a></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card"><div class="card-title">Recent Findings</div>' +
+          '<div id="dash-findings">Loading...</div>' +
+        '</div>';
+
+      // Load findings from most recent scan that has any
+      var scanWithFindings = scans.find(function (s) { return s.total_findings > 0; });
+      var findEl = document.getElementById('dash-findings');
+      if (scanWithFindings) {
+        var findings = await fetchFindings(scanWithFindings.id);
+        findEl.innerHTML = buildFindingsTable(findings);
+      } else {
+        findEl.innerHTML = '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings to display. Upload a .evtx file to scan for threats.</div>';
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // PAGE: Scans — clickable list of all scans
+    // ---------------------------------------------------------------
+    async function renderScansPage() {
+      var c = document.getElementById('content');
+      var scans = await fetchScans(50);
+
+      if (scans.length === 0) {
+        c.innerHTML = '<div class="page-placeholder"><div class="placeholder-icon">&#128269;</div>' +
+          '<h3>No scans yet</h3><p>Upload a .evtx file to run your first scan.</p></div>';
+        return;
+      }
+
+      c.innerHTML =
+        '<div class="card"><div class="card-title">All Scans (' + scans.length + ')</div>' +
+        '<table class="findings-table"><thead><tr>' +
+          '<th>ID</th><th>Date</th><th>Hostname</th><th>Files</th><th>Events</th><th>Findings</th><th>Score</th><th>Label</th>' +
+        '</tr></thead><tbody>' +
+        scans.map(function (s) {
+          return '<tr class="scan-row" onclick="viewScan(' + s.id + ')">' +
+            '<td>#' + s.id + '</td>' +
+            '<td class="col-time">' + (s.scanned_at || '-') + '</td>' +
+            '<td>' + (s.hostname || '-') + '</td>' +
+            '<td>' + (s.files_scanned || 0) + '</td>' +
+            '<td>' + (s.total_events || 0) + '</td>' +
+            '<td>' + s.total_findings + '</td>' +
+            '<td style="font-weight:600; color:' + scoreColor(s.score) + '">' + (s.score != null ? s.score : '-') + '</td>' +
+            '<td>' + (s.score_label || '-') + '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table></div>';
+    }
+
+    async function viewScan(scanId) {
+      var c = document.getElementById('content');
+      document.getElementById('page-title').textContent = 'Scan #' + scanId;
+
+      var scans = await fetchScans(50);
+      var scan = scans.find(function (s) { return s.id === scanId; });
+      var findings = await fetchFindings(scanId);
+
+      c.innerHTML =
+        '<div class="back-link" onclick="navigate(\'scans\')">\u2190 Back to Scans</div>' +
+        '<div class="scan-header">' +
+          statCard('Score', scan ? (scan.score != null ? scan.score : '-') : '-', scan ? (scan.score_label || '') : '', scan ? scoreColorClass(scan.score) : '') +
+          statCard('Findings', findings.length, 'In this scan', '') +
+          statCard('Files Scanned', scan ? scan.files_scanned : '-', '', '') +
+          statCard('Date', scan ? scan.scanned_at : '-', scan ? (scan.hostname || '') : '', '') +
+        '</div>' +
+        '<div class="card"><div class="card-title">Findings for Scan #' + scanId + '</div>' +
+          (findings.length > 0
+            ? buildFindingsTable(findings)
+            : '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings in this scan. All clear.</div>') +
+        '</div>';
+    }
+
+    // ---------------------------------------------------------------
+    // PAGE: Findings — all findings from the latest scan with findings
+    // ---------------------------------------------------------------
+    async function renderFindingsPage() {
+      var c = document.getElementById('content');
+      var scans = await fetchScans(50);
+      var scanWithFindings = scans.find(function (s) { return s.total_findings > 0; });
+
+      if (!scanWithFindings) {
+        c.innerHTML = '<div class="page-placeholder"><div class="placeholder-icon">&#9888;</div>' +
+          '<h3>No findings</h3><p>All scans came back clean. Upload a new .evtx file to check for threats.</p></div>';
+        return;
+      }
+
+      var findings = await fetchFindings(scanWithFindings.id);
+      c.innerHTML =
+        '<div class="card"><div class="card-title">Findings from Scan #' + scanWithFindings.id +
+          ' &mdash; ' + (scanWithFindings.scanned_at || '') + '</div>' +
+          buildFindingsTable(findings) +
+        '</div>';
+    }
+
+    // ---------------------------------------------------------------
+    // PAGE: History — expanded scan history with trends
+    // ---------------------------------------------------------------
+    async function renderHistoryPage() {
+      var c = document.getElementById('content');
+      var scans = await fetchScans(50);
+
+      if (scans.length === 0) {
+        c.innerHTML = '<div class="page-placeholder"><div class="placeholder-icon">&#9776;</div>' +
+          '<h3>No history yet</h3><p>Run a scan to start tracking your security posture over time.</p></div>';
+        return;
+      }
+
+      c.innerHTML =
+        '<div class="card"><div class="card-title">Scan History (' + scans.length + ' scans)</div>' +
+          buildHistoryTable(scans) +
+        '</div>';
+    }
+
+    // ---------------------------------------------------------------
+    // PAGE: Whitelist
+    // ---------------------------------------------------------------
+    async function renderWhitelistPage() {
+      var c = document.getElementById('content');
+      c.innerHTML =
+        '<div class="card">' +
+          '<div class="card-title">Whitelist Configuration</div>' +
+          '<p style="color:var(--text-muted); font-size:13px; margin-bottom:20px;">' +
+            'Pulse automatically suppresses findings from 100+ known-good services (anti-cheat, Google, Microsoft, security software, etc.). ' +
+            'You can add your own entries in <code style="background:var(--accent-glow); padding:2px 6px; border-radius:4px;">pulse.yaml</code>.' +
+          '</p>' +
+          '<div class="whitelist-grid">' +
+            whitelistSection('Built-in Services (sample)', [
+              'Windows Defender', 'CrowdStrike Falcon', 'Google Update', 'Steam Client',
+              'NVIDIA Display', 'Corsair iCUE', 'Discord', 'Spotify', 'NordVPN', 'Zoom',
+              'Adobe Acrobat', 'Slack', 'Docker Desktop', 'Visual Studio'
+            ]) +
+            whitelistSection('Custom (from pulse.yaml)', [
+              'Edit pulse.yaml to add your own accounts, services, IPs, or rule names'
+            ]) +
+          '</div>' +
+        '</div>';
+    }
+
+    // ---------------------------------------------------------------
+    // PAGE: Settings
+    // ---------------------------------------------------------------
+    function renderSettingsPage() {
+      var c = document.getElementById('content');
+      c.innerHTML =
+        '<div class="page-placeholder">' +
+          '<div class="placeholder-icon">&#9881;</div>' +
+          '<h3>Settings</h3>' +
+          '<p>Settings management is coming in a future release. For now, edit <code style="background:var(--accent-glow); padding:2px 6px; border-radius:4px;">pulse.yaml</code> directly to configure default scan options, email delivery, and whitelist entries.</p>' +
+        '</div>';
+    }
+
+    // ---------------------------------------------------------------
+    // Shared HTML builders
+    // ---------------------------------------------------------------
+    function statCard(label, value, sub, colorClass) {
+      return '<div class="stat-card">' +
+        '<div class="label">' + label + '</div>' +
+        '<div class="value ' + (colorClass || '') + '">' + value + '</div>' +
+        '<div class="sub">' + (sub || '') + '</div></div>';
+    }
+
+    function buildHistoryTable(scans) {
+      return '<table class="history-table"><thead><tr>' +
+        '<th>Date</th><th>Files</th><th>Findings</th><th>Score</th><th>Trend</th>' +
+        '</tr></thead><tbody>' +
+        scans.map(function (scan, i) {
+          var trend = '<span class="trend-flat">=</span>';
+          if (i < scans.length - 1 && scan.score != null && scans[i + 1].score != null) {
+            var diff = scan.score - scans[i + 1].score;
+            if (diff > 0) trend = '<span class="trend-up">\u2191 +' + diff + '</span>';
+            else if (diff < 0) trend = '<span class="trend-down">\u2193 ' + diff + '</span>';
+          }
+          return '<tr>' +
+            '<td>' + (scan.scanned_at || '-') + '</td>' +
+            '<td>' + (scan.files_scanned || 0) + '</td>' +
+            '<td>' + scan.total_findings + '</td>' +
+            '<td style="font-weight:600; color:' + scoreColor(scan.score) + '">' + (scan.score != null ? scan.score : '-') + '</td>' +
+            '<td>' + trend + '</td></tr>';
+        }).join('') +
+        '</tbody></table>';
+    }
+
+    function buildFindingsTable(findings) {
+      return '<table class="findings-table"><thead><tr>' +
+        '<th>Time</th><th>Severity</th><th>Rule</th><th>MITRE ATT&CK</th><th>Description</th>' +
+        '</tr></thead><tbody>' +
+        findings.map(function (f) {
+          var sev = (f.severity || 'LOW').toUpperCase();
+          var rule = f.rule || 'Unknown';
+          var mitre = f.mitre || mitreMap[rule] || '';
+          var mitreLink = mitre
+            ? '<span class="mitre-tag"><a href="https://attack.mitre.org/techniques/' +
+              mitre.replace('.', '/') + '/" target="_blank">' + mitre + '</a></span>'
+            : '-';
+          var details = f.details || f.description || '';
+          var shortDetails = details.length > 120 ? details.substring(0, 120) + '...' : details;
+          var timeMatch = details.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+          var time = f.timestamp || (timeMatch ? timeMatch[1] + ' ' + timeMatch[2] : '-');
+
+          return '<tr>' +
+            '<td class="col-time">' + time + '</td>' +
+            '<td class="col-severity"><span class="pill pill-' + sev.toLowerCase() + '">' + sev + '</span></td>' +
+            '<td class="col-rule">' + rule + '</td>' +
+            '<td class="col-mitre">' + mitreLink + '</td>' +
+            '<td>' + escapeHtml(shortDetails) + '</td></tr>';
+        }).join('') +
+        '</tbody></table>';
+    }
+
+    function whitelistSection(title, items) {
+      return '<div class="whitelist-section card">' +
+        '<h4>' + title + '</h4>' +
+        items.map(function (item) {
+          return '<span class="whitelist-item">' + escapeHtml(item) + '</span>';
+        }).join('') +
+      '</div>';
+    }
+
+    // ---------------------------------------------------------------
+    // Utilities
+    // ---------------------------------------------------------------
+    function scoreColor(score) {
+      if (score == null) return '#8b949e';
+      if (score >= 90) return '#10b981';
+      if (score >= 70) return '#3b82f6';
+      if (score >= 50) return '#f59e0b';
+      return '#ef4444';
+    }
+
+    function scoreColorClass(score) {
+      if (score == null) return '';
+      if (score >= 90) return 'score-secure';
+      if (score >= 70) return 'score-low';
+      if (score >= 50) return 'score-medium';
+      return 'score-critical';
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // ---------------------------------------------------------------
+    // Init
+    // ---------------------------------------------------------------
+    navigate('dashboard');
+  </script>
+</body>
+</html>

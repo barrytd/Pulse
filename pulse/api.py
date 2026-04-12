@@ -29,7 +29,7 @@ from typing import Optional
 
 import yaml
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from pulse import __version__
 from pulse.database import get_history, get_scan_findings, init_db, save_scan
@@ -91,6 +91,19 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None)
 
 def _register_routes(app: FastAPI) -> None:
     """Wire every endpoint onto the app."""
+
+    # Path to the dashboard HTML file (relative to this module).
+    _dashboard_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "web", "index.html"
+    )
+
+    # -------------------------------------------------------------------
+    # GET / — Web dashboard
+    # -------------------------------------------------------------------
+    @app.get("/", include_in_schema=False)
+    def dashboard():
+        """Serve the single-page web dashboard."""
+        return FileResponse(_dashboard_path, media_type="text/html")
 
     # -------------------------------------------------------------------
     # GET /api/health

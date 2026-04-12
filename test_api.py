@@ -204,3 +204,15 @@ def test_scan_cleans_up_temp_file(client):
     new_files = tmp_dir_after - tmp_dir_before
     leftover_evtx = [f for f in new_files if f.endswith(".evtx")]
     assert leftover_evtx == []
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+def test_dashboard_returns_html(client):
+    """The root route should serve the web dashboard as HTML."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "PULSE" in response.text
