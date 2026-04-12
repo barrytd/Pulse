@@ -662,13 +662,193 @@
     }
 
     .whitelist-item {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       padding: 4px 12px;
       background: var(--accent-glow);
       border-radius: 6px;
       font-size: 13px;
       margin: 2px 4px 2px 0;
       color: var(--text);
+    }
+
+    .whitelist-item .remove-btn {
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 15px;
+      line-height: 1;
+      border: none;
+      background: none;
+      padding: 0 2px;
+    }
+
+    .whitelist-item .remove-btn:hover {
+      color: #f85149;
+    }
+
+    .wl-add-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .wl-add-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .wl-add-row input:focus {
+      border-color: var(--accent);
+    }
+
+    .btn-small {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-small:hover {
+      opacity: 0.85;
+    }
+
+    .settings-section {
+      margin-bottom: 24px;
+    }
+
+    .settings-section h4 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .settings-section p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .history-group {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+
+    .history-group-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 16px;
+      cursor: pointer;
+      background: var(--card-bg);
+      transition: background 0.15s;
+    }
+
+    .history-group-header:hover {
+      background: var(--hover-bg);
+    }
+
+    .hg-toggle {
+      font-size: 10px;
+      color: var(--text-muted);
+      width: 14px;
+    }
+
+    .hg-date {
+      font-weight: 700;
+      font-size: 14px;
+      min-width: 100px;
+    }
+
+    .hg-stat {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .history-group-body {
+      border-top: 1px solid var(--border);
+    }
+
+    .history-group-body .history-table {
+      margin: 0;
+    }
+
+    .grade-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .category-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .category-card {
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .category-card .cat-name {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .category-card .cat-status {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .cat-clear { color: #3fb950; }
+    .cat-low { color: #d29922; }
+    .cat-medium { color: #f0883e; }
+    .cat-high { color: #f85149; }
+
+    .save-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #238636;
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .save-toast.show {
+      opacity: 1;
     }
 
     /* ------------------------------------------------------------------ */
@@ -749,16 +929,16 @@
   <!-- ============================================================= -->
   <div class="modal-overlay" id="upload-modal">
     <div class="modal">
-      <h3>Upload Event Log</h3>
-      <p>Select a Windows .evtx file to scan for threats. The file is analyzed and deleted immediately.</p>
+      <h3>Upload Event Logs</h3>
+      <p>Select one or more Windows .evtx files to scan for threats. Files are analyzed and deleted immediately.</p>
 
       <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
         <div class="drop-icon">&#128196;</div>
         <div class="drop-text">
-          Drop .evtx file here or <strong>browse</strong>
+          Drop .evtx files here or <strong>browse</strong>
         </div>
       </div>
-      <input type="file" id="file-input" accept=".evtx" style="display:none" />
+      <input type="file" id="file-input" accept=".evtx" multiple style="display:none" />
 
       <div class="upload-status" id="upload-status"></div>
 
@@ -815,6 +995,7 @@
     // ---------------------------------------------------------------
     function navigate(page) {
       currentPage = page;
+      if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page);
       document.querySelectorAll('.sidebar-nav a').forEach(function (a) { a.classList.remove('active'); });
       var links = document.querySelectorAll('.sidebar-nav a');
       var pageNames = ['dashboard','scans','findings','history','whitelist','settings'];
@@ -839,7 +1020,7 @@
     // ---------------------------------------------------------------
     // Upload modal
     // ---------------------------------------------------------------
-    var selectedFile = null;
+    var selectedFiles = [];
 
     function openUploadModal() {
       document.getElementById('upload-modal').classList.add('open');
@@ -847,22 +1028,31 @@
       document.getElementById('upload-status').className = 'upload-status';
       document.getElementById('scan-btn').disabled = true;
       document.getElementById('drop-zone').querySelector('.drop-text').innerHTML =
-        'Drop .evtx file here or <strong>browse</strong>';
-      selectedFile = null;
+        'Drop .evtx files here or <strong>browse</strong>';
+      selectedFiles = [];
     }
 
     function closeUploadModal() {
       document.getElementById('upload-modal').classList.remove('open');
       document.getElementById('file-input').value = '';
-      selectedFile = null;
+      selectedFiles = [];
+    }
+
+    function updateFileDisplay() {
+      var text = document.getElementById('drop-zone').querySelector('.drop-text');
+      if (selectedFiles.length === 1) {
+        text.innerHTML = '<strong>' + selectedFiles[0].name + '</strong> (' + formatBytes(selectedFiles[0].size) + ')';
+      } else {
+        var totalSize = selectedFiles.reduce(function (s, f) { return s + f.size; }, 0);
+        text.innerHTML = '<strong>' + selectedFiles.length + ' files</strong> selected (' + formatBytes(totalSize) + ')';
+      }
+      document.getElementById('scan-btn').disabled = false;
     }
 
     document.getElementById('file-input').addEventListener('change', function (e) {
       if (e.target.files.length > 0) {
-        selectedFile = e.target.files[0];
-        document.getElementById('drop-zone').querySelector('.drop-text').innerHTML =
-          '<strong>' + selectedFile.name + '</strong> (' + formatBytes(selectedFile.size) + ')';
-        document.getElementById('scan-btn').disabled = false;
+        selectedFiles = Array.from(e.target.files);
+        updateFileDisplay();
       }
     });
 
@@ -873,11 +1063,12 @@
       e.preventDefault();
       dropZone.classList.remove('drag-over');
       if (e.dataTransfer.files.length > 0) {
-        selectedFile = e.dataTransfer.files[0];
-        document.getElementById('file-input').files = e.dataTransfer.files;
-        dropZone.querySelector('.drop-text').innerHTML =
-          '<strong>' + selectedFile.name + '</strong> (' + formatBytes(selectedFile.size) + ')';
-        document.getElementById('scan-btn').disabled = false;
+        selectedFiles = Array.from(e.dataTransfer.files).filter(function (f) {
+          return f.name.toLowerCase().endsWith('.evtx');
+        });
+        if (selectedFiles.length > 0) {
+          updateFileDisplay();
+        }
       }
     });
 
@@ -886,34 +1077,50 @@
     });
 
     async function uploadAndScan() {
-      if (!selectedFile) return;
+      if (selectedFiles.length === 0) return;
       var status = document.getElementById('upload-status');
       var scanBtn = document.getElementById('scan-btn');
-      status.textContent = 'Scanning...';
-      status.className = 'upload-status';
       scanBtn.disabled = true;
 
-      try {
-        var form = new FormData();
-        form.append('file', selectedFile);
-        var resp = await fetch('/api/scan', { method: 'POST', body: form });
-        var data = await resp.json();
-        if (!resp.ok) {
-          status.textContent = data.detail || 'Scan failed.';
-          status.className = 'upload-status error';
-          scanBtn.disabled = false;
-          return;
+      var totalFindings = 0;
+      var completed = 0;
+      var failed = 0;
+
+      for (var i = 0; i < selectedFiles.length; i++) {
+        var file = selectedFiles[i];
+        status.textContent = 'Scanning file ' + (i + 1) + ' of ' + selectedFiles.length + '...';
+        status.className = 'upload-status';
+
+        try {
+          var form = new FormData();
+          form.append('file', file);
+          var resp = await fetch('/api/scan', { method: 'POST', body: form });
+          var data = await resp.json();
+          if (!resp.ok) {
+            failed++;
+            continue;
+          }
+          totalFindings += data.total_findings;
+          completed++;
+        } catch (err) {
+          failed++;
         }
-        status.textContent = 'Scan complete \u2014 ' + data.total_findings + ' finding(s), score ' + data.score + '/100';
-        status.className = 'upload-status success';
-        cachedScans = null;
-        cachedFindings = null;
-        setTimeout(function () { closeUploadModal(); navigate(currentPage); }, 1500);
-      } catch (err) {
-        status.textContent = 'Network error \u2014 is the API server running?';
+      }
+
+      if (failed > 0 && completed === 0) {
+        status.textContent = 'All ' + failed + ' file(s) failed to scan.';
         status.className = 'upload-status error';
         scanBtn.disabled = false;
+        return;
       }
+
+      var msg = completed + ' file(s) scanned \u2014 ' + totalFindings + ' finding(s)';
+      if (failed > 0) msg += ' (' + failed + ' failed)';
+      status.textContent = msg;
+      status.className = 'upload-status success';
+      cachedScans = null;
+      cachedFindings = null;
+      setTimeout(function () { closeUploadModal(); navigate(currentPage); }, 1500);
     }
 
     // ---------------------------------------------------------------
@@ -942,17 +1149,20 @@
     // ---------------------------------------------------------------
     async function renderDashboardPage() {
       var c = document.getElementById('content');
-      var scans = await fetchScans(10);
+      var scans = await fetchScans(50);
+      var dailyResp = await fetch('/api/score/daily?days=30').then(function (r) { return r.json(); });
+      var dailyScores = dailyResp.daily_scores || [];
+      var today = dailyScores[0];
 
-      var latest = scans[0];
+      var scoreNum = today ? today.score : 100;
+      var scoreLabel = today ? today.label : 'SECURE';
+      var grade = today ? today.grade : 'A';
+      var score = today ? today.score : '--';
       var totalFindings = scans.reduce(function (s, x) { return s + x.total_findings; }, 0);
-      var score = latest ? (latest.score != null ? latest.score : '--') : '--';
-      var scoreLabel = latest ? (latest.score_label || '') : '';
-      var scoreNum = latest ? (latest.score != null ? latest.score : 0) : 0;
 
       var scoreDesc = scoreNum >= 90
         ? 'No critical issues detected. Your security posture is strong. Continue monitoring for changes.'
-        : scoreNum >= 70
+        : scoreNum >= 75
           ? 'Minor issues found. Review findings and address high-severity items when possible.'
           : scoreNum >= 50
             ? 'Significant findings detected. Several items need attention to improve your security posture.'
@@ -961,15 +1171,59 @@
       var circumference = 2 * Math.PI * 58;
       var dashOffset = circumference * (1 - scoreNum / 100);
 
+      // Severity counts from today's deductions
+      var sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+      if (today && today.deductions) {
+        today.deductions.forEach(function (d) {
+          if (sevCounts[d.severity] !== undefined) sevCounts[d.severity]++;
+        });
+      }
+
+      // Score trend vs previous day
+      var trendHtml = '';
+      if (dailyScores.length >= 2) {
+        var diff = dailyScores[0].score - dailyScores[1].score;
+        if (diff > 0) trendHtml = '<span class="trend-up">\u2191 +' + diff + ' from yesterday</span>';
+        else if (diff < 0) trendHtml = '<span class="trend-down">\u2193 ' + diff + ' from yesterday</span>';
+        else trendHtml = '<span class="trend-flat">No change from yesterday</span>';
+      }
+
+      // Category breakdown
+      var categoryHtml = '';
+      if (today && today.categories) {
+        var catOrder = ['Authentication', 'Credential Access', 'Lateral Movement', 'Persistence', 'Privilege Escalation', 'Execution', 'Defense Evasion'];
+        categoryHtml = '<div class="category-grid">' +
+          catOrder.map(function (cat) {
+            var info = today.categories[cat] || { status: 'clear', deducted: 0, rules_triggered: [] };
+            var statusLabel = info.status === 'clear' ? 'Clear' : info.status === 'low' ? 'Low Risk' : info.status === 'medium' ? 'At Risk' : 'Critical';
+            var statusIcon = info.status === 'clear' ? '\u2713' : info.status === 'low' ? '\u26A0' : '\u2716';
+            return '<div class="category-card">' +
+              '<div class="cat-name">' + cat + '</div>' +
+              '<div class="cat-status cat-' + info.status + '">' + statusIcon + ' ' + statusLabel +
+                (info.deducted > 0 ? ' <span style="font-weight:400; font-size:12px;">(-' + info.deducted + ' pts)</span>' : '') +
+              '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }
+
+      // Files scanned today
+      var filesHtml = '';
+      if (today && today.files && today.files.length > 0) {
+        filesHtml = '<div style="font-size:13px; color:var(--text-muted); margin-top:4px;">Files: ' +
+          today.files.map(function (f) { return '<strong style="color:var(--text);">' + escapeHtml(f) + '</strong>'; }).join(', ') +
+        '</div>';
+      }
+
       c.innerHTML =
         '<div class="stat-row">' +
-          statCard('Security Score', score, scoreLabel, scoreColorClass(scoreNum)) +
-          statCard('Critical Findings', '0', 'Requires immediate action', 'score-critical') +
+          statCard('Daily Score', score + ' <span style="font-size:16px; opacity:0.7;">(' + grade + ')</span>', scoreLabel, scoreColorClass(scoreNum)) +
+          statCard('Unique Rules', today ? today.unique_rules : 0, 'Triggered today', today && today.unique_rules > 0 ? 'score-critical' : '') +
           statCard('Total Findings', totalFindings, 'Across all scans', '') +
           statCard('Scans Run', scans.length, 'Since first install', '') +
         '</div>' +
         '<div class="middle-row">' +
-          '<div class="card"><div class="card-title">Latest Security Score</div>' +
+          '<div class="card"><div class="card-title">Today\u2019s Security Score</div>' +
             '<div class="score-display">' +
               '<div class="score-ring-container">' +
                 '<svg class="score-ring" width="140" height="140" viewBox="0 0 140 140">' +
@@ -986,13 +1240,34 @@
                 '</div>' +
               '</div>' +
               '<div class="score-info">' +
-                '<div class="risk-label" style="color:' + scoreColor(scoreNum) + '">' + scoreLabel + '</div>' +
+                '<div class="risk-label" style="color:' + scoreColor(scoreNum) + '">' +
+                  '<span class="grade-badge" style="background:' + scoreColor(scoreNum) + '; margin-right:8px;">' + grade + '</span>' +
+                  scoreLabel +
+                '</div>' +
                 '<div class="risk-desc">' + scoreDesc + '</div>' +
+                (trendHtml ? '<div style="margin-top:8px; font-size:13px;">' + trendHtml + '</div>' : '') +
+                filesHtml +
               '</div>' +
             '</div>' +
+            '<div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">' +
+              '<div style="font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px;">Severity Breakdown (unique rules)</div>' +
+              '<div style="display:flex; gap:12px;">' +
+                sevBadge('CRITICAL', sevCounts.CRITICAL) +
+                sevBadge('HIGH', sevCounts.HIGH) +
+                sevBadge('MEDIUM', sevCounts.MEDIUM) +
+                sevBadge('LOW', sevCounts.LOW) +
+              '</div>' +
+            '</div>' +
+            '<div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">' +
+              '<div style="font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:4px;">Security Categories</div>' +
+              categoryHtml +
+            '</div>' +
+            '<div style="margin-top:16px;">' +
+              '<button class="btn-small" onclick="navigate(\'findings\')" style="width:100%; padding:10px; background:var(--border); color:var(--text);">View Findings \u2192</button>' +
+            '</div>' +
           '</div>' +
-          '<div class="card"><div class="card-title">Score History</div>' +
-            buildHistoryTable(scans.slice(0, 5)) +
+          '<div class="card"><div class="card-title">Daily Score History</div>' +
+            buildDailyScoreTable(dailyScores.slice(0, 7)) +
             '<div style="text-align:center; padding:8px 0 0;"><a href="#" onclick="navigate(\'history\'); return false;" style="color:var(--accent); font-size:13px; text-decoration:none;">View full history</a></div>' +
           '</div>' +
         '</div>' +
@@ -1000,12 +1275,12 @@
           '<div id="dash-findings">Loading...</div>' +
         '</div>';
 
-      // Load findings from most recent scan that has any
-      var scanWithFindings = scans.find(function (s) { return s.total_findings > 0; });
+      // Load findings
+      var latestWithFindings = scans.find(function (s) { return s.total_findings > 0; });
       var findEl = document.getElementById('dash-findings');
-      if (scanWithFindings) {
-        var findings = await fetchFindings(scanWithFindings.id);
-        findEl.innerHTML = buildFindingsTable(findings);
+      if (latestWithFindings) {
+        var latestFindings = await fetchFindings(latestWithFindings.id);
+        findEl.innerHTML = buildFindingsTable(latestFindings.slice().reverse());
       } else {
         findEl.innerHTML = '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings to display. Upload a .evtx file to scan for threats.</div>';
       }
@@ -1027,14 +1302,13 @@
       c.innerHTML =
         '<div class="card"><div class="card-title">All Scans (' + scans.length + ')</div>' +
         '<table class="findings-table"><thead><tr>' +
-          '<th>ID</th><th>Date</th><th>Hostname</th><th>Files</th><th>Events</th><th>Findings</th><th>Score</th><th>Label</th>' +
+          '<th>ID</th><th>Date</th><th>File</th><th>Events</th><th>Findings</th><th>Score</th><th>Label</th>' +
         '</tr></thead><tbody>' +
         scans.map(function (s) {
           return '<tr class="scan-row" onclick="viewScan(' + s.id + ')">' +
             '<td>#' + s.id + '</td>' +
             '<td class="col-time">' + (s.scanned_at || '-') + '</td>' +
-            '<td>' + (s.hostname || '-') + '</td>' +
-            '<td>' + (s.files_scanned || 0) + '</td>' +
+            '<td>' + escapeHtml(s.filename || 'Unknown') + '</td>' +
             '<td>' + (s.total_events || 0) + '</td>' +
             '<td>' + s.total_findings + '</td>' +
             '<td style="font-weight:600; color:' + scoreColor(s.score) + '">' + (s.score != null ? s.score : '-') + '</td>' +
@@ -1046,21 +1320,28 @@
 
     async function viewScan(scanId) {
       var c = document.getElementById('content');
-      document.getElementById('page-title').textContent = 'Scan #' + scanId;
-
       var scans = await fetchScans(50);
       var scan = scans.find(function (s) { return s.id === scanId; });
       var findings = await fetchFindings(scanId);
+      var fname = scan ? (scan.filename || 'Unknown') : 'Unknown';
+      document.getElementById('page-title').textContent = fname + ' — Scan #' + scanId;
 
       c.innerHTML =
         '<div class="back-link" onclick="navigate(\'scans\')">\u2190 Back to Scans</div>' +
         '<div class="scan-header">' +
+          statCard('File', fname, scan ? (scan.hostname || '') : '', '') +
           statCard('Score', scan ? (scan.score != null ? scan.score : '-') : '-', scan ? (scan.score_label || '') : '', scan ? scoreColorClass(scan.score) : '') +
           statCard('Findings', findings.length, 'In this scan', '') +
-          statCard('Files Scanned', scan ? scan.files_scanned : '-', '', '') +
-          statCard('Date', scan ? scan.scanned_at : '-', scan ? (scan.hostname || '') : '', '') +
+          statCard('Date', scan ? scan.scanned_at : '-', '', '') +
         '</div>' +
-        '<div class="card"><div class="card-title">Findings for Scan #' + scanId + '</div>' +
+        '<div class="card">' +
+          '<div class="card-title" style="justify-content:space-between;">' +
+            '<span>Findings — ' + escapeHtml(fname) + '</span>' +
+            '<div style="display:flex; gap:8px;">' +
+              '<button class="btn-small" onclick="downloadReport(' + scanId + ', \'html\')">Export HTML</button>' +
+              '<button class="btn-small" onclick="downloadReport(' + scanId + ', \'json\')" style="background:var(--border); color:var(--text);">Export JSON</button>' +
+            '</div>' +
+          '</div>' +
           (findings.length > 0
             ? buildFindingsTable(findings)
             : '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings in this scan. All clear.</div>') +
@@ -1104,7 +1385,7 @@
 
       c.innerHTML =
         '<div class="card"><div class="card-title">Scan History (' + scans.length + ' scans)</div>' +
-          buildHistoryTable(scans) +
+          buildGroupedHistoryTable(scans) +
         '</div>';
     }
 
@@ -1113,47 +1394,140 @@
     // ---------------------------------------------------------------
     async function renderWhitelistPage() {
       var c = document.getElementById('content');
+      c.innerHTML = '<div class="card"><div class="card-title">Loading...</div></div>';
+
+      var config = await fetch('/api/config').then(function (r) { return r.json(); });
+      var wl = config.whitelist;
+
       c.innerHTML =
         '<div class="card">' +
           '<div class="card-title">Whitelist Configuration</div>' +
           '<p style="color:var(--text-muted); font-size:13px; margin-bottom:20px;">' +
-            'Pulse automatically suppresses findings from 100+ known-good services (anti-cheat, Google, Microsoft, security software, etc.). ' +
-            'You can add your own entries in <code style="background:var(--accent-glow); padding:2px 6px; border-radius:4px;">pulse.yaml</code>.' +
+            'Pulse automatically suppresses findings from 100+ built-in known-good services. ' +
+            'Add your own entries below — changes are saved to <code style="background:var(--accent-glow); padding:2px 6px; border-radius:4px;">pulse.yaml</code> immediately.' +
           '</p>' +
           '<div class="whitelist-grid">' +
-            whitelistSection('Built-in Services (sample)', [
-              'Windows Defender', 'CrowdStrike Falcon', 'Google Update', 'Steam Client',
-              'NVIDIA Display', 'Corsair iCUE', 'Discord', 'Spotify', 'NordVPN', 'Zoom',
-              'Adobe Acrobat', 'Slack', 'Docker Desktop', 'Visual Studio'
-            ]) +
-            whitelistSection('Custom (from pulse.yaml)', [
-              'Edit pulse.yaml to add your own accounts, services, IPs, or rule names'
-            ]) +
+            whitelistEditable('Accounts', 'accounts', wl.accounts) +
+            whitelistEditable('Rules', 'rules', wl.rules) +
+            whitelistEditable('Services', 'services', wl.services) +
+            whitelistEditable('IPs', 'ips', wl.ips) +
           '</div>' +
-        '</div>';
+        '</div>' +
+        '<div class="card" style="margin-top:16px;">' +
+          '<div class="card-title">Built-in Known-Good Services (sample)</div>' +
+          '<p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">These are always active and cannot be removed. They suppress common software from triggering false positives.</p>' +
+          '<div>' +
+            ['Windows Defender', 'CrowdStrike Falcon', 'Google Update', 'Steam Client',
+             'NVIDIA Display', 'Corsair iCUE', 'Discord', 'Spotify', 'NordVPN', 'Zoom',
+             'Adobe Acrobat', 'Slack', 'Docker Desktop', 'Visual Studio', 'Riot Vanguard',
+             'BattlEye', 'Easy Anti-Cheat'].map(function (s) {
+              return '<span class="whitelist-item">' + escapeHtml(s) + '</span>';
+            }).join('') +
+          '</div>' +
+        '</div>' +
+        '<div id="save-toast" class="save-toast">Saved</div>';
+    }
+
+    function whitelistEditable(title, key, items) {
+      var itemsHtml = items.map(function (item) {
+        return '<span class="whitelist-item">' + escapeHtml(item) +
+          '<button class="remove-btn" onclick="removeWhitelistItem(\'' + key + '\', \'' + escapeHtml(item).replace(/'/g, "\\'") + '\')">&times;</button></span>';
+      }).join('');
+
+      return '<div class="whitelist-section card">' +
+        '<h4>' + title + '</h4>' +
+        '<div id="wl-items-' + key + '">' + (itemsHtml || '<span style="color:var(--text-muted); font-size:13px;">No custom entries</span>') + '</div>' +
+        '<div class="wl-add-row">' +
+          '<input type="text" id="wl-input-' + key + '" placeholder="Add ' + title.toLowerCase().replace(/s$/, '') + '..." onkeydown="if(event.key===\'Enter\')addWhitelistItem(\'' + key + '\')" />' +
+          '<button class="btn-small" onclick="addWhitelistItem(\'' + key + '\')">Add</button>' +
+        '</div>' +
+      '</div>';
     }
 
     // ---------------------------------------------------------------
     // PAGE: Settings
     // ---------------------------------------------------------------
-    function renderSettingsPage() {
+    async function renderSettingsPage() {
       var c = document.getElementById('content');
+      c.innerHTML = '<div class="card"><div class="card-title">Loading...</div></div>';
+
+      var config = await fetch('/api/config').then(function (r) { return r.json(); });
+      var rules = await fetch('/api/rules').then(function (r) { return r.json(); });
+
       c.innerHTML =
-        '<div class="page-placeholder">' +
-          '<div class="placeholder-icon">&#9881;</div>' +
-          '<h3>Settings</h3>' +
-          '<p>Settings management is coming in a future release. For now, edit <code style="background:var(--accent-glow); padding:2px 6px; border-radius:4px;">pulse.yaml</code> directly to configure default scan options, email delivery, and whitelist entries.</p>' +
+        '<div class="card">' +
+          '<div class="card-title">Settings</div>' +
+          '<div class="settings-section">' +
+            '<h4>Scan Defaults</h4>' +
+            '<p>These defaults are used when no CLI flags are provided.</p>' +
+            '<table class="history-table"><tbody>' +
+              '<tr><td style="font-weight:600; width:140px;">Log directory</td><td>' + escapeHtml(config.settings.logs) + '</td></tr>' +
+              '<tr><td style="font-weight:600;">Report format</td><td>' + escapeHtml(config.settings.format).toUpperCase() + '</td></tr>' +
+              '<tr><td style="font-weight:600;">Min severity</td><td>' + escapeHtml(config.settings.severity) + '</td></tr>' +
+            '</tbody></table>' +
+          '</div>' +
+          '<div class="settings-section">' +
+            '<h4>Available Detection Rules (' + rules.rules.length + ')</h4>' +
+            '<p>These are all the rules Pulse runs during a scan. Suppress any rule by adding it to the whitelist.</p>' +
+            '<div>' +
+              rules.rules.map(function (r) {
+                return '<span class="whitelist-item">' + escapeHtml(r) + '</span>';
+              }).join('') +
+            '</div>' +
+          '</div>' +
+          '<div class="settings-section">' +
+            '<h4>Quick Links</h4>' +
+            '<p><a href="/docs" target="_blank" style="color:var(--accent); text-decoration:none;">API Documentation (Swagger)</a></p>' +
+          '</div>' +
         '</div>';
     }
 
     // ---------------------------------------------------------------
     // Shared HTML builders
     // ---------------------------------------------------------------
+    function sevBadge(level, count) {
+      var colors = { CRITICAL: '#f85149', HIGH: '#f0883e', MEDIUM: '#d29922', LOW: '#3fb950' };
+      var c = colors[level] || '#8b949e';
+      var bg = count > 0 ? c + '22' : 'transparent';
+      var textColor = count > 0 ? c : 'var(--text-muted)';
+      return '<div style="text-align:center;">' +
+        '<div style="background:' + bg + '; border:1px solid ' + (count > 0 ? c : 'var(--border)') + '; border-radius:6px; padding:6px 12px; min-width:50px;">' +
+          '<div style="font-size:18px; font-weight:700; color:' + textColor + ';">' + count + '</div>' +
+          '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.3px; color:' + textColor + '; opacity:0.8;">' + level + '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
     function statCard(label, value, sub, colorClass) {
       return '<div class="stat-card">' +
         '<div class="label">' + label + '</div>' +
         '<div class="value ' + (colorClass || '') + '">' + value + '</div>' +
         '<div class="sub">' + (sub || '') + '</div></div>';
+    }
+
+    function buildDailyScoreTable(dailyScores) {
+      if (!dailyScores || dailyScores.length === 0) {
+        return '<div style="text-align:center; padding:24px; color:var(--text-muted);">No daily scores yet.</div>';
+      }
+      return '<table class="history-table"><thead><tr>' +
+        '<th>Date</th><th>Grade</th><th>Score</th><th>Rules</th><th>Trend</th>' +
+        '</tr></thead><tbody>' +
+        dailyScores.map(function (d, i) {
+          var trend = '<span class="trend-flat">=</span>';
+          if (i < dailyScores.length - 1) {
+            var diff = d.score - dailyScores[i + 1].score;
+            if (diff > 0) trend = '<span class="trend-up">\u2191 +' + diff + '</span>';
+            else if (diff < 0) trend = '<span class="trend-down">\u2193 ' + diff + '</span>';
+          }
+          return '<tr>' +
+            '<td>' + d.date + '</td>' +
+            '<td><span class="grade-badge" style="background:' + d.colour + '; width:28px; height:28px; font-size:14px;">' + d.grade + '</span></td>' +
+            '<td style="font-weight:600; color:' + d.colour + ';">' + d.score + '</td>' +
+            '<td>' + d.unique_rules + ' rule' + (d.unique_rules !== 1 ? 's' : '') + '</td>' +
+            '<td>' + trend + '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table>';
     }
 
     function buildHistoryTable(scans) {
@@ -1175,6 +1549,67 @@
             '<td>' + trend + '</td></tr>';
         }).join('') +
         '</tbody></table>';
+    }
+
+    function buildGroupedHistoryTable(scans, maxGroups) {
+      var groups = {};
+      var dateOrder = [];
+      scans.forEach(function (scan) {
+        var date = (scan.scanned_at || '').split(' ')[0] || 'Unknown';
+        if (!groups[date]) { groups[date] = []; dateOrder.push(date); }
+        groups[date].push(scan);
+      });
+
+      if (maxGroups) dateOrder = dateOrder.slice(0, maxGroups);
+
+      var html = '<div class="history-groups">';
+      dateOrder.forEach(function (date) {
+        var group = groups[date];
+        var totalFindings = group.reduce(function (s, x) { return s + x.total_findings; }, 0);
+        var totalFiles = group.reduce(function (s, x) { return s + (x.files_scanned || 0); }, 0);
+        var bestScore = group.reduce(function (best, x) { return x.score != null && (best === null || x.score < best) ? x.score : best; }, null);
+        var groupId = 'hg-' + date.replace(/[^0-9]/g, '');
+
+        html += '<div class="history-group">' +
+          '<div class="history-group-header" onclick="toggleHistoryGroup(\'' + groupId + '\')">' +
+            '<span class="hg-toggle" id="' + groupId + '-icon">\u25B6</span>' +
+            '<span class="hg-date">' + date + '</span>' +
+            '<span class="hg-stat">' + group.length + ' scan' + (group.length > 1 ? 's' : '') + '</span>' +
+            '<span class="hg-stat">' + totalFindings + ' finding' + (totalFindings !== 1 ? 's' : '') + '</span>' +
+            (bestScore != null ? '<span class="hg-stat" style="font-weight:600; color:' + scoreColor(bestScore) + '">Score: ' + bestScore + '</span>' : '') +
+          '</div>' +
+          '<div class="history-group-body" id="' + groupId + '" style="display:none;">' +
+            '<table class="history-table"><thead><tr>' +
+              '<th>Time</th><th>File</th><th>Findings</th><th>Score</th>' +
+            '</tr></thead><tbody>' +
+            group.map(function (scan) {
+              var time = (scan.scanned_at || '').split(' ')[1] || '-';
+              var fname = scan.filename || 'Unknown';
+              return '<tr class="scan-row" onclick="viewScan(' + scan.id + ')">' +
+                '<td>' + time + '</td>' +
+                '<td>' + escapeHtml(fname) + '</td>' +
+                '<td>' + scan.total_findings + '</td>' +
+                '<td style="font-weight:600; color:' + scoreColor(scan.score) + '">' + (scan.score != null ? scan.score : '-') + '</td>' +
+              '</tr>';
+            }).join('') +
+            '</tbody></table>' +
+          '</div>' +
+        '</div>';
+      });
+      html += '</div>';
+      return html;
+    }
+
+    function toggleHistoryGroup(id) {
+      var body = document.getElementById(id);
+      var icon = document.getElementById(id + '-icon');
+      if (body.style.display === 'none') {
+        body.style.display = 'block';
+        icon.textContent = '\u25BC';
+      } else {
+        body.style.display = 'none';
+        icon.textContent = '\u25B6';
+      }
     }
 
     function buildFindingsTable(findings) {
@@ -1218,16 +1653,17 @@
     // ---------------------------------------------------------------
     function scoreColor(score) {
       if (score == null) return '#8b949e';
-      if (score >= 90) return '#10b981';
-      if (score >= 70) return '#3b82f6';
-      if (score >= 50) return '#f59e0b';
-      return '#ef4444';
+      if (score >= 90) return '#27ae60';
+      if (score >= 75) return '#3498db';
+      if (score >= 50) return '#e67e22';
+      if (score >= 25) return '#e74c3c';
+      return '#8e44ad';
     }
 
     function scoreColorClass(score) {
       if (score == null) return '';
       if (score >= 90) return 'score-secure';
-      if (score >= 70) return 'score-low';
+      if (score >= 75) return 'score-low';
       if (score >= 50) return 'score-medium';
       return 'score-critical';
     }
@@ -1245,9 +1681,73 @@
     }
 
     // ---------------------------------------------------------------
+    // Report export
+    // ---------------------------------------------------------------
+    function downloadReport(scanId, fmt) {
+      var url = '/api/export/' + scanId + '?format=' + fmt;
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'pulse_scan_' + scanId + '.' + fmt;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    // ---------------------------------------------------------------
+    // Whitelist add/remove
+    // ---------------------------------------------------------------
+    async function addWhitelistItem(key) {
+      var input = document.getElementById('wl-input-' + key);
+      var value = input.value.trim();
+      if (!value) return;
+
+      var config = await fetch('/api/config').then(function (r) { return r.json(); });
+      var items = config.whitelist[key] || [];
+      if (items.indexOf(value) !== -1) { input.value = ''; return; }
+      items.push(value);
+
+      var body = {};
+      body[key] = items;
+      await fetch('/api/config/whitelist', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      showToast('Saved');
+      renderWhitelistPage();
+    }
+
+    async function removeWhitelistItem(key, value) {
+      var config = await fetch('/api/config').then(function (r) { return r.json(); });
+      var items = (config.whitelist[key] || []).filter(function (v) { return v !== value; });
+
+      var body = {};
+      body[key] = items;
+      await fetch('/api/config/whitelist', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      showToast('Removed');
+      renderWhitelistPage();
+    }
+
+    function showToast(msg) {
+      var toast = document.getElementById('save-toast');
+      if (!toast) return;
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(function () { toast.classList.remove('show'); }, 2000);
+    }
+
+    // ---------------------------------------------------------------
     // Init
     // ---------------------------------------------------------------
-    navigate('dashboard');
+    var startPage = (location.hash || '').replace('#', '') || 'dashboard';
+    var validPages = ['dashboard','scans','findings','history','whitelist','settings'];
+    navigate(validPages.indexOf(startPage) >= 0 ? startPage : 'dashboard');
   </script>
 </body>
 </html>

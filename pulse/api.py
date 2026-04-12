@@ -28,14 +28,17 @@ import tempfile
 from typing import Optional
 
 import yaml
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from pulse import __version__
 from pulse.database import get_history, get_scan_findings, init_db, save_scan
 from pulse.detections import run_all_detections
 from pulse.parser import parse_evtx
-from pulse.reporter import _calculate_score
+from pulse.reporter import (
+    _build_html_report, _build_json_report, _calculate_score,
+    calculate_score_from_findings,
+)
 from pulse.whitelist import filter_whitelist
 
 
@@ -148,15 +151,13 @@ def _register_routes(app: FastAPI) -> None:
             # Apply whitelist so the API gives the same answers as the CLI.
             findings = _filter_with_whitelist(findings, app.state.config_path)
 
-            # Count severities so we can score the scan.
+            score_data = calculate_score_from_findings(findings)
+
             sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
             for f in findings:
                 sev = f.get("severity", "LOW")
                 sev_counts[sev] = sev_counts.get(sev, 0) + 1
 
-            score, score_label, _ = _calculate_score(sev_counts)
-
-            # Save to the database so /api/history and /api/report pick it up.
             scan_stats = {
                 "total_events": len(events),
                 "files_scanned": 1,
@@ -165,8 +166,9 @@ def _register_routes(app: FastAPI) -> None:
                 app.state.db_path,
                 findings,
                 scan_stats=scan_stats,
-                score=score,
-                score_label=score_label,
+                score=score_data["score"],
+                score_label=score_data["label"],
+                filename=file.filename,
             )
 
             return {
@@ -174,8 +176,9 @@ def _register_routes(app: FastAPI) -> None:
                 "filename": file.filename,
                 "total_events": len(events),
                 "total_findings": len(findings),
-                "score": score,
-                "score_label": score_label,
+                "score": score_data["score"],
+                "score_label": score_data["label"],
+                "grade": score_data["grade"],
                 "severity_counts": sev_counts,
                 "findings": findings,
             }
@@ -217,25 +220,190 @@ def _register_routes(app: FastAPI) -> None:
                 )
         return {"scan_id": scan_id, "findings": findings}
 
+    # -------------------------------------------------------------------
+    # GET /api/score/daily — aggregated daily scores
+    # -------------------------------------------------------------------
+    @app.get("/api/score/daily")
+    def daily_scores(days: int = 30):
+        """Return deduplicated daily scores combining all scans per day."""
+        if days < 1 or days > 365:
+            raise HTTPException(400, detail="days must be between 1 and 365.")
+
+        all_scans = get_history(app.state.db_path, limit=200)
+
+        date_groups = {}
+        for scan in all_scans:
+            date = (scan.get("scanned_at") or "")[:10]
+            if not date:
+                continue
+            if date not in date_groups:
+                date_groups[date] = []
+            date_groups[date].append(scan)
+
+        daily = []
+        for date in sorted(date_groups.keys(), reverse=True)[:days]:
+            group = date_groups[date]
+            all_findings = []
+            total_events = 0
+            filenames = []
+            for scan in group:
+                findings = get_scan_findings(app.state.db_path, scan["id"])
+                all_findings.extend(findings)
+                total_events += scan.get("total_events", 0)
+                if scan.get("filename"):
+                    filenames.append(scan["filename"])
+
+            score_data = calculate_score_from_findings(all_findings)
+            daily.append({
+                "date": date,
+                "score": score_data["score"],
+                "grade": score_data["grade"],
+                "label": score_data["label"],
+                "colour": score_data["colour"],
+                "scans": len(group),
+                "files": list(set(filenames)),
+                "total_events": total_events,
+                "total_findings": len(all_findings),
+                "unique_rules": len(score_data["deductions"]),
+                "deductions": score_data["deductions"],
+                "categories": score_data["categories"],
+            })
+
+        return {"daily_scores": daily}
+
+    # -------------------------------------------------------------------
+    # GET /api/export/{scan_id} — download report as HTML or JSON
+    # -------------------------------------------------------------------
+    @app.get("/api/export/{scan_id}")
+    def export_report(scan_id: int, format: str = "html"):
+        """Download a formatted report for a past scan."""
+        if format not in ("html", "json"):
+            raise HTTPException(400, detail="format must be 'html' or 'json'.")
+
+        findings = get_scan_findings(app.state.db_path, scan_id)
+        history_rows = get_history(app.state.db_path, limit=200)
+        scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
+        if scan_row is None:
+            raise HTTPException(404, detail=f"Scan {scan_id} not found.")
+
+        sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for f in findings:
+            sev = f.get("severity", "LOW")
+            sev_counts[sev] = sev_counts.get(sev, 0) + 1
+
+        scan_stats = {
+            "total_events": scan_row.get("total_events", 0),
+            "files_scanned": scan_row.get("files_scanned", 1),
+            "top_event_ids": [],
+            "earliest": scan_row.get("scanned_at", "-"),
+            "latest": scan_row.get("scanned_at", "-"),
+        }
+
+        if format == "json":
+            content = _build_json_report(findings, sev_counts, scan_stats)
+            return Response(
+                content=content,
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename=pulse_scan_{scan_id}.json"},
+            )
+
+        content = _build_html_report(findings, sev_counts, scan_stats)
+        return HTMLResponse(
+            content=content,
+            headers={"Content-Disposition": f"attachment; filename=pulse_scan_{scan_id}.html"},
+        )
+
+    # -------------------------------------------------------------------
+    # GET /api/config — read current whitelist + settings
+    # -------------------------------------------------------------------
+    @app.get("/api/config")
+    def get_config():
+        """Return the current pulse.yaml whitelist and settings."""
+        config = _read_config(app.state.config_path)
+        whitelist = config.get("whitelist", {}) or {}
+        return {
+            "whitelist": {
+                "accounts": whitelist.get("accounts", []) or [],
+                "rules": whitelist.get("rules", []) or [],
+                "services": whitelist.get("services", []) or [],
+                "ips": whitelist.get("ips", []) or [],
+            },
+            "settings": {
+                "logs": config.get("logs", "logs"),
+                "format": config.get("format", "txt"),
+                "severity": config.get("severity", "LOW"),
+            },
+        }
+
+    # -------------------------------------------------------------------
+    # PUT /api/config/whitelist — update the whitelist
+    # -------------------------------------------------------------------
+    @app.put("/api/config/whitelist")
+    async def update_whitelist(request: Request):
+        """Update the whitelist section in pulse.yaml."""
+        body = await request.json()
+
+        config = _read_config(app.state.config_path)
+
+        whitelist = config.get("whitelist", {}) or {}
+        for key in ("accounts", "rules", "services", "ips"):
+            if key in body:
+                if not isinstance(body[key], list):
+                    raise HTTPException(400, detail=f"{key} must be a list.")
+                whitelist[key] = body[key]
+
+        config["whitelist"] = whitelist
+        _write_config(app.state.config_path, config)
+
+        return {"status": "ok", "whitelist": whitelist}
+
+    # -------------------------------------------------------------------
+    # GET /api/rules — list all available detection rule names
+    # -------------------------------------------------------------------
+    @app.get("/api/rules")
+    def list_rules():
+        """Return the names of all detection rules Pulse can run."""
+        return {"rules": _get_rule_names()}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _read_config(config_path):
+    """Read pulse.yaml and return the config dict."""
+    if not os.path.exists(config_path):
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def _write_config(config_path, config):
+    """Write config dict back to pulse.yaml."""
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
+def _get_rule_names():
+    """Return a sorted list of all detection rule names."""
+    return sorted([
+        "Brute Force Attempt", "User Account Created", "Privilege Escalation",
+        "Audit Log Cleared", "RDP Logon Detected", "Pass-the-Hash Attempt",
+        "Service Installed", "Antivirus Disabled", "Firewall Disabled",
+        "Firewall Rule Changed", "Account Lockout", "Scheduled Task Created",
+        "Suspicious PowerShell", "Account Takeover Chain", "Malware Persistence Chain",
+    ])
+
 
 def _filter_with_whitelist(findings, config_path):
     """
     Apply the same whitelist the CLI uses (pulse.yaml + built-in known-good
     services) so the API returns identical results to `python main.py`.
     """
-    if not os.path.exists(config_path):
-        return findings
-
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError):
-        return findings
-
+    config = _read_config(config_path)
     whitelist = config.get("whitelist", {}) or {}
     return filter_whitelist(findings, whitelist)
 

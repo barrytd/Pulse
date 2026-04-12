@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS scans (
     total_events   INTEGER DEFAULT 0,
     total_findings INTEGER DEFAULT 0,
     score          INTEGER,
-    score_label    TEXT
+    score_label    TEXT,
+    filename       TEXT
 );
 """
 
@@ -76,9 +77,13 @@ def init_db(db_path):
     with _connect(db_path) as conn:
         conn.execute(_CREATE_SCANS)
         conn.execute(_CREATE_FINDINGS)
+        try:
+            conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
-def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None):
+def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None):
     """
     Saves a completed scan and all its findings to the database.
 
@@ -88,6 +93,7 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None):
         scan_stats (dict):  Optional scan metadata (files_scanned, total_events).
         score (int):        Optional security score (0-100).
         score_label (str):  Optional label e.g. "HIGH RISK".
+        filename (str):     Optional name of the scanned file.
 
     Returns:
         int: The scan_id of the newly inserted scan row.
@@ -102,10 +108,10 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None):
         cursor = conn.execute(
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
-                total_findings, score, score_label)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                total_findings, score, score_label, filename)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
-             total_findings, score, score_label)
+             total_findings, score, score_label, filename)
         )
         scan_id = cursor.lastrowid
 
@@ -153,7 +159,8 @@ def get_history(db_path, limit=20):
         with _connect(db_path) as conn:
             cursor = conn.execute(
                 """SELECT id, scanned_at, hostname, files_scanned,
-                          total_events, total_findings, score, score_label
+                          total_events, total_findings, score, score_label,
+                          filename
                    FROM scans
                    ORDER BY id DESC
                    LIMIT ?""",

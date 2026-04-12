@@ -386,36 +386,118 @@ def _build_json_report(findings, severity_counts, scan_stats=None):
     return json.dumps(report, indent=2, ensure_ascii=False)
 
 
+RULE_CATEGORIES = {
+    "Brute Force Attempt":       "Authentication",
+    "Account Lockout":           "Authentication",
+    "Pass-the-Hash Attempt":     "Credential Access",
+    "RDP Logon Detected":        "Lateral Movement",
+    "User Account Created":      "Persistence",
+    "Privilege Escalation":      "Privilege Escalation",
+    "Service Installed":         "Persistence",
+    "Scheduled Task Created":    "Persistence",
+    "Suspicious PowerShell":     "Execution",
+    "Antivirus Disabled":        "Defense Evasion",
+    "Firewall Disabled":         "Defense Evasion",
+    "Firewall Rule Changed":     "Defense Evasion",
+    "Audit Log Cleared":         "Defense Evasion",
+    "Account Takeover Chain":    "Credential Access",
+    "Malware Persistence Chain": "Persistence",
+}
+
+SEVERITY_DEDUCTIONS = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3}
+
+
 def _calculate_score(severity_counts):
     """
-    Calculates a security score out of 100 based on findings.
+    Calculates a security score out of 100 based on severity counts.
 
-    Each finding deducts points depending on severity:
-      CRITICAL = -25 pts, HIGH = -10 pts, MEDIUM = -5 pts, LOW = -2 pts
-
-    The score is clamped at 0 (can't go below zero).
+    This is the legacy per-count version used by the CLI and HTML reports.
+    The API uses calculate_score_from_findings() for smarter deduplication.
 
     Returns:
         tuple: (score int, label str, hex_colour str)
     """
     deductions = (
         severity_counts.get("CRITICAL", 0) * 25 +
-        severity_counts.get("HIGH",     0) * 10 +
-        severity_counts.get("MEDIUM",   0) *  5 +
-        severity_counts.get("LOW",      0) *  2
+        severity_counts.get("HIGH",     0) * 15 +
+        severity_counts.get("MEDIUM",   0) *  8 +
+        severity_counts.get("LOW",      0) *  3
     )
     score = max(0, 100 - deductions)
+    return score, *_score_tier(score)
 
+
+def calculate_score_from_findings(findings):
+    """
+    Calculates a deduplicated security score from a list of findings.
+
+    Only unique rules are penalized — 50 brute force events count as one
+    "Brute Force Attempt" deduction, not 50. This prevents noisy but
+    low-risk events from tanking the score.
+
+    Returns:
+        dict with: score, label, colour, grade, deductions (list),
+                   categories (dict of category -> {score, rules})
+    """
+    unique_rules = {}
+    for f in findings:
+        rule = f.get("rule", "Unknown")
+        sev = f.get("severity", "LOW")
+        if rule not in unique_rules or SEVERITY_ORDER.index(sev) < SEVERITY_ORDER.index(unique_rules[rule]):
+            unique_rules[rule] = sev
+
+    deduction_list = []
+    for rule, sev in unique_rules.items():
+        pts = SEVERITY_DEDUCTIONS.get(sev, 3)
+        deduction_list.append({"rule": rule, "severity": sev, "points": pts,
+                               "category": RULE_CATEGORIES.get(rule, "Other")})
+
+    total_deducted = sum(d["points"] for d in deduction_list)
+    score = max(0, 100 - total_deducted)
+    label, colour = _score_tier(score)
+    grade = _score_grade(score)
+
+    categories = {}
+    all_cats = ["Authentication", "Credential Access", "Lateral Movement",
+                "Persistence", "Privilege Escalation", "Execution", "Defense Evasion"]
+    for cat in all_cats:
+        cat_rules = [d for d in deduction_list if d["category"] == cat]
+        cat_deducted = sum(d["points"] for d in cat_rules)
+        categories[cat] = {
+            "deducted": cat_deducted,
+            "rules_triggered": [d["rule"] for d in cat_rules],
+            "status": "clear" if cat_deducted == 0 else
+                      "low" if cat_deducted <= 5 else
+                      "medium" if cat_deducted <= 15 else "high",
+        }
+
+    return {
+        "score": score, "label": label, "colour": colour, "grade": grade,
+        "total_deducted": total_deducted,
+        "deductions": sorted(deduction_list, key=lambda d: d["points"], reverse=True),
+        "categories": categories,
+    }
+
+
+def _score_tier(score):
     if score >= 90:
-        return score, "SECURE",        "#27ae60"
-    elif score >= 70:
-        return score, "LOW RISK",      "#3498db"
+        return "SECURE",        "#27ae60"
+    elif score >= 75:
+        return "LOW RISK",      "#3498db"
     elif score >= 50:
-        return score, "MEDIUM RISK",   "#e67e22"
+        return "MODERATE RISK", "#e67e22"
     elif score >= 25:
-        return score, "HIGH RISK",     "#e74c3c"
+        return "HIGH RISK",     "#e74c3c"
     else:
-        return score, "CRITICAL RISK", "#8e44ad"
+        return "CRITICAL RISK", "#8e44ad"
+
+
+def _score_grade(score):
+    if score >= 90: return "A"
+    if score >= 75: return "B"
+    if score >= 50: return "C"
+    if score >= 25: return "D"
+    return "F"
 
 
 def _build_executive_summary(findings, severity_counts):

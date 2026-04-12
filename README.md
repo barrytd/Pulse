@@ -239,15 +239,36 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 - [x] 160 unit tests, all passing
 
 - [x] Web dashboard - single-page dark-themed UI served at `/`, with sidebar navigation, drag-and-drop upload, score ring, scan history, and light/dark theme toggle
+- [x] Functional Settings & Whitelist pages - edit whitelist from the browser, view active config and all detection rules
+- [x] Report export from dashboard - download HTML or JSON report for any scan result
+- [x] Multi-file upload - drag multiple `.evtx` files at once for batch scanning
+- [x] Deduplicated daily scoring - unique-rule-based scoring with letter grades (A-F), MITRE category breakdown, and daily aggregation
 
 ### Sprint 2 — Apr 14–27, 2026
-- [ ] **Functional Settings page** - edit `pulse.yaml` whitelist from the browser (add/remove accounts, services, IPs)
-- [ ] **Live Whitelist page** - display the active whitelist from config, not just built-in defaults
-- [ ] **Report export from dashboard** - download PDF or HTML report for any scan result
-- [ ] **Multi-file upload** - drag multiple `.evtx` files at once for batch scanning
 - [ ] **Email alerts** - send summary email when a scan finds CRITICAL/HIGH severity items
-- [ ] **Scheduled scans** - watch a folder for new `.evtx` files and auto-scan them
 - [ ] **New detection rules** - expand from 15 to 20+ (Kerberoasting, golden ticket, suspicious PowerShell, etc.)
+
+### Sprint 3 — Apr 28 – May 11, 2026
+- [ ] **Remediation suggestions** - each finding includes a "how to fix" recommendation with step-by-step guidance
+- [ ] **Scheduled scans** - watch a folder for new `.evtx` files and auto-scan them on arrival
+- [ ] **Recurring reports** - auto-generate daily or weekly HTML summary reports
+- [ ] **PDF export** - download formatted PDF reports from the dashboard
+
+### Sprint 4 — May 12–25, 2026
+- [ ] **Multi-machine support** - track scores per hostname, compare security posture across endpoints
+- [ ] **Firewall log analysis** - parse Windows Firewall logs, detect suspicious outbound connections, flag risky rules and misconfigurations
+- [ ] **Audit log** - track who scanned what and when within the dashboard
+
+### Sprint 5 — Jun 2–15, 2026
+- [ ] **User authentication** - login page, sessions, role-based access control (admin vs viewer)
+- [ ] **Compliance mapping** - tag findings against NIST CSF and ISO 27001 controls
+- [ ] **Trend analytics** - score-over-time charts, improvement tracking, historical comparisons
+
+### Sprint 6 — Jun 16–29, 2026
+- [ ] **Incident workflows** - mark findings as acknowledged, investigating, or resolved
+- [ ] **Custom branding** - upload company logo, set organization name on reports and dashboard
+- [ ] **Dashboard widgets** - customizable layout with drag-and-drop panels
+- [ ] **Threat intel integration** - correlate findings with external threat intelligence feeds
 
 ---
 
