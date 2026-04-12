@@ -58,6 +58,13 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - Mark findings as investigated or false positive
 - Add entries directly to the whitelist from the terminal — no manual YAML editing needed
 
+### REST API
+- **`--api` flag** - starts a local FastAPI server so other tools can send `.evtx` files over HTTP and get findings back as JSON
+- **Endpoints**: `POST /api/scan` (file upload), `GET /api/history`, `GET /api/report/{id}`, `GET /api/health`
+- **Interactive docs** auto-generated at `http://127.0.0.1:8000/docs` (Swagger UI)
+- Uploaded files are parsed in-memory and deleted immediately — nothing is kept on disk
+- Same whitelist, baseline, and scoring logic as the CLI
+
 ### Noise Reduction
 - **Built-in known-good whitelist** - 100+ entries covering anti-cheat, gaming platforms, hardware peripherals, Google, Microsoft, security software, VPNs, and common apps — suppressed by default with no configuration
 - **Custom whitelist** - add your own entries in `pulse.yaml` (accounts, services, IPs, rules)
@@ -70,7 +77,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **146 unit tests** - every detection rule, report format, config, whitelist, database, and monitor tested
+- **160 unit tests** - every detection rule, report format, config, whitelist, database, and monitor tested
 
 ---
 
@@ -88,11 +95,14 @@ Pulse/
 │   ├── database.py         # SQLite scan history
 │   ├── interactive.py      # Interactive terminal mode
 │   ├── animations.py       # ECG heartbeat terminal animation
+│   ├── api.py              # REST API (FastAPI) — /api/scan, /api/history, /api/report, /api/health
+│   ├── whitelist.py        # Whitelist filtering shared by CLI and API
 │   └── known_good.py       # Built-in known-good service whitelist
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
 ├── pulse.db                # SQLite scan history database
-├── test_detections.py      # 146 unit tests
+├── test_detections.py      # 146 unit tests for detection engine
+├── test_api.py             # 14 unit tests for the REST API
 ├── main.py                 # Entry point - run this to analyse logs
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
@@ -159,6 +169,12 @@ python main.py --save-baseline
 # Send the HTML report by email after the scan
 python main.py --format html --email
 
+# Start the REST API server (docs at http://127.0.0.1:8000/docs)
+python main.py --api
+
+# Start the API on a custom port
+python main.py --api --port 9000
+
 # See all options
 python main.py --help
 ```
@@ -219,10 +235,10 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 - [x] Interactive terminal mode - `--interactive` to browse, investigate, and whitelist findings
 - [x] Parallel file parsing across all CPU cores
 - [x] ECG heartbeat animation during parsing
-- [x] 146 unit tests, all passing
+- [x] REST API (FastAPI) - `--api` exposes Pulse as a local web service with `/api/scan`, `/api/history`, `/api/report/{id}`, `/api/health`, and auto-generated Swagger docs at `/docs`
+- [x] 160 unit tests, all passing
 
 ### Next up
-- [ ] **REST API** - expose Pulse as a local web service so other tools can submit `.evtx` files and get findings back as JSON
 - [ ] **Web dashboard** - a browser-based UI to upload logs, view findings, track history across multiple machines, and manage whitelists
 
 ---

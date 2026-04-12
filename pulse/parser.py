@@ -72,6 +72,9 @@ def parse_evtx(file_path, since=None):
         since (datetime | None):  If set, only return events after this UTC
                                   datetime. Pass None to scan all events.
 
+    Never raises on bad input — returns [] for empty, missing, or corrupt
+    files so callers (CLI, REST API) don't have to guard every call site.
+
     Returns:
         list: A list of dicts with keys:
               - "event_id"   (int)  e.g. 4625
@@ -79,10 +82,21 @@ def parse_evtx(file_path, since=None):
               - "data"       (str)  raw XML string for the event
               - "record_num" (int)  sequential Windows record number
     """
+    # Empty or unreadable files can't be parsed — return [] rather than
+    # letting mmap or the XML parser blow up on zero-byte input.
+    try:
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            return []
+    except OSError:
+        return []
+
     try:
         return _parse_evtx_fast(file_path, since)
     except Exception:
-        return _parse_evtx_full(file_path, since)
+        try:
+            return _parse_evtx_full(file_path, since)
+        except Exception:
+            return []
 
 
 # ---------------------------------------------------------------------------

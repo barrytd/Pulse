@@ -29,6 +29,7 @@ from pulse.emailer import send_report, validate_email_config
 from pulse.database import init_db, save_scan, get_history
 from pulse.reporter import _calculate_score
 from pulse.monitor import start_monitor
+from pulse.whitelist import filter_whitelist
 
 
 # Path to the config file. Lives in the project root next to main.py.
@@ -195,71 +196,31 @@ def build_arg_parser(config=None):
         help="Save a baseline snapshot of accounts, services, and tasks for future comparison.",
     )
 
-    return parser
-
-
-def filter_whitelist(findings, whitelist):
-    """
-    Removes findings that match whitelisted values.
-
-    The whitelist is a dictionary with four optional lists:
-      accounts:  usernames to ignore (matched against finding details)
-      rules:     rule names to skip entirely
-      services:  service names to ignore (matched against finding details)
-      ips:       IP addresses to ignore (matched against finding details)
-
-    A finding is removed if:
-      - Its rule name is in the "rules" list, OR
-      - Any whitelisted account, service, or IP appears in the finding's details text
-
-    Parameters:
-        findings (list):   List of finding dicts from the detection engine.
-        whitelist (dict):  Whitelist config from pulse.yaml.
-
-    Returns:
-        list: Filtered findings with whitelisted items removed.
-    """
-    if not whitelist:
-        return findings
-
-    # Pull out each whitelist category. Use empty lists as defaults.
-    # Built-in known-good list is merged with user's pulse.yaml entries.
-    from pulse.known_good import KNOWN_GOOD_SERVICES
-    skip_rules = [r.lower() for r in whitelist.get("rules", []) or []]
-    skip_accounts = [a.lower() for a in whitelist.get("accounts", []) or []]
-    skip_services = (
-        KNOWN_GOOD_SERVICES
-        + [s.lower() for s in whitelist.get("services", []) or []]
+    # --- ARGUMENT: --api ---
+    # Starts the REST API server (FastAPI + uvicorn). Other tools can
+    # then submit .evtx files over HTTP and get findings as JSON back.
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Start the Pulse REST API server instead of running a scan.",
     )
-    skip_ips = whitelist.get("ips", []) or []
 
-    filtered = []
-    for finding in findings:
-        # Check 1: is the entire rule whitelisted?
-        if finding["rule"].lower() in skip_rules:
-            continue
+    parser.add_argument(
+        "--host",
+        default=config.get("api", {}).get("host", "127.0.0.1") if config.get("api") else "127.0.0.1",
+        metavar="ADDR",
+        help="Address the API binds to. Default: 127.0.0.1 (local only)",
+    )
 
-        # Check 2: does the details text contain any whitelisted value?
-        # We lowercase the details for case-insensitive matching.
-        details_lower = finding["details"].lower()
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=config.get("api", {}).get("port", 8000) if config.get("api") else 8000,
+        metavar="PORT",
+        help="Port the API listens on. Default: 8000",
+    )
 
-        # Check accounts - look for the account name inside quotes in the details.
-        # e.g. "Account 'svc_backup' had 5+ failed login attempts..."
-        if any(account in details_lower for account in skip_accounts):
-            continue
-
-        # Check services - same approach.
-        # e.g. "New service 'WindowsUpdateSvc' was installed..."
-        if any(service in details_lower for service in skip_services):
-            continue
-
-        # Check IPs - these are case-sensitive (IPs don't have case).
-        if any(ip in finding["details"] for ip in skip_ips):
-            continue
-
-        filtered.append(finding)
-
-    return filtered
+    return parser
 
 
 BASELINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pulse_baseline.json")
@@ -529,6 +490,14 @@ def main():
     # If --history was passed, print past scans and exit immediately.
     if show_history_flag:
         _print_history(db_path)
+        return
+
+    # --- API MODE ---
+    # If --api was passed, start the REST API server and block until Ctrl+C.
+    # Nothing else runs in API mode — scans happen through HTTP requests.
+    if args.api:
+        from pulse.api import run as run_api
+        run_api(host=args.host, port=args.port, db_path=db_path)
         return
 
     # --- WATCH MODE ---

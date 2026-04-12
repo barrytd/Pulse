@@ -5,6 +5,33 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-12
+
+### Added
+- **REST API** (`pulse/api.py`) — FastAPI server with four endpoints:
+  - `POST /api/scan` — upload a `.evtx` file, get findings as JSON back. File is parsed in-memory and deleted immediately (ephemeral storage)
+  - `GET /api/history` — list recent scans from the local SQLite database (`?limit=N`, capped at 200)
+  - `GET /api/report/{id}` — return findings for a specific past scan; 404 if the scan doesn't exist
+  - `GET /api/health` — aliveness check, returns Pulse version
+- **`--api` flag** on `main.py` — starts the API with uvicorn. `--host` and `--port` override defaults
+- **Interactive OpenAPI docs** — Swagger UI auto-generated at `http://127.0.0.1:8000/docs`
+- **`pulse/whitelist.py`** — extracted `filter_whitelist` from `main.py` so both the CLI and the API share the same filtering logic
+- **`CONTRIBUTING.md`** and **`SECURITY.md`** — dev setup, test commands, and responsible disclosure policy
+- **GitHub tag `v1.1.0`** — stable release covering everything since v1.0.0 (live monitoring, history, interactive, baseline, Pass-the-Hash, parallel parsing, ECG animation, `--days`, and now the REST API)
+
+### Fixed
+- **Parser no longer crashes on empty/corrupt files** — `parse_evtx()` now returns `[]` for empty, missing, or unreadable `.evtx` files instead of raising `ValueError: cannot mmap an empty file`. Protects both the CLI and the API from bad input
+
+### Tests
+- 14 new tests in `test_api.py` covering every endpoint, bad inputs, history pagination, 404s, and temp-file cleanup
+- Test count: 146 → 160, all passing
+
+### Dependencies
+- `fastapi>=0.100.0`, `uvicorn[standard]>=0.23.0`, `python-multipart>=0.0.6` (runtime)
+- `httpx>=0.25.0` (testing only — required by FastAPI's TestClient)
+
+---
+
 ## 2026-04-11 (continued)
 
 ### Added

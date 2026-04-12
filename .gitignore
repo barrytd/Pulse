@@ -21,6 +21,14 @@ logs/*.evtx
 # Generated reports — users will generate their own
 reports/*.txt
 reports/*.json
+reports/*.html
+reports/*.csv
+
+# SQLite databases — each user has their own scan history
+*.db
+
+# Baseline snapshots — captured per-machine
+pulse_baseline.json
 
 # OS junk files
 .DS_Store

@@ -3,3 +3,11 @@
 python-evtx>=0.7.4
 # PyYAML: Reads YAML config files (pulse.yaml) for storing default settings
 PyYAML>=6.0
+# FastAPI: Web framework for the REST API (pulse/api.py)
+fastapi>=0.100.0
+# Uvicorn: ASGI server that runs the FastAPI app
+uvicorn[standard]>=0.23.0
+# python-multipart: Required by FastAPI for accepting file uploads via multipart/form-data
+python-multipart>=0.0.6
+# httpx: Required by FastAPI's TestClient in test_api.py (not used at runtime)
+httpx>=0.25.0
