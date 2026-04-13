@@ -216,7 +216,7 @@ All 146 tests run without needing real `.evtx` files - the test suite uses fake 
 ### Done
 - [x] Project structure and foundation
 - [x] `.evtx` file parsing (parallel, with per-file timeout)
-- [x] Detection rules - 15 rules covering login attacks, persistence, defence evasion, credential abuse
+- [x] Detection rules - 22 rules covering login attacks, persistence, defence evasion, credential abuse
 - [x] Human-readable text report output
 - [x] HTML report with security score, scan stats, severity filters, remediation tab, dark mode
 - [x] JSON report output - machine-readable findings for Splunk, ELK, Python scripts

@@ -72,6 +72,13 @@ EVENT_FIREWALL_PROFILE_CHANGED = 4950
 EVENT_AV_DISABLED = 5001
 EVENT_SERVICE_INSTALLED = 7045
 EVENT_SUCCESSFUL_LOGON = 4624
+EVENT_KERBEROS_TGS = 4769
+EVENT_KERBEROS_TGT = 4768
+EVENT_OBJECT_ACCESS = 4663
+EVENT_HANDLE_REQUEST = 4656
+EVENT_NETWORK_SHARE = 5140
+EVENT_SHARE_FILE_ACCESS = 5145
+EVENT_REGISTRY_MODIFIED = 4657
 
 # How many failed logins within the time window triggers a brute force alert.
 BRUTE_FORCE_THRESHOLD = 5
@@ -90,6 +97,26 @@ RDP_LOGON_TYPE = "10"
 # Every tag in the XML is prefixed with this namespace, so we need it
 # whenever we search through the XML tree. Same one from parser.py.
 NS = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+
+
+def _parse_event_time(event):
+    """Parse an event's timestamp string into a datetime object, or None."""
+    timestamp_str = event["timestamp"].rstrip("Z")
+    try:
+        return datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
+    except ValueError:
+        try:
+            return datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return None
+
+
+def _get_xml_field(xml_tree, field_name):
+    """Extract a named field from EventData in a parsed XML tree."""
+    for el in xml_tree.findall(f"{NS}EventData/{NS}Data"):
+        if el.get("Name") == field_name:
+            return el.text
+    return None
 
 
 def detect_brute_force(events):
@@ -1154,6 +1181,306 @@ def detect_malware_persistence_chain(events):
     return findings
 
 
+def detect_kerberoasting(events):
+    """
+    Detects Kerberoasting — TGS ticket requests using RC4 encryption.
+
+    Kerberoasting is an attack where an attacker requests Kerberos TGS
+    tickets for service accounts using weak RC4 encryption (0x17),
+    then cracks the tickets offline to recover service account passwords.
+    We flag when multiple RC4 TGS requests come from the same account.
+
+    Event ID: 4769 (Kerberos Service Ticket Operations)
+    MITRE ATT&CK: T1558.003
+    """
+    findings = []
+    rc4_requests = {}
+
+    for event in events:
+        if event["event_id"] != EVENT_KERBEROS_TGS:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        ticket_encryption = _get_xml_field(xml_tree, "TicketEncryptionType")
+        target_user = _get_xml_field(xml_tree, "TargetUserName")
+        service_name = _get_xml_field(xml_tree, "ServiceName")
+        if ticket_encryption and ticket_encryption.strip() == "0x17":
+            key = target_user or service_name or "unknown"
+            rc4_requests.setdefault(key, []).append(event["timestamp"])
+
+    for account, timestamps in rc4_requests.items():
+        if len(timestamps) >= 3:
+            findings.append({
+                "rule": "Kerberoasting",
+                "severity": "HIGH",
+                "details": (
+                    f"Potential Kerberoasting detected: {len(timestamps)} TGS ticket "
+                    f"requests using RC4 encryption (0x17) for service '{account}'. "
+                    f"First seen: {timestamps[0]}. Attackers request RC4-encrypted "
+                    f"tickets to crack service account passwords offline."
+                ),
+            })
+
+    return findings
+
+
+def detect_golden_ticket(events):
+    """
+    Detects potential Golden Ticket attacks via suspicious TGT requests.
+
+    A Golden Ticket is a forged Kerberos TGT that gives an attacker
+    domain admin access. Signs include TGT requests with abnormal
+    encryption types, unusual account names, or requests from IPs
+    that aren't domain controllers.
+
+    Event ID: 4768 (Kerberos Authentication Service)
+    MITRE ATT&CK: T1558.001
+    """
+    findings = []
+
+    for event in events:
+        if event["event_id"] != EVENT_KERBEROS_TGT:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        target_user = _get_xml_field(xml_tree, "TargetUserName") or ""
+        status = _get_xml_field(xml_tree, "Status") or ""
+        ticket_encryption = _get_xml_field(xml_tree, "TicketEncryptionType") or ""
+
+        if target_user.lower() in ("krbtgt", "administrator") and status == "0x0":
+            findings.append({
+                "rule": "Golden Ticket",
+                "severity": "CRITICAL",
+                "details": (
+                    f"Suspicious TGT request for privileged account '{target_user}' "
+                    f"at {event['timestamp']}. Encryption type: {ticket_encryption}. "
+                    f"This may indicate a Golden Ticket attack — a forged Kerberos "
+                    f"ticket granting unrestricted domain access."
+                ),
+            })
+
+    return findings
+
+
+def detect_credential_dumping(events):
+    """
+    Detects access to the LSASS process — a sign of credential dumping.
+
+    Tools like Mimikatz read LSASS memory to extract plaintext passwords,
+    NTLM hashes, and Kerberos tickets. Windows logs this as object access
+    events targeting lsass.exe.
+
+    Event IDs: 4656 (handle request), 4663 (object access)
+    MITRE ATT&CK: T1003.001
+    """
+    findings = []
+    flagged = False
+
+    for event in events:
+        if event["event_id"] not in (EVENT_HANDLE_REQUEST, EVENT_OBJECT_ACCESS):
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        object_name = _get_xml_field(xml_tree, "ObjectName") or ""
+        process_name = _get_xml_field(xml_tree, "ProcessName") or ""
+
+        if "lsass" in object_name.lower() or "lsass" in process_name.lower():
+            if not flagged:
+                subject_user = _get_xml_field(xml_tree, "SubjectUserName") or "unknown"
+                findings.append({
+                    "rule": "Credential Dumping",
+                    "severity": "CRITICAL",
+                    "details": (
+                        f"LSASS process access detected at {event['timestamp']} "
+                        f"by user '{subject_user}'. Process: {process_name or 'N/A'}. "
+                        f"This is a strong indicator of credential dumping (Mimikatz, "
+                        f"procdump, or similar tools extracting passwords from memory)."
+                    ),
+                })
+                flagged = True
+
+    return findings
+
+
+def detect_disabled_account_logon(events):
+    """
+    Detects logon attempts using disabled accounts.
+
+    If someone is trying to authenticate with an account that has been
+    disabled, it suggests they have old credentials and are testing them.
+    This is common in insider threats and post-compromise scenarios.
+
+    Event ID: 4625 (failed logon), Sub Status 0xC0000072
+    MITRE ATT&CK: T1078
+    """
+    findings = []
+    flagged_accounts = set()
+
+    for event in events:
+        if event["event_id"] != EVENT_FAILED_LOGIN:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        sub_status = _get_xml_field(xml_tree, "SubStatus") or ""
+        target_user = _get_xml_field(xml_tree, "TargetUserName") or "unknown"
+
+        if sub_status.strip().lower() == "0xc0000072" and target_user not in flagged_accounts:
+            flagged_accounts.add(target_user)
+            source_ip = _get_xml_field(xml_tree, "IpAddress") or "N/A"
+            findings.append({
+                "rule": "Logon from Disabled Account",
+                "severity": "MEDIUM",
+                "details": (
+                    f"Logon attempt using disabled account '{target_user}' "
+                    f"at {event['timestamp']} from IP {source_ip}. "
+                    f"Someone is trying credentials for an account that has been "
+                    f"deliberately disabled."
+                ),
+            })
+
+    return findings
+
+
+def detect_after_hours_logon(events):
+    """
+    Detects successful logons outside business hours (before 6 AM or after 10 PM).
+
+    Unusual logon times can indicate compromised credentials being used
+    by attackers in different time zones, or insider threats operating
+    outside normal oversight windows.
+
+    Event ID: 4624 (successful logon)
+    MITRE ATT&CK: T1078
+    """
+    findings = []
+    flagged_accounts = set()
+
+    for event in events:
+        if event["event_id"] != EVENT_SUCCESSFUL_LOGON:
+            continue
+
+        event_time = _parse_event_time(event)
+        if not event_time:
+            continue
+
+        if event_time.hour < 6 or event_time.hour >= 22:
+            xml_tree = ET.fromstring(event["data"])
+            target_user = _get_xml_field(xml_tree, "TargetUserName") or "unknown"
+            logon_type = _get_xml_field(xml_tree, "LogonType") or ""
+
+            if target_user.endswith("$") or target_user.upper() in ("SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "ANONYMOUS LOGON", "DWM-1", "UMFD-0", "UMFD-1"):
+                continue
+
+            if target_user not in flagged_accounts:
+                flagged_accounts.add(target_user)
+                findings.append({
+                    "rule": "After-Hours Logon",
+                    "severity": "MEDIUM",
+                    "details": (
+                        f"Logon outside business hours: user '{target_user}' "
+                        f"logged in at {event_time.strftime('%Y-%m-%dT%H:%M:%S')} "
+                        f"(logon type {logon_type}). Logons between 10 PM and 6 AM "
+                        f"may indicate unauthorized access."
+                    ),
+                })
+
+    return findings
+
+
+def detect_registry_persistence(events):
+    """
+    Detects suspicious modifications to autorun registry keys.
+
+    Malware commonly adds entries to Run/RunOnce registry keys so it
+    starts automatically on every boot. Changes to these keys outside
+    of software installations should be investigated.
+
+    Event ID: 4657 (registry value modified)
+    MITRE ATT&CK: T1547.001
+    """
+    findings = []
+
+    AUTORUN_KEYS = [
+        "\\currentversion\\run",
+        "\\currentversion\\runonce",
+        "\\currentversion\\runservices",
+        "\\currentversion\\policies\\explorer\\run",
+        "\\currentversion\\windows\\load",
+        "\\currentversion\\winlogon\\shell",
+        "\\currentversion\\winlogon\\userinit",
+    ]
+
+    for event in events:
+        if event["event_id"] != EVENT_REGISTRY_MODIFIED:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        object_name = (_get_xml_field(xml_tree, "ObjectName") or "").lower()
+        subject_user = _get_xml_field(xml_tree, "SubjectUserName") or "unknown"
+        object_value = _get_xml_field(xml_tree, "ObjectValueName") or ""
+        new_value = _get_xml_field(xml_tree, "NewValue") or ""
+
+        for key_pattern in AUTORUN_KEYS:
+            if key_pattern in object_name:
+                findings.append({
+                    "rule": "Suspicious Registry Modification",
+                    "severity": "HIGH",
+                    "details": (
+                        f"Autorun registry key modified by '{subject_user}' "
+                        f"at {event['timestamp']}. Key: ...{object_name[-80:]}. "
+                        f"Value: {object_value}. New data: {new_value[:100]}. "
+                        f"This is a common malware persistence technique."
+                    ),
+                })
+                break
+
+    return findings
+
+
+def detect_lateral_movement_shares(events):
+    """
+    Detects access to administrative network shares (C$, ADMIN$, IPC$).
+
+    Attackers use admin shares to move laterally between machines on a
+    network — copying tools, executing commands, or exfiltrating data.
+    Legitimate admin share access is rare in most environments.
+
+    Event IDs: 5140 (network share accessed), 5145 (share object access)
+    MITRE ATT&CK: T1021.002
+    """
+    findings = []
+    flagged = set()
+
+    ADMIN_SHARES = ["c$", "admin$", "ipc$"]
+
+    for event in events:
+        if event["event_id"] not in (EVENT_NETWORK_SHARE, EVENT_SHARE_FILE_ACCESS):
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        share_name = (_get_xml_field(xml_tree, "ShareName") or "").strip().lower()
+        subject_user = _get_xml_field(xml_tree, "SubjectUserName") or "unknown"
+        source_ip = _get_xml_field(xml_tree, "IpAddress") or "N/A"
+
+        share_base = share_name.split("\\")[-1] if "\\" in share_name else share_name
+        if share_base in ADMIN_SHARES:
+            key = subject_user + "|" + share_base
+            if key not in flagged:
+                flagged.add(key)
+                findings.append({
+                    "rule": "Lateral Movement via Network Share",
+                    "severity": "HIGH",
+                    "details": (
+                        f"Administrative share '{share_name}' accessed by "
+                        f"'{subject_user}' from {source_ip} at {event['timestamp']}. "
+                        f"Admin share access is commonly used for lateral movement "
+                        f"— copying tools between machines or remote execution."
+                    ),
+                })
+
+    return findings
+
+
 def run_all_detections(events):
     """
     Runs every detection rule against the parsed events.
@@ -1188,4 +1515,11 @@ def run_all_detections(events):
     findings += detect_suspicious_powershell(events) or []
     findings += detect_account_takeover_chain(events) or []
     findings += detect_malware_persistence_chain(events) or []
+    findings += detect_kerberoasting(events) or []
+    findings += detect_golden_ticket(events) or []
+    findings += detect_credential_dumping(events) or []
+    findings += detect_disabled_account_logon(events) or []
+    findings += detect_after_hours_logon(events) or []
+    findings += detect_registry_persistence(events) or []
+    findings += detect_lateral_movement_shares(events) or []
     return findings

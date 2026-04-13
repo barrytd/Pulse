@@ -395,6 +395,9 @@ def _get_rule_names():
         "Service Installed", "Antivirus Disabled", "Firewall Disabled",
         "Firewall Rule Changed", "Account Lockout", "Scheduled Task Created",
         "Suspicious PowerShell", "Account Takeover Chain", "Malware Persistence Chain",
+        "Kerberoasting", "Golden Ticket", "Credential Dumping",
+        "Logon from Disabled Account", "After-Hours Logon",
+        "Suspicious Registry Modification", "Lateral Movement via Network Share",
     ])
 
 

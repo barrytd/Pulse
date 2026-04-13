@@ -73,6 +73,13 @@ RULE_EVENT_IDS = {
     "Suspicious PowerShell":     "4104",
     "Account Takeover Chain":    "Multiple",
     "Malware Persistence Chain": "Multiple",
+    "Kerberoasting":                    "4769",
+    "Golden Ticket":                    "4768",
+    "Credential Dumping":               "4656 / 4663",
+    "Logon from Disabled Account":      "4625",
+    "After-Hours Logon":                "4624",
+    "Suspicious Registry Modification": "4657",
+    "Lateral Movement via Network Share": "5140 / 5145",
 }
 
 # Hardcoded remediation steps per rule.
@@ -402,6 +409,13 @@ RULE_CATEGORIES = {
     "Audit Log Cleared":         "Defense Evasion",
     "Account Takeover Chain":    "Credential Access",
     "Malware Persistence Chain": "Persistence",
+    "Kerberoasting":                    "Credential Access",
+    "Golden Ticket":                    "Credential Access",
+    "Credential Dumping":               "Credential Access",
+    "Logon from Disabled Account":      "Authentication",
+    "After-Hours Logon":                "Authentication",
+    "Suspicious Registry Modification": "Persistence",
+    "Lateral Movement via Network Share": "Lateral Movement",
 }
 
 SEVERITY_DEDUCTIONS = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3}
