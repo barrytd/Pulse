@@ -39,6 +39,23 @@ email:
   recipient: perezrobert0235249@gmail.com
   password: null
 
+# Email alerts - automatic "something bad happened" notifications.
+# Different from --email: --email sends the full report on demand, alerts
+# fire automatically ONLY when a scan finds something at or above the
+# threshold. Terse subject, short body — meant to wake you up.
+#
+# enabled:          master switch. false = no alerts, ever.
+# threshold:        minimum severity that triggers an alert.
+#                   Options: LOW, MEDIUM, HIGH, CRITICAL
+# recipient:        where alerts go. null = use email.recipient above.
+# cooldown_minutes: don't re-alert on the same rule within this window.
+#                   Prevents spamming your inbox during a --watch loop.
+alerts:
+  enabled: false
+  threshold: HIGH
+  recipient: null
+  cooldown_minutes: 60
+
 # Live monitor - settings for --watch mode.
 monitor:
   interval: 30   # seconds between polls

@@ -216,3 +216,183 @@ def test_dashboard_returns_html(client):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "PULSE" in response.text
+
+
+# ---------------------------------------------------------------------------
+# /api/config — email + alerts sections
+# ---------------------------------------------------------------------------
+
+def test_config_includes_email_and_alerts_sections(client):
+    """GET /api/config should always return email and alerts blocks for the dashboard."""
+    body = client.get("/api/config").json()
+    assert "email" in body
+    assert "alerts" in body
+    # Email defaults: password should never be returned, only password_set bool.
+    assert "password" not in body["email"]
+    assert "password_set" in body["email"]
+    # Alerts defaults
+    assert body["alerts"]["enabled"] is False
+    assert body["alerts"]["threshold"] == "HIGH"
+
+
+def test_config_password_never_leaks(client, tmp_path):
+    """Even when a password is set in pulse.yaml, GET /api/config must mask it."""
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text(
+        "email:\n"
+        "  smtp_host: smtp.example.com\n"
+        "  smtp_port: 587\n"
+        "  sender: a@example.com\n"
+        "  recipient: b@example.com\n"
+        "  password: SuperSecret123\n"
+    )
+    db_path = tmp_path / "test.db"
+    from pulse.api import create_app
+    from fastapi.testclient import TestClient
+    fresh = TestClient(create_app(db_path=str(db_path), config_path=str(config_path)))
+
+    body = fresh.get("/api/config").json()
+    assert body["email"]["password_set"] is True
+    # The literal secret must not appear anywhere in the response payload.
+    assert "SuperSecret123" not in fresh.get("/api/config").text
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/config/email
+# ---------------------------------------------------------------------------
+
+def test_put_email_persists_fields(client):
+    """PUT /api/config/email should write back to pulse.yaml so subsequent reads see it."""
+    payload = {
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "sender":    "alerts@me.com",
+        "recipient": "ops@me.com",
+        "password":  "newpass",
+    }
+    r = client.put("/api/config/email", json=payload)
+    assert r.status_code == 200
+    assert r.json()["password_set"] is True
+
+    body = client.get("/api/config").json()
+    assert body["email"]["smtp_host"] == "smtp.gmail.com"
+    assert body["email"]["sender"]    == "alerts@me.com"
+    assert body["email"]["password_set"] is True
+
+
+def test_put_email_keeps_password_when_blank(client):
+    """Saving with an empty password should NOT clear the existing one."""
+    client.put("/api/config/email", json={
+        "smtp_host": "smtp.x.com", "smtp_port": 587,
+        "sender": "a@x.com", "recipient": "b@x.com",
+        "password": "first-pass",
+    })
+    # Re-save without password — the original should survive.
+    client.put("/api/config/email", json={"sender": "c@x.com", "password": ""})
+    body = client.get("/api/config").json()
+    assert body["email"]["sender"] == "c@x.com"
+    assert body["email"]["password_set"] is True
+
+
+def test_put_email_rejects_bad_port(client):
+    r = client.put("/api/config/email", json={"smtp_port": "not a number"})
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/config/alerts
+# ---------------------------------------------------------------------------
+
+def test_put_alerts_persists_fields(client):
+    payload = {
+        "enabled": True,
+        "threshold": "CRITICAL",
+        "recipient": "soc@me.com",
+        "cooldown_minutes": 30,
+    }
+    r = client.put("/api/config/alerts", json=payload)
+    assert r.status_code == 200
+
+    body = client.get("/api/config").json()
+    assert body["alerts"]["enabled"] is True
+    assert body["alerts"]["threshold"] == "CRITICAL"
+    assert body["alerts"]["recipient"] == "soc@me.com"
+    assert body["alerts"]["cooldown_minutes"] == 30
+
+
+def test_put_alerts_threshold_validation(client):
+    r = client.put("/api/config/alerts", json={"threshold": "BANANA"})
+    assert r.status_code == 400
+
+
+def test_put_alerts_cooldown_validation(client):
+    r = client.put("/api/config/alerts", json={"cooldown_minutes": -5})
+    assert r.status_code == 400
+
+
+def test_put_alerts_threshold_is_uppercased(client):
+    """Lowercase threshold values should be normalised to uppercase."""
+    r = client.put("/api/config/alerts", json={"threshold": "high"})
+    assert r.status_code == 200
+    body = client.get("/api/config").json()
+    assert body["alerts"]["threshold"] == "HIGH"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/alerts/test
+# ---------------------------------------------------------------------------
+
+def test_alerts_test_requires_password(client):
+    """Without an SMTP password configured, the test endpoint should refuse."""
+    r = client.post("/api/alerts/test")
+    assert r.status_code == 400
+    assert "password" in r.json()["detail"].lower()
+
+
+def test_alerts_test_requires_recipient(client):
+    """A configured password but no recipient anywhere should also refuse."""
+    client.put("/api/config/email", json={
+        "smtp_host": "smtp.x.com", "smtp_port": 587,
+        "sender": "a@x.com", "recipient": "",
+        "password": "p",
+    })
+    r = client.post("/api/alerts/test")
+    assert r.status_code == 400
+    assert "recipient" in r.json()["detail"].lower()
+
+
+def test_alerts_test_calls_send_alert_when_configured(client, monkeypatch):
+    """When config is valid, the endpoint should invoke send_alert and return success."""
+    client.put("/api/config/email", json={
+        "smtp_host": "smtp.x.com", "smtp_port": 587,
+        "sender": "a@x.com", "recipient": "b@x.com",
+        "password": "p",
+    })
+
+    captured = {}
+
+    def fake_send_alert(email_cfg, alerts_cfg, findings, *a, **kw):
+        captured["email_cfg"] = email_cfg
+        captured["findings"]  = findings
+        return True
+
+    # Patch where api.py imports it (inside the endpoint, late import).
+    monkeypatch.setattr("pulse.emailer.send_alert", fake_send_alert)
+
+    r = client.post("/api/alerts/test")
+    assert r.status_code == 200
+    assert r.json()["status"] == "sent"
+    assert captured["findings"][0]["rule"] == "Pulse Test Alert"
+    assert captured["findings"][0]["severity"] == "CRITICAL"
+
+
+def test_alerts_test_returns_502_when_smtp_fails(client, monkeypatch):
+    """If send_alert returns False, the endpoint should bubble up a 502."""
+    client.put("/api/config/email", json={
+        "smtp_host": "smtp.x.com", "smtp_port": 587,
+        "sender": "a@x.com", "recipient": "b@x.com",
+        "password": "p",
+    })
+    monkeypatch.setattr("pulse.emailer.send_alert", lambda *a, **kw: False)
+    r = client.post("/api/alerts/test")
+    assert r.status_code == 502

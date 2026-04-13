@@ -23,17 +23,20 @@
 #   FastAPI generates an interactive Swagger UI with every endpoint, its
 #   parameters, example requests, and a "Try it out" button — all for free.
 
+import asyncio
+import json
 import os
 import tempfile
 from typing import Optional
 
 import yaml
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from pulse import __version__
 from pulse.database import get_history, get_scan_findings, init_db, save_scan
 from pulse.detections import run_all_detections
+from pulse.monitor_service import MonitorManager
 from pulse.parser import parse_evtx
 from pulse.reporter import (
     _build_html_report, _build_json_report, _calculate_score,
@@ -83,6 +86,15 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None)
     # Attach config so route handlers can reach it without globals.
     app.state.db_path = db_path
     app.state.config_path = config_path
+
+    # Live monitor — one MonitorManager per app. It owns the async polling
+    # loop and fans out findings to SSE subscribers. Lazy: doesn't start
+    # polling until POST /api/monitor/start is called.
+    app.state.monitor = MonitorManager(
+        db_path=db_path,
+        config_path=config_path,
+        config_getter=lambda: _read_config(config_path),
+    )
 
     _register_routes(app)
     return app
@@ -314,13 +326,22 @@ def _register_routes(app: FastAPI) -> None:
         )
 
     # -------------------------------------------------------------------
-    # GET /api/config — read current whitelist + settings
+    # GET /api/config — read current whitelist + settings + email + alerts
     # -------------------------------------------------------------------
     @app.get("/api/config")
     def get_config():
-        """Return the current pulse.yaml whitelist and settings."""
+        """
+        Return the current pulse.yaml config for the dashboard to render.
+
+        IMPORTANT: the email password is never returned. We send back a
+        boolean `password_set` flag instead, so the UI can show a "Password
+        is configured" badge without ever putting the secret on the wire.
+        """
         config = _read_config(app.state.config_path)
         whitelist = config.get("whitelist", {}) or {}
+        email = config.get("email", {}) or {}
+        alerts = config.get("alerts", {}) or {}
+
         return {
             "whitelist": {
                 "accounts": whitelist.get("accounts", []) or [],
@@ -333,6 +354,133 @@ def _register_routes(app: FastAPI) -> None:
                 "format": config.get("format", "txt"),
                 "severity": config.get("severity", "LOW"),
             },
+            "email": {
+                "smtp_host": email.get("smtp_host") or "",
+                "smtp_port": email.get("smtp_port") or 587,
+                "sender":    email.get("sender") or "",
+                "recipient": email.get("recipient") or "",
+                "password_set": bool(email.get("password")),
+            },
+            "alerts": {
+                "enabled":          bool(alerts.get("enabled", False)),
+                "threshold":        alerts.get("threshold", "HIGH"),
+                "recipient":        alerts.get("recipient") or "",
+                "cooldown_minutes": int(alerts.get("cooldown_minutes", 60)),
+            },
+        }
+
+    # -------------------------------------------------------------------
+    # PUT /api/config/email — update SMTP settings
+    # -------------------------------------------------------------------
+    @app.put("/api/config/email")
+    async def update_email(request: Request):
+        """
+        Update the email section of pulse.yaml.
+
+        Password handling:
+          - If the request omits "password" or sends an empty string,
+            the existing password is kept (no overwrite).
+          - This lets the dashboard re-save other fields without forcing
+            the user to retype the password every time.
+        """
+        body = await request.json()
+        config = _read_config(app.state.config_path)
+        email = config.get("email", {}) or {}
+
+        for key in ("smtp_host", "sender", "recipient"):
+            if key in body:
+                email[key] = (body[key] or "").strip() or None
+
+        if "smtp_port" in body:
+            try:
+                email["smtp_port"] = int(body["smtp_port"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="smtp_port must be an integer.")
+
+        # Only overwrite the password if a new non-empty value was sent.
+        if body.get("password"):
+            email["password"] = body["password"]
+
+        config["email"] = email
+        _write_config(app.state.config_path, config)
+
+        return {"status": "ok", "password_set": bool(email.get("password"))}
+
+    # -------------------------------------------------------------------
+    # PUT /api/config/alerts — update alert thresholds + cooldown
+    # -------------------------------------------------------------------
+    @app.put("/api/config/alerts")
+    async def update_alerts(request: Request):
+        """Update the alerts section of pulse.yaml."""
+        body = await request.json()
+        config = _read_config(app.state.config_path)
+        alerts = config.get("alerts", {}) or {}
+
+        if "enabled" in body:
+            alerts["enabled"] = bool(body["enabled"])
+
+        if "threshold" in body:
+            threshold = (body["threshold"] or "HIGH").upper()
+            if threshold not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
+                raise HTTPException(400, detail="threshold must be LOW, MEDIUM, HIGH, or CRITICAL.")
+            alerts["threshold"] = threshold
+
+        if "recipient" in body:
+            # Empty string means "fall back to email.recipient" — store as null.
+            alerts["recipient"] = (body["recipient"] or "").strip() or None
+
+        if "cooldown_minutes" in body:
+            try:
+                cooldown = int(body["cooldown_minutes"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="cooldown_minutes must be an integer.")
+            if cooldown < 0:
+                raise HTTPException(400, detail="cooldown_minutes cannot be negative.")
+            alerts["cooldown_minutes"] = cooldown
+
+        config["alerts"] = alerts
+        _write_config(app.state.config_path, config)
+
+        return {"status": "ok", "alerts": alerts}
+
+    # -------------------------------------------------------------------
+    # POST /api/alerts/test — fire a single dummy alert email
+    # -------------------------------------------------------------------
+    @app.post("/api/alerts/test")
+    def send_test_alert():
+        """
+        Fire one synthetic alert email to verify SMTP credentials work.
+
+        Bypasses the cooldown table and the alerts.enabled switch — the
+        whole point is to test connectivity without flipping production
+        settings on. Uses a fake CRITICAL finding so the email body
+        clearly looks like a test.
+        """
+        from pulse.emailer import send_alert
+
+        config = _read_config(app.state.config_path)
+        email_cfg  = config.get("email", {}) or {}
+        alerts_cfg = config.get("alerts", {}) or {}
+
+        if not email_cfg.get("password"):
+            raise HTTPException(400, detail="No SMTP password configured. Save your email settings first.")
+        if not (alerts_cfg.get("recipient") or email_cfg.get("recipient")):
+            raise HTTPException(400, detail="No recipient configured for alerts.")
+
+        synthetic = [{
+            "rule":     "Pulse Test Alert",
+            "severity": "CRITICAL",
+            "details":  "This is a test alert sent from the Pulse dashboard. "
+                        "If you are reading this, your SMTP settings are working.",
+        }]
+
+        ok = send_alert(email_cfg, alerts_cfg, synthetic)
+        if not ok:
+            raise HTTPException(502, detail="SMTP send failed. Check the server logs for details.")
+
+        return {
+            "status":    "sent",
+            "recipient": alerts_cfg.get("recipient") or email_cfg.get("recipient"),
         }
 
     # -------------------------------------------------------------------
@@ -365,10 +513,147 @@ def _register_routes(app: FastAPI) -> None:
         """Return the names of all detection rules Pulse can run."""
         return {"rules": _get_rule_names()}
 
+    # -------------------------------------------------------------------
+    # Live monitor endpoints
+    # -------------------------------------------------------------------
+    # The dashboard's live panel talks to these four endpoints plus the SSE
+    # stream. Start/stop are POST (they change server state), status and
+    # history are GET (they're read-only), and /stream is a long-lived GET
+    # that fans out events in real time.
+
+    @app.post("/api/monitor/start")
+    async def monitor_start(request: Request):
+        """Start or reconfigure the live monitor.
+
+        Request body (all optional):
+          poll_interval: int seconds (>=5)
+          mode:          "live" (wevtutil, Windows-only) or "file"
+          channels:      list of channel names for live mode
+          log_folder:    path for file mode
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        status = await app.state.monitor.start(
+            poll_interval=body.get("poll_interval"),
+            mode=body.get("mode"),
+            channels=body.get("channels"),
+            log_folder=body.get("log_folder"),
+        )
+        return status
+
+    @app.post("/api/monitor/stop")
+    async def monitor_stop():
+        """Stop the live monitor. Idempotent."""
+        return await app.state.monitor.stop()
+
+    @app.get("/api/monitor/status")
+    def monitor_status():
+        """Current monitor state — used by the dashboard on page load."""
+        return app.state.monitor.status()
+
+    @app.get("/api/monitor/history")
+    def monitor_history(limit: int = 50):
+        """Recent poll history — each entry is one check, with or without findings."""
+        if limit < 1 or limit > 100:
+            raise HTTPException(400, detail="limit must be between 1 and 100.")
+        return {"checks": app.state.monitor.recent_checks(limit=limit)}
+
+    @app.post("/api/monitor/test-alert")
+    async def monitor_test_alert():
+        """Inject a synthetic finding through the live-monitor fan-out.
+
+        Useful for verifying that the full SSE + UI pipeline (stream ->
+        EventSource -> slide-in + ding) is wired up correctly without
+        having to wait for a real detection to fire.
+        """
+        manager = app.state.monitor
+        if not manager.active:
+            raise HTTPException(
+                400,
+                detail="Monitor is not active. Start monitoring first.",
+            )
+        await manager.inject_test_finding()
+        return {"status": "sent"}
+
+    @app.get("/api/monitor/stream")
+    async def monitor_stream(request: Request):
+        """Server-Sent Events stream.
+
+        Each message is emitted as:
+            event: {type}
+            data:  {json}
+
+        Event types:
+          status   — monitor started/stopped or reconfigured
+          finding  — a new detection was triggered
+          check    — heartbeat after every poll (even when no findings)
+          error    — poll failed
+          ping     — keep-alive comment so proxies don't time us out
+        """
+        manager = app.state.monitor
+        queue = manager.subscribe()
+
+        async def event_generator():
+            # Kick the connection off with the current status so the client
+            # renders correctly even if it connected mid-session.
+            yield _sse_format("status", {"status": manager.status()})
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15)
+                    except asyncio.TimeoutError:
+                        # Heartbeat: an SSE comment line keeps proxies from
+                        # killing the idle connection without pushing a real
+                        # event into the client's handler.
+                        yield ": ping\n\n"
+                        continue
+                    etype = event.pop("type", "message")
+                    yield _sse_format(etype, event)
+            finally:
+                manager.unsubscribe(queue)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",  # disable nginx buffering if present
+                "Connection": "keep-alive",
+            },
+        )
+
+    # -------------------------------------------------------------------
+    # GET /api/whitelist/builtin — list the built-in known-good services
+    # -------------------------------------------------------------------
+    @app.get("/api/whitelist/builtin")
+    def builtin_whitelist():
+        """Return the built-in KNOWN_GOOD_SERVICES list the whitelist UI renders.
+
+        These are always active and cannot be removed — the UI shows them
+        as muted 'built-in' rows so users can see what's already covered.
+        """
+        from pulse.known_good import KNOWN_GOOD_SERVICES
+        return {"services": list(KNOWN_GOOD_SERVICES)}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _sse_format(event_type, payload):
+    """Format one message for an SSE stream.
+
+    SSE framing is: `event: <name>\\n` + `data: <line>\\n` (repeat) + blank line.
+    The data line must not contain raw newlines, so we json-dump to a single
+    line and send that."""
+    data = json.dumps(payload, default=str)
+    return f"event: {event_type}\ndata: {data}\n\n"
+
 
 def _read_config(config_path):
     """Read pulse.yaml and return the config dict."""

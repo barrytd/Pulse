@@ -55,8 +55,81 @@
 #    because it gives them a full GUI session on the target machine.
 
 
+import platform
 import xml.etree.ElementTree as ET          # Built-in XML parser
 from datetime import datetime, timedelta   # For comparing event timestamps
+
+
+# Cache for SID -> friendly name lookups. SIDs repeat constantly across
+# events (same admin doing many actions), so caching turns N lookups into 1.
+_SID_CACHE = {}
+
+
+def _resolve_sid(sid_string):
+    """Translate a Windows SID like "S-1-5-21-...-1003" into "DOMAIN\\user".
+
+    Falls back to returning the SID unchanged on:
+      - non-Windows platforms (Linux/macOS dev machines)
+      - unresolvable SIDs (orphaned accounts, remote domains)
+      - any ctypes / API failure
+
+    Implementation uses advapi32 directly via ctypes so we don't need to
+    add pywin32 as a dependency.
+    """
+    if not sid_string:
+        return sid_string
+    if sid_string in _SID_CACHE:
+        return _SID_CACHE[sid_string]
+    if platform.system() != "Windows":
+        return sid_string
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        advapi32 = ctypes.windll.advapi32
+        kernel32 = ctypes.windll.kernel32
+
+        # Step 1: "S-1-5-..." string -> binary SID struct.
+        sid_ptr = ctypes.c_void_p()
+        if not advapi32.ConvertStringSidToSidW(
+            ctypes.c_wchar_p(sid_string),
+            ctypes.byref(sid_ptr),
+        ):
+            return sid_string
+
+        try:
+            # Step 2: binary SID -> (name, domain). Buffers start at 256
+            # chars; if the lookup needs more, Windows writes the required
+            # size into name_size/domain_size and returns 0 — we'd retry,
+            # but 256 covers every real-world account name.
+            name_size   = wintypes.DWORD(256)
+            domain_size = wintypes.DWORD(256)
+            name_buf    = ctypes.create_unicode_buffer(name_size.value)
+            domain_buf  = ctypes.create_unicode_buffer(domain_size.value)
+            sid_type    = wintypes.DWORD()
+
+            if not advapi32.LookupAccountSidW(
+                None,                       # local machine
+                sid_ptr,
+                name_buf,
+                ctypes.byref(name_size),
+                domain_buf,
+                ctypes.byref(domain_size),
+                ctypes.byref(sid_type),
+            ):
+                return sid_string
+
+            name   = name_buf.value
+            domain = domain_buf.value
+            resolved = f"{domain}\\{name}" if domain else name or sid_string
+        finally:
+            kernel32.LocalFree(sid_ptr)
+
+        _SID_CACHE[sid_string] = resolved
+        return resolved
+    except Exception:
+        return sid_string
 
 
 # These are the Windows Event IDs we care about.
@@ -317,6 +390,7 @@ def detect_privilege_escalation(events):
         xml_tree = ET.fromstring(event["data"])
 
         member_added = None
+        member_sid   = None
         added_by = None
         group_name = None
 
@@ -325,6 +399,11 @@ def detect_privilege_escalation(events):
             if name == "MemberName":
                 # MemberName is the account that was ADDED to the group.
                 member_added = data_element.text
+            elif name == "MemberSid":
+                # Windows frequently writes MemberName as "-" and only
+                # fills in the SID. Keep it as a fallback so we don't
+                # show a bare dash in the finding.
+                member_sid = data_element.text
             elif name == "SubjectUserName":
                 # SubjectUserName is the account that DID the adding.
                 added_by = data_element.text
@@ -333,11 +412,21 @@ def detect_privilege_escalation(events):
                 # (confusing, but that's how Microsoft named it).
                 group_name = data_element.text
 
+        # Prefer the resolved name; fall back to translating the SID via
+        # LookupAccountSid; then the raw SID; only say "Unknown" if we
+        # truly have nothing.
+        if member_added and member_added.strip() and member_added.strip() != "-":
+            who = member_added
+        elif member_sid:
+            who = _resolve_sid(member_sid)
+        else:
+            who = "Unknown"
+
         findings.append({
             "rule": "Privilege Escalation",
             "severity": "HIGH",
             "details": (
-                f"'{member_added or 'Unknown'}' was added to security group "
+                f"'{who}' was added to security group "
                 f"'{group_name or 'Unknown'}' by '{added_by or 'Unknown'}' "
                 f"at {event['timestamp']}. "
                 f"Check if this was a legitimate admin action."
@@ -691,21 +780,39 @@ def detect_firewall_disabled(events):
             continue
 
         # --- EXTRACT WHICH PROFILE WAS CHANGED ---
-        # The "ProfileName" field tells us which firewall profile was
-        # affected: "Domain", "Private", or "Public".
+        # Real Windows 4950 events write the profile name into
+        # "ProfileChanged" (e.g. "Public Profile"), plus SettingType and
+        # SettingValue describing exactly what was flipped. Some test
+        # fixtures and older docs use "ProfileName" — fall back to that
+        # so we stay compatible.
         xml_tree = ET.fromstring(event["data"])
 
-        profile = None
+        profile       = None
+        setting_type  = None
+        setting_value = None
         for data_element in xml_tree.findall(f"{NS}EventData/{NS}Data"):
-            if data_element.get("Name") == "ProfileName":
+            name = data_element.get("Name")
+            if name in ("ProfileChanged", "ProfileName") and not profile:
                 profile = data_element.text
-                break
+            elif name == "SettingType":
+                setting_type = data_element.text
+            elif name == "NewProfileSetting" or name == "SettingValue":
+                setting_value = data_element.text
+
+        # Build a richer details line when SettingType/Value are present.
+        if setting_type and setting_value:
+            change = (
+                f"setting '{setting_type}' changed to '{setting_value}' on "
+                f"'{profile or 'Unknown profile'}'"
+            )
+        else:
+            change = f"profile '{profile or 'Unknown'}' was changed"
 
         findings.append({
             "rule": "Firewall Disabled",
             "severity": "HIGH",
             "details": (
-                f"Windows Firewall profile '{profile or 'Unknown'}' was changed "
+                f"Windows Firewall {change} "
                 f"at {event['timestamp']}. "
                 f"If the firewall was disabled, the machine is now exposed. "
                 f"Attackers disable firewalls to allow unrestricted network access."

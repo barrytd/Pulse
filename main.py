@@ -25,8 +25,11 @@ import yaml                                          # Third-party: reads YAML c
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
 from pulse.reporter import generate_report, SEVERITY_ORDER
-from pulse.emailer import send_report, validate_email_config
-from pulse.database import init_db, save_scan, get_history
+from pulse.emailer import (
+    send_report, validate_email_config,
+    send_alert, filter_alert_findings,
+)
+from pulse.database import init_db, save_scan, get_history, record_alert, was_recently_alerted
 from pulse.reporter import _calculate_score
 from pulse.monitor import start_monitor
 from pulse.whitelist import filter_whitelist
@@ -139,6 +142,16 @@ def build_arg_parser(config=None):
         "--email",
         action="store_true",
         help="Send the finished report via email (requires email settings in pulse.yaml).",
+    )
+
+    # --- ARGUMENT: --no-alerts ---
+    # Disables threshold-based alert emails for this run, even if
+    # alerts.enabled is true in pulse.yaml. Useful for noisy one-off scans
+    # where you don't want to fire an alert just because you're testing.
+    parser.add_argument(
+        "--no-alerts",
+        action="store_true",
+        help="Skip threshold-based alert emails for this run (overrides pulse.yaml).",
     )
 
     # --- ARGUMENT: --history ---
@@ -740,6 +753,50 @@ def main():
         scan_id = save_scan(db_path, findings, scan_stats=scan_stats,
                             score=score, score_label=score_label)
         print(f"  [*] Scan #{scan_id} saved to database ({db_path})")
+
+    # --- STEP 7b: THRESHOLD-BASED EMAIL ALERTS ---
+    # Separate from --email: --email sends the full report on demand,
+    # alerts fire ONLY when at least one finding is at/above the threshold
+    # configured in pulse.yaml (alerts.threshold). Cooldown prevents
+    # --watch from spamming the same alert every poll.
+    alert_config = config.get("alerts", {}) or {}
+    if (
+        findings
+        and not args.no_alerts
+        and alert_config.get("enabled")
+    ):
+        threshold  = alert_config.get("threshold", "HIGH")
+        cooldown   = int(alert_config.get("cooldown_minutes", 60))
+        alertable  = filter_alert_findings(findings, threshold)
+
+        if alertable:
+            # Cooldown filter: drop any finding whose rule already fired
+            # an alert within the cooldown window.
+            fresh = []
+            skipped_rules = set()
+            for f in alertable:
+                rule = f.get("rule", "")
+                if db_path and was_recently_alerted(db_path, rule, cooldown):
+                    skipped_rules.add(rule)
+                else:
+                    fresh.append(f)
+
+            if skipped_rules:
+                print(f"  [*] Alert cooldown suppressed: {', '.join(sorted(skipped_rules))}")
+
+            if fresh:
+                print(f"  [*] Firing alert ({len(fresh)} finding(s) >= {threshold})...")
+                ok = send_alert(email_config, alert_config, fresh)
+                if ok:
+                    # Record one alert_log row per unique rule so future
+                    # scans within the cooldown window skip them.
+                    unique_rules = {}
+                    for f in fresh:
+                        unique_rules[f.get("rule", "")] = f.get("severity")
+                    for rule, sev in unique_rules.items():
+                        if db_path:
+                            record_alert(db_path, rule, severity=sev)
+                    print(f"  [*] Alert sent to {alert_config.get('recipient') or email_config.get('recipient')}")
 
     print()
     print("=" * 50)

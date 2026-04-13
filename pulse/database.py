@@ -59,6 +59,21 @@ CREATE TABLE IF NOT EXISTS findings (
 );
 """
 
+# Records every email alert sent so we can enforce a cooldown window.
+# Without this, a --watch loop that re-detects the same brute force every
+# 30 seconds would send an email every 30 seconds. With this, we check
+# alert_log first: if we already alerted on "Brute Force Attempt" within
+# the last 60 minutes, skip sending another.
+_CREATE_ALERT_LOG = """
+CREATE TABLE IF NOT EXISTS alert_log (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    sent_at   TEXT    NOT NULL,
+    rule      TEXT    NOT NULL,
+    severity  TEXT,
+    hostname  TEXT
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -77,6 +92,7 @@ def init_db(db_path):
     with _connect(db_path) as conn:
         conn.execute(_CREATE_SCANS)
         conn.execute(_CREATE_FINDINGS)
+        conn.execute(_CREATE_ALERT_LOG)
         try:
             conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
         except sqlite3.OperationalError:
@@ -201,6 +217,77 @@ def get_scan_findings(db_path, scan_id):
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Alert log — cooldown tracking for email alerts
+# ---------------------------------------------------------------------------
+
+def record_alert(db_path, rule, severity=None, hostname=None):
+    """
+    Records that an alert email was just sent for a given rule.
+
+    Called by the email-alert code AFTER a successful send_alert() call.
+    The row it writes is what was_recently_alerted() checks against.
+
+    Parameters:
+        db_path (str):  Path to the .db file.
+        rule (str):     Name of the detection rule that triggered, e.g.
+                        "Brute Force Attempt".
+        severity (str): Severity label (CRITICAL/HIGH/MEDIUM/LOW).
+        hostname (str): Which host the alert was about. Defaults to local.
+    """
+    sent_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if hostname is None:
+        hostname = _get_hostname()
+
+    with _connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO alert_log (sent_at, rule, severity, hostname)
+               VALUES (?, ?, ?, ?)""",
+            (sent_at, rule, severity, hostname)
+        )
+
+
+def was_recently_alerted(db_path, rule, cooldown_minutes=60):
+    """
+    Checks whether an alert for `rule` was already sent within the cooldown window.
+
+    Cooldown is a spam guard. Without it, --watch mode would re-detect the
+    same brute force every poll cycle and email you every 30 seconds until
+    you disabled the feature in anger. With it, each unique rule only fires
+    at most once per `cooldown_minutes`.
+
+    Parameters:
+        db_path (str):           Path to the .db file.
+        rule (str):              Rule name to check.
+        cooldown_minutes (int):  How far back to look. 60 = "last hour".
+
+    Returns:
+        bool: True if we already alerted on this rule recently, False otherwise.
+    """
+    if not db_path:
+        return False   # no DB -> can't track cooldown -> always allow
+
+    try:
+        with _connect(db_path) as conn:
+            # SQLite's datetime() + modifier does the time math for us.
+            # "now" - "60 minutes" gives the cutoff; any row sent_at after
+            # that cutoff counts as "recent".
+            # record_alert writes sent_at in local time via Python's
+            # datetime.now(), but SQLite's bare datetime('now') returns UTC.
+            # Passing 'localtime' as a modifier makes the comparison
+            # timezone-consistent on any machine.
+            cursor = conn.execute(
+                """SELECT 1 FROM alert_log
+                   WHERE rule = ?
+                     AND sent_at > datetime('now', 'localtime', ?)
+                   LIMIT 1""",
+                (rule, f"-{int(cooldown_minutes)} minutes")
+            )
+            return cursor.fetchone() is not None
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------

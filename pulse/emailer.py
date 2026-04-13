@@ -46,8 +46,17 @@ SEVERITY_COLORS = {
 # Sort order for findings: highest severity first
 _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
+# Rank -> severity lookup used when comparing against the alert threshold.
+# "HIGH" has rank 1, so finding_rank <= threshold_rank means the finding
+# is at or above the threshold (remember: lower number = higher severity).
+_SEVERITY_RANK = _SEVERITY_ORDER
+
 # Maximum findings shown in the email body
 _MAX_FINDINGS_SHOWN = 3
+
+# Maximum findings listed inside an alert email. Alerts are meant to be
+# terse — "something bad happened, here's a taste" — not the full report.
+_MAX_ALERT_FINDINGS_SHOWN = 5
 
 
 def _header_color(severity_counts):
@@ -121,6 +130,251 @@ def validate_email_config(email_config):
             )
 
     return None
+
+
+def filter_alert_findings(findings, threshold):
+    """
+    Returns only the findings whose severity is at or above the threshold.
+
+    Severity ranks go: CRITICAL(0) < HIGH(1) < MEDIUM(2) < LOW(3). Lower
+    number = more serious. A finding passes the gate if its rank is <=
+    the threshold's rank (i.e. it is as severe or more severe).
+
+    Parameters:
+        findings (list):  Finding dicts, each with a "severity" key.
+        threshold (str):  "CRITICAL", "HIGH", "MEDIUM", or "LOW".
+
+    Returns:
+        list: Subset of findings that meet or exceed the threshold.
+    """
+    threshold_rank = _SEVERITY_RANK.get((threshold or "HIGH").upper(), 1)
+    result = []
+    for f in findings:
+        sev = (f.get("severity") or "LOW").upper()
+        if _SEVERITY_RANK.get(sev, 3) <= threshold_rank:
+            result.append(f)
+    return result
+
+
+def send_alert(email_config, alert_config, triggering_findings,
+               scan_dt=None, db_path=None):
+    """
+    Sends a short threshold-tripped alert email.
+
+    This is NOT the full report. It's a terse "wake up" message listing
+    only the findings that tripped the threshold. SMTP credentials come
+    from email_config (same server used by --email). Recipient comes
+    from alert_config.recipient, or falls back to email.recipient.
+
+    Cooldown handling:
+      - Before sending, the caller should have already filtered out
+        rules that were recently alerted (use was_recently_alerted()).
+      - After a successful send, the caller should record_alert() for
+        each unique rule in triggering_findings.
+      - We don't do the cooldown check here because the caller may want
+        to send one email covering several rules; letting this function
+        decide "skip" would make that harder.
+
+    Parameters:
+        email_config (dict):          SMTP credentials (smtp_host, sender, etc.)
+        alert_config (dict):          alerts section from pulse.yaml
+        triggering_findings (list):   Findings at or above threshold.
+        scan_dt (datetime):           When the scan ran. Defaults to now.
+        db_path (str):                Unused here — reserved for future use.
+
+    Returns:
+        bool: True if sent, False if not (config missing, SMTP error, etc.)
+    """
+    if not triggering_findings:
+        return False
+
+    error = validate_email_config(email_config)
+    if error:
+        print(f"  [!] Alert not sent: {error}")
+        return False
+
+    smtp_host = email_config["smtp_host"]
+    smtp_port = int(email_config["smtp_port"])
+    sender    = email_config["sender"]
+    password  = email_config["password"]
+
+    # Alert recipient overrides report recipient. If alerts.recipient is
+    # null/missing in pulse.yaml, fall back to the email.recipient field.
+    alert_recipient = (alert_config or {}).get("recipient") or email_config.get("recipient")
+    if not alert_recipient:
+        print("  [!] Alert not sent: no recipient configured.")
+        return False
+
+    if scan_dt is None:
+        scan_dt = datetime.now()
+
+    hostname = _get_hostname()
+
+    # Highest severity in this alert drives the subject and accent colour.
+    severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for f in triggering_findings:
+        sev = (f.get("severity") or "LOW").upper()
+        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+    msg = MIMEMultipart("alternative")
+    msg["From"]    = sender
+    msg["To"]      = alert_recipient
+    msg["Subject"] = _build_alert_subject(severity_counts, len(triggering_findings), hostname)
+
+    plain = _build_alert_plain_body(severity_counts, triggering_findings, hostname, scan_dt)
+    html  = _build_alert_html_body(severity_counts, triggering_findings, hostname, scan_dt)
+
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html,  "html"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(sender, password)
+            server.sendmail(sender, alert_recipient, msg.as_string())
+        return True
+
+    except smtplib.SMTPAuthenticationError:
+        print("  [!] Alert failed: SMTP authentication error. Check pulse.yaml credentials.")
+        return False
+    except smtplib.SMTPConnectError:
+        print(f"  [!] Alert failed: could not connect to {smtp_host}:{smtp_port}.")
+        return False
+    except Exception as e:
+        print(f"  [!] Alert failed: {e}")
+        return False
+
+
+def _build_alert_subject(severity_counts, total, hostname):
+    """Terse subject line. Example: '[PULSE ALERT] HIGH — 3 findings on DESKTOP-PC'"""
+    if severity_counts.get("CRITICAL", 0) > 0:
+        level = "CRITICAL"
+    elif severity_counts.get("HIGH", 0) > 0:
+        level = "HIGH"
+    elif severity_counts.get("MEDIUM", 0) > 0:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
+    suffix = f" on {hostname}" if hostname and hostname != "Unknown" else ""
+    noun = "finding" if total == 1 else "findings"
+    return f"[PULSE ALERT] {level} - {total} {noun}{suffix}"
+
+
+def _build_alert_plain_body(severity_counts, findings, hostname, scan_dt):
+    """Plain-text alert body. Short: host, time, top N rules tripped."""
+    sorted_f = sorted(findings, key=lambda f: _SEVERITY_ORDER.get(f.get("severity", "LOW"), 3))
+    shown    = sorted_f[:_MAX_ALERT_FINDINGS_SHOWN]
+    overflow = len(sorted_f) - len(shown)
+    stamp    = scan_dt.strftime("%b %d, %Y %H:%M") if hasattr(scan_dt, "strftime") else str(scan_dt)
+
+    lines = [
+        "PULSE ALERT",
+        "=" * 40,
+        f"Host : {hostname}",
+        f"Time : {stamp}",
+        f"Total: {len(findings)} finding(s) at or above threshold",
+        "",
+        "Breakdown:",
+        f"  CRITICAL : {severity_counts.get('CRITICAL', 0)}",
+        f"  HIGH     : {severity_counts.get('HIGH', 0)}",
+        f"  MEDIUM   : {severity_counts.get('MEDIUM', 0)}",
+        f"  LOW      : {severity_counts.get('LOW', 0)}",
+        "",
+        "Triggering findings:",
+    ]
+    for f in shown:
+        sev  = f.get("severity", "LOW")
+        rule = f.get("rule", "Unknown")
+        det  = (f.get("details") or f.get("description") or "").strip()
+        if len(det) > 140:
+            det = det[:137] + "..."
+        lines.append(f"  [{sev}] {rule}")
+        if det:
+            lines.append(f"    {det}")
+    if overflow > 0:
+        lines.append(f"  ...and {overflow} more.")
+    lines += [
+        "",
+        "Run `python main.py --format html` for the full report.",
+        "",
+        "-- Pulse",
+    ]
+    return "\n".join(lines)
+
+
+def _build_alert_html_body(severity_counts, findings, hostname, scan_dt):
+    """Compact HTML alert body. Same palette as send_report but smaller."""
+    accent = _header_color(severity_counts)
+    sorted_f = sorted(findings, key=lambda f: _SEVERITY_ORDER.get(f.get("severity", "LOW"), 3))
+    shown    = sorted_f[:_MAX_ALERT_FINDINGS_SHOWN]
+    overflow = len(sorted_f) - len(shown)
+    stamp    = scan_dt.strftime("%b %d, %Y %H:%M") if hasattr(scan_dt, "strftime") else str(scan_dt)
+
+    rows = ""
+    for i, f in enumerate(shown, start=1):
+        sev    = f.get("severity", "LOW")
+        colors = SEVERITY_COLORS.get(sev, SEVERITY_COLORS["LOW"])
+        rule   = f.get("rule", "Unknown")
+        det    = (f.get("details") or f.get("description") or "").strip()
+        if len(det) > 180:
+            det = det[:177] + "..."
+        border = "border-bottom:1px solid #eeeeee;" if i < len(shown) or overflow > 0 else ""
+        rows += f"""
+        <tr><td style="padding:10px 0; {border}">
+          <span style="background:{colors['bg']}; color:{colors['text']};
+                       font-family:Arial,sans-serif; font-size:10px;
+                       font-weight:bold; letter-spacing:1px;
+                       padding:3px 8px; border-radius:4px; margin-right:10px;">
+            {sev}
+          </span>
+          <span style="font-family:Arial,sans-serif; font-size:13px;
+                       font-weight:bold; color:#222222;">{rule}</span>
+          <div style="font-family:Arial,sans-serif; font-size:12px;
+                      color:#666666; margin:4px 0 0 0;">{det}</div>
+        </td></tr>"""
+
+    overflow_line = ""
+    if overflow > 0:
+        overflow_line = f"""
+        <tr><td style="padding-top:10px; font-family:Arial,sans-serif;
+                       font-size:12px; color:#888888; font-style:italic;">
+          ...and {overflow} more finding{"s" if overflow != 1 else ""}.
+        </td></tr>"""
+
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0; padding:0; background:#f0f0f0;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background:#f0f0f0; padding:24px 0;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" border="0"
+             style="background:#ffffff; border-radius:6px; overflow:hidden;
+                    border:1px solid #e1e4e8; border-top:4px solid {accent};">
+        <tr><td style="padding:20px 28px 8px 28px;">
+          <div style="font-family:Arial,sans-serif; font-size:18px;
+                      font-weight:bold; color:#c0392b; letter-spacing:2px;">
+            PULSE ALERT
+          </div>
+          <div style="font-family:Arial,sans-serif; font-size:12px;
+                      color:#666666; margin-top:4px;">
+            {hostname} &middot; {stamp} &middot; {len(findings)} finding(s)
+          </div>
+        </td></tr>
+        <tr><td style="padding:8px 28px 20px 28px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            {rows}
+            {overflow_line}
+          </table>
+        </td></tr>
+        <tr><td style="padding:14px 28px; background:#f6f8fa;
+                       border-top:1px solid #e1e4e8;
+                       font-family:Arial,sans-serif; font-size:11px;
+                       color:#888888;">
+          Run <code>python main.py --format html</code> for the full report.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
 
 
 def send_report(email_config, severity_counts, total_findings,

@@ -1,0 +1,106 @@
+# Pulse Roadmap
+
+Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for a commit-level history.
+
+---
+
+## Shipped
+
+- Project structure and foundation
+- `.evtx` file parsing (parallel, per-file timeout)
+- 22 detection rules covering login attacks, persistence, defence evasion, credential abuse
+- Attack chain correlation (multi-event patterns)
+- MITRE ATT&CK tagging — each finding links to its technique
+- Scan summary statistics (files scanned, total events, time range, top event IDs)
+- Human-readable text report output
+- HTML report with security score, scan stats, severity filters, remediation tab, dark mode
+- JSON report output — machine-readable findings for Splunk, ELK, Python scripts
+- CSV export — spreadsheet format for Excel and Google Sheets
+- CLI flags (`--logs`, `--output`, `--format`, `--severity`, `--days`, `--email`, `--api`, etc.)
+- Config file support (`pulse.yaml`) — default settings, email config, alert config
+- Whitelist / allowlist — suppress known-good accounts, services, IPs, and rules
+- Built-in known-good service whitelist (100+ entries, zero config)
+- Baseline comparison — snapshot known-good state, flag anything new on future scans
+- Email delivery — send finished HTML report via SMTP with `--email`
+- SQLite scan history — every scan saved to `pulse.db`; `--history` for trends
+- Deduplicated daily scoring with letter grades (A–F), MITRE category breakdown
+- Live monitoring (CLI) — `--watch` queries live Windows channels in real time
+- Interactive terminal mode — `--interactive` browse, investigate, and whitelist findings
+- Parallel file parsing across all CPU cores
+- ECG heartbeat animation during parsing
+- REST API (FastAPI) — `/api/scan`, `/api/history`, `/api/report/{id}`, `/api/health`, Swagger docs at `/docs`
+- Web dashboard — single-page dark-themed UI with sidebar nav, drag-and-drop upload, score ring, scan history, light/dark theme toggle
+- Functional Settings & Whitelist pages — edit whitelist from the browser, view active config and all detection rules
+- Report export from dashboard — download HTML or JSON report for any scan
+- Multi-file upload — drag multiple `.evtx` files at once for batch scanning
+- **Live monitor in dashboard** — SSE-powered live panel with pulsing indicator, slide-in alerts, audio ding, test-alert button, sliding 15-minute detection window, finding dedup, per-poll event-ID diagnostics, localStorage auto-resume
+- 189 unit tests, all passing
+
+---
+
+## Sprint 2 — Apr 14–27, 2026 (Alerting & detection depth)
+
+- [ ] Email alerts — send summary email when a scan finds CRITICAL/HIGH items
+- [ ] Alert throttling — dedupe repeated findings so one noisy host doesn't spam inbox
+- [ ] Slack / Discord webhook — optional webhook URL in `pulse.yaml` to post CRITICAL findings
+- [ ] Kerberoasting detection — Event ID 4769 with weak encryption type (RC4)
+- [ ] Golden ticket detection — anomalous TGT lifetime / mismatched domain in 4769/4624
+- [ ] DCSync detection — 4662 with directory-replication GUIDs from non-DC accounts
+- [ ] Suspicious child process chain — Office / browser spawning cmd.exe, powershell.exe, wscript.exe
+- [ ] Finding detail drawer — click a finding in the dashboard to see raw event XML + context
+- [ ] Dashboard search — search bar that filters findings by user, IP, rule, or event ID
+
+---
+
+## Sprint 3 — Apr 28 – May 11, 2026 (Remediation & automation)
+
+- [ ] Remediation suggestions — each rule includes a "how to fix" recommendation with step-by-step guidance
+- [ ] Remediation tab rewrite — group fixes by rule and show MITRE mitigation IDs (M1026, etc.)
+- [ ] Scheduled scans — watch a folder for new `.evtx` files and auto-scan on arrival
+- [ ] Recurring reports — auto-generate daily or weekly HTML summary reports
+- [ ] PDF export — download formatted PDF reports from the dashboard
+- [ ] Report comparison — diff two scans side by side, highlight new / resolved findings
+- [ ] "Mark reviewed" status — per-finding state saved to DB, persists across scans
+- [ ] CLI `--quiet` / `--json-only` — machine-friendly output for cron pipelines
+
+---
+
+## Sprint 4 — May 12–25, 2026 (Multi-host & firewall)
+
+- [ ] Multi-machine support — track scores per hostname, compare security posture across endpoints
+- [ ] Hostname auto-detection — parse `Computer` field from each `.evtx` event, tag findings
+- [ ] Per-host dashboard view — pick a machine, see only its history and trend
+- [ ] Fleet overview page — sortable table of all machines with score, last scan, top severity
+- [ ] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
+- [ ] Suspicious outbound detection — flag connections to non-RFC1918 IPs on unusual ports
+- [ ] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
+- [ ] Audit log — track who scanned what and when within the dashboard
+- [ ] Export fleet CSV — one-row-per-host summary for spreadsheets
+
+---
+
+## Sprint 5 — Jun 2–15, 2026 (Auth, compliance, analytics)
+
+- [ ] User authentication — login page backed by SQLite users table with bcrypt hashes
+- [ ] Session management — signed cookies, logout, idle timeout
+- [ ] Role-based access — admin (full) vs viewer (read-only) roles enforced in API
+- [ ] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan`
+- [ ] NIST CSF mapping — tag each rule against Identify / Protect / Detect / Respond / Recover
+- [ ] ISO 27001 mapping — link rules to Annex A controls (A.9 access, A.12 ops, etc.)
+- [ ] Compliance report view — dashboard page showing coverage per framework
+- [ ] Score-over-time chart — line chart of daily scores, 30 / 90 day windows
+- [ ] Trend analytics page — rule frequency heatmap, top offenders, week-over-week delta
+
+---
+
+## Sprint 6 — Jun 16–29, 2026 (Workflows, branding, threat intel)
+
+- [ ] Incident workflow states — mark findings as acknowledged, investigating, or resolved
+- [ ] Analyst notes — free-text notes field per finding, stored in DB, shown in report
+- [ ] Assignment — assign a finding to a user, filter dashboard by "assigned to me"
+- [ ] Custom branding — upload company logo, set organization name on reports and dashboard
+- [ ] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
+- [ ] Dashboard widgets — customisable layout with drag-and-drop panels
+- [ ] Threat intel integration — correlate source IPs with AbuseIPDB / OTX feeds
+- [ ] IOC lookup panel — paste an IP or hash, query intel feeds, cache results locally
+- [ ] Weekly threat brief — auto-emailed digest of top findings across the fleet

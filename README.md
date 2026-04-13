@@ -14,7 +14,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 
 ## Features
 
-### Detection Rules (15 total)
+### Detection Rules (22 total)
 
 | Rule | Event ID | Severity | MITRE ATT&CK | What it catches |
 |---|---|---|---|---|
@@ -44,10 +44,10 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - **Email delivery** - send the finished HTML report via SMTP after a scan with `--email`
 
 ### Live Monitoring
-- **`--watch` mode** - queries live Windows event channels (Security, System) in real time using `wevtutil`
-- Alerts on new suspicious events within seconds, with ANSI-coloured terminal output
-- `--interval` flag controls poll frequency (default 30s)
+- **CLI `--watch` mode** - queries live Windows event channels (Security, System) in real time via `wevtutil`, ANSI-coloured terminal alerts, configurable `--interval`
+- **Dashboard live monitor** - pulsing LIVE indicator, Start/Stop and Test Alert buttons, slide-in alert feed with audio ding, poll-history diagnostics, and a 15-minute sliding detection window with finding dedup so cross-poll patterns (like Brute Force) still trigger
 - Findings saved to the database automatically during monitoring
+- Auto-resumes monitoring across page reloads and server restarts via `localStorage`
 
 ### Scan History
 - **SQLite database** - every scan saved to `pulse.db` automatically
@@ -77,7 +77,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **160 unit tests** - every detection rule, report format, config, whitelist, database, and monitor tested
+- **189 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, and alert pathway tested
 
 ---
 
@@ -86,27 +86,31 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ```
 Pulse/
 ├── pulse/
-│   ├── __init__.py         # Makes "pulse" a Python package
 │   ├── parser.py           # Reads and parses .evtx log files
-│   ├── detections.py       # 15 detection rules + attack chain correlation
+│   ├── detections.py       # 22 detection rules + attack chain correlation
 │   ├── reporter.py         # Generates text, HTML, JSON, and CSV reports
-│   ├── emailer.py          # SMTP email delivery of HTML reports
-│   ├── monitor.py          # Live monitoring via wevtutil
+│   ├── emailer.py          # SMTP email delivery + CRITICAL/HIGH alert emails
+│   ├── monitor.py          # CLI live monitoring via wevtutil
+│   ├── monitor_service.py  # Async in-process live monitor (SSE-backed, for the dashboard)
 │   ├── database.py         # SQLite scan history
 │   ├── interactive.py      # Interactive terminal mode
 │   ├── animations.py       # ECG heartbeat terminal animation
-│   ├── api.py              # REST API (FastAPI) — /api/scan, /api/history, /api/report, /api/health
+│   ├── api.py              # FastAPI REST API + SSE stream for live monitor
 │   ├── whitelist.py        # Whitelist filtering shared by CLI and API
-│   └── known_good.py       # Built-in known-good service whitelist
+│   ├── known_good.py       # Built-in known-good service whitelist
+│   └── web/
+│       └── index.html      # Single-page dashboard
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
 ├── pulse.db                # SQLite scan history database
-├── test_detections.py      # 146 unit tests for detection engine
-├── test_api.py             # 14 unit tests for the REST API
+├── test_detections.py      # Detection engine tests
+├── test_api.py             # REST API tests
+├── test_alerts.py          # Email alert tests
 ├── main.py                 # Entry point - run this to analyse logs
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
 ├── CHANGELOG.md            # Daily change log
+├── ROADMAP.md              # Current status + sprint plan
 └── README.md               # You are here
 ```
 
@@ -207,68 +211,14 @@ The HTML report opens in any browser with colour-coded findings:
 python -m pytest test_detections.py -v
 ```
 
-All 146 tests run without needing real `.evtx` files - the test suite uses fake event data that mirrors real Windows log structure.
+All 189 tests run without needing real `.evtx` files — the test suite uses fake event data that mirrors real Windows log structure.
 
 ---
 
-## Roadmap
+## Roadmap & Changelog
 
-### Done
-- [x] Project structure and foundation
-- [x] `.evtx` file parsing (parallel, with per-file timeout)
-- [x] Detection rules - 22 rules covering login attacks, persistence, defence evasion, credential abuse
-- [x] Human-readable text report output
-- [x] HTML report with security score, scan stats, severity filters, remediation tab, dark mode
-- [x] JSON report output - machine-readable findings for Splunk, ELK, Python scripts
-- [x] CSV export - spreadsheet format for Excel and Google Sheets
-- [x] CLI flags (`--logs`, `--output`, `--format`, `--severity`)
-- [x] Config file support (`pulse.yaml`) - store default settings
-- [x] Whitelist/allowlist - suppress known-good accounts, services, IPs, and rules
-- [x] Built-in known-good service whitelist (100+ entries, zero config needed)
-- [x] Baseline comparison - snapshot known-good state with `--save-baseline`, flag anything new on future scans
-- [x] Attack chain correlation (connects multiple events into attack patterns)
-- [x] MITRE ATT&CK tagging - each finding links to its technique on attack.mitre.org
-- [x] Scan summary statistics - files scanned, total events, time range, top event IDs
-- [x] Email delivery - send finished HTML report via SMTP with `--email`
-- [x] SQLite scan history - every scan saved to `pulse.db`; use `--history` for trends
-- [x] Live monitoring mode - `--watch` queries live Windows channels in real time
-- [x] Interactive terminal mode - `--interactive` to browse, investigate, and whitelist findings
-- [x] Parallel file parsing across all CPU cores
-- [x] ECG heartbeat animation during parsing
-- [x] REST API (FastAPI) - `--api` exposes Pulse as a local web service with `/api/scan`, `/api/history`, `/api/report/{id}`, `/api/health`, and auto-generated Swagger docs at `/docs`
-- [x] 160 unit tests, all passing
-
-- [x] Web dashboard - single-page dark-themed UI served at `/`, with sidebar navigation, drag-and-drop upload, score ring, scan history, and light/dark theme toggle
-- [x] Functional Settings & Whitelist pages - edit whitelist from the browser, view active config and all detection rules
-- [x] Report export from dashboard - download HTML or JSON report for any scan result
-- [x] Multi-file upload - drag multiple `.evtx` files at once for batch scanning
-- [x] Deduplicated daily scoring - unique-rule-based scoring with letter grades (A-F), MITRE category breakdown, and daily aggregation
-
-### Sprint 2 — Apr 14–27, 2026
-- [ ] **Email alerts** - send summary email when a scan finds CRITICAL/HIGH severity items
-- [ ] **New detection rules** - expand from 15 to 20+ (Kerberoasting, golden ticket, suspicious PowerShell, etc.)
-
-### Sprint 3 — Apr 28 – May 11, 2026
-- [ ] **Remediation suggestions** - each finding includes a "how to fix" recommendation with step-by-step guidance
-- [ ] **Scheduled scans** - watch a folder for new `.evtx` files and auto-scan them on arrival
-- [ ] **Recurring reports** - auto-generate daily or weekly HTML summary reports
-- [ ] **PDF export** - download formatted PDF reports from the dashboard
-
-### Sprint 4 — May 12–25, 2026
-- [ ] **Multi-machine support** - track scores per hostname, compare security posture across endpoints
-- [ ] **Firewall log analysis** - parse Windows Firewall logs, detect suspicious outbound connections, flag risky rules and misconfigurations
-- [ ] **Audit log** - track who scanned what and when within the dashboard
-
-### Sprint 5 — Jun 2–15, 2026
-- [ ] **User authentication** - login page, sessions, role-based access control (admin vs viewer)
-- [ ] **Compliance mapping** - tag findings against NIST CSF and ISO 27001 controls
-- [ ] **Trend analytics** - score-over-time charts, improvement tracking, historical comparisons
-
-### Sprint 6 — Jun 16–29, 2026
-- [ ] **Incident workflows** - mark findings as acknowledged, investigating, or resolved
-- [ ] **Custom branding** - upload company logo, set organization name on reports and dashboard
-- [ ] **Dashboard widgets** - customizable layout with drag-and-drop panels
-- [ ] **Threat intel integration** - correlate findings with external threat intelligence feeds
+- Current status and planned sprints: [ROADMAP.md](ROADMAP.md)
+- Commit-level change history: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
