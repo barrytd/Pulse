@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 
 from pulse.detections import run_all_detections
 from pulse.database import save_scan
+from pulse.emailer import dispatch_alerts
 from pulse.monitor import (
     _apply_whitelist,
     _collect_new_events,
@@ -84,6 +85,12 @@ class MonitorManager:
         # browser with every pre-existing event.
         self._last_ids     = {}
         self._seen_keys    = set()
+
+        # Throttle for monitor-triggered email alerts. dispatch_alerts has
+        # its own per-rule cooldown, but we also gate the whole email path
+        # by a user-configurable interval so a noisy host can't trigger an
+        # email every 30-second poll.
+        self._last_monitor_email_at = None
 
         # Sliding detection window + dedup set.
         # _recent_events is a deque of (captured_at, event_dict) pairs kept
@@ -157,6 +164,7 @@ class MonitorManager:
             self._seen_keys        = set()
             self._recent_events.clear()
             self._seen_finding_keys.clear()
+            self._last_monitor_email_at = None
             self._stop_event       = asyncio.Event()
 
             # Baseline pass so the first real poll only sees *new* events.
@@ -397,6 +405,10 @@ class MonitorManager:
                     "stats":     self._stats_snapshot(),
                 })
 
+            # Fire an email for monitor findings when the user has enabled
+            # it AND the configured interval has elapsed since the last one.
+            await self._maybe_dispatch_monitor_email(findings)
+
         # Always send a heartbeat so "time since last check" in the UI stays
         # fresh even during quiet periods.
         await self._broadcast({
@@ -404,6 +416,49 @@ class MonitorManager:
             "check":  check_entry,
             "stats":  self._stats_snapshot(),
         })
+
+    def _monitor_email_due(self, interval_minutes, now=None):
+        """True if enough time has passed since the last monitor email.
+
+        First call (no prior email) always returns True so the first poll
+        that finds something can fire. interval_minutes<=0 is treated as
+        "no throttle".
+        """
+        if self._last_monitor_email_at is None:
+            return True
+        if interval_minutes <= 0:
+            return True
+        now = now or datetime.now()
+        return (now - self._last_monitor_email_at) >= timedelta(minutes=interval_minutes)
+
+    async def _maybe_dispatch_monitor_email(self, findings):
+        """Fire an email for the current poll's findings, gated by the
+        user's monitor_enabled switch and monitor_interval_minutes throttle.
+
+        Errors are swallowed so a broken SMTP config never stops the
+        polling loop.
+        """
+        if not findings:
+            return
+        config = self._get_config() or {}
+        alert_cfg = config.get("alerts") or {}
+        if not alert_cfg.get("monitor_enabled"):
+            return
+        interval = int(alert_cfg.get("monitor_interval_minutes", 30))
+        if not self._monitor_email_due(interval):
+            return
+        try:
+            result = await asyncio.to_thread(
+                dispatch_alerts,
+                self.db_path,
+                findings,
+                config.get("email") or {},
+                alert_cfg,
+            )
+        except Exception:
+            return
+        if result.get("sent"):
+            self._last_monitor_email_at = datetime.now()
 
     def _collect_new(self):
         """Blocking helper: returns a list of new event dicts based on mode."""

@@ -1372,6 +1372,232 @@
 
     .search-box:focus { border-color: var(--accent); }
 
+    /* Splunk-style dashboard filter toolbar — dropdowns + Apply + Reset */
+    .dash-filter-bar {
+      display: flex;
+      align-items: flex-end;
+      gap: 18px;
+      padding: 10px 16px;
+      margin: 0 0 16px 0;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    [data-theme="dark"] .dash-filter-bar {
+      background: #11161f;
+    }
+
+    .dash-filter-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 140px;
+    }
+
+    .dash-filter-label {
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    .dash-filter-select {
+      height: 30px;
+      padding: 0 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      border-radius: 4px;
+      outline: none;
+      cursor: pointer;
+      min-width: 140px;
+    }
+
+    .dash-filter-select:focus { border-color: var(--accent); }
+
+    .dash-filter-spacer { flex: 1; }
+
+    .dash-filter-apply {
+      height: 30px;
+      padding: 0 16px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: filter 0.15s;
+    }
+
+    .dash-filter-apply:hover { filter: brightness(1.1); }
+
+    .dash-filter-reset {
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      padding: 4px 6px;
+    }
+
+    .dash-filter-reset:hover { color: var(--text); }
+
+    .dash-empty-note {
+      padding: 30px 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* Finding detail drawer — slides in from the right, full height,
+       backed by a dimmed full-screen backdrop. */
+    .finding-drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 240;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+    .finding-drawer-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .finding-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 460px;
+      max-width: 92vw;
+      background: var(--card-bg);
+      border-left: 1px solid var(--border);
+      box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25);
+      z-index: 250;
+      transform: translateX(100%);
+      transition: transform 0.22s ease;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .finding-drawer.open { transform: translateX(0); }
+
+    .finding-drawer-head {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .finding-drawer-head .rule-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .finding-drawer-head .sev-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .finding-drawer-head .sev-pill {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 3px 10px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      color: #fff;
+    }
+    .finding-drawer-head .sev-pill.sev-critical { background: #f85149; }
+    .finding-drawer-head .sev-pill.sev-high     { background: #f0883e; }
+    .finding-drawer-head .sev-pill.sev-medium   { background: #d29922; color: #1a1a1a; }
+    .finding-drawer-head .sev-pill.sev-low      { background: #3fb950; }
+
+    .finding-drawer-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    .finding-drawer-close:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .finding-drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px;
+    }
+
+    .finding-drawer-section {
+      margin-bottom: 22px;
+    }
+    .finding-drawer-section .sec-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .finding-drawer-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 18px;
+    }
+    .finding-drawer-grid .k {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+    .finding-drawer-grid .v {
+      font-size: 13px;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .finding-drawer-details {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .finding-drawer .remediation {
+      margin-top: 0;
+    }
+
     /* Splunk-style data table — alternating rows, hover, colored left border */
     .data-table {
       width: 100%;
@@ -1691,6 +1917,21 @@
   <div id="toast" class="toast"></div>
 
   <!-- ============================================================= -->
+  <!-- FINDING DETAIL DRAWER                                          -->
+  <!-- ============================================================= -->
+  <div id="finding-drawer-backdrop" class="finding-drawer-backdrop" onclick="closeFindingDrawer()"></div>
+  <aside id="finding-drawer" class="finding-drawer" role="dialog" aria-label="Finding details">
+    <div class="finding-drawer-head">
+      <div style="flex:1; min-width:0;">
+        <div class="rule-title" id="drawer-rule">&nbsp;</div>
+        <div class="sev-line" id="drawer-sev-line"></div>
+      </div>
+      <button class="finding-drawer-close" onclick="closeFindingDrawer()" aria-label="Close">&times;</button>
+    </div>
+    <div class="finding-drawer-body" id="drawer-body"></div>
+  </aside>
+
+  <!-- ============================================================= -->
   <!-- JAVASCRIPT                                                      -->
   <!-- ============================================================= -->
   <script>
@@ -1699,7 +1940,12 @@
     // ---------------------------------------------------------------
     var cachedScans    = null;
     var cachedFindings = null;
+    var cachedRules    = null;
     var currentPage    = 'dashboard';
+
+    // Splunk-style dashboard filter state. Persisted in URL query params.
+    var dashFilterState = { time: 'today', sev: 'all', rule: 'all', source: 'all' };
+    var dashFiltersHydrated = false;
 
     // MITRE lookup used by multiple pages
     var mitreMap = {
@@ -1891,14 +2137,239 @@
     }
 
     // ---------------------------------------------------------------
+    // Dashboard filter bar helpers (Splunk-style)
+    // ---------------------------------------------------------------
+
+    // Hydrate dashFilterState from URL query params on first load so a
+    // pasted/bookmarked link restores the filtered view.
+    function parseDashFiltersFromURL() {
+      if (dashFiltersHydrated) return;
+      dashFiltersHydrated = true;
+      try {
+        var qp = new URLSearchParams(window.location.search);
+        var validTime = ['today', '7d', '30d', '90d'];
+        var validSev  = ['all', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+        if (qp.has('time')   && validTime.indexOf(qp.get('time'))   >= 0) dashFilterState.time   = qp.get('time');
+        if (qp.has('sev')    && validSev.indexOf(qp.get('sev'))     >= 0) dashFilterState.sev    = qp.get('sev');
+        if (qp.has('rule'))   dashFilterState.rule   = qp.get('rule')   || 'all';
+        if (qp.has('source')) dashFilterState.source = qp.get('source') || 'all';
+      } catch (e) {}
+    }
+
+    // Push current filter state back to the URL bar.
+    function writeDashFiltersToURL() {
+      var qp = new URLSearchParams();
+      if (dashFilterState.time   !== 'today') qp.set('time',   dashFilterState.time);
+      if (dashFilterState.sev    !== 'all')   qp.set('sev',    dashFilterState.sev);
+      if (dashFilterState.rule   !== 'all')   qp.set('rule',   dashFilterState.rule);
+      if (dashFilterState.source !== 'all')   qp.set('source', dashFilterState.source);
+      var qs = qp.toString();
+      var url = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+      history.replaceState({}, '', url);
+    }
+
+    // Cutoff Date object for "scan.scanned_at >= cutoff".
+    function _dashTimeCutoff(range) {
+      var now = new Date();
+      if (range === 'today') {
+        var d = new Date(now); d.setHours(0, 0, 0, 0); return d;
+      }
+      if (range === '7d')  return new Date(now.getTime() - 7  * 86400000);
+      if (range === '30d') return new Date(now.getTime() - 30 * 86400000);
+      if (range === '90d') return new Date(now.getTime() - 90 * 86400000);
+      return new Date(0);
+    }
+
+    // Parse "YYYY-MM-DD HH:MM:SS" (local) into a Date. Tolerant of ISO too.
+    function _parseScanDate(s) {
+      if (!s) return null;
+      var iso = s.indexOf('T') >= 0 ? s : s.replace(' ', 'T');
+      var d = new Date(iso);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    // Filter the scans list by Time Range + Source (sev/rule filter findings,
+    // not scans).
+    function filterScansByDashState(scans) {
+      var cutoff = _dashTimeCutoff(dashFilterState.time);
+      var src = dashFilterState.source;
+      return scans.filter(function (s) {
+        var d = _parseScanDate(s.scanned_at);
+        if (!d || d < cutoff) return false;
+        if (src !== 'all') {
+          var who = s.hostname || s.filename || '';
+          if (who !== src) return false;
+        }
+        return true;
+      });
+    }
+
+    // Filter a list of findings by the severity + rule filter.
+    function filterFindingsByDashState(findings) {
+      var sev  = dashFilterState.sev;
+      var rule = dashFilterState.rule;
+      return (findings || []).filter(function (f) {
+        if (sev  !== 'all' && (f.severity || '').toUpperCase() !== sev) return false;
+        if (rule !== 'all' && (f.rule || '') !== rule) return false;
+        return true;
+      });
+    }
+
+    // Daily-score objects from /api/score/daily have `.date` like "YYYY-MM-DD".
+    function filterDailyByDashState(daily) {
+      var cutoff = _dashTimeCutoff(dashFilterState.time);
+      return (daily || []).filter(function (d) {
+        var dt = _parseScanDate(d.date);
+        return dt && dt >= cutoff;
+      });
+    }
+
+    // Recompute MITRE categories object from a deductions list so the MITRE
+    // bars respect severity + rule filters.
+    function _categoriesFromDeductions(deds) {
+      var sevRank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+      var statusFor = { CRITICAL: 'critical', HIGH: 'critical', MEDIUM: 'medium', LOW: 'low' };
+      var out = {};
+      (deds || []).forEach(function (d) {
+        var cat = d.category || 'Other';
+        if (!out[cat]) out[cat] = { status: 'clear', rules_triggered: [], _worst: 0 };
+        if (out[cat].rules_triggered.indexOf(d.rule) < 0) out[cat].rules_triggered.push(d.rule);
+        var rank = sevRank[(d.severity || '').toUpperCase()] || 0;
+        if (rank > out[cat]._worst) {
+          out[cat]._worst = rank;
+          out[cat].status = statusFor[(d.severity || '').toUpperCase()] || 'clear';
+        }
+      });
+      return out;
+    }
+
+    function _dashFilterBarHtml(rules, sources) {
+      var timeOpts = [
+        { v: 'today', l: 'Today' },
+        { v: '7d',    l: 'Last 7 days' },
+        { v: '30d',   l: 'Last 30 days' },
+        { v: '90d',   l: 'Last 90 days' },
+      ];
+      var sevOpts = [
+        { v: 'all',      l: 'All' },
+        { v: 'CRITICAL', l: 'Critical' },
+        { v: 'HIGH',     l: 'High' },
+        { v: 'MEDIUM',   l: 'Medium' },
+        { v: 'LOW',      l: 'Low' },
+      ];
+      function opts(list, cur) {
+        return list.map(function (o) {
+          return '<option value="' + escapeHtml(o.v) + '"' +
+                 (o.v === cur ? ' selected' : '') + '>' +
+                 escapeHtml(o.l) + '</option>';
+        }).join('');
+      }
+      var ruleOpts   = [{ v: 'all', l: 'All rules' }].concat(
+        (rules || []).map(function (r) { return { v: r, l: r }; }));
+      var sourceOpts = [{ v: 'all', l: 'All sources' }].concat(
+        (sources || []).map(function (s) { return { v: s, l: s }; }));
+
+      return '<div class="dash-filter-bar">' +
+        '<div class="dash-filter-group">' +
+          '<label class="dash-filter-label">Time Range</label>' +
+          '<select class="dash-filter-select" id="f-time">' + opts(timeOpts, dashFilterState.time) + '</select>' +
+        '</div>' +
+        '<div class="dash-filter-group">' +
+          '<label class="dash-filter-label">Severity</label>' +
+          '<select class="dash-filter-select" id="f-severity">' + opts(sevOpts, dashFilterState.sev) + '</select>' +
+        '</div>' +
+        '<div class="dash-filter-group">' +
+          '<label class="dash-filter-label">Rule</label>' +
+          '<select class="dash-filter-select" id="f-rule">' + opts(ruleOpts, dashFilterState.rule) + '</select>' +
+        '</div>' +
+        '<div class="dash-filter-group">' +
+          '<label class="dash-filter-label">Source</label>' +
+          '<select class="dash-filter-select" id="f-source">' + opts(sourceOpts, dashFilterState.source) + '</select>' +
+        '</div>' +
+        '<div class="dash-filter-spacer"></div>' +
+        '<button class="dash-filter-apply" onclick="applyDashFilters()">Apply</button>' +
+        '<a class="dash-filter-reset" onclick="resetDashFilters()">Reset</a>' +
+      '</div>';
+    }
+
+    function applyDashFilters() {
+      var t = document.getElementById('f-time');
+      var s = document.getElementById('f-severity');
+      var r = document.getElementById('f-rule');
+      var src = document.getElementById('f-source');
+      if (t)   dashFilterState.time   = t.value;
+      if (s)   dashFilterState.sev    = s.value;
+      if (r)   dashFilterState.rule   = r.value;
+      if (src) dashFilterState.source = src.value;
+      writeDashFiltersToURL();
+      renderDashboardPage();
+    }
+
+    function resetDashFilters() {
+      dashFilterState = { time: 'today', sev: 'all', rule: 'all', source: 'all' };
+      writeDashFiltersToURL();
+      renderDashboardPage();
+    }
+
+    async function fetchRuleNames() {
+      if (cachedRules) return cachedRules;
+      try {
+        var resp = await fetch('/api/rules');
+        var data = await resp.json();
+        cachedRules = (data.rules || []).slice().sort();
+        return cachedRules;
+      } catch (e) { return []; }
+    }
+
+    function _dashSources(scans) {
+      var set = {};
+      (scans || []).forEach(function (s) {
+        var who = s.hostname || s.filename;
+        if (who) set[who] = true;
+      });
+      return Object.keys(set).sort();
+    }
+
+    // True if any filter is non-default — used to decide whether to recompute
+    // severity/rule-filtered snapshots or just use the backend's `today` blob.
+    function _dashFiltersActive() {
+      return dashFilterState.time !== 'today' ||
+             dashFilterState.sev  !== 'all'   ||
+             dashFilterState.rule !== 'all'   ||
+             dashFilterState.source !== 'all';
+    }
+
+    // ---------------------------------------------------------------
     // PAGE: Dashboard
     // ---------------------------------------------------------------
     async function renderDashboardPage() {
       var c = document.getElementById('content');
-      var scans = await fetchScans(50);
-      var dailyResp = await fetch('/api/score/daily?days=30').then(function (r) { return r.json(); });
-      var dailyScores = dailyResp.daily_scores || [];
+      parseDashFiltersFromURL();
+
+      // Bump fetch ceiling so 30/90-day filters have data to slice.
+      cachedScans = null;   // avoid stale cache on repeated renders
+      var allScans = await fetchScans(200);
+      var rules    = await fetchRuleNames();
+      var dailyResp = await fetch('/api/score/daily?days=90').then(function (r) { return r.json(); });
+      var allDaily  = dailyResp.daily_scores || [];
+
+      // Apply time-range + source filter to scans, time-range to daily scores.
+      var scans       = filterScansByDashState(allScans);
+      var dailyScores = filterDailyByDashState(allDaily);
+      var sourceList  = _dashSources(allScans);
+      var filtersOn   = _dashFiltersActive();
+
+      // "today" for the score ring — the most recent daily-score entry inside
+      // the filtered window (usually literal today, but becomes "latest in
+      // window" for other ranges).
       var today = dailyScores[0];
+
+      // When severity/rule filters are active, trim today.deductions so the
+      // severity breakdown + MITRE bars + unique_rules reflect the filter.
+      var filteredDeductions = today ? filterFindingsByDashState(today.deductions || []) : [];
+      var filteredCategories = filtersOn && today
+        ? _categoriesFromDeductions(filteredDeductions)
+        : (today && today.categories) || {};
 
       var scoreNum = today ? today.score : 100;
       var scoreLabel = today ? today.label : 'SECURE';
@@ -1906,24 +2377,32 @@
       var score = today ? today.score : '--';
       var totalFindings = scans.reduce(function (s, x) { return s + x.total_findings; }, 0);
 
-      var scoreDesc = scoreNum >= 90
-        ? 'No critical issues detected. Security posture is strong.'
-        : scoreNum >= 75
-          ? 'Minor issues found. Review findings and address high-severity items.'
-          : scoreNum >= 50
-            ? 'Significant findings detected. Multiple items need attention.'
-            : 'Critical issues detected. Immediate investigation recommended.';
+      var scoreDesc = !today
+        ? 'No scans yet in the selected window. Upload a log or start the live monitor to populate this panel.'
+        : scoreNum >= 90
+          ? 'No critical issues detected. Security posture is strong.'
+          : scoreNum >= 75
+            ? 'Minor issues found. Review findings and address high-severity items.'
+            : scoreNum >= 50
+              ? 'Significant findings detected. Multiple items need attention.'
+              : 'Critical issues detected. Immediate investigation recommended.';
 
       var circumference = 2 * Math.PI * 58;
       var dashOffset = circumference * (1 - scoreNum / 100);
 
-      // Severity counts from today's deductions
+      // Severity counts from filtered deductions (respects severity + rule).
       var sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-      if (today && today.deductions) {
-        today.deductions.forEach(function (d) {
-          if (sevCounts[d.severity] !== undefined) sevCounts[d.severity]++;
-        });
-      }
+      filteredDeductions.forEach(function (d) {
+        if (sevCounts[d.severity] !== undefined) sevCounts[d.severity]++;
+      });
+
+      // Unique rules counted off filtered deductions so the stat card moves
+      // with the filter bar.
+      var uniqueRulesFiltered = (function () {
+        var set = {};
+        filteredDeductions.forEach(function (d) { if (d.rule) set[d.rule] = true; });
+        return Object.keys(set).length;
+      })();
 
       // ---------- Trend deltas for the stat cards ----------
       // Score: today vs yesterday (up = better = green).
@@ -1931,7 +2410,7 @@
                                  dailyScores[1] && dailyScores[1].score,
                                  { upIsGood: true });
       // Unique rules: today vs yesterday (up = worse = red).
-      var rulesTrend = _trendFor(today && today.unique_rules,
+      var rulesTrend = _trendFor(uniqueRulesFiltered,
                                  dailyScores[1] && dailyScores[1].unique_rules,
                                  { upIsGood: false });
       // Total findings: latest scan vs the one before it.
@@ -1940,39 +2419,65 @@
                                 { upIsGood: false });
 
       // ---------- MITRE category bars ----------
-      // The five categories Splunk-style dashboards highlight.
+      // Splunk-style top-5 categories. Uses filteredCategories when filters
+      // are on so the bars shift with the severity/rule selection.
       var mitreCats = ['Authentication', 'Persistence', 'Lateral Movement',
                        'Privilege Escalation', 'Execution'];
-      var categories = (today && today.categories) || {};
-      var mitreBarsHtml = _mitreBarsHtml(mitreCats, categories);
+      var mitreBarsHtml = _mitreBarsHtml(mitreCats, filteredCategories);
 
-      // ---------- Recent findings (last 5 from latest scan with findings) ----------
+      // ---------- Recent findings (last 5 from latest scan in the window) ----------
       var latestWithFindings = scans.find(function (s) { return s.total_findings > 0; });
       var recentFindings = [];
       if (latestWithFindings) {
         var all = await fetchFindings(latestWithFindings.id);
-        // Sort newest first, take 5.
-        recentFindings = all.slice().sort(function (a, b) {
+        // Apply severity + rule filter, then sort newest first, take 5.
+        recentFindings = filterFindingsByDashState(all).slice().sort(function (a, b) {
           var at = a.timestamp || _extractTime(a) || '';
           var bt = b.timestamp || _extractTime(b) || '';
           return at < bt ? 1 : at > bt ? -1 : 0;
         }).slice(0, 5);
       }
 
+      var filterBarHtml = _dashFilterBarHtml(rules, sourceList);
+
+      // When there's no data in the filtered window, show a friendly banner
+      // above the panels rather than hiding them. Panels render with their
+      // zero-state so the layout still reads as a dashboard.
+      var emptyBannerHtml = '';
+      if (scans.length === 0) {
+        var bannerMsg = filtersOn
+          ? 'No scans match these filters. Try a wider time range or click Reset.'
+          : (dashFilterState.time === 'today'
+              ? 'No scans yet today. Upload a log or start the live monitor to get started.'
+              : 'No scans in this window yet.');
+        emptyBannerHtml =
+          '<div class="card" style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">' +
+            '<div class="dash-empty-note" style="margin:0;">' + bannerMsg + '</div>' +
+            '<div style="display:flex; gap:10px;">' +
+              (filtersOn
+                ? '<a class="btn" onclick="resetDashFilters()" style="cursor:pointer;">Reset filters</a>'
+                : '<a class="btn btn-primary" onclick="openUploadModal(); return false;" style="cursor:pointer;">Upload .evtx</a>' +
+                  '<a class="btn" onclick="navigate(\'monitor\'); return false;" style="cursor:pointer;">Open Monitor</a>') +
+            '</div>' +
+          '</div>';
+      }
+
       c.innerHTML =
+        filterBarHtml +
+        emptyBannerHtml +
         // ---------- STAT CARDS ROW ----------
         '<div class="stat-row">' +
           _trendStatCard('Daily Score',
                          score + ' <span style="font-size:14px; opacity:0.7;">(' + grade + ')</span>',
                          scoreLabel, scoreTrend, _accentForScore(scoreNum), scoreColorClass(scoreNum)) +
           _trendStatCard('Unique Rules',
-                         today ? today.unique_rules : 0,
-                         'Triggered today', rulesTrend,
-                         today && today.unique_rules > 0 ? 'accent-high' : 'accent-neutral') +
+                         uniqueRulesFiltered,
+                         filtersOn ? 'Matching filter' : 'Triggered today', rulesTrend,
+                         uniqueRulesFiltered > 0 ? 'accent-high' : 'accent-neutral') +
           _trendStatCard('Total Findings', totalFindings,
-                         'Across all scans', findTrend, 'accent-info') +
+                         filtersOn ? 'In filtered window' : 'Across all scans', findTrend, 'accent-info') +
           _trendStatCard('Scans Run', scans.length,
-                         'Since first install', null, 'accent-neutral') +
+                         filtersOn ? 'In filtered window' : 'Since first install', null, 'accent-neutral') +
         '</div>' +
 
         // ---------- LIVE MONITOR PANEL ----------
@@ -2047,7 +2552,9 @@
               '</div>' +
               _dashFindingsHtml(recentFindings) +
             '</div>'
-          : ''
+          : (filtersOn && latestWithFindings
+              ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
+              : '')
         );
 
       // ---------- Init Chart.js line chart ----------
@@ -2149,16 +2656,21 @@
       '</div>';
     }
 
+    // Shared by the Dashboard's Last Scan Findings card. Populated right
+    // before we render so the drawer can look up a finding by index.
+    var _dashRecentFindings = [];
+
     // Compact "last 5 findings" list with colored severity left-borders.
     function _dashFindingsHtml(findings) {
+      _dashRecentFindings = findings;
       return '<div class="dash-findings">' +
-        findings.map(function (f) {
+        findings.map(function (f, i) {
           var sev = (f.severity || 'LOW').toUpperCase();
           var rule = f.rule || 'Unknown';
           var details = f.details || f.description || '';
           var time = f.timestamp || _extractTime(f) || '-';
           return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '" ' +
-                 'onclick="navigate(\'findings\')" style="cursor:pointer;">' +
+                 'onclick="openFindingDrawerByIdx(' + i + ')" style="cursor:pointer;">' +
             '<div>' +
               '<div class="time">' + escapeHtml(time) + '</div>' +
             '</div>' +
@@ -2171,6 +2683,82 @@
         }).join('') +
       '</div>';
     }
+
+    // ---------------------------------------------------------------
+    // Finding detail drawer — slide-in panel for Last Scan Findings
+    // ---------------------------------------------------------------
+    function openFindingDrawerByIdx(idx) {
+      var f = _dashRecentFindings[idx];
+      if (f) openFindingDrawer(f);
+    }
+
+    function openFindingDrawer(f) {
+      if (!f) return;
+      var sev  = (f.severity || 'LOW').toUpperCase();
+      var rule = f.rule || 'Unknown';
+      var mitre = f.mitre || mitreMap[rule] || '';
+      var mitreLink = mitre
+        ? '<a class="mitre-tag" href="https://attack.mitre.org/techniques/' +
+          encodeURIComponent(mitre.replace('.', '/')) + '" target="_blank" rel="noopener">' +
+          escapeHtml(mitre) + '</a>'
+        : '<span style="color:var(--text-muted); font-size:12px;">\u2014</span>';
+
+      document.getElementById('drawer-rule').textContent = rule;
+      document.getElementById('drawer-sev-line').innerHTML =
+        '<span class="sev-pill sev-' + sev.toLowerCase() + '">' + sev + '</span>' +
+        mitreLink;
+
+      var rem = REMEDIATION[rule] || 'Investigate the event in its surrounding context. Correlate with other logs from the same host and timeframe.';
+      var time = f.timestamp || _extractTime(f) || '\u2014';
+      var eid  = (f.event_id != null && f.event_id !== '') ? f.event_id : '\u2014';
+      var desc = f.description || '';
+      var details = f.details || '';
+
+      document.getElementById('drawer-body').innerHTML =
+        '<div class="finding-drawer-section">' +
+          '<div class="sec-label">Metadata</div>' +
+          '<div class="finding-drawer-grid">' +
+            '<div><div class="k">Timestamp</div><div class="v">' + escapeHtml(String(time)) + '</div></div>' +
+            '<div><div class="k">Event ID</div><div class="v">' + escapeHtml(String(eid)) + '</div></div>' +
+          '</div>' +
+        '</div>' +
+
+        (desc ? '<div class="finding-drawer-section">' +
+          '<div class="sec-label">Description</div>' +
+          '<div style="font-size:13px; color:var(--text); line-height:1.5;">' + escapeHtml(desc) + '</div>' +
+        '</div>' : '') +
+
+        (details ? '<div class="finding-drawer-section">' +
+          '<div class="sec-label">Event Details</div>' +
+          '<div class="finding-drawer-details">' + escapeHtml(details) + '</div>' +
+        '</div>' : '') +
+
+        '<div class="finding-drawer-section">' +
+          '<div class="sec-label">Remediation</div>' +
+          '<div class="remediation">' +
+            '<div class="rem-label">Recommended action</div>' +
+            escapeHtml(rem) +
+          '</div>' +
+        '</div>';
+
+      document.getElementById('finding-drawer').classList.add('open');
+      document.getElementById('finding-drawer-backdrop').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeFindingDrawer() {
+      document.getElementById('finding-drawer').classList.remove('open');
+      document.getElementById('finding-drawer-backdrop').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    // Esc closes the drawer.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        var drawer = document.getElementById('finding-drawer');
+        if (drawer && drawer.classList.contains('open')) closeFindingDrawer();
+      }
+    });
 
     // Chart.js line chart — score over time. Stored globally so we can
     // destroy it before re-creating (avoids canvas re-use warnings).
@@ -3444,16 +4032,52 @@
 
       var config = await fetch('/api/config').then(function (r) { return r.json(); });
       var rules  = await fetch('/api/rules').then(function (r) { return r.json(); });
+      var auth   = await fetch('/api/auth/status').then(function (r) { return r.json(); }).catch(function () { return {email: ''}; });
 
       var em = config.email || {};
       var al = config.alerts || {};
       var pwStatus = em.password_set
-        ? '<span class="password-status set">\u2713 Password configured</span>'
-        : '<span class="password-status">No password set</span>';
+        ? '<span class="password-status set">\u2713 App password saved</span>'
+        : '<span class="password-status">No app password saved yet</span>';
+
+      // Map the saved SMTP host to a provider dropdown choice so users don't
+      // have to know the host/port strings. "Other" shows the raw fields.
+      var providers = [
+        { id: 'gmail',   label: 'Gmail',            host: 'smtp.gmail.com',         port: 587, help: 'https://myaccount.google.com/apppasswords' },
+        { id: 'outlook', label: 'Outlook / Hotmail', host: 'smtp-mail.outlook.com', port: 587, help: '' },
+        { id: 'yahoo',   label: 'Yahoo Mail',       host: 'smtp.mail.yahoo.com',    port: 587, help: '' },
+        { id: 'other',   label: 'Other (custom SMTP)', host: '',                    port: 587, help: '' }
+      ];
+      var currentProvider = 'other';
+      for (var i = 0; i < providers.length; i++) {
+        if (providers[i].host && providers[i].host === em.smtp_host) {
+          currentProvider = providers[i].id;
+          break;
+        }
+      }
+      if (!em.smtp_host) currentProvider = 'gmail';
+      var providerOpts = providers.map(function (p) {
+        var sel = (p.id === currentProvider) ? ' selected' : '';
+        return '<option value="' + p.id + '"' + sel + '>' + p.label + '</option>';
+      }).join('');
 
       var thresholdOpts = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (t) {
         var sel = (al.threshold === t) ? ' selected' : '';
         return '<option value="' + t + '"' + sel + '>' + t + '</option>';
+      }).join('');
+
+      var monitorInterval = (al.monitor_interval_minutes != null) ? al.monitor_interval_minutes : 30;
+      var intervalChoices = [
+        { v: 5,   label: 'Every 5 minutes' },
+        { v: 15,  label: 'Every 15 minutes' },
+        { v: 30,  label: 'Every 30 minutes' },
+        { v: 60,  label: 'Every hour' },
+        { v: 120, label: 'Every 2 hours' },
+        { v: 240, label: 'Every 4 hours' }
+      ];
+      var intervalOpts = intervalChoices.map(function (c) {
+        var sel = (monitorInterval === c.v) ? ' selected' : '';
+        return '<option value="' + c.v + '"' + sel + '>' + c.label + '</option>';
       }).join('');
 
       var currentTheme = getTheme();
@@ -3463,24 +4087,45 @@
           '<div class="page-head-title">Configure Pulse</div>' +
         '</div>' +
 
-        // ---------- EMAIL DELIVERY ----------
+        // ---------- MY ACCOUNT ----------
         '<div class="card" style="margin-bottom:16px;">' +
-          '<div class="section-label">Email Delivery</div>' +
+          '<div class="section-label">My Account</div>' +
           '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
-            'SMTP credentials used for both --email reports and threshold alerts. ' +
-            'Gmail users: generate an app password at myaccount.google.com/apppasswords.' +
+            'The email and password you use to sign in to Pulse.' +
           '</p>' +
-          '<div class="form-row"><label>SMTP host</label>' +
-            '<input type="text" id="email-smtp_host" value="' + escapeHtml(em.smtp_host || '') + '" placeholder="smtp.gmail.com"/></div>' +
-          '<div class="form-row"><label>SMTP port</label>' +
+          '<div class="form-row"><label>Account email</label>' +
+            '<input type="email" id="account-email" value="' + escapeHtml(auth.email || '') + '"/></div>' +
+          '<div class="form-row"><label>New password</label>' +
+            '<input type="password" id="account-new-password" placeholder="leave blank to keep current" autocomplete="new-password"/></div>' +
+          '<div class="form-row"><label>Current password</label>' +
+            '<input type="password" id="account-current-password" placeholder="required to change email or password" autocomplete="current-password"/></div>' +
+          '<div class="form-actions">' +
+            '<button class="btn btn-primary" onclick="saveAccount()">Save account changes</button>' +
+            '<button class="btn" onclick="signOut()">Sign out</button>' +
+          '</div>' +
+        '</div>' +
+
+        // ---------- EMAIL NOTIFICATIONS ----------
+        '<div class="card" style="margin-bottom:16px;">' +
+          '<div class="section-label">Email Notifications</div>' +
+          '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+            'Connect Pulse to your mailbox so it can send you threat alert emails. ' +
+            'If your provider requires 2-factor authentication (Gmail, Outlook), you\u2019ll need an ' +
+            '<strong>app password</strong> instead of your normal one.' +
+          '</p>' +
+          '<div class="form-row"><label>Email provider</label>' +
+            '<select id="email-provider" onchange="onEmailProviderChange()">' + providerOpts + '</select></div>' +
+          '<div class="form-row" id="email-custom-host-row" style="display:' + (currentProvider === 'other' ? 'flex' : 'none') + ';">' +
+            '<label>Outgoing mail server</label>' +
+            '<input type="text" id="email-smtp_host" value="' + escapeHtml(em.smtp_host || '') + '" placeholder="smtp.example.com"/></div>' +
+          '<div class="form-row" id="email-custom-port-row" style="display:' + (currentProvider === 'other' ? 'flex' : 'none') + ';">' +
+            '<label>Server port</label>' +
             '<input type="number" id="email-smtp_port" value="' + (em.smtp_port || 587) + '"/></div>' +
-          '<div class="form-row"><label>From address</label>' +
-            '<input type="email" id="email-sender" value="' + escapeHtml(em.sender || '') + '" placeholder="alerts@you.com"/></div>' +
-          '<div class="form-row"><label>To address</label>' +
-            '<input type="email" id="email-recipient" value="' + escapeHtml(em.recipient || '') + '" placeholder="ops@you.com"/></div>' +
-          '<div class="form-row"><label>Password</label>' +
-            '<input type="password" id="email-password" placeholder="' + (em.password_set ? 'leave blank to keep current' : 'app password') + '" autocomplete="new-password"/></div>' +
-          '<div class="form-row"><span></span><span>' + pwStatus + '</span></div>' +
+          '<div class="form-row"><label>Your email</label>' +
+            '<input type="email" id="email-sender" value="' + escapeHtml(em.sender || '') + '" placeholder="you@example.com"/></div>' +
+          '<div class="form-row"><label>App password</label>' +
+            '<input type="password" id="email-password" placeholder="' + (em.password_set ? 'leave blank to keep current' : '16-character app password') + '" autocomplete="new-password"/></div>' +
+          '<div class="form-row"><span></span><span>' + pwStatus + ' <a id="email-help-link" href="#" target="_blank" style="color:var(--accent); text-decoration:none; margin-left:12px; display:none;">How do I get an app password?</a></span></div>' +
           '<div class="form-actions">' +
             '<button class="btn btn-primary" onclick="saveEmailSettings()">Save email settings</button>' +
           '</div>' +
@@ -3504,6 +4149,23 @@
           '<div class="form-actions">' +
             '<button class="btn btn-primary" onclick="saveAlertSettings()">Save alert settings</button>' +
             '<button class="btn" onclick="sendTestAlert()">Send test alert</button>' +
+          '</div>' +
+        '</div>' +
+
+        // ---------- LIVE MONITOR EMAILS ----------
+        '<div class="card" style="margin-bottom:16px;">' +
+          '<div class="section-label">Live Monitor Emails</div>' +
+          '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+            'Send email alerts for findings detected by the live monitor. The interval ' +
+            'is the minimum gap between monitor emails \u2014 the per-rule cooldown above ' +
+            'still applies on top, so noisy rules never spam you.' +
+          '</p>' +
+          '<div class="form-row"><label>Email during monitoring</label>' +
+            '<label class="form-checkbox"><input type="checkbox" id="alert-monitor-enabled"' + (al.monitor_enabled ? ' checked' : '') + '/> Send monitor findings by email</label></div>' +
+          '<div class="form-row"><label>Email interval</label>' +
+            '<select id="alert-monitor-interval">' + intervalOpts + '</select></div>' +
+          '<div class="form-actions">' +
+            '<button class="btn btn-primary" onclick="saveAlertSettings()">Save alert settings</button>' +
           '</div>' +
         '</div>' +
 
@@ -3554,6 +4216,65 @@
           '<div class="section-label">Resources</div>' +
           '<p><a href="/docs" target="_blank" style="color:var(--accent); text-decoration:none;">\u2192 API Documentation (Swagger)</a></p>' +
         '</div>';
+
+      // Wire up provider-specific fields after the DOM is in place.
+      onEmailProviderChange();
+    }
+
+    async function saveAccount() {
+      var newEmail = document.getElementById('account-email').value.trim();
+      var newPw    = document.getElementById('account-new-password').value;
+      var curPw    = document.getElementById('account-current-password').value;
+      if (!curPw) {
+        toastError('Enter your current password to make changes.');
+        return;
+      }
+      try {
+        var changed = false;
+        if (newEmail) {
+          var r1 = await fetch('/api/auth/email', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: newEmail, current_password: curPw }),
+          });
+          if (!r1.ok) {
+            var e1 = await r1.json();
+            toastError(e1.detail || 'Email update failed.');
+            return;
+          }
+          changed = true;
+        }
+        if (newPw) {
+          var r2 = await fetch('/api/auth/password', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: newPw, current_password: curPw }),
+          });
+          if (!r2.ok) {
+            var e2 = await r2.json();
+            toastError(e2.detail || 'Password update failed.');
+            return;
+          }
+          changed = true;
+        }
+        if (!changed) {
+          toastError('Nothing to save \u2014 enter a new email or new password.');
+          return;
+        }
+        showToast('Account updated');
+        document.getElementById('account-new-password').value = '';
+        document.getElementById('account-current-password').value = '';
+        renderSettingsPage();
+      } catch (e) {
+        toastError('Network error: ' + e.message);
+      }
+    }
+
+    async function signOut() {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (_) { /* sign out is best-effort */ }
+      window.location.href = '/login';
     }
 
     function setThemeFromSelect(theme) {
@@ -3569,12 +4290,52 @@
     // ---------------------------------------------------------------
     // Settings: save handlers — all feedback now via global toast
     // ---------------------------------------------------------------
+    // Map the "Email provider" dropdown back to host+port so users never
+    // have to know those exist for Gmail/Outlook/Yahoo.
+    var EMAIL_PROVIDER_PRESETS = {
+      gmail:   { host: 'smtp.gmail.com',        port: 587, help: 'https://myaccount.google.com/apppasswords' },
+      outlook: { host: 'smtp-mail.outlook.com', port: 587, help: 'https://support.microsoft.com/account-billing/5896ed9b-4263-e681-128a-a6f2979a7944' },
+      yahoo:   { host: 'smtp.mail.yahoo.com',   port: 587, help: 'https://help.yahoo.com/kb/SLN15241.html' },
+      other:   { host: '',                      port: 587, help: '' }
+    };
+
+    function onEmailProviderChange() {
+      var sel = document.getElementById('email-provider');
+      if (!sel) return;
+      var p = sel.value;
+      var isCustom = (p === 'other');
+      document.getElementById('email-custom-host-row').style.display = isCustom ? 'flex' : 'none';
+      document.getElementById('email-custom-port-row').style.display = isCustom ? 'flex' : 'none';
+      var preset = EMAIL_PROVIDER_PRESETS[p];
+      var helpLink = document.getElementById('email-help-link');
+      if (preset && preset.help) {
+        helpLink.href = preset.help;
+        helpLink.style.display = 'inline';
+      } else {
+        helpLink.style.display = 'none';
+      }
+    }
+
     async function saveEmailSettings() {
+      var sel = document.getElementById('email-provider');
+      var provider = sel ? sel.value : 'other';
+      var preset = EMAIL_PROVIDER_PRESETS[provider] || EMAIL_PROVIDER_PRESETS.other;
+      var host, port;
+      if (provider === 'other') {
+        host = document.getElementById('email-smtp_host').value;
+        port = document.getElementById('email-smtp_port').value;
+      } else {
+        host = preset.host;
+        port = preset.port;
+      }
+      var sender = document.getElementById('email-sender').value;
       var body = {
-        smtp_host: document.getElementById('email-smtp_host').value,
-        smtp_port: document.getElementById('email-smtp_port').value,
-        sender:    document.getElementById('email-sender').value,
-        recipient: document.getElementById('email-recipient').value,
+        smtp_host: host,
+        smtp_port: port,
+        sender:    sender,
+        // Default recipient to sender so alerts go to the user's own
+        // inbox unless overridden in Threshold Alerts -> Recipient.
+        recipient: sender,
         password:  document.getElementById('email-password').value,
       };
       try {
@@ -3598,10 +4359,12 @@
 
     async function saveAlertSettings() {
       var body = {
-        enabled:          document.getElementById('alert-enabled').checked,
-        threshold:        document.getElementById('alert-threshold').value,
-        recipient:        document.getElementById('alert-recipient').value,
-        cooldown_minutes: document.getElementById('alert-cooldown').value,
+        enabled:                  document.getElementById('alert-enabled').checked,
+        threshold:                document.getElementById('alert-threshold').value,
+        recipient:                document.getElementById('alert-recipient').value,
+        cooldown_minutes:         document.getElementById('alert-cooldown').value,
+        monitor_enabled:          document.getElementById('alert-monitor-enabled').checked,
+        monitor_interval_minutes: document.getElementById('alert-monitor-interval').value,
       };
       try {
         var r = await fetch('/api/config/alerts', {

@@ -74,6 +74,17 @@ CREATE TABLE IF NOT EXISTS alert_log (
 );
 """
 
+# Dashboard login. Scope today is single-user, but the schema supports more
+# rows so future invite flows don't need a migration.
+_CREATE_USERS = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -93,6 +104,7 @@ def init_db(db_path):
         conn.execute(_CREATE_SCANS)
         conn.execute(_CREATE_FINDINGS)
         conn.execute(_CREATE_ALERT_LOG)
+        conn.execute(_CREATE_USERS)
         try:
             conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
         except sqlite3.OperationalError:
@@ -288,6 +300,74 @@ def was_recently_alerted(db_path, rule, cooldown_minutes=60):
             return cursor.fetchone() is not None
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Users (dashboard login)
+# ---------------------------------------------------------------------------
+
+def count_users(db_path):
+    """Number of rows in the users table. Used to decide whether signup is
+    still open (signup is allowed only when the table is empty)."""
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return int(row[0]) if row else 0
+
+
+def create_user(db_path, email, password_hash):
+    """Insert a new user and return the row id. Email is lowercased and
+    stripped so lookups are consistent."""
+    email = (email or "").strip().lower()
+    if not email:
+        raise ValueError("email is required")
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)",
+            (email, password_hash, created_at),
+        )
+        return cursor.lastrowid
+
+
+def get_user_by_email(db_path, email):
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, email, password_hash, created_at FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "email": row[1], "password_hash": row[2], "created_at": row[3]}
+
+
+def get_user_by_id(db_path, user_id):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, email, password_hash, created_at FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "email": row[1], "password_hash": row[2], "created_at": row[3]}
+
+
+def update_user_email(db_path, user_id, new_email):
+    new_email = (new_email or "").strip().lower()
+    if not new_email:
+        raise ValueError("email is required")
+    with _connect(db_path) as conn:
+        conn.execute("UPDATE users SET email = ? WHERE id = ?", (new_email, int(user_id)))
+
+
+def update_user_password(db_path, user_id, password_hash):
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (password_hash, int(user_id)),
+        )
 
 
 # ---------------------------------------------------------------------------

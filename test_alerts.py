@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from pulse.emailer import filter_alert_findings, send_alert
+from pulse.emailer import filter_alert_findings, send_alert, dispatch_alerts
 from pulse.database import init_db, record_alert, was_recently_alerted
 
 
@@ -187,3 +187,92 @@ def test_send_alert_uses_alert_recipient_override():
 
     # sendmail(sender, recipient, msg) — recipient should be the override.
     assert fake_server.sendmail.call_args[0][1] == "soc-team@example.com"
+
+
+# ---------------------------------------------------------------------------
+# dispatch_alerts — the top-level helper both CLI and API use
+# ---------------------------------------------------------------------------
+
+def _findings_above_threshold():
+    return [
+        {"rule": "Brute Force Attempt", "severity": "HIGH",     "details": "x"},
+        {"rule": "Account Takeover",    "severity": "CRITICAL", "details": "y"},
+        {"rule": "RDP Logon Detected",  "severity": "MEDIUM",   "details": "z"},
+    ]
+
+
+def _patch_smtp_ok():
+    """Return (patch_ctx, fake_server) for a successful SMTP mock."""
+    fake_server = MagicMock()
+    fake_smtp_cls = MagicMock()
+    fake_smtp_cls.return_value.__enter__.return_value = fake_server
+    return patch("pulse.emailer.smtplib.SMTP", fake_smtp_cls), fake_server
+
+
+def test_dispatch_noop_when_alerts_disabled(tmp_db):
+    alert_cfg = {"enabled": False, "threshold": "HIGH"}
+    result = dispatch_alerts(tmp_db, _findings_above_threshold(), _email_config(), alert_cfg)
+    assert result["enabled"] is False
+    assert result["sent"] is False
+
+
+def test_dispatch_noop_when_no_findings(tmp_db):
+    alert_cfg = {"enabled": True, "threshold": "HIGH"}
+    result = dispatch_alerts(tmp_db, [], _email_config(), alert_cfg)
+    assert result["enabled"] is True
+    assert result["sent"] is False
+    assert result["fresh"] == 0
+
+
+def test_dispatch_sends_and_records_on_first_fire(tmp_db):
+    alert_cfg = {"enabled": True, "threshold": "HIGH", "cooldown_minutes": 60}
+    ctx, _server = _patch_smtp_ok()
+    with ctx:
+        result = dispatch_alerts(tmp_db, _findings_above_threshold(), _email_config(), alert_cfg)
+
+    assert result["sent"] is True
+    # Only HIGH + CRITICAL pass the HIGH threshold; MEDIUM is excluded.
+    assert result["over_threshold"] == 2
+    assert result["fresh"] == 2
+    # Both rules recorded so the next scan is suppressed by cooldown.
+    assert was_recently_alerted(tmp_db, "Brute Force Attempt", 60) is True
+    assert was_recently_alerted(tmp_db, "Account Takeover",    60) is True
+
+
+def test_dispatch_suppresses_when_cooldown_active(tmp_db):
+    # Seed: a recent alert already exists for Brute Force. Another scan
+    # should NOT re-send for that rule.
+    record_alert(tmp_db, "Brute Force Attempt", severity="HIGH")
+
+    alert_cfg = {"enabled": True, "threshold": "HIGH", "cooldown_minutes": 60}
+    findings = [{"rule": "Brute Force Attempt", "severity": "HIGH", "details": "x"}]
+    ctx, fake_server = _patch_smtp_ok()
+    with ctx:
+        result = dispatch_alerts(tmp_db, findings, _email_config(), alert_cfg)
+
+    assert result["fresh"] == 0
+    assert result["sent"] is False
+    assert "Brute Force Attempt" in result["skipped_rules"]
+    fake_server.sendmail.assert_not_called()
+
+
+def test_dispatch_partial_cooldown_still_sends_for_fresh_rules(tmp_db):
+    # One rule on cooldown, another still fresh — email should go out
+    # with the fresh rule only.
+    record_alert(tmp_db, "Brute Force Attempt", severity="HIGH")
+
+    alert_cfg = {"enabled": True, "threshold": "HIGH", "cooldown_minutes": 60}
+    findings = [
+        {"rule": "Brute Force Attempt", "severity": "HIGH",     "details": "suppressed"},
+        {"rule": "Account Takeover",    "severity": "CRITICAL", "details": "fresh"},
+    ]
+    ctx, fake_server = _patch_smtp_ok()
+    with ctx:
+        result = dispatch_alerts(tmp_db, findings, _email_config(), alert_cfg)
+
+    assert result["sent"] is True
+    assert result["fresh"] == 1
+    assert result["skipped_rules"] == ["Brute Force Attempt"]
+    # Sent message should mention only the fresh rule.
+    msg = fake_server.sendmail.call_args[0][2]
+    assert "Account Takeover" in msg

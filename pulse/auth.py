@@ -1,0 +1,152 @@
+# pulse/auth.py
+# -------------
+# Single-user authentication for the Pulse web dashboard.
+#
+# Everything here is stdlib — no new dependencies.
+#   - Passwords hashed with hashlib.scrypt (memory-hard, OWASP recommended).
+#   - Session cookies signed with HMAC-SHA256.
+#   - Secret auto-generated on first boot and stored in pulse.yaml.
+#
+# Scope is deliberately small: one user, one browser session cookie, login
+# page stays open so the owner can always get back in. No password reset
+# flow, no 2FA, no CSRF token — SameSite=Lax covers the browser path for
+# a local-deploy single-user app. Revisit before any multi-tenant deploy.
+
+import base64
+import hashlib
+import hmac
+import os
+import secrets
+import time
+from typing import Optional
+
+from fastapi import HTTPException, Request
+
+
+# ---------------------------------------------------------------------------
+# Password hashing
+# ---------------------------------------------------------------------------
+
+_SCRYPT_N = 2 ** 14   # cpu/memory cost
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_DKLEN = 32
+
+
+def hash_password(password: str) -> str:
+    """Hash a password with scrypt + random salt. Returns a self-describing
+    string so we can tune parameters later without breaking old hashes."""
+    if not password:
+        raise ValueError("password cannot be empty")
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=_SCRYPT_DKLEN,
+    )
+    return "scrypt${}${}${}${}${}".format(
+        _SCRYPT_N, _SCRYPT_R, _SCRYPT_P,
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(dk).decode("ascii"),
+    )
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Timing-safe verify against a stored scrypt hash."""
+    if not password or not stored:
+        return False
+    try:
+        parts = stored.split("$")
+        if len(parts) != 6 or parts[0] != "scrypt":
+            return False
+        n, r, p = int(parts[1]), int(parts[2]), int(parts[3])
+        salt = base64.b64decode(parts[4])
+        expected = base64.b64decode(parts[5])
+        candidate = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt, n=n, r=r, p=p, dklen=len(expected),
+        )
+        return hmac.compare_digest(candidate, expected)
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Session cookies
+# ---------------------------------------------------------------------------
+
+SESSION_COOKIE_NAME = "pulse_session"
+SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60   # 30 days
+
+
+def ensure_session_secret(config: dict) -> str:
+    """Return the session secret from config, generating one if missing.
+    Caller is responsible for persisting the mutated config back to disk."""
+    auth = config.setdefault("auth", {})
+    secret = auth.get("session_secret")
+    if not secret:
+        secret = secrets.token_hex(32)
+        auth["session_secret"] = secret
+    return secret
+
+
+def _sign(secret: str, payload: bytes) -> str:
+    sig = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+
+
+def issue_session_cookie(secret: str, user_id: int, now: Optional[int] = None) -> str:
+    """Build the signed cookie value for a logged-in user."""
+    now = now if now is not None else int(time.time())
+    payload = f"{int(user_id)}:{now}".encode("ascii")
+    body = base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    return f"{body}.{_sign(secret, payload)}"
+
+
+def verify_session_cookie(secret: str, cookie_value: str,
+                           now: Optional[int] = None,
+                           max_age: int = SESSION_MAX_AGE_SECONDS) -> Optional[int]:
+    """Return the user_id if the cookie is valid, else None."""
+    if not cookie_value or "." not in cookie_value:
+        return None
+    try:
+        body_b64, sig = cookie_value.rsplit(".", 1)
+        # Re-pad for urlsafe_b64decode
+        padded = body_b64 + "=" * (-len(body_b64) % 4)
+        payload = base64.urlsafe_b64decode(padded)
+        expected_sig = _sign(secret, payload)
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        parts = payload.decode("ascii").split(":")
+        if len(parts) != 2:
+            return None
+        user_id = int(parts[0])
+        issued = int(parts[1])
+        now = now if now is not None else int(time.time())
+        if now - issued > max_age:
+            return None
+        return user_id
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# FastAPI dependency
+# ---------------------------------------------------------------------------
+
+def require_login(request: Request) -> int:
+    """FastAPI dependency that 401s unless a valid session cookie is present.
+
+    Apps built with `disable_auth=True` (tests) set `app.state.auth_required
+    = False`, in which case this is a no-op returning a sentinel user_id of 0.
+    """
+    if getattr(request.app.state, "auth_required", True) is False:
+        return 0
+    secret = getattr(request.app.state, "session_secret", None)
+    if not secret:
+        raise HTTPException(500, detail="Session secret not configured.")
+    cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    user_id = verify_session_cookie(secret, cookie) if cookie else None
+    if user_id is None:
+        raise HTTPException(401, detail="Authentication required.")
+    return user_id

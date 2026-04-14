@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Sign in to Pulse</title>
+  <style>
+    :root {
+      --bg:        #0b0f17;
+      --panel:     #141a24;
+      --panel-2:   #1a2130;
+      --border:    #232c3b;
+      --text:      #e6edf7;
+      --muted:     #8a94a6;
+      --accent:    #3b82f6;
+      --accent-hv: #2563eb;
+      --danger:    #ef4444;
+      --ok:        #10b981;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.10), transparent 60%),
+        radial-gradient(900px 500px at 110% 110%, rgba(16,185,129,0.06), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 22px;
+    }
+    .brand-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 14px rgba(59,130,246,0.7);
+    }
+    .brand-name {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 26px 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+
+    h1 {
+      margin: 0 0 4px 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+    input[type="email"], input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus {
+      border-color: var(--accent);
+    }
+
+    .field { margin-bottom: 14px; }
+
+    button {
+      width: 100%;
+      padding: 11px 14px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 6px;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hv); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .msg {
+      margin-top: 14px;
+      font-size: 13px;
+      padding: 9px 12px;
+      border-radius: 6px;
+      display: none;
+    }
+    .msg.error {
+      display: block;
+      background: rgba(239,68,68,0.12);
+      color: var(--danger);
+      border: 1px solid rgba(239,68,68,0.25);
+    }
+    .msg.ok {
+      display: block;
+      background: rgba(16,185,129,0.10);
+      color: var(--ok);
+      border: 1px solid rgba(16,185,129,0.25);
+    }
+
+    .footnote {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 18px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: -6px;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="brand-name">Pulse</span>
+    </div>
+
+    <div class="card">
+      <h1 id="form-title">Sign in</h1>
+      <p class="subtitle" id="form-subtitle">Welcome back. Enter your credentials to continue.</p>
+
+      <form id="auth-form" autocomplete="on">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required autocomplete="email" autofocus/>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password"/>
+        </div>
+
+        <p class="hint" id="password-hint" style="display:none;">At least 8 characters.</p>
+
+        <button type="submit" id="submit-btn">Sign in</button>
+
+        <div id="msg" class="msg"></div>
+      </form>
+    </div>
+
+    <div class="footnote">Pulse &middot; Windows event log analyzer</div>
+  </div>
+
+  <script>
+    var mode = 'login'; // 'login' or 'signup'
+
+    async function loadMode() {
+      try {
+        var r = await fetch('/api/auth/status');
+        var data = await r.json();
+        if (data.logged_in) {
+          window.location.href = '/';
+          return;
+        }
+        if (data.needs_signup) {
+          mode = 'signup';
+          document.getElementById('form-title').textContent = 'Create your account';
+          document.getElementById('form-subtitle').textContent =
+            'No account exists yet. Set the email and password you\u2019ll use to sign in.';
+          document.getElementById('submit-btn').textContent = 'Create account';
+          document.getElementById('password').autocomplete = 'new-password';
+          document.getElementById('password-hint').style.display = 'block';
+        }
+      } catch (e) {
+        showError('Could not reach Pulse. Is the server running?');
+      }
+    }
+
+    function showError(text) {
+      var m = document.getElementById('msg');
+      m.className = 'msg error';
+      m.textContent = text;
+    }
+
+    document.getElementById('auth-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var email = document.getElementById('email').value.trim();
+      var password = document.getElementById('password').value;
+      var btn = document.getElementById('submit-btn');
+      var m = document.getElementById('msg');
+      m.className = 'msg';
+      m.textContent = '';
+      btn.disabled = true;
+
+      var url = (mode === 'signup') ? '/api/auth/signup' : '/api/auth/login';
+
+      try {
+        var r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, password: password }),
+        });
+        var data = {};
+        try { data = await r.json(); } catch (_) {}
+        if (!r.ok) {
+          showError(data.detail || 'Something went wrong.');
+          btn.disabled = false;
+          return;
+        }
+        // Success — cookie is set, bounce to the dashboard.
+        window.location.href = '/';
+      } catch (err) {
+        showError('Network error: ' + err.message);
+        btn.disabled = false;
+      }
+    });
+
+    loadMode();
+  </script>
+</body>
+</html>

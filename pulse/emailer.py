@@ -245,6 +245,95 @@ def send_alert(email_config, alert_config, triggering_findings,
         return False
 
 
+def dispatch_alerts(db_path, findings, email_config, alert_config):
+    """
+    Threshold-filter, cooldown-check, send, and record one alert dispatch.
+
+    This is the single entry point both the CLI (main.py) and the API
+    (POST /api/scan) use after a scan finishes. It centralises:
+      1. Checking alerts.enabled
+      2. Filtering findings by alerts.threshold
+      3. Dropping rules whose cooldown window is still active
+      4. Sending one email covering any remaining "fresh" findings
+      5. Recording an alert_log row per unique rule on success
+
+    Parameters:
+        db_path (str | None):   SQLite path. None skips cooldown + record.
+        findings (list):        All findings from the scan.
+        email_config (dict):    SMTP credentials (email section of pulse.yaml).
+        alert_config (dict):    alerts section of pulse.yaml.
+
+    Returns:
+        dict with keys:
+            enabled   (bool) - alerts.enabled was true
+            threshold (str)  - effective threshold used
+            over_threshold (int) - findings at or above threshold
+            skipped_rules  (list[str]) - rules suppressed by cooldown
+            fresh (int)      - findings that passed cooldown
+            sent  (bool)     - True if send_alert succeeded
+            recipient (str | None)
+    """
+    result = {
+        "enabled": False,
+        "threshold": None,
+        "over_threshold": 0,
+        "skipped_rules": [],
+        "fresh": 0,
+        "sent": False,
+        "recipient": None,
+    }
+
+    alert_config = alert_config or {}
+    if not alert_config.get("enabled"):
+        return result
+    result["enabled"] = True
+
+    if not findings:
+        return result
+
+    threshold = alert_config.get("threshold", "HIGH")
+    cooldown  = int(alert_config.get("cooldown_minutes", 60))
+    result["threshold"] = threshold
+
+    alertable = filter_alert_findings(findings, threshold)
+    result["over_threshold"] = len(alertable)
+    if not alertable:
+        return result
+
+    # Cooldown filter — drop findings whose rule was alerted recently.
+    # Imported lazily so importing emailer doesn't require database at
+    # module load (keeps the dependency graph thin).
+    from pulse.database import record_alert, was_recently_alerted
+
+    fresh = []
+    skipped = set()
+    for f in alertable:
+        rule = f.get("rule", "")
+        if db_path and was_recently_alerted(db_path, rule, cooldown):
+            skipped.add(rule)
+        else:
+            fresh.append(f)
+
+    result["skipped_rules"] = sorted(skipped)
+    result["fresh"] = len(fresh)
+    if not fresh:
+        return result
+
+    ok = send_alert(email_config, alert_config, fresh)
+    result["sent"] = bool(ok)
+    result["recipient"] = (alert_config.get("recipient")
+                           or (email_config or {}).get("recipient"))
+
+    if ok and db_path:
+        unique_rules = {}
+        for f in fresh:
+            unique_rules[f.get("rule", "")] = f.get("severity")
+        for rule, sev in unique_rules.items():
+            record_alert(db_path, rule, severity=sev)
+
+    return result
+
+
 def _build_alert_subject(severity_counts, total, hostname):
     """Terse subject line. Example: '[PULSE ALERT] HIGH — 3 findings on DESKTOP-PC'"""
     if severity_counts.get("CRITICAL", 0) > 0:

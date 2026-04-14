@@ -30,12 +30,22 @@ import tempfile
 from typing import Optional
 
 import yaml
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from pulse import __version__
-from pulse.database import get_history, get_scan_findings, init_db, save_scan
+from pulse.auth import (
+    SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS,
+    ensure_session_secret, hash_password, issue_session_cookie,
+    require_login, verify_password,
+)
+from pulse.database import (
+    count_users, create_user, get_history, get_scan_findings,
+    get_user_by_email, get_user_by_id, init_db, save_scan,
+    update_user_email, update_user_password,
+)
 from pulse.detections import run_all_detections
+from pulse.emailer import dispatch_alerts
 from pulse.monitor_service import MonitorManager
 from pulse.parser import parse_evtx
 from pulse.reporter import (
@@ -52,7 +62,8 @@ from pulse.whitelist import filter_whitelist
 # tests can construct a fresh app with a temporary database per test. The
 # default call without arguments gives you the real production app.
 
-def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None) -> FastAPI:
+def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
+               disable_auth: bool = False) -> FastAPI:
     """
     Build and return a configured FastAPI application.
 
@@ -86,6 +97,19 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None)
     # Attach config so route handlers can reach it without globals.
     app.state.db_path = db_path
     app.state.config_path = config_path
+    app.state.auth_required = not disable_auth
+
+    # Resolve (and if needed, generate + persist) the session signing secret
+    # so every logged-in browser cookie can be verified on future requests.
+    if app.state.auth_required:
+        cfg = _read_config(config_path) or {}
+        had_secret = bool((cfg.get("auth") or {}).get("session_secret"))
+        secret = ensure_session_secret(cfg)
+        app.state.session_secret = secret
+        if not had_secret:
+            _write_config(config_path, cfg)
+    else:
+        app.state.session_secret = "test-secret-not-used"
 
     # Live monitor — one MonitorManager per app. It owns the async polling
     # loop and fans out findings to SSE subscribers. Lazy: doesn't start
@@ -97,6 +121,31 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None)
     )
 
     _register_routes(app)
+
+    # Auth middleware — rather than sprinkle Depends(require_login) onto every
+    # existing endpoint, a single middleware 401s for unauthenticated requests
+    # to /api/*. Exceptions are the login surface and the health check.
+    _AUTH_EXEMPT_EXACT   = {"/api/health"}
+    _AUTH_EXEMPT_PREFIX  = ("/api/auth/",)
+
+    @app.middleware("http")
+    async def _auth_middleware(request, call_next):
+        if not app.state.auth_required:
+            return await call_next(request)
+        path = request.url.path
+        needs_auth = (
+            path.startswith("/api/")
+            and path not in _AUTH_EXEMPT_EXACT
+            and not any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIX)
+        )
+        if needs_auth:
+            from pulse.auth import verify_session_cookie
+            cookie = request.cookies.get(SESSION_COOKIE_NAME)
+            user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
+            if user_id is None:
+                return JSONResponse({"detail": "Authentication required."}, status_code=401)
+        return await call_next(request)
+
     return app
 
 
@@ -108,17 +157,125 @@ def _register_routes(app: FastAPI) -> None:
     """Wire every endpoint onto the app."""
 
     # Path to the dashboard HTML file (relative to this module).
-    _dashboard_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "web", "index.html"
-    )
+    _web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+    _dashboard_path = os.path.join(_web_dir, "index.html")
+    _login_path     = os.path.join(_web_dir, "login.html")
 
     # -------------------------------------------------------------------
-    # GET / — Web dashboard
+    # GET / — Web dashboard (requires login)
     # -------------------------------------------------------------------
     @app.get("/", include_in_schema=False)
-    def dashboard():
-        """Serve the single-page web dashboard."""
+    def dashboard(request: Request):
+        """Serve the dashboard, redirecting to /login if not signed in."""
+        if app.state.auth_required:
+            cookie = request.cookies.get(SESSION_COOKIE_NAME)
+            from pulse.auth import verify_session_cookie
+            user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
+            if user_id is None:
+                return RedirectResponse(url="/login", status_code=302)
         return FileResponse(_dashboard_path, media_type="text/html")
+
+    # -------------------------------------------------------------------
+    # GET /login — public login/signup page
+    # -------------------------------------------------------------------
+    @app.get("/login", include_in_schema=False)
+    def login_page():
+        return FileResponse(_login_path, media_type="text/html")
+
+    # -------------------------------------------------------------------
+    # Auth endpoints (all public — these are how you get a session)
+    # -------------------------------------------------------------------
+    @app.get("/api/auth/status")
+    def auth_status(request: Request):
+        """Tell the login page whether to show login or first-user signup,
+        and tell the dashboard whether the user is already signed in."""
+        if not app.state.auth_required:
+            return {"logged_in": True, "email": "local", "needs_signup": False}
+        needs_signup = count_users(app.state.db_path) == 0
+        cookie = request.cookies.get(SESSION_COOKIE_NAME)
+        from pulse.auth import verify_session_cookie
+        user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
+        if user_id:
+            user = get_user_by_id(app.state.db_path, user_id)
+            if user:
+                return {"logged_in": True, "email": user["email"], "needs_signup": False}
+        return {"logged_in": False, "email": None, "needs_signup": needs_signup}
+
+    @app.post("/api/auth/signup")
+    async def auth_signup(request: Request):
+        """Create the one and only user. 409s after the first row exists."""
+        if count_users(app.state.db_path) > 0:
+            raise HTTPException(409, detail="Signup is closed. An account already exists.")
+        body = await request.json()
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        if "@" not in email or "." not in email:
+            raise HTTPException(400, detail="Please enter a valid email address.")
+        if len(password) < 8:
+            raise HTTPException(400, detail="Password must be at least 8 characters.")
+        user_id = create_user(app.state.db_path, email, hash_password(password))
+        cookie = issue_session_cookie(app.state.session_secret, user_id)
+        resp = JSONResponse({"status": "ok", "email": email})
+        resp.set_cookie(
+            SESSION_COOKIE_NAME, cookie,
+            max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+        )
+        return resp
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request):
+        body = await request.json()
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        user = get_user_by_email(app.state.db_path, email)
+        if not user or not verify_password(password, user["password_hash"]):
+            # Deliberately vague — don't leak whether the email exists.
+            raise HTTPException(401, detail="Invalid email or password.")
+        cookie = issue_session_cookie(app.state.session_secret, user["id"])
+        resp = JSONResponse({"status": "ok", "email": user["email"]})
+        resp.set_cookie(
+            SESSION_COOKIE_NAME, cookie,
+            max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+        )
+        return resp
+
+    @app.post("/api/auth/logout")
+    def auth_logout():
+        resp = JSONResponse({"status": "ok"})
+        resp.delete_cookie(SESSION_COOKIE_NAME)
+        return resp
+
+    @app.put("/api/auth/email")
+    async def auth_update_email(request: Request, user_id: int = Depends(require_login)):
+        body = await request.json()
+        current_password = body.get("current_password") or ""
+        new_email = (body.get("email") or "").strip().lower()
+        if "@" not in new_email or "." not in new_email:
+            raise HTTPException(400, detail="Please enter a valid email address.")
+        user = get_user_by_id(app.state.db_path, user_id)
+        if not user or not verify_password(current_password, user["password_hash"]):
+            raise HTTPException(401, detail="Current password is incorrect.")
+        # Make sure we're not colliding with another row (defensive; shouldn't
+        # happen in the single-user case, but keeps the UNIQUE constraint
+        # from exploding into a 500).
+        existing = get_user_by_email(app.state.db_path, new_email)
+        if existing and existing["id"] != user_id:
+            raise HTTPException(409, detail="That email is already in use.")
+        update_user_email(app.state.db_path, user_id, new_email)
+        return {"status": "ok", "email": new_email}
+
+    @app.put("/api/auth/password")
+    async def auth_update_password(request: Request, user_id: int = Depends(require_login)):
+        body = await request.json()
+        current_password = body.get("current_password") or ""
+        new_password = body.get("new_password") or ""
+        if len(new_password) < 8:
+            raise HTTPException(400, detail="New password must be at least 8 characters.")
+        user = get_user_by_id(app.state.db_path, user_id)
+        if not user or not verify_password(current_password, user["password_hash"]):
+            raise HTTPException(401, detail="Current password is incorrect.")
+        update_user_password(app.state.db_path, user_id, hash_password(new_password))
+        return {"status": "ok"}
 
     # -------------------------------------------------------------------
     # GET /api/health
@@ -183,6 +340,23 @@ def _register_routes(app: FastAPI) -> None:
                 filename=file.filename,
             )
 
+            # Fire threshold-based alerts if configured. SMTP can be slow,
+            # so run it in a worker thread. Failure never breaks the scan
+            # response — dispatch_alerts swallows its own errors and
+            # returns a summary dict.
+            alert_summary = {"enabled": False, "sent": False}
+            try:
+                cfg = _read_config(app.state.config_path) or {}
+                alert_summary = await asyncio.to_thread(
+                    dispatch_alerts,
+                    app.state.db_path,
+                    findings,
+                    cfg.get("email") or {},
+                    cfg.get("alerts") or {},
+                )
+            except Exception:
+                pass
+
             return {
                 "scan_id": scan_id,
                 "filename": file.filename,
@@ -193,6 +367,7 @@ def _register_routes(app: FastAPI) -> None:
                 "grade": score_data["grade"],
                 "severity_counts": sev_counts,
                 "findings": findings,
+                "alert": alert_summary,
             }
         finally:
             # Always clean up the temp file, even if parsing raised.
@@ -366,6 +541,8 @@ def _register_routes(app: FastAPI) -> None:
                 "threshold":        alerts.get("threshold", "HIGH"),
                 "recipient":        alerts.get("recipient") or "",
                 "cooldown_minutes": int(alerts.get("cooldown_minutes", 60)),
+                "monitor_enabled":          bool(alerts.get("monitor_enabled", False)),
+                "monitor_interval_minutes": int(alerts.get("monitor_interval_minutes", 30)),
             },
         }
 
@@ -437,6 +614,18 @@ def _register_routes(app: FastAPI) -> None:
             if cooldown < 0:
                 raise HTTPException(400, detail="cooldown_minutes cannot be negative.")
             alerts["cooldown_minutes"] = cooldown
+
+        if "monitor_enabled" in body:
+            alerts["monitor_enabled"] = bool(body["monitor_enabled"])
+
+        if "monitor_interval_minutes" in body:
+            try:
+                interval = int(body["monitor_interval_minutes"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="monitor_interval_minutes must be an integer.")
+            if interval < 1:
+                raise HTTPException(400, detail="monitor_interval_minutes must be at least 1.")
+            alerts["monitor_interval_minutes"] = interval
 
         config["alerts"] = alerts
         _write_config(app.state.config_path, config)

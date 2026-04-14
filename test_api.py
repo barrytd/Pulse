@@ -34,13 +34,17 @@ from pulse.api import create_app
 
 @pytest.fixture
 def client(tmp_path):
-    """Fresh app + isolated database for each test."""
+    """Fresh app + isolated database for each test.
+
+    `disable_auth=True` keeps the existing tests simple — auth is covered
+    by test_auth.py. Without this flag every /api/* call would 401.
+    """
     db_path = tmp_path / "test.db"
     config_path = tmp_path / "pulse.yaml"
     # Write a minimal config so the whitelist loader has something to read.
     config_path.write_text("whitelist:\n  accounts: []\n")
 
-    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    app = create_app(db_path=str(db_path), config_path=str(config_path), disable_auth=True)
     return TestClient(app)
 
 
@@ -249,7 +253,7 @@ def test_config_password_never_leaks(client, tmp_path):
     db_path = tmp_path / "test.db"
     from pulse.api import create_app
     from fastapi.testclient import TestClient
-    fresh = TestClient(create_app(db_path=str(db_path), config_path=str(config_path)))
+    fresh = TestClient(create_app(db_path=str(db_path), config_path=str(config_path), disable_auth=True))
 
     body = fresh.get("/api/config").json()
     assert body["email"]["password_set"] is True
@@ -336,6 +340,28 @@ def test_put_alerts_threshold_is_uppercased(client):
     assert r.status_code == 200
     body = client.get("/api/config").json()
     assert body["alerts"]["threshold"] == "HIGH"
+
+
+def test_put_alerts_persists_monitor_fields(client):
+    r = client.put("/api/config/alerts", json={
+        "monitor_enabled": True,
+        "monitor_interval_minutes": 15,
+    })
+    assert r.status_code == 200
+    body = client.get("/api/config").json()
+    assert body["alerts"]["monitor_enabled"] is True
+    assert body["alerts"]["monitor_interval_minutes"] == 15
+
+
+def test_put_alerts_monitor_interval_validation(client):
+    r = client.put("/api/config/alerts", json={"monitor_interval_minutes": 0})
+    assert r.status_code == 400
+
+
+def test_config_defaults_include_monitor_fields(client):
+    body = client.get("/api/config").json()
+    assert "monitor_enabled" in body["alerts"]
+    assert "monitor_interval_minutes" in body["alerts"]
 
 
 # ---------------------------------------------------------------------------
