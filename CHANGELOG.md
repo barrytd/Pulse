@@ -5,6 +5,30 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-14
+
+### Added
+- **Single-user dashboard authentication** (`pulse/auth.py`, `pulse/web/login.html`) — clean dark-themed login page that doubles as a first-user signup form when no account exists yet. Password hashing uses stdlib `hashlib.scrypt`; session cookies are HMAC-SHA256 signed with a secret auto-generated into `pulse.yaml` on first boot. No external auth deps
+- **Auth middleware** on `/api/*` — every endpoint is 401 without a valid session cookie, except `/api/health` and `/api/auth/*`. `GET /` 302-redirects to `/login` when signed out
+- **Account routes** — `POST /api/auth/signup` (closed after first user, 409 thereafter), `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/status`, `PUT /api/auth/email`, `PUT /api/auth/password`. Email/password changes require current password re-entry
+- **Settings rewrite** — new "My Account" card on the Settings page lets you change your login email and password from the browser and sign out. The old SMTP fields are now hidden behind a provider dropdown (Gmail / Outlook / Yahoo / Custom) that auto-fills host and port — no more jargon for non-sysadmin users
+- **Live monitor email alerts** (`pulse/monitor_service.py`) — live monitoring can now email findings, gated by a new `monitor_enabled` toggle and `monitor_interval_minutes` setting (5 min to 4 hours). Slow SMTP won't block the poll loop (`asyncio.to_thread`). Alert config is editable from the Settings page
+- **`dispatch_alerts` helper** (`pulse/emailer.py`) — shared alert-dispatch logic used by the CLI scan path, the API scan path, and now the live monitor, so throttling and cooldown behave consistently everywhere
+- **Dashboard empty state** — when no scans fall inside the filtered time window, the Dashboard now shows a banner with "Upload .evtx" / "Open Monitor" CTAs plus muted zero-state panels instead of hiding everything behind a single "No data" card
+
+### Changed
+- **`create_app(...)`** accepts a `disable_auth=False` test flag so the existing API test fixture stays simple
+- **`users` table** added to SQLite on startup (`pulse/database.py`) with UNIQUE email constraint and scrypt-format password hashes
+
+### Tests
+- 25 new tests in `test_auth.py` (unit: scrypt round-trip, cookie sign/verify/tamper/expiry; API: needs_signup flag, signup closed after first user, login/logout, protected 401/200, root redirects, email/password updates)
+- 5 new tests in `test_monitor_service.py` for the monitor email-interval throttle
+- 5 new tests in `test_alerts.py` for `dispatch_alerts` (covers throttling + CLI/API parity)
+- 3 new tests in `test_api.py` for the monitor config fields
+- Test count: 189 → 227, all passing
+
+---
+
 ## 2026-04-12
 
 ### Added

@@ -34,14 +34,20 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - Report export from dashboard — download HTML or JSON report for any scan
 - Multi-file upload — drag multiple `.evtx` files at once for batch scanning
 - **Live monitor in dashboard** — SSE-powered live panel with pulsing indicator, slide-in alerts, audio ding, test-alert button, sliding 15-minute detection window, finding dedup, per-poll event-ID diagnostics, localStorage auto-resume
-- 189 unit tests, all passing
+- **Dashboard authentication** — single-user login/signup page, scrypt-hashed passwords, signed session cookies, `/api/*` auth middleware, "My Account" card for changing email/password
+- **Email alerts with throttling** — `dispatch_alerts` helper unifies CLI + API scan alert paths; per-rule cooldown prevents repeat-finding spam
+- **Live monitor email alerts** — monitor polls can now email findings, gated by a user-configurable interval (5 min – 4 hours)
+- **Settings UX polish** — SMTP jargon hidden behind a provider dropdown (Gmail / Outlook / Yahoo / Custom) with auto-filled host and port
+- **Dashboard zero-state polish** — friendly banner + empty panels when the filtered window has no scans, instead of hiding everything
+- 227 unit tests, all passing
 
 ---
 
 ## Sprint 2 — Apr 14–27, 2026 (Alerting & detection depth)
 
-- [ ] Email alerts — send summary email when a scan finds CRITICAL/HIGH items
-- [ ] Alert throttling — dedupe repeated findings so one noisy host doesn't spam inbox
+- [x] Email alerts — send summary email when a scan finds CRITICAL/HIGH items
+- [x] Alert throttling — dedupe repeated findings so one noisy host doesn't spam inbox
+- [x] Live-monitor email alerts — interval-gated emails straight from the monitor loop
 - [ ] Slack / Discord webhook — optional webhook URL in `pulse.yaml` to post CRITICAL findings
 - [ ] Kerberoasting detection — Event ID 4769 with weak encryption type (RC4)
 - [ ] Golden ticket detection — anomalous TGT lifetime / mismatched domain in 4769/4624
@@ -81,8 +87,8 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ## Sprint 5 — Jun 2–15, 2026 (Auth, compliance, analytics)
 
-- [ ] User authentication — login page backed by SQLite users table with bcrypt hashes
-- [ ] Session management — signed cookies, logout, idle timeout
+- [x] User authentication — login page backed by SQLite users table with scrypt hashes (shipped early, single-user)
+- [x] Session management — signed cookies, logout, 30-day expiry (shipped early)
 - [ ] Role-based access — admin (full) vs viewer (read-only) roles enforced in API
 - [ ] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan`
 - [ ] NIST CSF mapping — tag each rule against Identify / Protect / Detect / Respond / Recover
