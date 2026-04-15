@@ -40,7 +40,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - **Settings UX polish** — SMTP jargon hidden behind a provider dropdown (Gmail / Outlook / Yahoo / Custom) with auto-filled host and port
 - **Dashboard zero-state polish** — friendly banner + empty panels when the filtered window has no scans, instead of hiding everything
 - **Slack / Discord webhook delivery** — alongside email alerts, with shared cooldown, payload caps, and a Settings card with test button
-- **Frontend modularised** — `pulse/web/index.html` split into native ES modules under `pulse/static/js/` (api, dashboard, scans, findings, monitor, settings, etc.) with a central action registry replacing inline `on*` handlers
+- **Frontend modularized** — `pulse/web/index.html` split into native ES modules under `pulse/static/js/` (api, dashboard, scans, findings, monitor, settings, etc.) with a central action registry replacing inline `on*` handlers
 - 271 unit tests, all passing
 
 ---
@@ -108,7 +108,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Assignment — assign a finding to a user, filter dashboard by "assigned to me"
 - [ ] Custom branding — upload company logo, set organization name on reports and dashboard
 - [ ] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
-- [ ] Dashboard widgets — customisable layout with drag-and-drop panels
+- [ ] Dashboard widgets — customizable layout with drag-and-drop panels
 - [ ] Threat intel integration — correlate source IPs with AbuseIPDB / OTX feeds
 - [ ] IOC lookup panel — paste an IP or hash, query intel feeds, cache results locally
 - [ ] Weekly threat brief — auto-emailed digest of top findings across the fleet
