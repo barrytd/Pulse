@@ -1,0 +1,347 @@
+/* ------------------------------------------------------------------ */
+/* Findings table                                                      */
+/* ------------------------------------------------------------------ */
+.findings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.findings-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.findings-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.findings-table tr:hover td {
+  background: var(--hover-row);
+}
+
+.findings-table .col-time {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  width: 160px;
+}
+
+.findings-table .col-severity { width: 100px; }
+.findings-table .col-rule     { width: 200px; font-weight: 500; }
+.findings-table .col-mitre    { width: 110px; }
+
+/* MITRE code tag */
+.mitre-tag {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.mitre-tag a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mitre-tag a:hover {
+  text-decoration: underline;
+}
+
+/* Finding detail drawer — slides in from the right, full height,
+   backed by a dimmed full-screen backdrop. */
+.finding-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 240;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.finding-drawer-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.finding-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 460px;
+  max-width: 92vw;
+  background: var(--card-bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25);
+  z-index: 250;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.finding-drawer.open { transform: translateX(0); }
+
+.finding-drawer-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.finding-drawer-head .rule-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.finding-drawer-head .sev-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.finding-drawer-head .sev-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  color: #fff;
+}
+.finding-drawer-head .sev-pill.sev-critical { background: #f85149; }
+.finding-drawer-head .sev-pill.sev-high     { background: #f0883e; }
+.finding-drawer-head .sev-pill.sev-medium   { background: #d29922; color: #1a1a1a; }
+.finding-drawer-head .sev-pill.sev-low      { background: #3fb950; }
+
+.finding-drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.finding-drawer-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.finding-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.finding-drawer-section {
+  margin-bottom: 22px;
+}
+.finding-drawer-section .sec-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.finding-drawer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 18px;
+}
+.finding-drawer-grid .k {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.finding-drawer-grid .v {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.finding-drawer-details {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.finding-drawer .remediation {
+  margin-top: 0;
+}
+
+/* Splunk-style data table — alternating rows, hover, colored left border */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.data-table thead th.sortable { cursor: pointer; }
+.data-table thead th.sortable:hover { color: var(--text); }
+
+.data-table tbody tr {
+  transition: background 0.1s;
+}
+
+.data-table tbody tr:nth-child(even) td { background: var(--hover-row); }
+.data-table tbody tr:hover td { background: var(--accent-glow); }
+
+.data-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.data-table tbody tr.clickable { cursor: pointer; }
+
+/* Severity-left-border variant for rows on findings tables */
+.data-table tbody tr.sev-row td:first-child {
+  border-left: 3px solid transparent;
+}
+.data-table tbody tr.sev-row.sev-critical td:first-child { border-left-color: #f85149; }
+.data-table tbody tr.sev-row.sev-high     td:first-child { border-left-color: #f0883e; }
+.data-table tbody tr.sev-row.sev-medium   td:first-child { border-left-color: #d29922; }
+.data-table tbody tr.sev-row.sev-low      td:first-child { border-left-color: #3fb950; }
+
+.sort-arrow {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--accent);
+}
+.sort-arrow.inactive { color: var(--text-muted); opacity: 0.4; }
+
+/* Inline expand row for findings detail */
+.expand-row td {
+  background: var(--bg) !important;
+  padding: 16px 20px !important;
+  border-bottom: 1px solid var(--border);
+}
+
+.expand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.expand-field .label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.expand-field .val {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.expand-field .val.mono {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+}
+
+.remediation {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-glow);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.remediation .rem-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+/* Grade badge — used in findings / scan detail */
+.grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+}
+
+/* Grade badge variants used across scan/history tables */
+.grade-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+.grade-A { background: #3fb950; }
+.grade-B { background: #58a6ff; }
+.grade-C { background: #d29922; }
+.grade-D { background: #f0883e; }
+.grade-F { background: #f85149; }
+
+/* Highlighted row (History chart <-> table link) */
+.data-table tbody tr.highlight td { background: var(--accent-glow) !important; }

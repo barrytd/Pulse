@@ -1,0 +1,97 @@
+/* ------------------------------------------------------------------ */
+/* Sidebar — always dark navy                                          */
+/* ------------------------------------------------------------------ */
+.sidebar {
+  width: 220px;
+  min-height: 100vh;
+  background: #0f1623;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 100;
+}
+
+.sidebar-logo {
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.sidebar-logo h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #e6edf3;
+}
+
+.sidebar-logo span {
+  display: block;
+  font-size: 10px;
+  color: #8b949e;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 12px 0;
+}
+
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  color: #8b949e;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+
+.sidebar-nav a:hover {
+  color: #c9d1d9;
+  background: rgba(255,255,255,0.04);
+}
+
+.sidebar-nav a.active {
+  color: #e6edf3;
+  background: rgba(255,255,255,0.06);
+  border-left-color: var(--accent);
+}
+
+.sidebar-nav a .icon {
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.sidebar-footer {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.sidebar-footer .user {
+  font-size: 13px;
+  color: #c9d1d9;
+  font-weight: 500;
+}
+
+.sidebar-footer .version {
+  font-size: 11px;
+  color: #484f58;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Main area                                                           */
+/* ------------------------------------------------------------------ */
+.main {
+  flex: 1;
+  margin-left: 220px;
+  min-height: 100vh;
+}

@@ -30,8 +30,9 @@ import tempfile
 from typing import Optional
 
 import yaml
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from pulse import __version__
 from pulse.auth import (
@@ -40,7 +41,7 @@ from pulse.auth import (
     require_login, verify_password,
 )
 from pulse.database import (
-    count_users, create_user, get_history, get_scan_findings,
+    count_users, create_user, delete_scans, get_history, get_scan_findings,
     get_user_by_email, get_user_by_id, init_db, save_scan,
     update_user_email, update_user_password,
 )
@@ -121,6 +122,12 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     )
 
     _register_routes(app)
+
+    # Mount the static directory for CSS, JS, and other frontend assets.
+    # Served at /static/* and not behind auth so the login page and
+    # pre-login redirects can still reference shared stylesheets.
+    _static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
     # Auth middleware — rather than sprinkle Depends(require_login) onto every
     # existing endpoint, a single middleware 401s for unauthenticated requests
@@ -388,6 +395,21 @@ def _register_routes(app: FastAPI) -> None:
                 detail="limit must be between 1 and 200.",
             )
         return {"scans": get_history(app.state.db_path, limit=limit)}
+
+    # -------------------------------------------------------------------
+    # DELETE /api/scans — delete one or many scans (+ cascading findings)
+    # -------------------------------------------------------------------
+    @app.delete("/api/scans")
+    def delete_scans_endpoint(payload: dict = Body(...)):
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list) or not ids:
+            raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
+        try:
+            ids_int = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            raise HTTPException(400, detail="All ids must be integers.")
+        deleted = delete_scans(app.state.db_path, ids_int)
+        return {"deleted": deleted}
 
     # -------------------------------------------------------------------
     # GET /api/report/{scan_id}

@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS findings (
     rule        TEXT,
     mitre       TEXT,
     description TEXT,
-    details     TEXT
+    details     TEXT,
+    raw_xml     TEXT
 );
 """
 
@@ -109,6 +110,10 @@ def init_db(db_path):
             conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE findings ADD COLUMN raw_xml TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None):
@@ -155,13 +160,14 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
                 f.get("mitre"),
                 f.get("description"),
                 f.get("details"),
+                f.get("raw_xml"),
             ))
 
         conn.executemany(
             """INSERT INTO findings
                (scan_id, timestamp, event_id, severity, rule,
-                mitre, description, details)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                mitre, description, details, raw_xml)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             rows
         )
 
@@ -214,7 +220,7 @@ def get_scan_findings(db_path, scan_id):
     with _connect(db_path) as conn:
         cursor = conn.execute(
             """SELECT timestamp, event_id, severity, rule,
-                      mitre, description, details
+                      mitre, description, details, raw_xml
                FROM findings
                WHERE scan_id = ?
                ORDER BY
@@ -229,6 +235,20 @@ def get_scan_findings(db_path, scan_id):
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
+def delete_scans(db_path, scan_ids):
+    """Delete one or more scans (and their findings via ON DELETE CASCADE).
+    Returns the number of scan rows actually deleted."""
+    ids = [int(i) for i in (scan_ids or []) if str(i).strip()]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            f"DELETE FROM scans WHERE id IN ({placeholders})", ids
+        )
+        return cursor.rowcount or 0
 
 
 # ---------------------------------------------------------------------------

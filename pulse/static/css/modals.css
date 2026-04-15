@@ -1,0 +1,202 @@
+/* ------------------------------------------------------------------ */
+/* Upload modal overlay                                                */
+/* ------------------------------------------------------------------ */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.open {
+  display: flex;
+}
+
+.modal {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  width: 440px;
+  max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+}
+
+.modal.modal-lg {
+  width: 600px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.help-link {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+.help-link:hover { text-decoration: underline; }
+
+.tutorial-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.tutorial-tab {
+  background: transparent;
+  border: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tutorial-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.tutorial-tab:hover { color: var(--text); }
+
+.tutorial-pane { display: none; }
+.tutorial-pane.active { display: block; }
+
+.tutorial-step {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.tutorial-step strong { font-size: 13px; color: var(--text); }
+.tutorial-step-num {
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tutorial-step-body {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+  line-height: 1.5;
+}
+.tutorial-step kbd {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}
+.tutorial-step code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+
+.tutorial-code {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.tutorial-code code {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+.tutorial-copy {
+  background: var(--card-bg);
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tutorial-copy:hover { color: var(--text); }
+.tutorial-copy.copied { color: var(--accent); }
+
+.modal h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.modal p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 16px;
+}
+
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.drop-zone .drop-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.drop-zone .drop-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.drop-zone .drop-text strong {
+  color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.upload-status {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  min-height: 20px;
+}
+
+.upload-status.success { color: #10b981; }
+.upload-status.error   { color: #ef4444; }

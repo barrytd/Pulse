@@ -1,0 +1,67 @@
+/* ------------------------------------------------------------------ */
+/* CSS Variables — light theme default, dark overrides below           */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg:          #f0f2f5;
+  --card-bg:     #ffffff;
+  --border:      #d0d7de;
+  --text:        #1f2328;
+  --text-muted:  #656d76;
+  --text-light:  #8b949e;
+  --topbar-bg:   #ffffff;
+  --hover-row:   #f6f8fa;
+  --shadow:      0 1px 3px rgba(0,0,0,0.08);
+  --accent:      #3b82f6;
+  --accent-glow: rgba(59,130,246,0.15);
+}
+
+[data-theme="dark"] {
+  --bg:          #0d1117;
+  --card-bg:     #161b22;
+  --border:      #21262d;
+  --text:        #e6edf3;
+  --text-muted:  #8b949e;
+  --text-light:  #484f58;
+  --topbar-bg:   #161b22;
+  --hover-row:   #1c2129;
+  --shadow:      0 1px 3px rgba(0,0,0,0.3);
+  --accent:      #58a6ff;
+  --accent-glow: rgba(88,166,255,0.12);
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset + base                                                        */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout — sidebar + main                                             */
+/* ------------------------------------------------------------------ */
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
+@media (max-width: 1100px) {
+  .stat-row    { grid-template-columns: repeat(2, 1fr); }
+  .middle-row  { grid-template-columns: 1fr; }
+  .summary-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .sidebar     { display: none; }
+  .main        { margin-left: 0; }
+  .stat-row    { grid-template-columns: 1fr; }
+  .summary-row { grid-template-columns: 1fr; }
+}

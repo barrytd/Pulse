@@ -56,6 +56,7 @@
 
 
 import platform
+import re
 import xml.etree.ElementTree as ET          # Built-in XML parser
 from datetime import datetime, timedelta   # For comparing event timestamps
 
@@ -130,6 +131,32 @@ def _resolve_sid(sid_string):
         return resolved
     except Exception:
         return sid_string
+
+
+# Matches any well-formed Windows SID (S-1-5-21-...-RID and similar).
+_SID_REGEX = re.compile(r"S-\d+-\d+(?:-\d+)+")
+
+
+def _friendly_sid(sid_string):
+    """Best-effort rendering of a SID for display. If Windows can resolve it
+    we get "DOMAIN\\user". Otherwise we fall back to a compact "(deleted
+    account, RID <n>)" rather than the full 50-char SID — the RID is the
+    only useful piece left once an account has been tombstoned."""
+    resolved = _resolve_sid(sid_string)
+    if resolved and resolved != sid_string:
+        return resolved
+    rid = sid_string.rsplit("-", 1)[-1] if sid_string else ""
+    if rid.isdigit():
+        return f"(deleted account, RID {rid})"
+    return sid_string
+
+
+def _resolve_sids_in_text(text):
+    """Replace every SID substring in `text` with a friendly account name
+    (or "(deleted account, RID N)" if Windows can't resolve the SID)."""
+    if not text or "S-" not in text:
+        return text
+    return _SID_REGEX.sub(lambda m: _friendly_sid(m.group(0)), text)
 
 
 # These are the Windows Event IDs we care about.
@@ -356,6 +383,8 @@ def detect_user_creation(events):
 
         findings.append({
             "rule": "User Account Created",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "MEDIUM",
             "details": (
                 f"New account '{new_account or 'Unknown'}' was created "
@@ -424,6 +453,8 @@ def detect_privilege_escalation(events):
 
         findings.append({
             "rule": "Privilege Escalation",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "HIGH",
             "details": (
                 f"'{who}' was added to security group "
@@ -477,6 +508,8 @@ def detect_log_clearing(events):
 
         findings.append({
             "rule": "Audit Log Cleared",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "HIGH",
             "details": (
                 f"The security audit log was cleared by "
@@ -547,6 +580,8 @@ def detect_rdp_logon(events):
 
         findings.append({
             "rule": "RDP Logon Detected",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "MEDIUM",
             "details": (
                 f"Remote Desktop logon by '{target_user or 'Unknown'}' "
@@ -642,6 +677,8 @@ def detect_pass_the_hash(events):
 
         findings.append({
             "rule": "Pass-the-Hash Attempt",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "HIGH",
             "details": (
                 f"Possible Pass-the-Hash login by '{target_user or 'Unknown'}' "
@@ -699,6 +736,8 @@ def detect_service_installed(events):
 
         findings.append({
             "rule": "Service Installed",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "MEDIUM",
             "details": (
                 f"New service '{service_name or 'Unknown'}' was installed "
@@ -743,6 +782,8 @@ def detect_av_disabled(events):
         # The event itself is the red flag.
         findings.append({
             "rule": "Antivirus Disabled",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "HIGH",
             "details": (
                 f"Windows Defender real-time protection was disabled "
@@ -810,6 +851,8 @@ def detect_firewall_disabled(events):
 
         findings.append({
             "rule": "Firewall Disabled",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "HIGH",
             "details": (
                 f"Windows Firewall {change} "
@@ -855,20 +898,62 @@ def detect_firewall_rule_change(events):
         else:
             action = "modified"
 
-        # --- EXTRACT THE RULE NAME FROM THE XML ---
+        # --- EXTRACT RULE NAME, RULE ID, ACTOR, PROFILE FROM THE XML ---
+        # Rules added by apps often ship only a GUID in RuleName. When that
+        # happens we label the finding more honestly ("unnamed rule") and
+        # show the GUID, plus who/what made the change.
         xml_tree = ET.fromstring(event["data"])
 
         rule_name = None
+        rule_id   = None
+        modifying_user = None
+        modifying_app  = None
+        profile = None
         for data_element in xml_tree.findall(f"{NS}EventData/{NS}Data"):
-            if data_element.get("Name") == "RuleName":
+            name = data_element.get("Name")
+            if name == "RuleName":
                 rule_name = data_element.text
-                break
+            elif name == "RuleId":
+                rule_id = data_element.text
+            elif name == "ModifyingUser":
+                modifying_user = data_element.text
+            elif name == "ModifyingApplication":
+                modifying_app = data_element.text
+            elif name == "SubjectUserName" and not modifying_user:
+                modifying_user = data_element.text
+            elif name == "ProfileChanged":
+                profile = data_element.text
+
+        # A RuleName that looks like a GUID means the rule has no display
+        # name. Show it as "(unnamed rule, ID ...)" instead of pretending
+        # the GUID is the name.
+        def _looks_like_guid(s):
+            return bool(s) and len(s) >= 32 and s.count("-") >= 4
+        if rule_name and _looks_like_guid(rule_name) and not rule_id:
+            rule_id = rule_name
+            rule_name = None
+        if rule_name and rule_name.strip() and rule_name.strip() != "-":
+            rule_label = f"'{rule_name}'"
+        elif rule_id:
+            rule_label = f"(unnamed rule, ID {rule_id})"
+        else:
+            rule_label = "(unnamed rule)"
+
+        actor_bits = []
+        if modifying_user and modifying_user.strip() and modifying_user.strip() != "-":
+            actor_bits.append(f"by '{modifying_user}'")
+        if modifying_app and modifying_app.strip() and modifying_app.strip() != "-":
+            actor_bits.append(f"via {modifying_app}")
+        actor_str = (" " + " ".join(actor_bits)) if actor_bits else ""
+        profile_str = f" (profile: {profile})" if profile else ""
 
         findings.append({
             "rule": "Firewall Rule Changed",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "MEDIUM",
             "details": (
-                f"Firewall rule '{rule_name or 'Unknown'}' was {action} "
+                f"Firewall rule {rule_label} was {action}{actor_str}{profile_str} "
                 f"at {event['timestamp']}. "
                 f"Verify this was an authorized change - attackers modify "
                 f"firewall rules to allow C2 traffic or open backdoor ports."
@@ -914,6 +999,8 @@ def detect_account_lockout(events):
 
         findings.append({
             "rule": "Account Lockout",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "HIGH",
             "details": (
                 f"Account '{target_user or 'Unknown'}' was locked out "
@@ -966,6 +1053,8 @@ def detect_scheduled_task_created(events):
 
         findings.append({
             "rule": "Scheduled Task Created",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
             "severity": "MEDIUM",
             "details": (
                 f"Scheduled task '{task_name or 'Unknown'}' was created "
@@ -1051,6 +1140,8 @@ def detect_suspicious_powershell(events):
 
             findings.append({
                 "rule": "Suspicious PowerShell",
+                "raw_xml": event["data"],
+                "event_id": event["event_id"],
                 "severity": "HIGH",
                 "details": (
                     f"Suspicious PowerShell script detected at {event['timestamp']}. "
@@ -1357,6 +1448,8 @@ def detect_golden_ticket(events):
         if target_user.lower() in ("krbtgt", "administrator") and status == "0x0":
             findings.append({
                 "rule": "Golden Ticket",
+                "raw_xml": event["data"],
+                "event_id": event["event_id"],
                 "severity": "CRITICAL",
                 "details": (
                     f"Suspicious TGT request for privileged account '{target_user}' "
@@ -1396,6 +1489,8 @@ def detect_credential_dumping(events):
                 subject_user = _get_xml_field(xml_tree, "SubjectUserName") or "unknown"
                 findings.append({
                     "rule": "Credential Dumping",
+                "raw_xml": event["data"],
+                "event_id": event["event_id"],
                     "severity": "CRITICAL",
                     "details": (
                         f"LSASS process access detected at {event['timestamp']} "
@@ -1436,6 +1531,8 @@ def detect_disabled_account_logon(events):
             source_ip = _get_xml_field(xml_tree, "IpAddress") or "N/A"
             findings.append({
                 "rule": "Logon from Disabled Account",
+                "raw_xml": event["data"],
+                "event_id": event["event_id"],
                 "severity": "MEDIUM",
                 "details": (
                     f"Logon attempt using disabled account '{target_user}' "
@@ -1482,6 +1579,8 @@ def detect_after_hours_logon(events):
                 flagged_accounts.add(target_user)
                 findings.append({
                     "rule": "After-Hours Logon",
+                    "raw_xml": event["data"],
+                    "event_id": event["event_id"],
                     "severity": "MEDIUM",
                     "details": (
                         f"Logon outside business hours: user '{target_user}' "
@@ -1531,6 +1630,8 @@ def detect_registry_persistence(events):
             if key_pattern in object_name:
                 findings.append({
                     "rule": "Suspicious Registry Modification",
+                    "raw_xml": event["data"],
+                    "event_id": event["event_id"],
                     "severity": "HIGH",
                     "details": (
                         f"Autorun registry key modified by '{subject_user}' "
@@ -1576,6 +1677,8 @@ def detect_lateral_movement_shares(events):
                 flagged.add(key)
                 findings.append({
                     "rule": "Lateral Movement via Network Share",
+                    "raw_xml": event["data"],
+                    "event_id": event["event_id"],
                     "severity": "HIGH",
                     "details": (
                         f"Administrative share '{share_name}' accessed by "
@@ -1629,4 +1732,12 @@ def run_all_detections(events):
     findings += detect_after_hours_logon(events) or []
     findings += detect_registry_persistence(events) or []
     findings += detect_lateral_movement_shares(events) or []
+
+    # Windows events often name users by raw SID (e.g. S-1-5-21-...-1003)
+    # instead of a friendly username. Resolve any SID strings in the free-text
+    # details field so the UI shows "DESKTOP-X\alice" rather than a cryptic SID.
+    for f in findings:
+        if f.get("details"):
+            f["details"] = _resolve_sids_in_text(f["details"])
+
     return findings

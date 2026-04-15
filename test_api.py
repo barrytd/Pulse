@@ -162,6 +162,29 @@ def test_history_respects_limit(client):
     assert len(scans) == 2
 
 
+def test_delete_scans_removes_rows_and_cascades_findings(client):
+    """DELETE /api/scans removes the selected scans and their findings."""
+    for name in ("a.evtx", "b.evtx", "c.evtx"):
+        client.post("/api/scan", files={"file": (name, b"", "application/octet-stream")})
+
+    scans = client.get("/api/history").json()["scans"]
+    assert len(scans) == 3
+    ids_to_delete = [scans[0]["id"], scans[2]["id"]]
+
+    resp = client.request("DELETE", "/api/scans", json={"ids": ids_to_delete})
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == 2
+
+    remaining = client.get("/api/history").json()["scans"]
+    assert [s["id"] for s in remaining] == [scans[1]["id"]]
+
+
+def test_delete_scans_rejects_empty_or_bad_body(client):
+    assert client.request("DELETE", "/api/scans", json={}).status_code == 400
+    assert client.request("DELETE", "/api/scans", json={"ids": []}).status_code == 400
+    assert client.request("DELETE", "/api/scans", json={"ids": ["not-a-number"]}).status_code == 400
+
+
 def test_history_rejects_bad_limit(client):
     """Limit outside [1, 200] should be rejected with 400."""
     assert client.get("/api/history?limit=0").status_code == 400

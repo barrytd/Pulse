@@ -1,0 +1,742 @@
+/* ------------------------------------------------------------------ */
+/* Stat cards row                                                       */
+/* ------------------------------------------------------------------ */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 6px;
+  padding: 12px 16px;
+  box-shadow: var(--shadow);
+}
+
+/* Left-border accent variants — Splunk-style status colour */
+.stat-card.accent-critical { border-left-color: #f85149; }
+.stat-card.accent-high     { border-left-color: #f0883e; }
+.stat-card.accent-medium   { border-left-color: #d29922; }
+.stat-card.accent-info     { border-left-color: var(--accent); }
+.stat-card.accent-neutral  { border-left-color: #8b949e; }
+
+.stat-card .label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.stat-card .value {
+  font-size: 26px;
+  font-weight: 700;
+  margin: 2px 0 0 0;
+  line-height: 1.1;
+}
+
+.stat-card .sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Trend pill under each stat card value */
+.trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.trend.up   { color: #f85149; }   /* score went up = WORSE for findings; up=GOOD only for score */
+.trend.down { color: #3fb950; }
+.trend.flat { color: var(--text-muted); }
+/* Inverted variants — used for "score" stat where up=good */
+.trend.up.good   { color: #3fb950; }
+.trend.down.bad  { color: #f85149; }
+
+/* ------------------------------------------------------------------ */
+/* MITRE category bar chart — inside the score panel                   */
+/* ------------------------------------------------------------------ */
+.mitre-bars { display: flex; flex-direction: column; gap: 8px; }
+
+.mitre-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 32px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.mitre-row .label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.mitre-row .count {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.mitre-bar-track {
+  background: var(--border);
+  border-radius: 3px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.mitre-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard findings list — left-border severity rows                 */
+/* ------------------------------------------------------------------ */
+.dash-findings { display: flex; flex-direction: column; gap: 6px; }
+
+.dash-finding-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 80px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.dash-finding-row.sev-critical { border-left-color: #f85149; }
+.dash-finding-row.sev-high     { border-left-color: #f0883e; }
+.dash-finding-row.sev-medium   { border-left-color: #d29922; }
+.dash-finding-row.sev-low      { border-left-color: #3fb950; }
+
+.dash-finding-row .time { color: var(--text-muted); font-family: monospace; font-size: 11px; }
+.dash-finding-row .rule { color: var(--text); font-weight: 600; }
+.dash-finding-row .desc {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-finding-row .sev {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-align: right;
+}
+.dash-finding-row .sev.critical { color: #f85149; }
+.dash-finding-row .sev.high     { color: #f0883e; }
+.dash-finding-row .sev.medium   { color: #d29922; }
+.dash-finding-row .sev.low      { color: #3fb950; }
+
+/* Score history line chart container */
+.score-chart-wrap {
+  position: relative;
+  height: 180px;
+  margin-bottom: 12px;
+}
+
+/* Inside the stretched dashboard history card, let the chart grow to
+   absorb any vertical slack so the table + footer don't float on top
+   of a big gap when only a few days of history exist. */
+.middle-row > .card .score-chart-wrap {
+  flex: 1;
+  min-height: 180px;
+  height: auto;
+}
+
+.score-secure  { color: #10b981; }
+.score-low     { color: #3b82f6; }
+.score-medium  { color: #f59e0b; }
+.score-high    { color: #ef4444; }
+.score-critical { color: #dc2626; }
+
+/* ------------------------------------------------------------------ */
+/* Live monitor panel                                                   */
+/* ------------------------------------------------------------------ */
+.live-panel {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid #3fb950;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.live-panel.idle {
+  border-left-color: var(--text-muted);
+}
+
+.live-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 0 0 rgba(63,185,80,0.6);
+  animation: live-pulse 2s infinite;
+  flex-shrink: 0;
+}
+.live-dot.idle {
+  background: var(--text-muted);
+  animation: none;
+  box-shadow: none;
+}
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(63,185,80,0.6); }
+  70%  { box-shadow: 0 0 0 10px rgba(63,185,80,0); }
+  100% { box-shadow: 0 0 0 0 rgba(63,185,80,0); }
+}
+
+.live-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(63,185,80,0.15);
+  color: #3fb950;
+}
+.live-badge.idle {
+  background: var(--border);
+  color: var(--text-muted);
+}
+
+.live-interval {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+.live-btn {
+  margin-left: auto;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.live-btn:hover { border-color: var(--accent); }
+.live-btn.start { background: #3fb950; color: #fff; border-color: #3fb950; }
+.live-btn.start:hover { background: #2ea043; border-color: #2ea043; }
+.live-btn.stop  { background: transparent; color: #f85149; border-color: #f85149; }
+.live-btn.stop:hover { background: rgba(248,81,73,0.1); }
+
+.live-meta {
+  display: flex;
+  gap: 24px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+.live-meta .item .k {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+}
+.live-meta .item .v {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.live-feed {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.live-feed.empty {
+  max-height: none;
+  text-align: center;
+  padding: 20px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Slide-in animation for newly arrived alerts */
+@keyframes live-slide-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.live-feed .dash-finding-row {
+  animation: live-slide-in 0.3s ease-out;
+}
+
+/* Monitor page — checks table (polls without findings too) */
+.monitor-checks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.monitor-checks-table th,
+.monitor-checks-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.monitor-checks-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.monitor-checks-table td.num {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.monitor-checks-table td.num.hit {
+  color: #f0883e;
+  font-weight: 600;
+}
+
+.monitor-settings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.monitor-settings label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.monitor-settings input[type="range"] { width: 100%; }
+.monitor-settings .hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.monitor-settings input[type="text"],
+.monitor-settings select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Middle row — score ring + history table                              */
+/* ------------------------------------------------------------------ */
+.middle-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+  align-items: stretch;
+}
+
+/* Both middle-row cards are flex columns so their inner sections can
+   flow top-to-bottom and footer-style elements (e.g. "View full history")
+   can sit at the bottom via margin-top:auto — eliminates the empty
+   space that appears when one card is taller than the other. */
+.middle-row > .card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  text-align: center;
+}
+.history-footer a {
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Score ring */
+.score-display {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  max-height: 200px;
+  overflow: hidden;
+}
+
+.score-ring-container {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.score-ring {
+  width: 180px;
+  height: 180px;
+  max-width: 180px;
+  max-height: 180px;
+}
+
+.score-ring .track  { stroke-width: 10; }
+.score-ring .fill   { stroke-width: 10; }
+
+.score-ring .track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 8;
+}
+
+.score-ring .fill {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s ease;
+}
+
+.score-ring-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.score-ring-label .number {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.score-ring-label .out-of {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.score-info .risk-label {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.score-info .risk-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* History table */
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.history-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.history-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-table tr:last-child td {
+  border-bottom: none;
+}
+
+.trend-up   { color: #10b981; font-weight: 600; }
+.trend-down { color: #ef4444; font-weight: 600; }
+.trend-flat { color: var(--text-muted); }
+
+/* ------------------------------------------------------------------ */
+/* Bulk action bar (selections across dashboard/findings tables)       */
+/* ------------------------------------------------------------------ */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.bulk-bar-count { font-size: 13px; color: var(--text-muted); }
+.bulk-bar-clear { font-size: 12px; color: var(--text-muted); cursor: pointer; text-decoration: underline; }
+.bulk-bar-clear:hover { color: var(--text); }
+
+/* ------------------------------------------------------------------ */
+/* Empty state                                                         */
+/* ------------------------------------------------------------------ */
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state .empty-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.empty-state p {
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Clickable scan rows                                                 */
+/* ------------------------------------------------------------------ */
+.scan-row { cursor: pointer; }
+.scan-row:hover td { background: var(--hover-row); }
+
+/* Scan detail header */
+.scan-header {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.scan-header .stat-card { flex: 1; min-width: 150px; }
+
+/* History page — grouped day rows */
+.history-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.history-group-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  cursor: pointer;
+  background: var(--card-bg);
+  transition: background 0.15s;
+}
+
+.history-group-header:hover {
+  background: var(--hover-bg);
+}
+
+.hg-toggle {
+  font-size: 10px;
+  color: var(--text-muted);
+  width: 14px;
+}
+
+.hg-date {
+  font-weight: 700;
+  font-size: 14px;
+  min-width: 100px;
+}
+
+.hg-stat {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.history-group-body {
+  border-top: 1px solid var(--border);
+}
+
+.history-group-body .history-table {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Splunk-style shared page elements                                   */
+/* ------------------------------------------------------------------ */
+
+/* Page heading bar — title + right-side action / counts */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.page-head .page-head-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+}
+
+.page-head .page-head-title strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.page-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Splunk-style dashboard filter toolbar — dropdowns + Apply + Reset */
+.dash-filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 10px 16px;
+  margin: 0 0 16px 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+[data-theme="dark"] .dash-filter-bar {
+  background: #11161f;
+}
+
+.dash-filter-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+
+.dash-filter-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.dash-filter-select {
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.dash-filter-select:focus { border-color: var(--accent); }
+
+.dash-filter-search {
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  border-radius: 4px;
+  outline: none;
+  width: 100%;
+}
+.dash-filter-search:focus { border-color: var(--accent); }
+.dash-filter-search::placeholder { color: var(--text-muted); }
+
+.dash-filter-spacer { flex: 1; }
+
+.dash-filter-apply {
+  height: 30px;
+  padding: 0 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.dash-filter-apply:hover { filter: brightness(1.1); }
+
+.dash-filter-reset {
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 6px;
+}
+
+.dash-filter-reset:hover { color: var(--text); }
+
+.dash-empty-note {
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Empty-state with call-to-action */
+.empty-state.cta {
+  background: var(--card-bg);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 56px 24px;
+}
+.empty-state.cta h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 4px 0;
+}
+.empty-state.cta p {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+/* Summary-card row used by History */
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
