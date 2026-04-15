@@ -360,6 +360,7 @@ def _register_routes(app: FastAPI) -> None:
                     findings,
                     cfg.get("email") or {},
                     cfg.get("alerts") or {},
+                    cfg.get("webhook") or {},
                 )
             except Exception:
                 pass
@@ -538,6 +539,7 @@ def _register_routes(app: FastAPI) -> None:
         whitelist = config.get("whitelist", {}) or {}
         email = config.get("email", {}) or {}
         alerts = config.get("alerts", {}) or {}
+        webhook = config.get("webhook", {}) or {}
 
         return {
             "whitelist": {
@@ -565,6 +567,14 @@ def _register_routes(app: FastAPI) -> None:
                 "cooldown_minutes": int(alerts.get("cooldown_minutes", 60)),
                 "monitor_enabled":          bool(alerts.get("monitor_enabled", False)),
                 "monitor_interval_minutes": int(alerts.get("monitor_interval_minutes", 30)),
+            },
+            # The webhook URL is a credential (anyone who has it can post to
+            # your Slack/Discord as Pulse), so we expose only a boolean
+            # "url_set" — the raw URL never leaves the server.
+            "webhook": {
+                "enabled":  bool(webhook.get("enabled", False)),
+                "flavor":   webhook.get("flavor") or "",
+                "url_set":  bool((webhook.get("url") or "").strip()),
             },
         }
 
@@ -693,6 +703,78 @@ def _register_routes(app: FastAPI) -> None:
             "status":    "sent",
             "recipient": alerts_cfg.get("recipient") or email_cfg.get("recipient"),
         }
+
+    # -------------------------------------------------------------------
+    # PUT /api/config/webhook — update Slack/Discord webhook settings
+    # -------------------------------------------------------------------
+    @app.put("/api/config/webhook")
+    async def update_webhook(request: Request):
+        """
+        Update the webhook section of pulse.yaml.
+
+        URL handling mirrors email.password: an omitted or empty "url" leaves
+        the stored value alone. This lets the UI resave enabled/flavor without
+        forcing the user to repaste their webhook URL every time.
+        """
+        body = await request.json()
+        config = _read_config(app.state.config_path)
+        webhook = config.get("webhook", {}) or {}
+
+        if "enabled" in body:
+            webhook["enabled"] = bool(body["enabled"])
+
+        if "flavor" in body:
+            flavor = (body["flavor"] or "").strip().lower()
+            if flavor and flavor not in ("slack", "discord"):
+                raise HTTPException(400, detail="flavor must be 'slack' or 'discord'.")
+            webhook["flavor"] = flavor or None
+
+        # Only overwrite url if a new non-empty value was sent.
+        if body.get("url"):
+            url = body["url"].strip()
+            if not url.startswith(("http://", "https://")):
+                raise HTTPException(400, detail="webhook url must start with http:// or https://.")
+            webhook["url"] = url
+
+        config["webhook"] = webhook
+        _write_config(app.state.config_path, config)
+
+        return {"status": "ok", "url_set": bool(webhook.get("url"))}
+
+    # -------------------------------------------------------------------
+    # POST /api/webhook/test — fire a single synthetic webhook message
+    # -------------------------------------------------------------------
+    @app.post("/api/webhook/test")
+    def send_test_webhook():
+        """Fire one synthetic webhook to verify the URL and flavor work.
+
+        Bypasses the enabled toggle — the whole point is to verify before
+        turning alerts on. Uses a fake CRITICAL finding so the message body
+        is clearly a test.
+        """
+        from pulse.webhook import send_webhook
+
+        config = _read_config(app.state.config_path)
+        webhook_cfg = config.get("webhook", {}) or {}
+
+        url = (webhook_cfg.get("url") or "").strip()
+        if not url:
+            raise HTTPException(400, detail="No webhook URL configured. Save your webhook settings first.")
+
+        synthetic = [{
+            "rule":     "Pulse Test Alert",
+            "severity": "CRITICAL",
+            "details":  "This is a test notification from the Pulse dashboard. "
+                        "If you see this message, your webhook is wired up correctly.",
+        }]
+
+        # Bypass the enabled flag for the test.
+        test_cfg = {**webhook_cfg, "enabled": True}
+        ok = send_webhook(test_cfg, synthetic)
+        if not ok:
+            raise HTTPException(502, detail="Webhook POST failed. Check the URL and try again.")
+
+        return {"status": "sent"}
 
     # -------------------------------------------------------------------
     # PUT /api/config/whitelist — update the whitelist

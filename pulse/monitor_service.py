@@ -454,10 +454,11 @@ class MonitorManager:
                 findings,
                 config.get("email") or {},
                 alert_cfg,
+                config.get("webhook") or {},
             )
         except Exception:
             return
-        if result.get("sent"):
+        if result.get("sent") or result.get("webhook_sent"):
             self._last_monitor_email_at = datetime.now()
 
     def _collect_new(self):

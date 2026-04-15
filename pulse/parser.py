@@ -40,6 +40,8 @@ RELEVANT_EVENT_IDS = [
     4104,   # Suspicious PowerShell (script block logging)
     4624,   # Successful logon (RDP, Pass-the-Hash)
     4625,   # Failed logon (brute force)
+    4662,   # Directory Service object access (DCSync)
+    4688,   # Process creation (suspicious child process chain)
     4698,   # Scheduled task created
     4720,   # User account created
     4732,   # User added to security group

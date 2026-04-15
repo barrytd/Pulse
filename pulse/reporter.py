@@ -41,6 +41,15 @@ MITRE_ATTACK_IDS = {
     "Suspicious PowerShell":     "T1059.001",
     "Account Takeover Chain":    "T1078",
     "Malware Persistence Chain": "T1543.003",
+    "Kerberoasting":              "T1558.003",
+    "Golden Ticket":              "T1558.001",
+    "Credential Dumping":         "T1003.001",
+    "Logon from Disabled Account": "T1078",
+    "After-Hours Logon":          "T1078",
+    "Suspicious Registry Modification": "T1547.001",
+    "Lateral Movement via Network Share": "T1021.002",
+    "DCSync Attempt":             "T1003.006",
+    "Suspicious Child Process":   "T1059",
 }
 
 
@@ -80,6 +89,8 @@ RULE_EVENT_IDS = {
     "After-Hours Logon":                "4624",
     "Suspicious Registry Modification": "4657",
     "Lateral Movement via Network Share": "5140 / 5145",
+    "DCSync Attempt":                     "4662",
+    "Suspicious Child Process":           "4688",
 }
 
 # Hardcoded remediation steps per rule.
@@ -181,6 +192,20 @@ REMEDIATION = {
         "Verify the source IP is expected and belongs to a known user.",
         "If unexpected, block the IP at the firewall and audit the session activity.",
         "Consider restricting RDP access to a VPN or jump host only.",
+    ],
+    "DCSync Attempt": [
+        "Treat this as an active domain compromise — a DCSync recovers every password hash in the domain.",
+        "Isolate the workstation the request came from and capture memory for forensics.",
+        "Reset the krbtgt account password twice (24h apart) to invalidate any Golden Tickets.",
+        "Rotate passwords for every privileged account (Domain Admins, service accounts, break-glass).",
+        "Audit which accounts have Replicating Directory Changes rights and remove any that shouldn't.",
+    ],
+    "Suspicious Child Process": [
+        "Review the full command line in Event 4688 — decode any Base64 PowerShell to see the real payload.",
+        "Capture a memory image and hash of the child process before killing it.",
+        "Check the user's mailbox/browser history for the initial lure (macro document, phishing link, fake captcha).",
+        "Block the parent application from spawning child shells via Attack Surface Reduction rules.",
+        "Search the fleet for other hosts running the same command line — attacker often spray the lure widely.",
     ],
 }
 

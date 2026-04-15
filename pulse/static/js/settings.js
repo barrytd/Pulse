@@ -12,6 +12,8 @@ import {
   apiSaveEmailConfig,
   apiSaveAlertsConfig,
   apiSendTestAlert,
+  apiSaveWebhookConfig,
+  apiSendTestWebhook,
 } from './api.js';
 import { escapeHtml, showToast, toastError } from './dashboard.js';
 import { getTheme } from './theme.js';
@@ -35,6 +37,19 @@ export async function renderSettingsPage() {
 
   var em = config.email || {};
   var al = config.alerts || {};
+  var wh = config.webhook || {};
+  var whFlavor = wh.flavor || '';
+  var flavorOpts = [
+    { v: '',        label: 'Auto-detect from URL' },
+    { v: 'slack',   label: 'Slack' },
+    { v: 'discord', label: 'Discord' },
+  ].map(function (o) {
+    var sel = (whFlavor === o.v) ? ' selected' : '';
+    return '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
+  }).join('');
+  var whUrlStatus = wh.url_set
+    ? '<span class="password-status set">\u2713 Webhook URL saved</span>'
+    : '<span class="password-status">No webhook URL saved yet</span>';
   var pwStatus = em.password_set
     ? '<span class="password-status set">\u2713 App password saved</span>'
     : '<span class="password-status">No app password saved yet</span>';
@@ -160,6 +175,26 @@ export async function renderSettingsPage() {
         '<select id="alert-monitor-interval">' + intervalOpts + '</select></div>' +
       '<div class="form-actions">' +
         '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Slack / Discord Notifications</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Post threat findings to a Slack or Discord channel via incoming webhook. ' +
+        'Fires alongside email when the alert threshold is met. ' +
+        'Paste the webhook URL from your channel\u2019s integration settings.' +
+      '</p>' +
+      '<div class="form-row"><label>Enable webhook</label>' +
+        '<label class="form-checkbox"><input type="checkbox" id="webhook-enabled"' + (wh.enabled ? ' checked' : '') + '/> Send alerts to webhook</label></div>' +
+      '<div class="form-row"><label>Service</label>' +
+        '<select id="webhook-flavor">' + flavorOpts + '</select></div>' +
+      '<div class="form-row"><label>Webhook URL</label>' +
+        '<input type="password" id="webhook-url" placeholder="' + (wh.url_set ? 'leave blank to keep current' : 'https://hooks.slack.com/...') + '" autocomplete="new-password"/></div>' +
+      '<div class="form-row"><span></span><span>' + whUrlStatus + '</span></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary" data-action="saveWebhookSettings">Save webhook settings</button>' +
+        '<button class="btn" data-action="sendTestWebhook">Send test notification</button>' +
       '</div>' +
     '</div>' +
 
@@ -339,6 +374,41 @@ export async function sendTestAlert() {
       return;
     }
     showToast('Test alert sent to ' + r.data.recipient);
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function saveWebhookSettings() {
+  var body = {
+    enabled: document.getElementById('webhook-enabled').checked,
+    flavor:  document.getElementById('webhook-flavor').value,
+    url:     document.getElementById('webhook-url').value,
+  };
+  try {
+    var r = await apiSaveWebhookConfig(body);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Save failed.');
+      return;
+    }
+    showToast('Webhook settings saved');
+    document.getElementById('webhook-url').value = '';
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function sendTestWebhook() {
+  showToast('Sending test notification...');
+  try {
+    var r = await apiSendTestWebhook();
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Test failed.');
+      return;
+    }
+    showToast('Test notification posted');
   } catch (e) {
     toastError('Network error: ' + e.message);
   }

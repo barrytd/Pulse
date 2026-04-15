@@ -14,7 +14,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 
 ## Features
 
-### Detection Rules (22 total)
+### Detection Rules (24 total)
 
 | Rule | Event ID | Severity | MITRE ATT&CK | What it catches |
 |---|---|---|---|---|
@@ -31,6 +31,15 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 | Antivirus Disabled | 5001 | HIGH | T1562.001 | Defender real-time protection turned off |
 | Firewall Disabled | 4950 | HIGH | T1562.004 | Firewall profile changed or disabled |
 | Firewall Rule Changed | 4946 / 4947 | MEDIUM | T1562.004 | Firewall rules added or modified |
+| Kerberoasting | 4769 (RC4) | HIGH | T1558.003 | TGS requests with weak RC4 encryption |
+| Golden Ticket | 4769 / 4624 | HIGH | T1558.001 | Anomalous TGT lifetime or domain mismatch |
+| Credential Dumping | 4656 | HIGH | T1003.001 | LSASS handle access from non-system processes |
+| Logon from Disabled Account | 4625 / 4624 | HIGH | T1078 | Logon attempt against an account marked disabled |
+| After-Hours Logon | 4624 | MEDIUM | T1078 | Interactive logon outside business hours |
+| Suspicious Registry Modification | 4657 | MEDIUM | T1547.001 | Run/RunOnce/Image File Execution Options writes |
+| Lateral Movement via Network Share | 5140 / 5145 | MEDIUM | T1021.002 | Admin share access (`ADMIN$`, `C$`) from new hosts |
+| **DCSync Attempt** | 4662 | **CRITICAL** | T1003.006 | Directory replication GUIDs requested by non-DC accounts |
+| **Suspicious Child Process** | 4688 | HIGH | T1059 | Office / browser parents spawning cmd / powershell / wscript |
 | **Account Takeover Chain** | Multiple | **CRITICAL** | T1078 | Brute force -> successful login -> new user created |
 | **Malware Persistence Chain** | Multiple | **CRITICAL** | T1543.003 | AV disabled -> new service installed |
 
@@ -42,6 +51,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - **Security Score** - a score out of 100 at the top of HTML reports, colour-coded from SECURE to CRITICAL RISK
 - **MITRE ATT&CK tagging** - each finding links to its ATT&CK technique on attack.mitre.org
 - **Email delivery** - send the finished HTML report via SMTP after a scan with `--email`
+- **Slack / Discord webhook** - post threat findings to a channel via incoming webhook (auto-detects flavor from URL); fires alongside email and shares a per-rule cooldown
 
 ### Live Monitoring
 - **CLI `--watch` mode** - queries live Windows event channels (Security, System) in real time via `wevtutil`, ANSI-coloured terminal alerts, configurable `--interval`
@@ -77,7 +87,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **189 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, and alert pathway tested
+- **271 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, and webhook delivery tested
 
 ---
 
@@ -87,25 +97,31 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 Pulse/
 ├── pulse/
 │   ├── parser.py           # Reads and parses .evtx log files
-│   ├── detections.py       # 22 detection rules + attack chain correlation
+│   ├── detections.py       # 24 detection rules + attack chain correlation
 │   ├── reporter.py         # Generates text, HTML, JSON, and CSV reports
 │   ├── emailer.py          # SMTP email delivery + CRITICAL/HIGH alert emails
+│   ├── webhook.py          # Slack / Discord webhook delivery
 │   ├── monitor.py          # CLI live monitoring via wevtutil
 │   ├── monitor_service.py  # Async in-process live monitor (SSE-backed, for the dashboard)
 │   ├── database.py         # SQLite scan history
 │   ├── interactive.py      # Interactive terminal mode
 │   ├── animations.py       # ECG heartbeat terminal animation
 │   ├── api.py              # FastAPI REST API + SSE stream for live monitor
+│   ├── auth.py             # Single-user auth: scrypt hashing + signed session cookies
 │   ├── whitelist.py        # Whitelist filtering shared by CLI and API
 │   ├── known_good.py       # Built-in known-good service whitelist
+│   ├── static/js/          # Native ES modules: api, dashboard, scans, findings, monitor, settings, etc.
 │   └── web/
-│       └── index.html      # Single-page dashboard
+│       ├── index.html      # Single-page dashboard
+│       └── login.html      # Sign-in / first-user signup page
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
 ├── pulse.db                # SQLite scan history database
 ├── test_detections.py      # Detection engine tests
 ├── test_api.py             # REST API tests
 ├── test_alerts.py          # Email alert tests
+├── test_auth.py            # Auth + session cookie tests
+├── test_webhook.py         # Slack / Discord webhook tests
 ├── main.py                 # Entry point - run this to analyse logs
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
@@ -211,7 +227,7 @@ The HTML report opens in any browser with colour-coded findings:
 python -m pytest test_detections.py -v
 ```
 
-All 189 tests run without needing real `.evtx` files — the test suite uses fake event data that mirrors real Windows log structure.
+All 271 tests run without needing real `.evtx` files — the test suite uses fake event data that mirrors real Windows log structure.
 
 ---
 

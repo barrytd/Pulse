@@ -245,7 +245,7 @@ def send_alert(email_config, alert_config, triggering_findings,
         return False
 
 
-def dispatch_alerts(db_path, findings, email_config, alert_config):
+def dispatch_alerts(db_path, findings, email_config, alert_config, webhook_config=None):
     """
     Threshold-filter, cooldown-check, send, and record one alert dispatch.
 
@@ -254,14 +254,19 @@ def dispatch_alerts(db_path, findings, email_config, alert_config):
       1. Checking alerts.enabled
       2. Filtering findings by alerts.threshold
       3. Dropping rules whose cooldown window is still active
-      4. Sending one email covering any remaining "fresh" findings
+      4. Sending one email + one webhook covering the remaining fresh findings
       5. Recording an alert_log row per unique rule on success
 
+    Email and webhook share one cooldown window — we don't want two channels
+    independently double-notifying for the same rule.
+
     Parameters:
-        db_path (str | None):   SQLite path. None skips cooldown + record.
-        findings (list):        All findings from the scan.
-        email_config (dict):    SMTP credentials (email section of pulse.yaml).
-        alert_config (dict):    alerts section of pulse.yaml.
+        db_path (str | None):      SQLite path. None skips cooldown + record.
+        findings (list):           All findings from the scan.
+        email_config (dict):       SMTP credentials (email section of pulse.yaml).
+        alert_config (dict):       alerts section of pulse.yaml.
+        webhook_config (dict | None): webhook section of pulse.yaml. Skipped
+                                   entirely when None or when enabled=false.
 
     Returns:
         dict with keys:
@@ -270,7 +275,8 @@ def dispatch_alerts(db_path, findings, email_config, alert_config):
             over_threshold (int) - findings at or above threshold
             skipped_rules  (list[str]) - rules suppressed by cooldown
             fresh (int)      - findings that passed cooldown
-            sent  (bool)     - True if send_alert succeeded
+            sent  (bool)     - True if email sent
+            webhook_sent (bool) - True if webhook POST succeeded
             recipient (str | None)
     """
     result = {
@@ -280,6 +286,7 @@ def dispatch_alerts(db_path, findings, email_config, alert_config):
         "skipped_rules": [],
         "fresh": 0,
         "sent": False,
+        "webhook_sent": False,
         "recipient": None,
     }
 
@@ -319,12 +326,21 @@ def dispatch_alerts(db_path, findings, email_config, alert_config):
     if not fresh:
         return result
 
-    ok = send_alert(email_config, alert_config, fresh)
-    result["sent"] = bool(ok)
+    email_ok = send_alert(email_config, alert_config, fresh)
+    result["sent"] = bool(email_ok)
     result["recipient"] = (alert_config.get("recipient")
                            or (email_config or {}).get("recipient"))
 
-    if ok and db_path:
+    webhook_ok = False
+    if webhook_config and webhook_config.get("enabled"):
+        from pulse.webhook import send_webhook
+        webhook_ok = send_webhook(webhook_config, fresh)
+        result["webhook_sent"] = bool(webhook_ok)
+
+    # Record per-rule cooldown if either channel delivered — we don't want
+    # to keep retrying a rule just because one channel failed and would
+    # otherwise resend next scan.
+    if (email_ok or webhook_ok) and db_path:
         unique_rules = {}
         for f in fresh:
             unique_rules[f.get("rule", "")] = f.get("severity")

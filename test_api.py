@@ -445,3 +445,93 @@ def test_alerts_test_returns_502_when_smtp_fails(client, monkeypatch):
     monkeypatch.setattr("pulse.emailer.send_alert", lambda *a, **kw: False)
     r = client.post("/api/alerts/test")
     assert r.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# /api/config — webhook section
+# ---------------------------------------------------------------------------
+
+def test_config_includes_webhook_section(client):
+    body = client.get("/api/config").json()
+    assert "webhook" in body
+    # Secret URL must never come back to the browser — only a boolean.
+    assert "url" not in body["webhook"]
+    assert "url_set" in body["webhook"]
+    assert body["webhook"]["enabled"] is False
+    assert body["webhook"]["url_set"] is False
+
+
+def test_put_webhook_persists_fields(client):
+    r = client.put("/api/config/webhook", json={
+        "enabled": True,
+        "flavor":  "slack",
+        "url":     "https://hooks.slack.com/services/T/B/abc",
+    })
+    assert r.status_code == 200
+    assert r.json()["url_set"] is True
+
+    body = client.get("/api/config").json()
+    assert body["webhook"]["enabled"] is True
+    assert body["webhook"]["flavor"] == "slack"
+    assert body["webhook"]["url_set"] is True
+
+
+def test_put_webhook_keeps_url_when_blank(client):
+    """Resaving with an empty url should NOT clear the stored URL."""
+    client.put("/api/config/webhook", json={
+        "enabled": True, "flavor": "slack",
+        "url": "https://hooks.slack.com/services/T/B/abc",
+    })
+    client.put("/api/config/webhook", json={"enabled": False, "url": ""})
+    body = client.get("/api/config").json()
+    assert body["webhook"]["enabled"] is False
+    assert body["webhook"]["url_set"] is True  # URL still on file
+
+
+def test_put_webhook_rejects_bad_flavor(client):
+    r = client.put("/api/config/webhook", json={"flavor": "teams"})
+    assert r.status_code == 400
+
+
+def test_put_webhook_rejects_non_http_url(client):
+    r = client.put("/api/config/webhook", json={"url": "ftp://x/y"})
+    assert r.status_code == 400
+
+
+def test_webhook_test_requires_url(client):
+    """Without a URL configured, the test endpoint should refuse."""
+    r = client.post("/api/webhook/test")
+    assert r.status_code == 400
+    assert "url" in r.json()["detail"].lower()
+
+
+def test_webhook_test_sends_when_configured(client, monkeypatch):
+    client.put("/api/config/webhook", json={
+        "enabled": False,   # test endpoint should bypass enabled flag
+        "flavor":  "slack",
+        "url":     "https://hooks.slack.com/services/T/B/abc",
+    })
+
+    captured = {}
+    def fake_send_webhook(cfg, findings, **kw):
+        captured["cfg"] = cfg
+        captured["findings"] = findings
+        return True
+    monkeypatch.setattr("pulse.webhook.send_webhook", fake_send_webhook)
+
+    r = client.post("/api/webhook/test")
+    assert r.status_code == 200
+    assert r.json()["status"] == "sent"
+    assert captured["findings"][0]["rule"] == "Pulse Test Alert"
+    # Even though saved as disabled, the test call forces enabled=True.
+    assert captured["cfg"]["enabled"] is True
+
+
+def test_webhook_test_returns_502_when_post_fails(client, monkeypatch):
+    client.put("/api/config/webhook", json={
+        "enabled": True, "flavor": "slack",
+        "url":     "https://hooks.slack.com/services/T/B/abc",
+    })
+    monkeypatch.setattr("pulse.webhook.send_webhook", lambda *a, **kw: False)
+    r = client.post("/api/webhook/test")
+    assert r.status_code == 502

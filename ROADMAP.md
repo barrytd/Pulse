@@ -39,7 +39,9 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - **Live monitor email alerts** — monitor polls can now email findings, gated by a user-configurable interval (5 min – 4 hours)
 - **Settings UX polish** — SMTP jargon hidden behind a provider dropdown (Gmail / Outlook / Yahoo / Custom) with auto-filled host and port
 - **Dashboard zero-state polish** — friendly banner + empty panels when the filtered window has no scans, instead of hiding everything
-- 227 unit tests, all passing
+- **Slack / Discord webhook delivery** — alongside email alerts, with shared cooldown, payload caps, and a Settings card with test button
+- **Frontend modularised** — `pulse/web/index.html` split into native ES modules under `pulse/static/js/` (api, dashboard, scans, findings, monitor, settings, etc.) with a central action registry replacing inline `on*` handlers
+- 271 unit tests, all passing
 
 ---
 
@@ -48,13 +50,13 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Email alerts — send summary email when a scan finds CRITICAL/HIGH items
 - [x] Alert throttling — dedupe repeated findings so one noisy host doesn't spam inbox
 - [x] Live-monitor email alerts — interval-gated emails straight from the monitor loop
-- [ ] Slack / Discord webhook — optional webhook URL in `pulse.yaml` to post CRITICAL findings
-- [ ] Kerberoasting detection — Event ID 4769 with weak encryption type (RC4)
-- [ ] Golden ticket detection — anomalous TGT lifetime / mismatched domain in 4769/4624
-- [ ] DCSync detection — 4662 with directory-replication GUIDs from non-DC accounts
-- [ ] Suspicious child process chain — Office / browser spawning cmd.exe, powershell.exe, wscript.exe
-- [ ] Finding detail drawer — click a finding in the dashboard to see raw event XML + context
-- [ ] Dashboard search — search bar that filters findings by user, IP, rule, or event ID
+- [x] Slack / Discord webhook — optional webhook URL in `pulse.yaml` to post CRITICAL findings
+- [x] Kerberoasting detection — Event ID 4769 with weak encryption type (RC4)
+- [x] Golden ticket detection — anomalous TGT lifetime / mismatched domain in 4769/4624
+- [x] DCSync detection — 4662 with directory-replication GUIDs from non-DC accounts
+- [x] Suspicious child process chain — Office / browser spawning cmd.exe, powershell.exe, wscript.exe
+- [x] Finding detail drawer — click a finding in the dashboard to see raw event XML + context
+- [x] Dashboard search — search bar that filters findings by user, IP, rule, or event ID
 
 ---
 

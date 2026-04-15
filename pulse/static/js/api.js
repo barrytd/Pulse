@@ -139,6 +139,20 @@ export async function apiSendTestAlert() {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+export async function apiSaveWebhookConfig(body) {
+  return fetch('/api/config/webhook', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiSendTestWebhook() {
+  var resp = await fetch('/api/webhook/test', { method: 'POST' });
+  var data = await resp.json();
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 // ---------------------------------------------------------------
 // Daily scores
 // ---------------------------------------------------------------

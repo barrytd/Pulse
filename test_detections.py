@@ -2079,6 +2079,187 @@ def test_html_body_no_file_url_link(tmp_path):
 
 
 # =============================================================================
+# DCSync detection tests
+# =============================================================================
+from pulse.detections import detect_dcsync, detect_suspicious_child_process
+
+
+def _make_4662_event(subject_user, properties, subject_domain="CORP",
+                     timestamp="2026-04-15T10:00:00.000000Z"):
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System><EventID>4662</EventID>"
+        f'<TimeCreated SystemTime="{timestamp}" /></System>'
+        "<EventData>"
+        f'<Data Name="SubjectUserName">{subject_user}</Data>'
+        f'<Data Name="SubjectDomainName">{subject_domain}</Data>'
+        f'<Data Name="Properties">{properties}</Data>'
+        "</EventData></Event>"
+    )
+    return {"event_id": 4662, "timestamp": timestamp, "data": xml}
+
+
+def test_dcsync_flags_replication_guid():
+    """A 4662 with the DS-Replication-Get-Changes GUID from a user account is CRITICAL."""
+    events = [_make_4662_event("alice", "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2")]
+    findings = detect_dcsync(events)
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "DCSync Attempt"
+    assert findings[0]["severity"] == "CRITICAL"
+    assert "alice" in findings[0]["details"].lower()
+
+
+def test_dcsync_flags_any_of_three_replication_guids():
+    """All three replication GUIDs should trigger the detection."""
+    guids = [
+        "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2",
+        "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2",
+        "89e95b76-444d-4c62-991a-0facbeda640c",
+    ]
+    for guid in guids:
+        findings = detect_dcsync([_make_4662_event("attacker", guid)])
+        assert len(findings) == 1, f"missed GUID {guid}"
+
+
+def test_dcsync_ignores_unrelated_guid():
+    """A 4662 with an unrelated GUID (e.g. a normal AD read) should be ignored."""
+    events = [_make_4662_event("alice", "00000000-0000-0000-0000-000000000000")]
+    assert detect_dcsync(events) == []
+
+
+def test_dcsync_ignores_domain_controller_computer_account():
+    """Computer accounts end in '$' and replicate legitimately — don't flag them."""
+    events = [_make_4662_event("DC01$", "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2")]
+    assert detect_dcsync(events) == []
+
+
+def test_dcsync_dedupes_per_actor():
+    """Multiple replication calls from the same account = one finding, not five."""
+    guid = "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2"
+    events = [_make_4662_event("alice", guid) for _ in range(5)]
+    assert len(detect_dcsync(events)) == 1
+
+
+def test_dcsync_ignores_non_4662_events():
+    """The detector must not false-positive on any other event ID."""
+    other = {
+        "event_id": 4624,
+        "timestamp": "2026-04-15T10:00:00",
+        "data": (
+            '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+            "<System><EventID>4624</EventID></System><EventData></EventData></Event>"
+        ),
+    }
+    assert detect_dcsync([other]) == []
+
+
+# =============================================================================
+# Suspicious child process detection tests
+# =============================================================================
+
+def _make_4688_event(parent, child, user="alice", command_line="",
+                     timestamp="2026-04-15T10:00:00.000000Z"):
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System><EventID>4688</EventID>"
+        f'<TimeCreated SystemTime="{timestamp}" /></System>'
+        "<EventData>"
+        f'<Data Name="SubjectUserName">{user}</Data>'
+        f'<Data Name="ParentProcessName">{parent}</Data>'
+        f'<Data Name="NewProcessName">{child}</Data>'
+        f'<Data Name="CommandLine">{command_line}</Data>'
+        "</EventData></Event>"
+    )
+    return {"event_id": 4688, "timestamp": timestamp, "data": xml}
+
+
+def test_child_process_flags_word_spawning_powershell():
+    """Word → PowerShell is the classic macro dropper pattern."""
+    events = [_make_4688_event(
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )]
+    findings = detect_suspicious_child_process(events)
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "Suspicious Child Process"
+    assert findings[0]["severity"] == "HIGH"
+    assert "winword.exe" in findings[0]["details"].lower()
+    assert "powershell.exe" in findings[0]["details"].lower()
+
+
+def test_child_process_flags_browser_spawning_cmd():
+    """Chrome → cmd.exe is a copy-paste social-engineering pattern."""
+    events = [_make_4688_event(
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Windows\System32\cmd.exe",
+    )]
+    findings = detect_suspicious_child_process(events)
+    assert len(findings) == 1
+
+
+def test_child_process_flags_outlook_spawning_wscript():
+    """Outlook → wscript.exe is a classic attachment-based dropper."""
+    events = [_make_4688_event(
+        r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE",
+        r"C:\Windows\System32\wscript.exe",
+    )]
+    assert len(detect_suspicious_child_process(events)) == 1
+
+
+def test_child_process_ignores_normal_chains():
+    """explorer.exe spawning cmd.exe is perfectly normal."""
+    events = [_make_4688_event(
+        r"C:\Windows\explorer.exe",
+        r"C:\Windows\System32\cmd.exe",
+    )]
+    assert detect_suspicious_child_process(events) == []
+
+
+def test_child_process_ignores_office_spawning_benign_child():
+    """Word → splwow64.exe is normal printing — don't flag."""
+    events = [_make_4688_event(
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Windows\splwow64.exe",
+    )]
+    assert detect_suspicious_child_process(events) == []
+
+
+def test_child_process_includes_command_line_when_present():
+    """If command-line auditing is on, the snippet should surface in details."""
+    events = [_make_4688_event(
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        command_line="powershell -enc JABz...",
+    )]
+    details = detect_suspicious_child_process(events)[0]["details"]
+    assert "powershell -enc JABz" in details
+
+
+def test_child_process_truncates_long_command_lines():
+    """Obfuscated PS lines can be KB long — truncate to keep the UI readable."""
+    long_cmd = "powershell " + "A" * 500
+    events = [_make_4688_event(
+        r"C:\...\WINWORD.EXE", r"C:\...\powershell.exe", command_line=long_cmd,
+    )]
+    details = detect_suspicious_child_process(events)[0]["details"]
+    # 200-char cap + ellipsis marker
+    assert "..." in details
+    assert "A" * 500 not in details
+
+
+def test_child_process_ignores_non_4688_events():
+    other = {
+        "event_id": 4624,
+        "timestamp": "2026-04-15T10:00:00",
+        "data": (
+            '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+            "<System><EventID>4624</EventID></System><EventData></EventData></Event>"
+        ),
+    }
+    assert detect_suspicious_child_process([other]) == []
+
+
+# =============================================================================
 # Database tests
 # =============================================================================
 from pulse.database import init_db, save_scan, get_history, get_scan_findings

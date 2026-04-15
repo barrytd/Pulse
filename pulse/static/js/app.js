@@ -60,6 +60,8 @@ import {
   saveEmailSettings,
   saveAlertSettings,
   sendTestAlert,
+  saveWebhookSettings,
+  sendTestWebhook,
 } from './settings.js';
 
 // Central action registry — replaces the old window[action] lookup.
@@ -127,6 +129,8 @@ const actions = {
   saveEmailSettings,
   saveAlertSettings,
   sendTestAlert,
+  saveWebhookSettings,
+  sendTestWebhook,
 };
 
 // Event delegation. Any element with data-action="fnName" (or a per-event

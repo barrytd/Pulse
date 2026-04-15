@@ -758,15 +758,18 @@ def main():
     # alerts fire ONLY when at least one finding is at/above the threshold
     # configured in pulse.yaml (alerts.threshold). Cooldown prevents
     # --watch from spamming the same alert every poll.
-    alert_config = config.get("alerts", {}) or {}
+    alert_config   = config.get("alerts",  {}) or {}
+    webhook_config = config.get("webhook", {}) or {}
     if findings and not args.no_alerts:
-        ar = dispatch_alerts(db_path, findings, email_config, alert_config)
+        ar = dispatch_alerts(db_path, findings, email_config, alert_config, webhook_config)
         if ar["skipped_rules"]:
             print(f"  [*] Alert cooldown suppressed: {', '.join(ar['skipped_rules'])}")
         if ar["fresh"]:
             print(f"  [*] Firing alert ({ar['fresh']} finding(s) >= {ar['threshold']})...")
             if ar["sent"]:
-                print(f"  [*] Alert sent to {ar['recipient']}")
+                print(f"  [*] Email sent to {ar['recipient']}")
+            if ar["webhook_sent"]:
+                print(f"  [*] Webhook delivered")
 
     print()
     print("=" * 50)

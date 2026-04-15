@@ -5,6 +5,25 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-15
+
+### Added
+- **DCSync detection** (`pulse/detections.py`) — `detect_dcsync()` flags Event 4662 records carrying any of the three directory-replication extended-rights GUIDs (`DS-Replication-Get-Changes`, `-All`, `-In-Filtered-Set`). Computer accounts (those ending in `$`) are skipped so legitimate domain-controller replication traffic does not generate noise; per-actor dedupe keeps a single CRITICAL finding per attacker. MITRE T1003.006
+- **Suspicious child process detection** (`pulse/detections.py`) — `detect_suspicious_child_process()` reads Event 4688 and flags Office/browser parents (Word, Excel, Outlook, Chrome, Edge, etc.) spawning shell-like children (`cmd.exe`, `powershell.exe`, `wscript.exe`, `mshta.exe`, `rundll32.exe`, etc.). Includes truncated command line for triage. MITRE T1059
+- **Slack / Discord webhook delivery** (`pulse/webhook.py`) — new module with auto-detect from URL, explicit flavor override, severity-coloured Slack attachments (10-cap + overflow notice) and Discord embeds (integer colours, 9-cap), and POSTs via stdlib `urllib.request` (no extra dependency). Errors are swallowed and reported as `False` so a broken webhook never crashes a scan
+- **`dispatch_alerts` webhook integration** (`pulse/emailer.py`) — accepts a `webhook_config`, fires both channels in parallel, and records cooldown if *either* channel succeeded so a broken SMTP can no longer cause webhook-successful notifications to repeat every scan
+- **API webhook surface** (`pulse/api.py`) — `GET /api/config` returns `webhook.url_set` (boolean) but never the URL itself; `PUT /api/config/webhook` validates flavor + scheme and keeps the saved URL when the request body is blank; `POST /api/webhook/test` posts a sample finding even when the webhook is disabled in config
+- **Settings card for webhooks** (`pulse/static/js/settings.js`) — new "Slack / Discord Notifications" card between Live Monitor Emails and Scan Defaults with enable toggle, service dropdown (Auto / Slack / Discord), password-style URL field, save + send-test buttons
+- **Parser fast-path event IDs** (`pulse/parser.py`) — added 4662 and 4688 to `RELEVANT_EVENT_IDS` so the wevtutil pre-filter surfaces the events the new rules need
+
+### Tests
+- 14 new tests in `test_detections.py` (6 DCSync: replication GUID, all three GUID variants, ignores unrelated GUIDs, skips computer accounts, dedupes per actor, ignores non-4662; 8 child process: Word→PowerShell, Chrome→cmd, Outlook→wscript, ignores explorer→cmd and Word→splwow64, includes truncated command line, ignores non-4688)
+- 20 new tests in `test_webhook.py` covering flavor detection, config validation, payload shape (Slack attachments + colour stripe, 10-cap + overflow, Discord embeds + integer colours, description truncation), `send_webhook` with mocked `urlopen` (slack/discord URL routing, explicit flavor override, network error → False, HTTPError → False), and `dispatch_alerts` integration (fires when enabled, skips when disabled, records cooldown when webhook alone succeeds)
+- 8 new tests in `test_api.py` for the new webhook config + test endpoints (URL never echoed, blank URL keeps existing, bad flavor/scheme rejected, test endpoint requires URL and returns 502 on POST failure)
+- Test count: 229 → 271, all passing
+
+---
+
 ## 2026-04-14
 
 ### Added

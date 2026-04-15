@@ -179,6 +179,37 @@ EVENT_HANDLE_REQUEST = 4656
 EVENT_NETWORK_SHARE = 5140
 EVENT_SHARE_FILE_ACCESS = 5145
 EVENT_REGISTRY_MODIFIED = 4657
+EVENT_DIRECTORY_ACCESS = 4662
+EVENT_PROCESS_CREATED = 4688
+
+# Active Directory extended-rights GUIDs that together grant the ability to
+# replicate the directory. Any account that isn't a domain controller
+# requesting these is almost certainly performing a DCSync attack
+# (Mimikatz lsadump::dcsync and similar).
+DCSYNC_GUIDS = {
+    "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2": "DS-Replication-Get-Changes",
+    "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2": "DS-Replication-Get-Changes-All",
+    "89e95b76-444d-4c62-991a-0facbeda640c": "DS-Replication-Get-Changes-In-Filtered-Set",
+}
+
+# Parent processes that legitimately almost never spawn a shell. A Word or
+# Outlook child of cmd.exe is a classic macro-dropper pattern; a browser
+# child of powershell.exe is a classic social-engineering pattern.
+SUSPICIOUS_PARENT_PROCESSES = {
+    "winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
+    "onenote.exe", "msaccess.exe", "visio.exe", "mspub.exe",
+    "chrome.exe", "msedge.exe", "firefox.exe", "iexplore.exe",
+    "brave.exe", "opera.exe",
+    "acrord32.exe", "acrobat.exe",
+}
+
+# Shells/interpreters that attackers chain after a macro or browser exploit.
+SUSPICIOUS_CHILD_PROCESSES = {
+    "cmd.exe", "powershell.exe", "powershell_ise.exe", "pwsh.exe",
+    "wscript.exe", "cscript.exe",
+    "mshta.exe", "rundll32.exe", "regsvr32.exe",
+    "bitsadmin.exe", "certutil.exe",
+}
 
 # How many failed logins within the time window triggers a brute force alert.
 BRUTE_FORCE_THRESHOLD = 5
@@ -1691,6 +1722,135 @@ def detect_lateral_movement_shares(events):
     return findings
 
 
+def detect_dcsync(events):
+    """
+    Detects DCSync attacks — an account requesting directory replication rights.
+
+    DCSync abuses the AD replication protocol (MS-DRSR) to pull password
+    hashes for every user in the domain straight from a domain controller.
+    Tools like Mimikatz (lsadump::dcsync) and Impacket's secretsdump invoke
+    exactly the same extended rights any DC would use to replicate — so
+    the single reliable signal is: who's asking?
+
+    We flag any Event 4662 on a Directory Service object whose Properties
+    field references one of the three DS-Replication-Get-Changes* GUIDs.
+    Legitimate use is domain controllers replicating to each other; anything
+    else (a user account, a workstation computer account) is the attack.
+
+    Event ID: 4662
+    MITRE ATT&CK: T1003.006
+    """
+    findings = []
+    flagged = set()
+
+    for event in events:
+        if event["event_id"] != EVENT_DIRECTORY_ACCESS:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        properties = (_get_xml_field(xml_tree, "Properties") or "").lower()
+        if not properties:
+            continue
+
+        matched_guids = [label for guid, label in DCSYNC_GUIDS.items() if guid in properties]
+        if not matched_guids:
+            continue
+
+        subject_user   = _get_xml_field(xml_tree, "SubjectUserName") or "unknown"
+        subject_domain = _get_xml_field(xml_tree, "SubjectDomainName") or ""
+        actor = f"{subject_domain}\\{subject_user}" if subject_domain else subject_user
+
+        # Domain controller computer accounts end in "$" and are the only
+        # legitimate callers. Skip them so the detection doesn't false-positive
+        # on a healthy AD replication topology.
+        if subject_user.endswith("$"):
+            continue
+
+        key = actor
+        if key in flagged:
+            continue
+        flagged.add(key)
+
+        findings.append({
+            "rule": "DCSync Attempt",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
+            "severity": "CRITICAL",
+            "details": (
+                f"Account '{actor}' requested directory replication rights "
+                f"({', '.join(matched_guids)}) at {event['timestamp']}. "
+                f"This extended right is used by domain controllers to replicate "
+                f"password hashes; any non-DC account invoking it is almost "
+                f"certainly performing a DCSync attack (Mimikatz, Impacket "
+                f"secretsdump) to steal every credential in the domain."
+            ),
+        })
+
+    return findings
+
+
+def detect_suspicious_child_process(events):
+    """
+    Detects Office / browser / PDF readers spawning a shell or scripting host.
+
+    Healthy users don't have Word launch cmd.exe, and Chrome doesn't spawn
+    powershell.exe. When they do, it's almost always a macro dropper, a
+    browser exploit, or a social-engineering "copy-paste this into Run"
+    campaign. This is a Sprint 2 staple detection — high signal, low noise,
+    and one of the earliest things a SOC catches.
+
+    Requires Event 4688 with command-line auditing enabled (Group Policy →
+    Audit Process Creation → Include command line). Without it, we still
+    catch the parent/child pair but can't show what was run.
+
+    Event ID: 4688
+    MITRE ATT&CK: T1059
+    """
+    findings = []
+
+    for event in events:
+        if event["event_id"] != EVENT_PROCESS_CREATED:
+            continue
+
+        xml_tree = ET.fromstring(event["data"])
+        parent_name = (_get_xml_field(xml_tree, "ParentProcessName") or "").strip()
+        new_name    = (_get_xml_field(xml_tree, "NewProcessName")    or "").strip()
+        if not parent_name or not new_name:
+            continue
+
+        parent_base = parent_name.rsplit("\\", 1)[-1].lower()
+        child_base  = new_name.rsplit("\\", 1)[-1].lower()
+
+        if parent_base not in SUSPICIOUS_PARENT_PROCESSES:
+            continue
+        if child_base not in SUSPICIOUS_CHILD_PROCESSES:
+            continue
+
+        subject_user = _get_xml_field(xml_tree, "SubjectUserName") or "unknown"
+        command_line = (_get_xml_field(xml_tree, "CommandLine") or "").strip()
+
+        # Command line only shows up when audit policy is set to include it.
+        # Truncate because obfuscated PowerShell lines can be several KB long.
+        cmd_snippet = (command_line[:200] + "...") if len(command_line) > 200 else command_line
+        cmd_piece = f" Command: {cmd_snippet}." if cmd_snippet else ""
+
+        findings.append({
+            "rule": "Suspicious Child Process",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
+            "severity": "HIGH",
+            "details": (
+                f"'{parent_base}' spawned '{child_base}' as user '{subject_user}' "
+                f"at {event['timestamp']}.{cmd_piece} Productivity apps and "
+                f"browsers rarely launch shells or scripting hosts — this pattern "
+                f"is a hallmark of macro droppers, browser exploits, and "
+                f"copy-paste social-engineering attacks."
+            ),
+        })
+
+    return findings
+
+
 def run_all_detections(events):
     """
     Runs every detection rule against the parsed events.
@@ -1732,6 +1892,8 @@ def run_all_detections(events):
     findings += detect_after_hours_logon(events) or []
     findings += detect_registry_persistence(events) or []
     findings += detect_lateral_movement_shares(events) or []
+    findings += detect_dcsync(events) or []
+    findings += detect_suspicious_child_process(events) or []
 
     # Windows events often name users by raw SID (e.g. S-1-5-21-...-1003)
     # instead of a friendly username. Resolve any SID strings in the free-text
