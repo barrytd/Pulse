@@ -2403,6 +2403,77 @@ def test_get_scan_findings_sorted_by_severity(tmp_path):
     assert stored[1]["severity"] == "LOW"
 
 
+# ---------------------------------------------------------------------------
+# Finding review status
+# ---------------------------------------------------------------------------
+from pulse.database import set_finding_review, REVIEW_STATUSES
+
+
+def _seed_one_finding(tmp_path):
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    save_scan(db, [{
+        "severity": "HIGH", "rule": "Brute Force Attempt", "event_id": 4625,
+        "timestamp": "2026-04-15T10:00:00", "mitre": "T1110",
+        "description": "desc", "details": "5 failed logins for alice",
+    }])
+    row = get_scan_findings(db, 1)[0]
+    return db, row["id"]
+
+
+def test_findings_default_review_status_is_new(tmp_path):
+    """A freshly saved finding should start with review_status='new'."""
+    db, fid = _seed_one_finding(tmp_path)
+    row = get_scan_findings(db, 1)[0]
+    assert row["review_status"] == "new"
+    assert row["review_note"] is None
+    assert row["reviewed_at"] is None
+
+
+def test_set_finding_review_marks_reviewed(tmp_path):
+    db, fid = _seed_one_finding(tmp_path)
+    updated = set_finding_review(db, fid, "reviewed", note="looked at it, benign")
+    assert updated["review_status"] == "reviewed"
+    assert updated["review_note"]   == "looked at it, benign"
+    assert updated["reviewed_at"]   is not None
+
+
+def test_set_finding_review_false_positive_persists(tmp_path):
+    db, fid = _seed_one_finding(tmp_path)
+    set_finding_review(db, fid, "false_positive", note="known scanner")
+    row = get_scan_findings(db, 1)[0]
+    assert row["review_status"] == "false_positive"
+    assert row["review_note"]   == "known scanner"
+
+
+def test_set_finding_review_resets_clears_timestamp(tmp_path):
+    db, fid = _seed_one_finding(tmp_path)
+    set_finding_review(db, fid, "reviewed", note="x")
+    reset = set_finding_review(db, fid, "new", note="")
+    assert reset["review_status"] == "new"
+    assert reset["reviewed_at"]   is None
+    assert reset["review_note"]   is None  # blank note is normalised to None
+
+
+def test_set_finding_review_unknown_status_raises(tmp_path):
+    import pytest
+    db, fid = _seed_one_finding(tmp_path)
+    with pytest.raises(ValueError):
+        set_finding_review(db, fid, "bogus")
+
+
+def test_set_finding_review_unknown_id_returns_none(tmp_path):
+    db = str(tmp_path / "pulse.db")
+    init_db(db)
+    assert set_finding_review(db, 999, "reviewed") is None
+
+
+def test_review_statuses_tuple_shape():
+    """REVIEW_STATUSES is the single source of truth consumed by the API.
+    Freeze the shape so the dashboard and API stay in sync."""
+    assert set(REVIEW_STATUSES) == {"new", "reviewed", "false_positive"}
+
+
 # =============================================================================
 # Monitor tests
 # =============================================================================

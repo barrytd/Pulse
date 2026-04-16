@@ -7,6 +7,7 @@ import {
   fetchScans,
   fetchFindings,
   apiDeleteScans,
+  apiSetFindingReview,
   invalidateScansCache,
   invalidateFindingsCache,
 } from './api.js';
@@ -16,6 +17,7 @@ import {
   scoreColorClass,
   statCard,
   showToast,
+  toastError,
   mitreMap,
   REMEDIATION,
   _extractTime,
@@ -291,12 +293,13 @@ export async function viewScan(scanId) {
 // Findings page
 // ---------------------------------------------------------------
 export const findingsState = {
-  raw:       [],
-  sortCol:   'time',
-  sortDir:   'desc',
-  sevFilter: 'ALL',
-  query:     '',
-  expanded:  null,
+  raw:          [],
+  sortCol:      'time',
+  sortDir:      'desc',
+  sevFilter:    'ALL',
+  reviewFilter: 'ALL', // ALL | OPEN (hide reviewed + fp) | REVIEWED | FP
+  query:        '',
+  expanded:     null,
 };
 
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
@@ -322,12 +325,13 @@ export async function renderFindingsPage() {
     batches.forEach(function (b) { allFindings = allFindings.concat(b); });
   }
 
-  findingsState.raw       = allFindings;
-  findingsState.sortCol   = 'time';
-  findingsState.sortDir   = 'desc';
-  findingsState.sevFilter = 'ALL';
-  findingsState.query     = '';
-  findingsState.expanded  = null;
+  findingsState.raw          = allFindings;
+  findingsState.sortCol      = 'time';
+  findingsState.sortDir      = 'desc';
+  findingsState.sevFilter    = 'ALL';
+  findingsState.reviewFilter = 'ALL';
+  findingsState.query        = '';
+  findingsState.expanded     = null;
 
   if (allFindings.length === 0) {
     c.innerHTML =
@@ -357,6 +361,12 @@ export function setFindingsSort(col) {
 export function setFindingsFilter(sev) {
   findingsState.sevFilter = sev;
   findingsState.expanded  = null;
+  applyFindingsView();
+}
+
+export function setFindingsReviewFilter(mode) {
+  findingsState.reviewFilter = mode || 'ALL';
+  findingsState.expanded     = null;
   applyFindingsView();
 }
 
@@ -396,6 +406,16 @@ export function applyFindingsView() {
   if (s.sevFilter !== 'ALL') {
     rows = rows.filter(function (f) {
       return (f.severity || 'LOW').toUpperCase() === s.sevFilter;
+    });
+  }
+
+  if (s.reviewFilter && s.reviewFilter !== 'ALL') {
+    rows = rows.filter(function (f) {
+      var st = f.review_status || 'new';
+      if (s.reviewFilter === 'OPEN')     return st === 'new';
+      if (s.reviewFilter === 'REVIEWED') return st === 'reviewed';
+      if (s.reviewFilter === 'FP')       return st === 'false_positive';
+      return true;
     });
   }
 
@@ -444,6 +464,25 @@ export function applyFindingsView() {
       sev + ' <span style="opacity:0.7;">(' + counts[sev] + ')</span></div>';
   }).join('');
 
+  var reviewCounts = { ALL: s.raw.length, OPEN: 0, REVIEWED: 0, FP: 0 };
+  s.raw.forEach(function (f) {
+    var st = f.review_status || 'new';
+    if (st === 'new')            reviewCounts.OPEN++;
+    else if (st === 'reviewed')  reviewCounts.REVIEWED++;
+    else if (st === 'false_positive') reviewCounts.FP++;
+  });
+  var reviewPills = [
+    { k: 'ALL',      label: 'All'       },
+    { k: 'OPEN',     label: 'Open'      },
+    { k: 'REVIEWED', label: 'Reviewed'  },
+    { k: 'FP',       label: 'False pos.'},
+  ].map(function (p) {
+    var isActive = s.reviewFilter === p.k;
+    var cls = 'filter-pill' + (isActive ? ' active' : '');
+    return '<div class="' + cls + '" data-action="setFindingsReviewFilter" data-arg="' + p.k + '">' +
+      escapeHtml(p.label) + ' <span style="opacity:0.7;">(' + reviewCounts[p.k] + ')</span></div>';
+  }).join('');
+
   var c = document.getElementById('content');
   c.innerHTML =
     '<div class="page-head">' +
@@ -453,6 +492,9 @@ export function applyFindingsView() {
       '<div class="filter-pills">' + pills + '</div>' +
       '<input type="search" id="findings-search-box" class="search-box" placeholder="Search rule, description, or MITRE..." ' +
         'value="' + escapeHtml(s.query) + '" data-action-input="setFindingsQueryFromInput" />' +
+    '</div>' +
+    '<div class="filter-bar" style="padding-top:0;">' +
+      '<div class="filter-pills">' + reviewPills + '</div>' +
     '</div>' +
     '<div class="card" style="padding:0; overflow:hidden;">' +
       (rows.length === 0
@@ -499,12 +541,18 @@ function _buildFindingsTable(findings) {
       var time = f.timestamp || _extractTime(f) || '-';
       var isOpen = expanded === f._uid;
 
-      var main = '<tr class="clickable sev-row sev-' + sev.toLowerCase() + '" ' +
+      var reviewStatus = f.review_status || 'new';
+      var rowCls = 'clickable sev-row sev-' + sev.toLowerCase();
+      if (reviewStatus !== 'new') rowCls += ' row-reviewed';
+      var ruleCell = escapeHtml(rule);
+      if (reviewStatus !== 'new') ruleCell += ' ' + _reviewBadge(reviewStatus);
+
+      var main = '<tr class="' + rowCls + '" ' +
                  'data-action="toggleFindingExpand" data-arg="' + f._uid + '">' +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
         '<td class="mono">' + escapeHtml(f.event_id || '-') + '</td>' +
         '<td><span class="pill pill-' + sev.toLowerCase() + '">' + sev + '</span></td>' +
-        '<td style="font-weight:500;">' + escapeHtml(rule) + '</td>' +
+        '<td style="font-weight:500;">' + ruleCell + '</td>' +
         '<td>' + mitreTag + '</td>' +
         '<td style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
         '<td><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
@@ -567,8 +615,24 @@ export function _expandField(label, htmlVal, extraCls) {
 // ---------------------------------------------------------------
 // Finding drawer — shared slide-in detail panel
 // ---------------------------------------------------------------
+// Track the finding object currently shown in the drawer so the review
+// buttons can mutate its review_status without needing the caller to
+// thread the id through every handler invocation.
+let _drawerFinding = null;
+
+function _reviewBadge(status) {
+  if (status === 'reviewed') {
+    return '<span class="review-badge review-reviewed">Reviewed</span>';
+  }
+  if (status === 'false_positive') {
+    return '<span class="review-badge review-fp">False positive</span>';
+  }
+  return '<span class="review-badge review-new">New</span>';
+}
+
 export function openFindingDrawer(f) {
   if (!f) return;
+  _drawerFinding = f;
   var sev  = (f.severity || 'LOW').toUpperCase();
   var rule = f.rule || 'Unknown';
   var mitre = f.mitre || mitreMap[rule] || '';
@@ -581,7 +645,8 @@ export function openFindingDrawer(f) {
   document.getElementById('drawer-rule').textContent = rule;
   document.getElementById('drawer-sev-line').innerHTML =
     '<span class="sev-pill sev-' + sev.toLowerCase() + '">' + sev + '</span>' +
-    mitreLink;
+    mitreLink +
+    _reviewBadge(f.review_status || 'new');
 
   var rem = REMEDIATION[rule] || 'Investigate the event in its surrounding context. Correlate with other logs from the same host and timeframe.';
   var time = f.timestamp || _extractTime(f) || '\u2014';
@@ -622,12 +687,84 @@ export function openFindingDrawer(f) {
         '<div class="rem-label">Recommended action</div>' +
         escapeHtml(rem) +
       '</div>' +
-    '</div>';
+    '</div>' +
+
+    _renderReviewSection(f);
+
+  _updateReviewButtonStates(f.review_status || 'new');
 
   document.getElementById('finding-drawer').classList.add('open');
   document.getElementById('finding-drawer-backdrop').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
+
+function _renderReviewSection(f) {
+  var noteVal = f.review_note || '';
+  var reviewedAt = f.reviewed_at
+    ? '<div class="review-meta">Reviewed at ' + escapeHtml(f.reviewed_at) + '</div>'
+    : '';
+  return '<div class="finding-drawer-section">' +
+    '<div class="sec-label">Review</div>' +
+    reviewedAt +
+    '<textarea id="drawer-review-note" class="review-note-input" placeholder="Optional note (why reviewed, who owns follow-up, etc.)">' +
+      escapeHtml(noteVal) +
+    '</textarea>' +
+    '<div class="review-buttons">' +
+      '<button class="btn btn-primary" data-action="markFindingReviewed" id="btn-review-reviewed">Mark reviewed</button>' +
+      '<button class="btn" data-action="markFindingFalsePositive" id="btn-review-fp">False positive</button>' +
+      '<button class="btn" data-action="resetFindingReview" id="btn-review-new">Reset</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function _updateReviewButtonStates(status) {
+  var map = { reviewed: 'btn-review-reviewed', false_positive: 'btn-review-fp', new: 'btn-review-new' };
+  Object.keys(map).forEach(function (k) {
+    var el = document.getElementById(map[k]);
+    if (!el) return;
+    if (k === status) el.classList.add('btn-active');
+    else el.classList.remove('btn-active');
+  });
+}
+
+async function _submitReview(status) {
+  if (!_drawerFinding || _drawerFinding.id == null) {
+    toastError('This finding has no id yet — save a scan first.');
+    return;
+  }
+  var noteEl = document.getElementById('drawer-review-note');
+  var note = noteEl ? noteEl.value : '';
+  var r = await apiSetFindingReview(_drawerFinding.id, status, note);
+  if (!r.ok) {
+    toastError((r.data && r.data.detail) || 'Review update failed.');
+    return;
+  }
+  _drawerFinding.review_status = r.data.review_status;
+  _drawerFinding.review_note = r.data.review_note;
+  _drawerFinding.reviewed_at = r.data.reviewed_at;
+  // Re-render the sev line badge + button highlight; cheaper than the
+  // full drawer rebuild.
+  var sevLine = document.getElementById('drawer-sev-line');
+  if (sevLine) {
+    var pill = sevLine.querySelector('.sev-pill');
+    var mitreEl = sevLine.querySelector('.mitre-tag');
+    sevLine.innerHTML = '';
+    if (pill) sevLine.appendChild(pill);
+    if (mitreEl) sevLine.appendChild(mitreEl);
+    sevLine.insertAdjacentHTML('beforeend', _reviewBadge(r.data.review_status));
+  }
+  _updateReviewButtonStates(r.data.review_status);
+  invalidateFindingsCache();
+  showToast(
+    r.data.review_status === 'reviewed'     ? 'Marked reviewed' :
+    r.data.review_status === 'false_positive' ? 'Marked false positive' :
+    'Review reset'
+  );
+}
+
+export function markFindingReviewed()      { _submitReview('reviewed'); }
+export function markFindingFalsePositive() { _submitReview('false_positive'); }
+export function resetFindingReview()       { _submitReview('new'); }
 
 export function closeFindingDrawer() {
   document.getElementById('finding-drawer').classList.remove('open');

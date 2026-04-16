@@ -82,6 +82,8 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
 - [ ] Suspicious outbound detection — flag connections to non-RFC1918 IPs on unusual ports
 - [ ] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
+- [ ] **IP block list** — manage a Pulse-owned list of blocked source IPs that gets pushed into Windows Firewall (`netsh advfirewall`) as inbound deny rules. Each entry has an optional comment field (e.g. "brute force on 2026-04-15", "Tor exit node") so an analyst remembers why it was added. Add/remove from the dashboard, see "Pulse-managed" tag on each rule so user-created rules are never touched
+- [ ] One-click "block source IP" action — on any finding with a source IP (Brute Force, RDP Logon, etc.) the dashboard shows a Block button that adds the IP to the block list with a pre-filled comment linking back to the finding
 - [ ] Audit log — track who scanned what and when within the dashboard
 - [ ] Export fleet CSV — one-row-per-host summary for spreadsheets
 

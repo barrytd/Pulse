@@ -203,6 +203,61 @@
   margin-top: 0;
 }
 
+/* Review status badge shown next to severity pill in the drawer head. */
+.review-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.review-badge.review-new      { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+.review-badge.review-reviewed { background: rgba(63, 185, 80, 0.15);  color: #3fb950; }
+.review-badge.review-fp       { background: rgba(210, 153, 34, 0.18); color: #d29922; }
+
+.review-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.review-note-input {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.review-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.review-buttons .btn-active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.data-table tr.row-reviewed {
+  opacity: 0.55;
+}
+.data-table tr.row-reviewed:hover {
+  opacity: 1;
+}
+
 /* Splunk-style data table — alternating rows, hover, colored left border */
 .data-table {
   width: 100%;

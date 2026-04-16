@@ -41,9 +41,10 @@ from pulse.auth import (
     require_login, verify_password,
 )
 from pulse.database import (
+    REVIEW_STATUSES,
     count_users, create_user, delete_scans, get_history, get_scan_findings,
     get_user_by_email, get_user_by_id, init_db, save_scan,
-    update_user_email, update_user_password,
+    set_finding_review, update_user_email, update_user_password,
 )
 from pulse.detections import run_all_detections
 from pulse.emailer import dispatch_alerts
@@ -429,6 +430,25 @@ def _register_routes(app: FastAPI) -> None:
                     detail=f"Scan {scan_id} not found.",
                 )
         return {"scan_id": scan_id, "findings": findings}
+
+    # -------------------------------------------------------------------
+    # PUT /api/finding/{id}/review — mark a finding reviewed / FP / new
+    # -------------------------------------------------------------------
+    @app.put("/api/finding/{finding_id}/review")
+    def review_finding(finding_id: int, payload: dict = Body(...)):
+        """Update the review status of a single finding. Body:
+           {"status": "reviewed"|"false_positive"|"new", "note": "..."}"""
+        status = (payload or {}).get("status")
+        if status not in REVIEW_STATUSES:
+            raise HTTPException(
+                400,
+                detail=f"status must be one of {list(REVIEW_STATUSES)}",
+            )
+        note = (payload or {}).get("note")
+        updated = set_finding_review(app.state.db_path, finding_id, status, note)
+        if updated is None:
+            raise HTTPException(404, detail=f"Finding {finding_id} not found.")
+        return updated
 
     # -------------------------------------------------------------------
     # GET /api/score/daily — aggregated daily scores

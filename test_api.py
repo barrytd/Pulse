@@ -535,3 +535,72 @@ def test_webhook_test_returns_502_when_post_fails(client, monkeypatch):
     monkeypatch.setattr("pulse.webhook.send_webhook", lambda *a, **kw: False)
     r = client.post("/api/webhook/test")
     assert r.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/finding/{id}/review
+# ---------------------------------------------------------------------------
+
+def _seed_finding(client):
+    """Save a scan with one finding; return its id."""
+    from pulse.database import save_scan, get_scan_findings
+    db = client.app.state.db_path
+    save_scan(db, [{
+        "severity": "HIGH", "rule": "Brute Force Attempt", "event_id": 4625,
+        "timestamp": "2026-04-15T10:00:00", "mitre": "T1110",
+        "description": "desc", "details": "5 failed logins",
+    }])
+    return get_scan_findings(db, 1)[0]["id"]
+
+
+def test_review_marks_finding_reviewed(client):
+    fid = _seed_finding(client)
+    r = client.put(f"/api/finding/{fid}/review",
+                   json={"status": "reviewed", "note": "benign scanner"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["review_status"] == "reviewed"
+    assert body["review_note"]   == "benign scanner"
+    assert body["reviewed_at"] is not None
+
+
+def test_review_marks_false_positive(client):
+    fid = _seed_finding(client)
+    r = client.put(f"/api/finding/{fid}/review", json={"status": "false_positive"})
+    assert r.status_code == 200
+    assert r.json()["review_status"] == "false_positive"
+
+
+def test_review_reset_clears_note_and_timestamp(client):
+    fid = _seed_finding(client)
+    client.put(f"/api/finding/{fid}/review", json={"status": "reviewed", "note": "x"})
+    r = client.put(f"/api/finding/{fid}/review", json={"status": "new"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["review_status"] == "new"
+    assert body["reviewed_at"]   is None
+    assert body["review_note"]   is None
+
+
+def test_review_rejects_unknown_status(client):
+    fid = _seed_finding(client)
+    r = client.put(f"/api/finding/{fid}/review", json={"status": "wrong"})
+    assert r.status_code == 400
+
+
+def test_review_returns_404_for_missing_finding(client):
+    r = client.put("/api/finding/9999/review", json={"status": "reviewed"})
+    assert r.status_code == 404
+
+
+def test_report_endpoint_includes_review_fields(client):
+    """The report endpoint is what the dashboard reads; the drawer needs
+    review_status / review_note / reviewed_at / id on each finding."""
+    _seed_finding(client)
+    r = client.get("/api/report/1")
+    assert r.status_code == 200
+    findings = r.json()["findings"]
+    assert findings[0]["id"] is not None
+    assert findings[0]["review_status"] == "new"
+    assert "review_note" in findings[0]
+    assert "reviewed_at" in findings[0]

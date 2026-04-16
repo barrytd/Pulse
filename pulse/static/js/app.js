@@ -30,6 +30,7 @@ import {
   viewScan,
   setFindingsSort,
   setFindingsFilter,
+  setFindingsReviewFilter,
   setFindingsQueryFromInput,
   stopClickPropagation,
   viewScanFromLink,
@@ -37,6 +38,9 @@ import {
   openFindingsPageDrawerByUid,
   closeFindingDrawer,
   openScanDetailFindingByIdx,
+  markFindingReviewed,
+  markFindingFalsePositive,
+  resetFindingReview,
 } from './findings.js';
 import { highlightHistoryScan } from './history.js';
 import {
@@ -98,6 +102,7 @@ const actions = {
   viewScan,
   setFindingsSort,
   setFindingsFilter,
+  setFindingsReviewFilter,
   setFindingsQueryFromInput,
   stopClickPropagation,
   viewScanFromLink,
@@ -105,6 +110,9 @@ const actions = {
   openFindingsPageDrawerByUid,
   closeFindingDrawer,
   openScanDetailFindingByIdx,
+  markFindingReviewed,
+  markFindingFalsePositive,
+  resetFindingReview,
 
   // history
   highlightHistoryScan,

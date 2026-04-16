@@ -47,18 +47,25 @@ CREATE TABLE IF NOT EXISTS scans (
 
 _CREATE_FINDINGS = """
 CREATE TABLE IF NOT EXISTS findings (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_id     INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
-    timestamp   TEXT,
-    event_id    TEXT,
-    severity    TEXT,
-    rule        TEXT,
-    mitre       TEXT,
-    description TEXT,
-    details     TEXT,
-    raw_xml     TEXT
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id       INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    timestamp     TEXT,
+    event_id      TEXT,
+    severity      TEXT,
+    rule          TEXT,
+    mitre         TEXT,
+    description   TEXT,
+    details       TEXT,
+    raw_xml       TEXT,
+    review_status TEXT DEFAULT 'new',
+    review_note   TEXT,
+    reviewed_at   TEXT
 );
 """
+
+# Valid values for findings.review_status. Kept as a module constant so the
+# API layer and dashboard can reference the same source of truth.
+REVIEW_STATUSES = ("new", "reviewed", "false_positive")
 
 # Records every email alert sent so we can enforce a cooldown window.
 # Without this, a --watch loop that re-detects the same brute force every
@@ -114,6 +121,15 @@ def init_db(db_path):
             conn.execute("ALTER TABLE findings ADD COLUMN raw_xml TEXT")
         except sqlite3.OperationalError:
             pass
+        for col, ddl in (
+            ("review_status", "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'"),
+            ("review_note",   "ALTER TABLE findings ADD COLUMN review_note TEXT"),
+            ("reviewed_at",   "ALTER TABLE findings ADD COLUMN reviewed_at TEXT"),
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
 
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None):
@@ -219,8 +235,9 @@ def get_scan_findings(db_path, scan_id):
     """
     with _connect(db_path) as conn:
         cursor = conn.execute(
-            """SELECT timestamp, event_id, severity, rule,
-                      mitre, description, details, raw_xml
+            """SELECT id, timestamp, event_id, severity, rule,
+                      mitre, description, details, raw_xml,
+                      review_status, review_note, reviewed_at
                FROM findings
                WHERE scan_id = ?
                ORDER BY
@@ -235,6 +252,53 @@ def get_scan_findings(db_path, scan_id):
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
+def set_finding_review(db_path, finding_id, status, note=None):
+    """
+    Update the review status (and optional note) for a single finding.
+
+    Parameters:
+        db_path (str):      Path to the .db file.
+        finding_id (int):   Row id from the findings table.
+        status (str):       One of REVIEW_STATUSES.
+        note (str | None):  Free-text analyst note. Pass None to clear.
+
+    Returns:
+        dict | None: The updated finding row (same shape as get_scan_findings
+                     items) or None if no such finding id exists.
+
+    Raises:
+        ValueError: if status is not in REVIEW_STATUSES.
+    """
+    if status not in REVIEW_STATUSES:
+        raise ValueError(f"status must be one of {REVIEW_STATUSES}")
+
+    # 'new' is the default / reset state — clear the reviewed_at timestamp
+    # so the UI can tell "never reviewed" apart from "was reviewed then reset".
+    reviewed_at = None if status == "new" else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    clean_note = (note or "").strip() or None
+
+    with _connect(db_path) as conn:
+        conn.execute(
+            """UPDATE findings
+               SET review_status = ?, review_note = ?, reviewed_at = ?
+               WHERE id = ?""",
+            (status, clean_note, reviewed_at, int(finding_id)),
+        )
+        row = conn.execute(
+            """SELECT id, scan_id, timestamp, event_id, severity, rule,
+                      mitre, description, details, raw_xml,
+                      review_status, review_note, reviewed_at
+               FROM findings WHERE id = ?""",
+            (int(finding_id),),
+        ).fetchone()
+        if not row:
+            return None
+        cols = ("id", "scan_id", "timestamp", "event_id", "severity", "rule",
+                "mitre", "description", "details", "raw_xml",
+                "review_status", "review_note", "reviewed_at")
+        return dict(zip(cols, row))
 
 
 def delete_scans(db_path, scan_ids):

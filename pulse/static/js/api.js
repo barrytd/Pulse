@@ -154,6 +154,19 @@ export async function apiSendTestWebhook() {
 }
 
 // ---------------------------------------------------------------
+// Finding review status (mark reviewed / false positive)
+// ---------------------------------------------------------------
+export async function apiSetFindingReview(findingId, status, note) {
+  var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/review', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: status, note: note || '' }),
+  });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
+// ---------------------------------------------------------------
 // Daily scores
 // ---------------------------------------------------------------
 export async function apiDailyScores(days) {
