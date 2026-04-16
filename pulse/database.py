@@ -24,7 +24,7 @@
 
 import sqlite3
 import socket
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +215,68 @@ def get_history(db_path, limit=20):
                    ORDER BY id DESC
                    LIMIT ?""",
                 (limit,)
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
+def get_findings_since(db_path, days):
+    """
+    Return every finding whose parent scan ran within the last `days` days,
+    annotated with the parent scan's id, timestamp, hostname, score, and
+    score_label so a summary renderer can group by scan or by rule.
+
+    Parameters:
+        db_path (str): Path to the .db file.
+        days (int):    Window in days (1 for last 24h, 7 for last week).
+
+    Returns:
+        list[dict]: Findings, newest-scan first; empty list if the DB is
+                   missing or nothing falls within the window.
+    """
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
+                          f.rule, f.mitre, f.description, f.details,
+                          f.review_status,
+                          s.scanned_at, s.hostname, s.score, s.score_label,
+                          s.filename
+                   FROM findings f
+                   JOIN scans s ON s.id = f.scan_id
+                   WHERE s.scanned_at >= ?
+                   ORDER BY s.id DESC,
+                       CASE f.severity
+                           WHEN 'CRITICAL' THEN 1
+                           WHEN 'HIGH'     THEN 2
+                           WHEN 'MEDIUM'   THEN 3
+                           WHEN 'LOW'      THEN 4
+                           ELSE 5
+                       END""",
+                (cutoff,)
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
+def get_scans_since(db_path, days):
+    """Return every scan row whose scanned_at falls within the last `days` days."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT id, scanned_at, hostname, files_scanned,
+                          total_events, total_findings, score, score_label,
+                          filename
+                   FROM scans
+                   WHERE scanned_at >= ?
+                   ORDER BY id DESC""",
+                (cutoff,)
             )
             cols = [d[0] for d in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

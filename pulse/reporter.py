@@ -1242,3 +1242,208 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
 </html>"""
 
     return html
+
+
+# ---------------------------------------------------------------------------
+# Recurring summary report — aggregates every scan in a rolling window
+# (last N days) into a single HTML digest. Called by `pulse --summary`.
+# ---------------------------------------------------------------------------
+
+def build_summary_report(scans, findings, period_days, output_path=None):
+    """
+    Build a daily / weekly summary HTML report from past scans + findings.
+
+    Parameters:
+        scans (list):       Rows from database.get_scans_since().
+        findings (list):    Rows from database.get_findings_since().
+        period_days (int):  Window the summary covers (1 = daily, 7 = weekly).
+        output_path (str):  Path to write HTML to. Auto-generated if None.
+
+    Returns:
+        str: Path the HTML file was written to.
+    """
+    if output_path is None:
+        tag = {1: "daily", 7: "weekly", 30: "monthly"}.get(period_days, f"{period_days}d")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = os.path.join("reports", f"pulse_summary_{tag}_{stamp}.html")
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    total_scans    = len(scans)
+    total_findings = len(findings)
+    scores         = [s.get("score") for s in scans if s.get("score") is not None]
+    avg_score      = round(sum(scores) / len(scores)) if scores else None
+
+    severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for f in findings:
+        sev = f.get("severity", "LOW")
+        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+    rule_counts = {}
+    for f in findings:
+        rule = f.get("rule") or "Unknown"
+        rule_counts[rule] = rule_counts.get(rule, 0) + 1
+    top_rules = sorted(rule_counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    host_counts = {}
+    for s in scans:
+        host = s.get("hostname") or "(unknown)"
+        host_counts[host] = host_counts.get(host, 0) + 1
+    top_hosts = sorted(host_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
+
+    worst_scan = min(
+        (s for s in scans if s.get("score") is not None),
+        key=lambda s: s["score"], default=None,
+    )
+
+    tag = {1: "Daily", 7: "Weekly", 30: "Monthly"}.get(period_days, f"{period_days}-day")
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    empty_state = total_scans == 0
+
+    sev_cards = "".join(
+        f'<div class="sum-sev-card sum-sev-{lvl.lower()}">'
+        f'<div class="sum-sev-count">{severity_counts[lvl]}</div>'
+        f'<div class="sum-sev-label">{lvl}</div></div>'
+        for lvl in SEVERITY_ORDER
+    )
+
+    if top_rules:
+        max_rule_count = top_rules[0][1] or 1
+        rule_rows_html = "".join(
+            f'<tr><td>{_esc(rule)}</td>'
+            f'<td><div class="sum-bar"><span style="width:{int(100 * n / max_rule_count)}%;"></span></div></td>'
+            f'<td class="sum-num">{n}</td></tr>'
+            for rule, n in top_rules
+        )
+    else:
+        rule_rows_html = '<tr><td colspan="3" class="sum-empty">No detections in this period.</td></tr>'
+
+    if top_hosts:
+        host_rows_html = "".join(
+            f'<tr><td>{_esc(host)}</td><td class="sum-num">{n}</td></tr>'
+            for host, n in top_hosts
+        )
+    else:
+        host_rows_html = '<tr><td colspan="2" class="sum-empty">No hosts scanned.</td></tr>'
+
+    if worst_scan:
+        worst_html = (
+            f'<div class="sum-worst">'
+            f'<div class="sum-worst-label">Worst scan</div>'
+            f'<div class="sum-worst-row">'
+            f'<span class="sum-worst-score">{worst_scan.get("score", "-")}</span>'
+            f'<span class="sum-worst-label-text">{_esc(worst_scan.get("score_label") or "")}</span>'
+            f'<span class="sum-worst-meta">{_esc(worst_scan.get("scanned_at", ""))} '
+            f'&middot; {_esc(worst_scan.get("hostname") or "(unknown)")}</span>'
+            f'</div></div>'
+        )
+    else:
+        worst_html = ""
+
+    avg_display = f"{avg_score}" if avg_score is not None else "-"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pulse {tag} Summary</title>
+<style>
+body {{ font-family: 'Inter', -apple-system, Segoe UI, sans-serif; background: #f4f6f8; color: #1a1a2e; margin: 0; padding: 32px; }}
+.sum-wrap {{ max-width: 960px; margin: 0 auto; }}
+.sum-head {{ background: #1a1a2e; color: #fff; padding: 22px 28px; border-radius: 10px; margin-bottom: 22px; }}
+.sum-head h1 {{ margin: 0; font-size: 1.4rem; font-weight: 700; }}
+.sum-head .sum-sub {{ color: #cfd3db; font-size: 0.85rem; margin-top: 6px; }}
+.sum-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 22px; }}
+.sum-card {{ background: #fff; border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }}
+.sum-card .sum-num {{ font-size: 1.8rem; font-weight: 700; }}
+.sum-card .sum-label {{ font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #7f8c8d; margin-top: 4px; }}
+.sum-section {{ background: #fff; border-radius: 8px; padding: 18px 22px; margin-bottom: 22px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }}
+.sum-section h2 {{ margin: 0 0 14px; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1.3px; color: #7f8c8d; }}
+.sum-sev-row {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
+.sum-sev-card {{ padding: 14px 16px; border-radius: 8px; color: #fff; }}
+.sum-sev-card .sum-sev-count {{ font-size: 1.8rem; font-weight: 700; }}
+.sum-sev-card .sum-sev-label {{ font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; opacity: 0.9; }}
+.sum-sev-critical {{ background: {SEVERITY_COLOURS['CRITICAL']}; }}
+.sum-sev-high     {{ background: {SEVERITY_COLOURS['HIGH']}; }}
+.sum-sev-medium   {{ background: {SEVERITY_COLOURS['MEDIUM']}; }}
+.sum-sev-low      {{ background: {SEVERITY_COLOURS['LOW']}; }}
+.sum-table {{ width: 100%; border-collapse: collapse; font-size: 0.88rem; }}
+.sum-table th, .sum-table td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #eceff4; }}
+.sum-table th {{ font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.8px; color: #7f8c8d; }}
+.sum-table td.sum-num {{ text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }}
+.sum-bar {{ background: #eceff4; border-radius: 4px; height: 6px; overflow: hidden; width: 100%; max-width: 260px; }}
+.sum-bar span {{ display: block; background: {SEVERITY_COLOURS['HIGH']}; height: 100%; }}
+.sum-empty {{ text-align: center; color: #7f8c8d; padding: 18px 0; }}
+.sum-worst {{ background: #fff6f6; border-left: 3px solid {SEVERITY_COLOURS['CRITICAL']}; padding: 10px 14px; border-radius: 0 6px 6px 0; margin-top: 10px; }}
+.sum-worst-label {{ font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #7f8c8d; }}
+.sum-worst-row {{ display: flex; align-items: baseline; gap: 10px; margin-top: 4px; flex-wrap: wrap; }}
+.sum-worst-score {{ font-size: 1.6rem; font-weight: 700; color: {SEVERITY_COLOURS['CRITICAL']}; }}
+.sum-worst-label-text {{ font-weight: 600; }}
+.sum-worst-meta {{ color: #7f8c8d; font-size: 0.82rem; }}
+.sum-footer {{ text-align: center; color: #7f8c8d; font-size: 0.78rem; margin-top: 24px; }}
+.sum-banner {{ background: #fff; border-radius: 8px; padding: 24px; text-align: center; color: #7f8c8d; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }}
+</style>
+</head>
+<body>
+<div class="sum-wrap">
+<div class="sum-head">
+<h1>Pulse {tag} Summary</h1>
+<div class="sum-sub">Window: last {period_days} day{'s' if period_days != 1 else ''} &middot; Generated {generated_at}</div>
+</div>
+"""
+
+    if empty_state:
+        html += '<div class="sum-banner">No scans ran in this window. Nothing to summarize.</div>'
+    else:
+        html += f"""
+<div class="sum-grid">
+<div class="sum-card"><div class="sum-num">{total_scans}</div><div class="sum-label">Scans</div></div>
+<div class="sum-card"><div class="sum-num">{total_findings}</div><div class="sum-label">Findings</div></div>
+<div class="sum-card"><div class="sum-num">{avg_display}</div><div class="sum-label">Avg score</div></div>
+</div>
+
+<div class="sum-section">
+<h2>Findings by severity</h2>
+<div class="sum-sev-row">{sev_cards}</div>
+{worst_html}
+</div>
+
+<div class="sum-section">
+<h2>Top rules</h2>
+<table class="sum-table">
+<thead><tr><th>Rule</th><th>Frequency</th><th class="sum-num">Count</th></tr></thead>
+<tbody>{rule_rows_html}</tbody>
+</table>
+</div>
+
+<div class="sum-section">
+<h2>Hosts scanned</h2>
+<table class="sum-table">
+<thead><tr><th>Hostname</th><th class="sum-num">Scans</th></tr></thead>
+<tbody>{host_rows_html}</tbody>
+</table>
+</div>
+"""
+
+    html += """
+<div class="sum-footer">Pulse &mdash; threat detection for Windows event logs</div>
+</div>
+</body>
+</html>"""
+
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    return output_path
+
+
+def _esc(value):
+    """Tiny HTML-escape helper for summary output."""
+    if value is None:
+        return ""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )

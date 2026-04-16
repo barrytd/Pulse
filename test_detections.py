@@ -2946,3 +2946,147 @@ def test_apply_whitelist_empty_does_nothing():
     findings = [{"rule": "Any Rule", "severity": "HIGH", "details": "something"}]
     result = _apply_whitelist(findings, {})
     assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# RECURRING SUMMARY REPORT TESTS
+# ---------------------------------------------------------------------------
+
+def _seed_scan(db_path, scanned_at, findings, score=80, score_label="LOW RISK",
+               hostname=None):
+    """Insert a scan + findings row with an explicit scanned_at timestamp."""
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.execute(
+            """INSERT INTO scans (scanned_at, hostname, files_scanned,
+                                   total_events, total_findings, score,
+                                   score_label, filename)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (scanned_at, hostname or "TEST-HOST", 1, 100, len(findings),
+             score, score_label, "security.evtx"),
+        )
+        sid = cur.lastrowid
+        for f in findings:
+            conn.execute(
+                """INSERT INTO findings (scan_id, timestamp, event_id, severity,
+                                         rule, mitre, description, details)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sid, f.get("timestamp", scanned_at), f.get("event_id", "4625"),
+                 f["severity"], f["rule"], f.get("mitre"),
+                 f.get("description", ""), f.get("details", "")),
+            )
+        return sid
+
+
+def test_get_scans_since_respects_window(tmp_path):
+    from pulse.database import init_db, get_scans_since
+    from datetime import datetime, timedelta
+    db = str(tmp_path / "t.db")
+    init_db(db)
+    now = datetime.now()
+    _seed_scan(db, (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
+               [{"rule": "Brute Force Attempt", "severity": "HIGH"}])
+    _seed_scan(db, (now - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S"),
+               [{"rule": "Brute Force Attempt", "severity": "HIGH"}])
+
+    recent = get_scans_since(db, days=7)
+    assert len(recent) == 1
+
+    wide = get_scans_since(db, days=30)
+    assert len(wide) == 2
+
+
+def test_get_findings_since_joins_scan_metadata(tmp_path):
+    from pulse.database import init_db, get_findings_since
+    from datetime import datetime, timedelta
+    db = str(tmp_path / "t.db")
+    init_db(db)
+    ts = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    _seed_scan(db, ts,
+               [{"rule": "Brute Force Attempt", "severity": "HIGH"},
+                {"rule": "RDP Logon Detected",  "severity": "LOW"}],
+               hostname="HOST-A", score=72)
+    rows = get_findings_since(db, days=1)
+    assert len(rows) == 2
+    # Joined fields must be present on every row.
+    for row in rows:
+        assert row["hostname"] == "HOST-A"
+        assert row["score"] == 72
+        assert "scanned_at" in row
+
+
+def test_build_summary_report_produces_html_with_aggregation(tmp_path):
+    from pulse.reporter import build_summary_report
+    scans = [
+        {"id": 1, "scanned_at": "2026-04-16 09:00:00", "hostname": "HOST-A",
+         "score": 85, "score_label": "LOW RISK", "filename": "a.evtx"},
+        {"id": 2, "scanned_at": "2026-04-16 10:00:00", "hostname": "HOST-B",
+         "score": 40, "score_label": "HIGH RISK", "filename": "b.evtx"},
+    ]
+    findings = [
+        {"rule": "Brute Force Attempt", "severity": "HIGH",  "scanned_at": "2026-04-16 10:00:00", "hostname": "HOST-B"},
+        {"rule": "Brute Force Attempt", "severity": "HIGH",  "scanned_at": "2026-04-16 10:00:00", "hostname": "HOST-B"},
+        {"rule": "RDP Logon Detected",  "severity": "LOW",   "scanned_at": "2026-04-16 09:00:00", "hostname": "HOST-A"},
+    ]
+    out = tmp_path / "summary.html"
+    path = build_summary_report(scans, findings, period_days=1, output_path=str(out))
+    assert path == str(out)
+    html = out.read_text(encoding="utf-8")
+    assert "Pulse Daily Summary" in html
+    assert "Brute Force Attempt" in html
+    assert "HOST-B" in html
+    # Worst-scan block should surface the low score.
+    assert "40" in html
+    # Severity cards reflect the actual counts.
+    assert ">2<" in html  # HIGH count
+    assert ">1<" in html  # LOW count
+
+
+def test_build_summary_report_empty_window(tmp_path):
+    from pulse.reporter import build_summary_report
+    out = tmp_path / "empty.html"
+    build_summary_report([], [], period_days=7, output_path=str(out))
+    html = out.read_text(encoding="utf-8")
+    assert "Pulse Weekly Summary" in html
+    assert "No scans ran" in html
+
+
+def test_summary_cli_writes_report(tmp_path):
+    """End-to-end: --summary weekly against a seeded DB writes an HTML file
+    and prints the path under --quiet."""
+    import subprocess
+    import sys
+    from pathlib import Path as _Path
+
+    from pulse.database import init_db
+    from datetime import datetime, timedelta
+
+    project_root = _Path(__file__).resolve().parent
+    db_path = tmp_path / "summary.db"
+    init_db(str(db_path))
+    ts = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    _seed_scan(str(db_path), ts,
+               [{"rule": "Brute Force Attempt", "severity": "HIGH"}])
+
+    # Point pulse.db at our tmp DB via --config = an in-memory yaml snippet.
+    # Simplest: write a one-off yaml file and pass it via PULSE_CONFIG env
+    # var if the CLI supports one; otherwise pass the path positionally by
+    # writing our seeded DB to the project-default pulse.db is too invasive.
+    # Use a cwd-local config file.
+    cfg_path = tmp_path / "pulse.yaml"
+    cfg_path.write_text(
+        "database:\n  path: " + str(db_path).replace("\\", "/") + "\n",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [sys.executable, str(project_root / "main.py"),
+         "--summary", "weekly", "--quiet",
+         "--config", str(cfg_path)],
+        cwd=str(tmp_path),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    printed = proc.stdout.strip().splitlines()[-1]
+    assert printed.endswith(".html")
+    assert _Path(printed if _Path(printed).is_absolute() else tmp_path / printed).exists()

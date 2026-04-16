@@ -65,7 +65,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Remediation suggestions — each rule includes a "how to fix" recommendation with step-by-step guidance
 - [x] Remediation tab rewrite — group fixes by rule and show MITRE mitigation IDs (M1026, etc.)
 - [x] Scheduled scans — watch a folder for new `.evtx` files and auto-scan on arrival
-- [ ] Recurring reports — auto-generate daily or weekly HTML summary reports
+- [x] Recurring reports — auto-generate daily or weekly HTML summary reports
 - [ ] PDF export — download formatted PDF reports from the dashboard
 - [ ] Report comparison — diff two scans side by side, highlight new / resolved findings
 - [x] "Mark reviewed" status — per-finding state saved to DB, persists across scans

@@ -241,6 +241,27 @@ def build_arg_parser(config=None):
         help="Watch --logs for new .evtx files and auto-scan each one.",
     )
 
+    # --- ARGUMENT: --summary ---
+    # Build a recurring HTML digest (daily/weekly/monthly) from past scans
+    # already stored in pulse.db. Intended to be invoked by Task Scheduler
+    # or cron. Combine with --email to mail the digest, or let it save to
+    # reports/ so the dashboard picks it up.
+    parser.add_argument(
+        "--summary",
+        choices=["daily", "weekly", "monthly"],
+        help="Build an HTML digest of the last 1/7/30 days of scans from pulse.db.",
+    )
+
+    # --- ARGUMENT: --config ---
+    # Use a non-default pulse.yaml path. Handy for CI pipelines that want
+    # to keep per-environment configs out of the project root.
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="Path to a pulse.yaml config file. Defaults to pulse.yaml in the project root.",
+    )
+
     # --- ARGUMENT: --quiet ---
     # Suppresses banner and progress chatter so cron jobs and pipelines
     # don't get noisy. Errors still print. The final report path is the
@@ -466,6 +487,44 @@ def _print_history(db_path):
     print()
 
 
+def _run_summary(period, db_path, config, email_flag, log, quiet):
+    """
+    Build a daily/weekly/monthly summary report from pulse.db and optionally
+    email it. Used by --summary mode.
+    """
+    from pulse.database import get_findings_since, get_scans_since
+    from pulse.reporter import build_summary_report
+
+    period_days = {"daily": 1, "weekly": 7, "monthly": 30}[period]
+    scans    = get_scans_since(db_path, period_days)
+    findings = get_findings_since(db_path, period_days)
+
+    report_path = build_summary_report(scans, findings, period_days)
+
+    if email_flag:
+        from pulse.emailer import send_report, validate_email_config
+        email_cfg = config.get("email") or {}
+        err = validate_email_config(email_cfg)
+        if err:
+            log(f"  [!] Email not sent: {err}")
+        else:
+            severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for f in findings:
+                sev = f.get("severity", "LOW")
+                severity_counts[sev] = severity_counts.get(sev, 0) + 1
+            ok = send_report(email_cfg, severity_counts, len(findings),
+                             findings=findings, report_path=report_path)
+            if ok:
+                log(f"  [+] {period.title()} summary emailed to {email_cfg.get('recipient')}")
+
+    if quiet:
+        # Machine-friendly: only the path is emitted, so cron can capture it.
+        print(report_path)
+    else:
+        log(f"  [+] {period.title()} summary: {report_path}")
+        log(f"      {len(scans)} scan(s), {len(findings)} finding(s) in the last {period_days} day(s)")
+
+
 BANNER = r"""
   ____  _   _ _     ____  _____
  |  _ \| | | | |   / ___|| ____|
@@ -487,7 +546,14 @@ def main():
     # We parse args before the banner so --quiet / --json-only can
     # suppress it. --json-only implies --quiet; JSON goes to stdout
     # and any chatter would corrupt the pipe.
-    config = load_config()
+    # Peek at --config before loading the file so a custom path is honored.
+    # We pre-parse only what we need; the real parser is built against the
+    # loaded config (defaults depend on it) in the next step.
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", default=None)
+    pre_args, _ = pre_parser.parse_known_args()
+
+    config = load_config(pre_args.config)
     parser = build_arg_parser(config)
     args = parser.parse_args()
 
@@ -534,6 +600,14 @@ def main():
     # If --history was passed, print past scans and exit immediately.
     if show_history_flag:
         _print_history(db_path)
+        return
+
+    # --- SUMMARY MODE ---
+    # If --summary was passed, pull the last N days of scans from pulse.db
+    # and emit a single HTML digest (and optionally email it). Never scans
+    # anything fresh — this is strictly a "look back" view for cron jobs.
+    if args.summary:
+        _run_summary(args.summary, db_path, config, send_email_flag, log, quiet)
         return
 
     # --- API MODE ---
