@@ -176,6 +176,64 @@ DEFAULT_REMEDIATION = [
 ]
 
 
+# MITRE ATT&CK mitigations, keyed by ID. Names taken from
+# https://attack.mitre.org/mitigations/ — kept short for UI rendering.
+_MITIGATION_NAMES = {
+    "M1015": "Active Directory Configuration",
+    "M1018": "User Account Management",
+    "M1024": "Restrict Registry Permissions",
+    "M1026": "Privileged Account Management",
+    "M1027": "Password Policies",
+    "M1028": "Operating System Configuration",
+    "M1029": "Remote Data Storage",
+    "M1030": "Network Segmentation",
+    "M1031": "Network Intrusion Prevention",
+    "M1032": "Multi-factor Authentication",
+    "M1035": "Limit Access to Resource Over Network",
+    "M1036": "Account Use Policies",
+    "M1037": "Filter Network Traffic",
+    "M1038": "Execution Prevention",
+    "M1040": "Behavior Prevention on Endpoint",
+    "M1041": "Encrypt Sensitive Information",
+    "M1042": "Disable or Remove Feature or Program",
+    "M1043": "Credential Access Protection",
+    "M1047": "Audit",
+    "M1049": "Antivirus/Antimalware",
+}
+
+# Per-rule MITRE mitigation IDs. Two to three per rule, ordered by
+# relevance. IDs must exist in _MITIGATION_NAMES.
+MITIGATIONS = {
+    "Brute Force Attempt":       ["M1027", "M1032", "M1036"],
+    "User Account Created":      ["M1026", "M1018", "M1047"],
+    "Privilege Escalation":      ["M1026", "M1018", "M1047"],
+    "Audit Log Cleared":         ["M1029", "M1047"],
+    "RDP Logon Detected":        ["M1035", "M1030", "M1032"],
+    "Pass-the-Hash Attempt":     ["M1043", "M1026", "M1027"],
+    "Service Installed":         ["M1047", "M1038", "M1042"],
+    "Antivirus Disabled":        ["M1049", "M1024", "M1047"],
+    "Firewall Disabled":         ["M1031", "M1028", "M1047"],
+    "Firewall Rule Changed":     ["M1047", "M1028", "M1037"],
+    "Account Lockout":           ["M1027", "M1032"],
+    "Scheduled Task Created":    ["M1047", "M1038"],
+    "Suspicious PowerShell":     ["M1038", "M1040", "M1042"],
+    "Account Takeover Chain":    ["M1026", "M1018", "M1032"],
+    "Malware Persistence Chain": ["M1049", "M1040", "M1038"],
+    "Kerberoasting":             ["M1027", "M1026", "M1041"],
+    "Golden Ticket":             ["M1026", "M1027", "M1043"],
+    "Credential Dumping":        ["M1043", "M1028", "M1040"],
+    "Logon from Disabled Account": ["M1018", "M1032", "M1026"],
+    "After-Hours Logon":         ["M1036", "M1032"],
+    "Suspicious Registry Modification": ["M1024", "M1047"],
+    "Lateral Movement via Network Share": ["M1035", "M1037", "M1030"],
+    "DCSync Attempt":            ["M1026", "M1027", "M1015"],
+    "Suspicious Child Process":  ["M1040", "M1038", "M1049"],
+    "New Account (Baseline)":    ["M1018", "M1026"],
+    "New Service (Baseline)":    ["M1047", "M1038"],
+    "New Task (Baseline)":       ["M1047", "M1038"],
+}
+
+
 def get_remediation(rule_name):
     """
     Return the ordered list of remediation steps for a given rule name.
@@ -185,13 +243,27 @@ def get_remediation(rule_name):
     return REMEDIATION.get(rule_name, DEFAULT_REMEDIATION)
 
 
+def get_mitigations(rule_name):
+    """
+    Return a list of {"id": "M1026", "name": "Privileged Account Management"}
+    dicts for a given rule. Empty list for unknown rules.
+    """
+    return [
+        {"id": mid, "name": _MITIGATION_NAMES[mid]}
+        for mid in MITIGATIONS.get(rule_name, [])
+        if mid in _MITIGATION_NAMES
+    ]
+
+
 def attach_remediation(findings):
     """
-    Decorate every finding dict in-place with a `remediation` field so the
-    dashboard and any JSON-consuming tool can read steps directly from the
-    finding without maintaining a parallel dict. Returns the same list
-    (so call sites can chain it).
+    Decorate every finding dict in-place with `remediation` (list of step
+    strings) and `mitigations` (list of {id, name} dicts) so the dashboard
+    and any JSON-consuming tool can read both directly from the finding.
+    Returns the same list so call sites can chain it.
     """
     for f in findings or []:
-        f["remediation"] = get_remediation(f.get("rule", ""))
+        rule = f.get("rule", "")
+        f["remediation"] = get_remediation(rule)
+        f["mitigations"] = get_mitigations(rule)
     return findings

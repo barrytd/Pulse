@@ -96,7 +96,7 @@ RULE_EVENT_IDS = {
 # Remediation steps live in pulse/remediation.py (single source of truth).
 # Re-exported here so any existing caller that does `from pulse.reporter
 # import REMEDIATION` keeps working.
-from pulse.remediation import REMEDIATION  # noqa: F401, E402
+from pulse.remediation import REMEDIATION, get_mitigations  # noqa: F401, E402
 
 def generate_report(findings, output_path=None, fmt="txt", scan_stats=None):
     """
@@ -546,28 +546,50 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
     # --- REMEDIATION TAB: executive summary + cards ---
     exec_summary = _build_executive_summary(findings, severity_counts)
 
-    # Only show remediation cards for rules that actually fired, sorted by severity.
-    triggered_rules = []
-    seen = set()
-    for finding in findings:  # already sorted by severity
+    # Group by rule: count findings, keep the highest-severity example per rule.
+    # Findings are already sorted by severity (critical first), so the first
+    # sighting of a rule has its most severe instance.
+    rule_groups = {}  # rule_name -> {"example": finding, "count": int}
+    for finding in findings:
         rule = finding["rule"]
-        if rule not in seen and rule in REMEDIATION:
-            seen.add(rule)
-            triggered_rules.append(finding)
+        if rule not in REMEDIATION:
+            continue
+        if rule not in rule_groups:
+            rule_groups[rule] = {"example": finding, "count": 0}
+        rule_groups[rule]["count"] += 1
 
     remediation_cards_html = ""
-    for finding in triggered_rules:
+    for rule, group in rule_groups.items():
+        finding  = group["example"]
+        count    = group["count"]
         severity = finding["severity"]
         colour   = SEVERITY_COLOURS.get(severity, "#95a5a6")
-        steps    = REMEDIATION.get(finding["rule"], [])
+        steps    = REMEDIATION.get(rule, [])
         steps_html = "\n".join(f"<li>{s}</li>" for s in steps)
+
+        mitigations = get_mitigations(rule)
+        if mitigations:
+            chips = "".join(
+                f'<a class="mitre-chip" href="https://attack.mitre.org/mitigations/{m["id"]}/" '
+                f'target="_blank" rel="noopener noreferrer" title="{m["name"]}">'
+                f'<span class="mitre-chip-id">{m["id"]}</span>'
+                f'<span class="mitre-chip-name">{m["name"]}</span></a>'
+                for m in mitigations
+            )
+            chips_html = f'<div class="mitre-chips">{chips}</div>'
+        else:
+            chips_html = ""
+
+        count_label = f"{count} finding" if count == 1 else f"{count} findings"
 
         remediation_cards_html += f"""
             <div class="rem-card">
                 <div class="rem-card-header">
                     <span class="badge" style="background:{colour};">{severity}</span>
-                    <span class="rem-rule-name">{finding['rule']}</span>
+                    <span class="rem-rule-name">{rule}</span>
+                    <span class="rem-count">{count_label}</span>
                 </div>
+                {chips_html}
                 <ul class="rem-steps">
                     {steps_html}
                 </ul>
@@ -883,6 +905,50 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
             font-weight: 600;
             font-size: 0.95rem;
         }}
+        .rem-count {{
+            margin-left: auto;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg);
+            border: 1px solid var(--rem-border);
+            border-radius: 10px;
+            padding: 2px 10px;
+            white-space: nowrap;
+        }}
+        .mitre-chips {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 10px 18px 0;
+        }}
+        .mitre-chip {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.72rem;
+            text-decoration: none;
+            border: 1px solid var(--rem-border);
+            border-radius: 12px;
+            padding: 2px 10px;
+            background: var(--bg);
+            color: var(--text);
+            transition: border-color 0.1s, color 0.1s;
+        }}
+        .mitre-chip:hover {{
+            border-color: {SEVERITY_COLOURS['HIGH']};
+            color: {SEVERITY_COLOURS['HIGH']};
+        }}
+        .mitre-chip-id {{
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            font-weight: 700;
+            font-size: 0.7rem;
+            letter-spacing: 0.2px;
+        }}
+        .mitre-chip-name {{
+            color: var(--text-muted);
+        }}
+        body.dark .mitre-chip-name {{ color: var(--text-muted); }}
         .rem-steps {{
             list-style: none;
             padding: 14px 18px;

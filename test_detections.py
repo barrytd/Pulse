@@ -1589,7 +1589,8 @@ def test_run_scheduler_callback_error_does_not_stop_loop(tmp_path):
 # ---------------------------------------------------------------------------
 
 from pulse.remediation import (
-    REMEDIATION, DEFAULT_REMEDIATION, get_remediation, attach_remediation,
+    REMEDIATION, DEFAULT_REMEDIATION, MITIGATIONS, get_remediation,
+    get_mitigations, attach_remediation,
 )
 
 
@@ -1651,6 +1652,100 @@ def test_reporter_reexports_remediation_from_canonical_module():
     from pulse import reporter
     from pulse import remediation
     assert reporter.REMEDIATION is remediation.REMEDIATION
+
+
+def test_every_remediation_rule_has_mitre_mitigations():
+    """Every rule with remediation steps should also carry at least two
+    MITRE mitigation IDs so the Remediation tab can render chips for it."""
+    for rule in REMEDIATION:
+        assert rule in MITIGATIONS, f"Missing mitigations for rule {rule!r}"
+        ids = MITIGATIONS[rule]
+        assert isinstance(ids, list) and len(ids) >= 2, \
+            f"{rule}: need at least 2 MITRE mitigation IDs, got {ids!r}"
+        for mid in ids:
+            assert isinstance(mid, str) and mid.startswith("M") and mid[1:].isdigit(), \
+                f"{rule}: mitigation ID must look like M1026, got {mid!r}"
+
+
+def test_get_mitigations_returns_id_name_dicts():
+    mits = get_mitigations("Brute Force Attempt")
+    assert isinstance(mits, list) and mits
+    for m in mits:
+        assert set(m.keys()) == {"id", "name"}
+        assert m["id"].startswith("M")
+        assert isinstance(m["name"], str) and m["name"]
+
+
+def test_get_mitigations_unknown_rule_returns_empty():
+    assert get_mitigations("Rule That Does Not Exist") == []
+
+
+def test_attach_remediation_attaches_mitigations_field():
+    findings = [
+        {"rule": "Brute Force Attempt", "severity": "HIGH"},
+        {"rule": "Unknown Rule",        "severity": "LOW"},
+    ]
+    attach_remediation(findings)
+    assert findings[0]["mitigations"] == get_mitigations("Brute Force Attempt")
+    assert findings[0]["mitigations"], "expected at least one mitigation"
+    assert findings[1]["mitigations"] == []  # unknown rule -> empty
+
+
+def _render_html(findings, tmp_path):
+    """Helper: render findings to HTML via generate_report and return the body."""
+    from pulse.reporter import generate_report
+    out = tmp_path / "report.html"
+    generate_report(findings, output_path=str(out), fmt="html")
+    return out.read_text(encoding="utf-8")
+
+
+def test_html_report_renders_mitigation_chips(tmp_path):
+    """The Remediation tab HTML should include MITRE mitigation chips
+    for each rule that fired."""
+    findings = [
+        {
+            "rule": "Brute Force Attempt",
+            "severity": "HIGH",
+            "description": "test",
+            "timestamp": "2026-04-16 10:00:00",
+            "event_id": "4625",
+            "details": "",
+        },
+    ]
+    html = _render_html(findings, tmp_path)
+    assert "mitre-chip" in html
+    # One of Brute Force Attempt's mitigations
+    assert "M1027" in html
+    assert "https://attack.mitre.org/mitigations/M1027/" in html
+
+
+def test_html_report_shows_finding_counts_per_rule(tmp_path):
+    """When a rule fires multiple times, the Remediation card should show
+    '3 findings' rather than hiding the count."""
+    findings = [
+        {
+            "rule": "Brute Force Attempt",
+            "severity": "HIGH",
+            "description": "hit " + str(i),
+            "timestamp": "2026-04-16 10:00:00",
+            "event_id": "4625",
+            "details": "",
+        }
+        for i in range(3)
+    ]
+    html = _render_html(findings, tmp_path)
+    assert "3 findings" in html
+
+
+def test_html_report_singular_count_label(tmp_path):
+    findings = [{
+        "rule": "Brute Force Attempt", "severity": "HIGH",
+        "description": "one", "timestamp": "2026-04-16 10:00:00",
+        "event_id": "4625", "details": "",
+    }]
+    html = _render_html(findings, tmp_path)
+    # The rem-count span should say "1 finding" (singular) for a single hit.
+    assert '<span class="rem-count">1 finding</span>' in html
 
 
 def test_quiet_with_empty_logs_produces_no_stdout(tmp_path):

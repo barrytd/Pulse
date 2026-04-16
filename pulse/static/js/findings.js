@@ -595,9 +595,10 @@ export function _expandRow(f, colspan) {
   '</td></tr>';
 }
 
-// Render the remediation card. Findings carry `remediation` as an array
-// of step strings (attached server-side); fall back to a generic default
-// if the API didn't include it (older cached responses, etc).
+// Render the remediation card. Findings carry `remediation` (array of step
+// strings) and `mitigations` (array of {id, name} dicts) attached server-side.
+// Falls back to a generic default when `remediation` is missing (older
+// cached responses, etc).
 export function _remediationBlock(f) {
   var steps = Array.isArray(f.remediation) && f.remediation.length
     ? f.remediation
@@ -606,8 +607,23 @@ export function _remediationBlock(f) {
         'Correlate with other logs from the same host and timeframe.',
       ];
   var items = steps.map(function (s) { return '<li>' + escapeHtml(s) + '</li>'; }).join('');
+
+  var chipsHtml = '';
+  if (Array.isArray(f.mitigations) && f.mitigations.length) {
+    var chips = f.mitigations.map(function (m) {
+      return '<a class="mitre-chip" href="https://attack.mitre.org/mitigations/' +
+        escapeHtml(m.id) + '/" target="_blank" rel="noopener noreferrer" title="' +
+        escapeHtml(m.name) + '">' +
+        '<span class="mitre-chip-id">' + escapeHtml(m.id) + '</span>' +
+        '<span class="mitre-chip-name">' + escapeHtml(m.name) + '</span>' +
+      '</a>';
+    }).join('');
+    chipsHtml = '<div class="mitre-chips">' + chips + '</div>';
+  }
+
   return '<div class="remediation">' +
     '<div class="rem-label">Remediation</div>' +
+    chipsHtml +
     '<ol class="rem-steps">' + items + '</ol>' +
   '</div>';
 }
