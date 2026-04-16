@@ -1441,6 +1441,74 @@ def test_config_partial_values():
     assert args.output is None      # Hardcoded default
 
 
+def test_quiet_flag_defaults_false_and_parses():
+    """--quiet is off by default and sets args.quiet = True when passed."""
+    parser = build_arg_parser({})
+
+    args = parser.parse_args([])
+    assert args.quiet is False
+    assert args.json_only is False
+
+    args = parser.parse_args(["--quiet"])
+    assert args.quiet is True
+    assert args.json_only is False
+
+
+def test_json_only_flag_parses():
+    """--json-only should set args.json_only=True (and dest is json_only)."""
+    parser = build_arg_parser({})
+
+    args = parser.parse_args(["--json-only"])
+    assert args.json_only is True
+    # --json-only shouldn't implicitly flip args.quiet at parse time —
+    # the implication lives in main() so tests can still distinguish them.
+    assert args.quiet is False
+
+
+def test_json_only_with_empty_logs_emits_valid_json(tmp_path):
+    """End-to-end: --json-only against an empty logs folder writes only
+    JSON to stdout (no banner), and that JSON parses cleanly."""
+    import subprocess
+    import sys
+    import json as _json
+    from pathlib import Path as _Path
+
+    project_root = _Path(__file__).resolve().parent
+    empty_logs = tmp_path / "empty_logs"
+    empty_logs.mkdir()
+
+    result = subprocess.run(
+        [sys.executable, "main.py", "--json-only", "--logs", str(empty_logs)],
+        capture_output=True, text=True, cwd=str(project_root), timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    parsed = _json.loads(result.stdout.strip())
+    assert "findings" in parsed
+    assert parsed["findings"] == []
+    # Banner should be absent — stdout must be JSON only.
+    assert "PULSE" not in result.stdout.split("{", 1)[0]
+
+
+def test_quiet_with_empty_logs_produces_no_stdout(tmp_path):
+    """End-to-end: --quiet against an empty logs folder suppresses the
+    banner and the 'No .evtx files' help text."""
+    import subprocess
+    import sys
+    from pathlib import Path as _Path
+
+    project_root = _Path(__file__).resolve().parent
+    empty_logs = tmp_path / "empty_logs"
+    empty_logs.mkdir()
+
+    result = subprocess.run(
+        [sys.executable, "main.py", "--quiet", "--logs", str(empty_logs)],
+        capture_output=True, text=True, cwd=str(project_root), timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    # Quiet mode should emit nothing on stdout for this no-op path.
+    assert result.stdout.strip() == ""
+
+
 # ---------------------------------------------------------------------------
 # WHITELIST TESTS
 # ---------------------------------------------------------------------------

@@ -232,6 +232,26 @@ def build_arg_parser(config=None):
         help="Port the API listens on. Default: 8000",
     )
 
+    # --- ARGUMENT: --quiet ---
+    # Suppresses banner and progress chatter so cron jobs and pipelines
+    # don't get noisy. Errors still print. The final report path is the
+    # only thing written to stdout on success.
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress banner and progress output. Useful for cron / CI.",
+    )
+
+    # --- ARGUMENT: --json-only ---
+    # Implies --quiet and writes the JSON findings report to stdout
+    # instead of a file. Designed for shell pipelines: `pulse --json-only | jq ...`
+    parser.add_argument(
+        "--json-only",
+        action="store_true",
+        dest="json_only",
+        help="Emit the JSON report to stdout instead of writing a file. Implies --quiet.",
+    )
+
     return parser
 
 
@@ -454,21 +474,24 @@ def main():
     The main function that orchestrates the entire Pulse workflow.
     """
 
-    # Print the banner first so it's the first thing the user sees.
-    # end="" avoids adding an extra blank line after the banner (it already has one).
-    print(BANNER)
-
     # --- STEP 0: LOAD CONFIG + PARSE COMMAND-LINE ARGUMENTS ---
-    # First we load pulse.yaml (if it exists) to get default values.
-    # Then argparse reads the CLI flags. If the user typed --format html,
-    # that overrides whatever pulse.yaml says. If they didn't type --format,
-    # the value from pulse.yaml is used. If pulse.yaml doesn't exist either,
-    # the hardcoded defaults kick in (e.g. "txt").
+    # We parse args before the banner so --quiet / --json-only can
+    # suppress it. --json-only implies --quiet; JSON goes to stdout
+    # and any chatter would corrupt the pipe.
     config = load_config()
-    if config:
-        print("  [*] Loaded settings from pulse.yaml")
     parser = build_arg_parser(config)
     args = parser.parse_args()
+
+    quiet = bool(args.quiet or args.json_only)
+
+    def log(msg=""):
+        """Print unless --quiet was set. Used for all non-error output."""
+        if not quiet:
+            print(msg)
+
+    log(BANNER)
+    if config:
+        log("  [*] Loaded settings from pulse.yaml")
 
     # Pull the values out into plain variables for readability.
     log_folder         = args.logs
@@ -549,27 +572,32 @@ def main():
             return
 
     if not os.path.exists(log_folder):
-        print(f"[!] Log folder '{log_folder}' not found. Creating it...")
+        log(f"[!] Log folder '{log_folder}' not found. Creating it...")
         os.makedirs(log_folder)
 
     # Make sure the reports/ folder exists (unless the user gave a full path).
     # If they gave --output /tmp/report.txt we don't need to create reports/.
-    if output_path is None:
+    # In --json-only mode we skip this — no report file is written.
+    if output_path is None and not args.json_only:
         report_folder = "reports"
         if not os.path.exists(report_folder):
-            print(f"[!] Report folder '{report_folder}' not found. Creating it...")
+            log(f"[!] Report folder '{report_folder}' not found. Creating it...")
             os.makedirs(report_folder)
 
     # --- STEP 2: FIND LOG FILES ---
     log_files = [f for f in os.listdir(log_folder) if f.endswith(".evtx")]
 
     if not log_files:
-        print(f"  No .evtx files found in '{log_folder}'.")
-        print("  Drop your Windows event log files there and run again.")
-        print()
-        print("  Export logs from Event Viewer:")
-        print("  Windows Logs > Security > Save All Events As...")
-        print()
+        log(f"  No .evtx files found in '{log_folder}'.")
+        log("  Drop your Windows event log files there and run again.")
+        log()
+        log("  Export logs from Event Viewer:")
+        log("  Windows Logs > Security > Save All Events As...")
+        log()
+        # In --json-only mode still emit an empty findings envelope so
+        # downstream pipelines always get valid JSON.
+        if args.json_only:
+            print(json.dumps({"findings": [], "summary": {"total": 0}}, indent=2))
         return
 
     # --- STEP 3: PARSE EACH LOG FILE ---
@@ -587,7 +615,8 @@ def main():
     all_events = []
 
     monitor = HeartbeatMonitor()
-    monitor.start(f"Parsing {total} file(s) across {workers} worker(s)...")
+    if not quiet:
+        monitor.start(f"Parsing {total} file(s) across {workers} worker(s)...")
 
     if workers > 1:
         import threading
@@ -635,9 +664,10 @@ def main():
             if events:
                 all_events.extend(events)
 
-    monitor.stop()
-    print(f"  [*] Parsed {total} file(s) — {len(all_events)} events total")
-    print()
+    if not quiet:
+        monitor.stop()
+    log(f"  [*] Parsed {total} file(s) — {len(all_events)} events total")
+    log()
 
     # --- STEP 3b: BUILD SCAN STATISTICS ---
     # Counter is a dict subclass that counts how many times each value appears.
@@ -663,13 +693,13 @@ def main():
     # have made any changes. Then future scans compare against it.
     if save_baseline_flag:
         path, baseline = save_baseline(all_events)
-        print(f"  [*] Baseline saved to: {path}")
-        print(f"      Accounts : {len(baseline['accounts'])}")
-        print(f"      Services : {len(baseline['services'])}")
-        print(f"      Tasks    : {len(baseline['tasks'])}")
-        print()
-        print("  Run Pulse normally to compare future scans against this baseline.")
-        print()
+        log(f"  [*] Baseline saved to: {path}")
+        log(f"      Accounts : {len(baseline['accounts'])}")
+        log(f"      Services : {len(baseline['services'])}")
+        log(f"      Tasks    : {len(baseline['tasks'])}")
+        log()
+        log("  Run Pulse normally to compare future scans against this baseline.")
+        log()
         return
 
     # Auto-load the baseline if it exists. If it does, any new accounts,
@@ -677,10 +707,10 @@ def main():
     # will generate extra findings.
     baseline = load_baseline()
     if baseline:
-        print(f"  [*] Baseline loaded (captured {baseline['created_at']})")
+        log(f"  [*] Baseline loaded (captured {baseline['created_at']})")
 
     # --- STEP 4: RUN DETECTIONS ---
-    print("  [*] Running detection rules...")
+    log("  [*] Running detection rules...")
     findings = run_all_detections(all_events)
 
     # --- FILTER BY SEVERITY ---
@@ -701,7 +731,7 @@ def main():
     findings = filter_whitelist(findings, whitelist)
     suppressed = before_count - len(findings)
     if suppressed > 0:
-        print(f"  [*] Whitelist suppressed {suppressed} finding(s)")
+        log(f"  [*] Whitelist suppressed {suppressed} finding(s)")
 
     # --- APPLY BASELINE COMPARISON ---
     # If a baseline was loaded, prepend extra findings for anything new.
@@ -710,18 +740,30 @@ def main():
         findings = compare_baseline(findings, baseline)
         new_count = len(findings) - before
         if new_count > 0:
-            print(f"  [*] Baseline flagged {new_count} new item(s) not seen before")
+            log(f"  [*] Baseline flagged {new_count} new item(s) not seen before")
 
-    print(f"  [*] Findings: {len(findings)}")
+    log(f"  [*] Findings: {len(findings)}")
 
     # --- STEP 5: GENERATE REPORT ---
-    if findings:
-        print(f"  [*] Generating {report_format.upper()} report...")
+    # --json-only short-circuits the normal report pipeline: we render
+    # the JSON in-memory and print it straight to stdout. Skip the
+    # interactive block too (no TTY in a pipeline).
+    report_path = None
+    if args.json_only:
+        from pulse.reporter import _build_json_report
+        severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for f in findings:
+            sev = f.get("severity", "LOW")
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+        # _build_json_report returns a JSON string; print verbatim.
+        print(_build_json_report(findings, severity_counts, scan_stats))
+    elif findings:
+        log(f"  [*] Generating {report_format.upper()} report...")
 
         # We pass output_path (may be None) and report_format to the reporter.
         # The reporter will handle auto-naming if output_path is None.
         report_path = generate_report(findings, output_path=output_path, fmt=report_format, scan_stats=scan_stats)
-        print(f"  [*] Report saved to: {report_path}")
+        log(f"  [*] Report saved to: {report_path}")
 
         # --- STEP 6: SEND EMAIL ---
         # Only runs if --email was passed and config is valid (already checked).
@@ -731,14 +773,14 @@ def main():
                 sev = f.get("severity", "LOW")
                 severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-            print(f"  [*] Sending report to {email_config['recipient']}...")
+            log(f"  [*] Sending report to {email_config['recipient']}...")
             success = send_report(email_config, severity_counts,
                                   len(findings), findings=findings,
                                   report_path=report_path)
             if success:
-                print(f"  [*] Email sent successfully.")
+                log(f"  [*] Email sent successfully.")
     else:
-        print("  [*] No suspicious activity detected. You're clean!")
+        log("  [*] No suspicious activity detected. You're clean!")
 
     # --- STEP 7: SAVE TO DATABASE ---
     # Always save the scan result so --history works over time.
@@ -751,7 +793,7 @@ def main():
         score, score_label, _ = _calculate_score(severity_counts_db)
         scan_id = save_scan(db_path, findings, scan_stats=scan_stats,
                             score=score, score_label=score_label)
-        print(f"  [*] Scan #{scan_id} saved to database ({db_path})")
+        log(f"  [*] Scan #{scan_id} saved to database ({db_path})")
 
     # --- STEP 7b: THRESHOLD-BASED EMAIL ALERTS ---
     # Separate from --email: --email sends the full report on demand,
@@ -763,21 +805,22 @@ def main():
     if findings and not args.no_alerts:
         ar = dispatch_alerts(db_path, findings, email_config, alert_config, webhook_config)
         if ar["skipped_rules"]:
-            print(f"  [*] Alert cooldown suppressed: {', '.join(ar['skipped_rules'])}")
+            log(f"  [*] Alert cooldown suppressed: {', '.join(ar['skipped_rules'])}")
         if ar["fresh"]:
-            print(f"  [*] Firing alert ({ar['fresh']} finding(s) >= {ar['threshold']})...")
+            log(f"  [*] Firing alert ({ar['fresh']} finding(s) >= {ar['threshold']})...")
             if ar["sent"]:
-                print(f"  [*] Email sent to {ar['recipient']}")
+                log(f"  [*] Email sent to {ar['recipient']}")
             if ar["webhook_sent"]:
-                print(f"  [*] Webhook delivered")
+                log(f"  [*] Webhook delivered")
 
-    print()
-    print("=" * 50)
-    print("  Scan complete.")
-    print("=" * 50)
+    log()
+    log("=" * 50)
+    log("  Scan complete.")
+    log("=" * 50)
 
     # --- STEP 8: INTERACTIVE MODE ---
-    if interactive_flag and findings:
+    # Skip in quiet / JSON pipeline modes — there is no interactive TTY.
+    if interactive_flag and findings and not quiet:
         from pulse.interactive import run_interactive_mode
         run_interactive_mode(findings, CONFIG_PATH)
 

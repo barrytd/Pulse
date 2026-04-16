@@ -68,8 +68,8 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Recurring reports — auto-generate daily or weekly HTML summary reports
 - [ ] PDF export — download formatted PDF reports from the dashboard
 - [ ] Report comparison — diff two scans side by side, highlight new / resolved findings
-- [ ] "Mark reviewed" status — per-finding state saved to DB, persists across scans
-- [ ] CLI `--quiet` / `--json-only` — machine-friendly output for cron pipelines
+- [x] "Mark reviewed" status — per-finding state saved to DB, persists across scans
+- [x] CLI `--quiet` / `--json-only` — machine-friendly output for cron pipelines
 
 ---
 
