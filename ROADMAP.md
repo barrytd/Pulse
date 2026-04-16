@@ -67,7 +67,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Scheduled scans — watch a folder for new `.evtx` files and auto-scan on arrival
 - [x] Recurring reports — auto-generate daily or weekly HTML summary reports
 - [x] PDF export — download formatted PDF reports from the dashboard
-- [ ] Report comparison — diff two scans side by side, highlight new / resolved findings
+- [x] Report comparison — diff two scans side by side, highlight new / resolved findings
 - [x] "Mark reviewed" status — per-finding state saved to DB, persists across scans
 - [x] CLI `--quiet` / `--json-only` — machine-friendly output for cron pipelines
 

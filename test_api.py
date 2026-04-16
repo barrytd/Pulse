@@ -661,3 +661,60 @@ def test_report_endpoint_supports_pdf_format(client):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/pdf")
     assert r.content[:5] == b"%PDF-"
+
+
+# ---------------------------------------------------------------------------
+# /api/compare — diff two scans
+# ---------------------------------------------------------------------------
+
+def _seed_scan_with(client, findings):
+    """Save a scan of the given findings, return its scan id."""
+    from pulse.database import save_scan, get_history
+    save_scan(client.app.state.db_path, findings)
+    return get_history(client.app.state.db_path, limit=1)[0]["id"]
+
+
+def test_compare_returns_new_resolved_shared(client):
+    a_id = _seed_scan_with(client, [
+        {"severity": "HIGH", "rule": "Brute Force Attempt", "event_id": 4625,
+         "description": "10 failed logins for alice"},
+        {"severity": "LOW", "rule": "RDP Logon Detected", "event_id": 4624,
+         "description": "RDP from 10.0.0.5"},
+    ])
+    b_id = _seed_scan_with(client, [
+        {"severity": "HIGH", "rule": "Brute Force Attempt", "event_id": 4625,
+         "description": "10 failed logins for alice"},
+        {"severity": "CRITICAL", "rule": "Golden Ticket", "event_id": 4768,
+         "description": "Unusual TGT lifetime"},
+    ])
+    r = client.get(f"/api/compare?a={a_id}&b={b_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scan_a"]["id"] == a_id
+    assert body["scan_b"]["id"] == b_id
+    assert len(body["new"])      == 1
+    assert body["new"][0]["rule"] == "Golden Ticket"
+    assert len(body["resolved"]) == 1
+    assert body["resolved"][0]["rule"] == "RDP Logon Detected"
+    assert len(body["shared"])   == 1
+    assert body["shared"][0]["rule"] == "Brute Force Attempt"
+    # Decorated with remediation.
+    assert isinstance(body["new"][0].get("remediation"), list)
+
+
+def test_compare_rejects_same_scan(client):
+    a_id = _seed_scan_with(client, [
+        {"severity": "HIGH", "rule": "Brute Force Attempt", "event_id": 4625,
+         "description": "x"},
+    ])
+    r = client.get(f"/api/compare?a={a_id}&b={a_id}")
+    assert r.status_code == 400
+
+
+def test_compare_unknown_scan_returns_404(client):
+    a_id = _seed_scan_with(client, [
+        {"severity": "HIGH", "rule": "Brute Force Attempt", "event_id": 4625,
+         "description": "x"},
+    ])
+    r = client.get(f"/api/compare?a={a_id}&b=999")
+    assert r.status_code == 404

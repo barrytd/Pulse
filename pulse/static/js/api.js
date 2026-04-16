@@ -89,6 +89,13 @@ export async function apiGetRules() {
   return resp.json();
 }
 
+// Diff two past scans: returns { scan_a, scan_b, new, resolved, shared }.
+export async function apiCompareScans(idA, idB) {
+  var resp = await fetch('/api/compare?a=' + idA + '&b=' + idB);
+  if (!resp.ok) throw new Error('compare failed: ' + resp.status);
+  return resp.json();
+}
+
 export async function apiGetAuthStatus() {
   try {
     var resp = await fetch('/api/auth/status');

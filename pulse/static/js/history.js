@@ -2,7 +2,7 @@
 // (separate from dashboard's score chart) so the two can coexist.
 'use strict';
 
-import { fetchScans } from './api.js';
+import { fetchScans, apiCompareScans } from './api.js';
 import {
   escapeHtml,
   scoreColor,
@@ -11,6 +11,7 @@ import {
   _trendStatCard,
   _accentForScore,
 } from './dashboard.js';
+import { buildFindingsTable } from './findings.js';
 
 let _historyChartInstance = null;
 let _historyHighlightIdx  = -1;
@@ -58,11 +59,94 @@ export async function renderHistoryPage() {
       '<div class="score-chart-wrap" style="height:220px;"><canvas id="history-line-chart"></canvas></div>' +
     '</div>' +
 
+    _buildComparePanel(scans) +
+
     '<div class="card" style="padding:0; overflow:hidden;">' +
       _buildHistoryTable(scans) +
     '</div>';
 
   _initHistoryLineChart(scans);
+}
+
+function _buildComparePanel(scans) {
+  if (!scans || scans.length < 2) return '';
+  var options = scans.map(function (s) {
+    var label = '#' + s.id + ' \u00b7 ' + (s.scanned_at || '') +
+                ' \u00b7 ' + (s.filename || 'Unknown') +
+                ' \u00b7 ' + s.total_findings + ' finding(s)';
+    return '<option value="' + s.id + '">' + escapeHtml(label) + '</option>';
+  }).join('');
+  var defaultA = scans[1] ? scans[1].id : '';
+  var defaultB = scans[0] ? scans[0].id : '';
+
+  return '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="section-label">Compare scans</div>' +
+    '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' +
+      '<label style="font-size:11px; text-transform:uppercase; letter-spacing:0.7px; color:var(--text-muted);">Before</label>' +
+      '<select id="cmp-a" class="dash-filter-select" style="min-width:260px;">' + options.replace('value="' + defaultA + '"', 'value="' + defaultA + '" selected') + '</select>' +
+      '<label style="font-size:11px; text-transform:uppercase; letter-spacing:0.7px; color:var(--text-muted);">After</label>' +
+      '<select id="cmp-b" class="dash-filter-select" style="min-width:260px;">' + options.replace('value="' + defaultB + '"', 'value="' + defaultB + '" selected') + '</select>' +
+      '<button class="btn btn-primary" data-action="runHistoryCompare">Compare</button>' +
+    '</div>' +
+    '<div id="cmp-results" style="margin-top:14px;"></div>' +
+  '</div>';
+}
+
+export async function runHistoryCompare() {
+  var a = document.getElementById('cmp-a');
+  var b = document.getElementById('cmp-b');
+  var out = document.getElementById('cmp-results');
+  if (!a || !b || !out) return;
+  var idA = Number(a.value);
+  var idB = Number(b.value);
+  if (!idA || !idB) {
+    out.innerHTML = '<div style="color:var(--text-muted);">Pick two scans to compare.</div>';
+    return;
+  }
+  if (idA === idB) {
+    out.innerHTML = '<div style="color:var(--text-muted);">Pick two different scans.</div>';
+    return;
+  }
+  out.innerHTML = '<div style="color:var(--text-muted);">Loading diff\u2026</div>';
+  try {
+    var diff = await apiCompareScans(idA, idB);
+    out.innerHTML = _renderDiff(diff);
+  } catch (err) {
+    out.innerHTML = '<div style="color:var(--severity-critical, #f85149);">' +
+      escapeHtml(err && err.message ? err.message : 'Comparison failed.') + '</div>';
+  }
+}
+
+function _renderDiff(diff) {
+  var a = diff.scan_a || {};
+  var b = diff.scan_b || {};
+  var meta =
+    '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:12px; color:var(--text-muted);">' +
+      '<span><strong>Before:</strong> #' + a.id + ' \u00b7 ' + escapeHtml(a.scanned_at || '') + ' \u00b7 ' + (a.total_findings || 0) + ' finding(s)</span>' +
+      '<span><strong>After:</strong> #' + b.id + ' \u00b7 ' + escapeHtml(b.scanned_at || '') + ' \u00b7 ' + (b.total_findings || 0) + ' finding(s)</span>' +
+    '</div>';
+  return meta +
+    '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">' +
+      _diffColumn('New', diff.new || [], '#e74c3c', 'Present in After, absent from Before.') +
+      _diffColumn('Shared', diff.shared || [], 'var(--text-muted)', 'Present in both scans.') +
+      _diffColumn('Resolved', diff.resolved || [], '#3fb950', 'Present in Before, absent from After.') +
+    '</div>';
+}
+
+function _diffColumn(label, findings, accent, hint) {
+  var body = findings.length
+    ? buildFindingsTable(findings)
+    : '<div style="padding:14px; text-align:center; color:var(--text-muted);">None</div>';
+  return '<div class="card" style="padding:0; overflow:hidden; margin:0;">' +
+    '<div style="padding:10px 14px; border-bottom:1px solid var(--border); ' +
+    'display:flex; align-items:center; justify-content:space-between;">' +
+      '<span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; color:' + accent + ';">' +
+        label + ' \u00b7 ' + findings.length +
+      '</span>' +
+      '<span style="font-size:11px; color:var(--text-muted);">' + escapeHtml(hint) + '</span>' +
+    '</div>' +
+    body +
+  '</div>';
 }
 
 function _buildHistoryTable(scans) {

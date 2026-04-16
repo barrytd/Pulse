@@ -3051,6 +3051,41 @@ def test_build_summary_report_empty_window(tmp_path):
     assert "No scans ran" in html
 
 
+def test_diff_findings_bucketizes_by_rule_and_description():
+    from pulse.comparison import diff_findings
+    a = [
+        {"rule": "Brute Force Attempt", "severity": "HIGH", "description": "alice from 1.2.3.4"},
+        {"rule": "RDP Logon Detected",  "severity": "LOW",  "description": "bob from 10.0.0.5"},
+    ]
+    b = [
+        {"rule": "Brute Force Attempt", "severity": "HIGH", "description": "alice from 1.2.3.4"},
+        {"rule": "Golden Ticket",       "severity": "CRITICAL", "description": "weird tgt"},
+    ]
+    d = diff_findings(a, b)
+    assert [f["rule"] for f in d["new"]]      == ["Golden Ticket"]
+    assert [f["rule"] for f in d["resolved"]] == ["RDP Logon Detected"]
+    assert [f["rule"] for f in d["shared"]]   == ["Brute Force Attempt"]
+    # attach_remediation should have decorated every bucket.
+    assert d["new"][0]["remediation"]
+
+
+def test_diff_findings_empty_inputs():
+    from pulse.comparison import diff_findings
+    d = diff_findings([], [])
+    assert d == {"new": [], "resolved": [], "shared": []}
+
+
+def test_diff_findings_distinguishes_same_rule_different_descriptions():
+    """Two brute-force hits from different IPs should not collapse as shared."""
+    from pulse.comparison import diff_findings
+    a = [{"rule": "Brute Force Attempt", "severity": "HIGH", "description": "from 1.1.1.1"}]
+    b = [{"rule": "Brute Force Attempt", "severity": "HIGH", "description": "from 2.2.2.2"}]
+    d = diff_findings(a, b)
+    assert len(d["new"])      == 1
+    assert len(d["resolved"]) == 1
+    assert d["shared"]        == []
+
+
 def test_build_pdf_produces_pdf_bytes_with_findings():
     """The PDF builder returns a non-empty PDF with the %PDF- header."""
     from pulse.pdf_report import build_pdf

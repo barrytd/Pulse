@@ -42,7 +42,7 @@ import {
   markFindingFalsePositive,
   resetFindingReview,
 } from './findings.js';
-import { highlightHistoryScan } from './history.js';
+import { highlightHistoryScan, runHistoryCompare } from './history.js';
 import {
   monitorClient,
   startMonitor,
@@ -116,6 +116,7 @@ const actions = {
 
   // history
   highlightHistoryScan,
+  runHistoryCompare,
 
   // monitor
   startMonitor,

@@ -521,6 +521,36 @@ def _register_routes(app: FastAPI) -> None:
         return {"daily_scores": daily}
 
     # -------------------------------------------------------------------
+    # GET /api/compare?a=<id>&b=<id> — diff two scans
+    # -------------------------------------------------------------------
+    @app.get("/api/compare")
+    def compare_scans(a: int, b: int):
+        """Return the new / resolved / shared findings between two scans."""
+        if a == b:
+            raise HTTPException(400, detail="a and b must be different scans.")
+
+        history_rows = get_history(app.state.db_path, limit=200)
+        scan_a = next((s for s in history_rows if s["id"] == a), None)
+        scan_b = next((s for s in history_rows if s["id"] == b), None)
+        if scan_a is None:
+            raise HTTPException(404, detail=f"Scan {a} not found.")
+        if scan_b is None:
+            raise HTTPException(404, detail=f"Scan {b} not found.")
+
+        from pulse.comparison import diff_findings
+        findings_a = get_scan_findings(app.state.db_path, a)
+        findings_b = get_scan_findings(app.state.db_path, b)
+        diff = diff_findings(findings_a, findings_b)
+
+        return {
+            "scan_a": scan_a,
+            "scan_b": scan_b,
+            "new":      diff["new"],
+            "resolved": diff["resolved"],
+            "shared":   diff["shared"],
+        }
+
+    # -------------------------------------------------------------------
     # GET /api/export/{scan_id} — download report as HTML or JSON
     # -------------------------------------------------------------------
     @app.get("/api/export/{scan_id}")
