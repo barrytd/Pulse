@@ -1489,6 +1489,101 @@ def test_json_only_with_empty_logs_emits_valid_json(tmp_path):
     assert "PULSE" not in result.stdout.split("{", 1)[0]
 
 
+# ---------------------------------------------------------------------------
+# SCHEDULER TESTS
+# ---------------------------------------------------------------------------
+
+from pulse.scheduler import find_new_stable_files, run_scheduler
+
+
+def test_find_new_stable_files_requires_two_polls(tmp_path):
+    """A file appearing for the first time should NOT be returned — we
+    need a second poll at the same size to confirm it's stable."""
+    f = tmp_path / "a.evtx"
+    f.write_bytes(b"x" * 100)
+    seen = {}
+
+    # First poll: record size but don't return yet.
+    assert find_new_stable_files(str(tmp_path), seen) == []
+    assert str(f.resolve()).lower() in (p.lower() for p in seen.keys())
+
+    # Second poll, size unchanged: now it's ready.
+    ready = find_new_stable_files(str(tmp_path), seen)
+    assert len(ready) == 1
+    assert ready[0].lower().endswith("a.evtx")
+
+
+def test_find_new_stable_files_skips_growing_files(tmp_path):
+    """Files whose size changes between polls are still being written —
+    keep waiting until size stops changing."""
+    f = tmp_path / "growing.evtx"
+    f.write_bytes(b"x" * 100)
+    seen = {}
+
+    find_new_stable_files(str(tmp_path), seen)   # record 100
+    f.write_bytes(b"x" * 200)                    # still growing
+    ready = find_new_stable_files(str(tmp_path), seen)
+    assert ready == []
+    # Now it's stable.
+    ready = find_new_stable_files(str(tmp_path), seen)
+    assert len(ready) == 1
+
+
+def test_find_new_stable_files_never_reprocesses(tmp_path):
+    """Once a file has been returned it shouldn't come back on later polls."""
+    f = tmp_path / "once.evtx"
+    f.write_bytes(b"data")
+    seen = {}
+    find_new_stable_files(str(tmp_path), seen)         # first sighting
+    first = find_new_stable_files(str(tmp_path), seen) # ready
+    assert len(first) == 1
+    # Subsequent polls: already scanned, nothing new.
+    assert find_new_stable_files(str(tmp_path), seen) == []
+    assert find_new_stable_files(str(tmp_path), seen) == []
+
+
+def test_find_new_stable_files_ignores_non_evtx(tmp_path):
+    """Only .evtx files are candidates — README, .txt, etc. are skipped."""
+    (tmp_path / "notes.txt").write_text("hello")
+    (tmp_path / "data.json").write_text("{}")
+    (tmp_path / "real.evtx").write_bytes(b"x")
+    seen = {}
+    find_new_stable_files(str(tmp_path), seen)
+    ready = find_new_stable_files(str(tmp_path), seen)
+    assert len(ready) == 1
+    assert ready[0].lower().endswith("real.evtx")
+
+
+def test_run_scheduler_invokes_callback_and_stops(tmp_path):
+    """run_scheduler with stop_after=2 should complete after two polls and
+    call on_new_file for a stable file."""
+    f = tmp_path / "one.evtx"
+    f.write_bytes(b"data")
+
+    calls = []
+    result = run_scheduler(
+        str(tmp_path), interval=0, on_new_file=lambda p: calls.append(p),
+        log=lambda *_a, **_k: None, sleep=lambda _s: None, stop_after=2,
+    )
+    assert result["iterations"] == 2
+    assert len(calls) == 1
+    assert calls[0].lower().endswith("one.evtx")
+
+
+def test_run_scheduler_callback_error_does_not_stop_loop(tmp_path):
+    """If on_new_file raises, the scheduler logs and keeps polling."""
+    (tmp_path / "boom.evtx").write_bytes(b"x")
+    logs = []
+    def bad_cb(_p): raise RuntimeError("kaboom")
+
+    result = run_scheduler(
+        str(tmp_path), interval=0, on_new_file=bad_cb,
+        log=lambda msg="": logs.append(msg), sleep=lambda _s: None, stop_after=3,
+    )
+    assert result["iterations"] == 3
+    assert any("kaboom" in m for m in logs)
+
+
 def test_quiet_with_empty_logs_produces_no_stdout(tmp_path):
     """End-to-end: --quiet against an empty logs folder suppresses the
     banner and the 'No .evtx files' help text."""

@@ -232,6 +232,15 @@ def build_arg_parser(config=None):
         help="Port the API listens on. Default: 8000",
     )
 
+    # --- ARGUMENT: --schedule ---
+    # Folder-watch mode: keeps running and scans every new .evtx file
+    # that arrives in --logs. Polling cadence reuses --interval.
+    parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Watch --logs for new .evtx files and auto-scan each one.",
+    )
+
     # --- ARGUMENT: --quiet ---
     # Suppresses banner and progress chatter so cron jobs and pipelines
     # don't get noisy. Errors still print. The final report path is the
@@ -557,6 +566,50 @@ def main():
             db_path=db_path if db_path else None,
             live=use_live,
         )
+        return
+
+    # --- SCHEDULE MODE ---
+    # If --schedule was passed, enter folder-watch mode: every new .evtx
+    # file that appears in --logs gets auto-scanned, saved, and alerted on.
+    # Blocks until Ctrl+C.
+    if args.schedule:
+        from pulse.scheduler import run_scheduler
+
+        whitelist_cfg = config.get("whitelist", {})
+        alert_config_sched   = config.get("alerts",  {}) or {}
+        webhook_config_sched = config.get("webhook", {}) or {}
+
+        def _scan_one(path):
+            events = parse_evtx(path, since_dt)
+            findings = run_all_detections(events or [])
+            SEV = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+            findings = [f for f in findings
+                        if SEV.index(f["severity"]) >= SEV.index(severity_filter)]
+            findings = filter_whitelist(findings, whitelist_cfg)
+
+            sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for f in findings:
+                sev_counts[f.get("severity", "LOW")] += 1
+            score, score_label, _ = _calculate_score(sev_counts)
+
+            stats = {
+                "total_events": len(events or []),
+                "files_scanned": 1,
+                "earliest": "Unknown", "latest": "Unknown",
+                "top_event_ids": [],
+                "filename": os.path.basename(path),
+            }
+            if db_path:
+                scan_id = save_scan(db_path, findings, scan_stats=stats,
+                                    score=score, score_label=score_label)
+                log(f"  [*] Scan #{scan_id}: {len(findings)} finding(s) — {os.path.basename(path)}")
+
+            if findings and not args.no_alerts:
+                dispatch_alerts(db_path, findings,
+                                config.get("email", {}) or {},
+                                alert_config_sched, webhook_config_sched)
+
+        run_scheduler(log_folder, watch_interval, _scan_one, log=log)
         return
 
     # --- STEP 1: PREFLIGHT CHECKS ---
