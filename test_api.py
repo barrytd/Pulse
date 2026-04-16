@@ -604,3 +604,22 @@ def test_report_endpoint_includes_review_fields(client):
     assert findings[0]["review_status"] == "new"
     assert "review_note" in findings[0]
     assert "reviewed_at" in findings[0]
+
+
+# ---------------------------------------------------------------------------
+# Remediation steps attached to findings
+# ---------------------------------------------------------------------------
+
+def test_report_endpoint_includes_remediation_steps(client):
+    """Each finding returned by /api/report must carry a non-empty
+    remediation list so the dashboard drawer can render it without
+    maintaining its own lookup table."""
+    _seed_finding(client)
+    r = client.get("/api/report/1")
+    assert r.status_code == 200
+    findings = r.json()["findings"]
+    steps = findings[0].get("remediation")
+    assert isinstance(steps, list) and len(steps) > 0
+    # Brute Force Attempt is a known rule — should match canonical steps.
+    from pulse.remediation import REMEDIATION
+    assert steps == REMEDIATION["Brute Force Attempt"]

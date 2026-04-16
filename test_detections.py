@@ -1584,6 +1584,75 @@ def test_run_scheduler_callback_error_does_not_stop_loop(tmp_path):
     assert any("kaboom" in m for m in logs)
 
 
+# ---------------------------------------------------------------------------
+# REMEDIATION TESTS
+# ---------------------------------------------------------------------------
+
+from pulse.remediation import (
+    REMEDIATION, DEFAULT_REMEDIATION, get_remediation, attach_remediation,
+)
+
+
+def test_every_detection_rule_has_remediation():
+    """Every rule a detection can emit must have a non-empty list of
+    remediation steps. If you add a new rule, add its remediation too."""
+    # Pulled from pulse/detections.py — these are the rule names actually
+    # emitted by run_all_detections. Keep in sync when rules change.
+    emitted_rules = [
+        "Brute Force Attempt", "User Account Created", "Privilege Escalation",
+        "Audit Log Cleared", "RDP Logon Detected", "Pass-the-Hash Attempt",
+        "Service Installed", "Antivirus Disabled", "Firewall Disabled",
+        "Firewall Rule Changed", "Account Lockout", "Scheduled Task Created",
+        "Suspicious PowerShell", "Account Takeover Chain",
+        "Malware Persistence Chain", "Kerberoasting", "Golden Ticket",
+        "Credential Dumping", "Logon from Disabled Account",
+        "After-Hours Logon", "Suspicious Registry Modification",
+        "Lateral Movement via Network Share", "DCSync Attempt",
+        "Suspicious Child Process",
+    ]
+    for rule in emitted_rules:
+        assert rule in REMEDIATION, f"Missing remediation for {rule!r}"
+        steps = REMEDIATION[rule]
+        assert isinstance(steps, list) and len(steps) >= 2, \
+            f"{rule}: need at least 2 actionable steps, got {steps!r}"
+        for s in steps:
+            assert isinstance(s, str) and s.strip(), \
+                f"{rule}: step must be a non-empty string"
+
+
+def test_get_remediation_returns_default_for_unknown_rule():
+    steps = get_remediation("Rule That Does Not Exist")
+    assert steps == DEFAULT_REMEDIATION
+    assert len(steps) >= 2
+
+
+def test_attach_remediation_decorates_findings_in_place():
+    findings = [
+        {"rule": "Brute Force Attempt", "severity": "HIGH"},
+        {"rule": "Kerberoasting",       "severity": "HIGH"},
+        {"rule": "Unknown Rule",        "severity": "LOW"},
+    ]
+    result = attach_remediation(findings)
+    # Returns the same list (so callers can chain).
+    assert result is findings
+    assert findings[0]["remediation"] == REMEDIATION["Brute Force Attempt"]
+    assert findings[1]["remediation"] == REMEDIATION["Kerberoasting"]
+    assert findings[2]["remediation"] == DEFAULT_REMEDIATION
+
+
+def test_attach_remediation_handles_empty_and_none():
+    assert attach_remediation([]) == []
+    assert attach_remediation(None) is None
+
+
+def test_reporter_reexports_remediation_from_canonical_module():
+    """pulse.reporter.REMEDIATION must be the exact same object as
+    pulse.remediation.REMEDIATION — one source of truth."""
+    from pulse import reporter
+    from pulse import remediation
+    assert reporter.REMEDIATION is remediation.REMEDIATION
+
+
 def test_quiet_with_empty_logs_produces_no_stdout(tmp_path):
     """End-to-end: --quiet against an empty logs folder suppresses the
     banner and the 'No .evtx files' help text."""

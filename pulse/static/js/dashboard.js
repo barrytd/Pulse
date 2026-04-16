@@ -39,31 +39,9 @@ export const mitreMap = {
   'Lateral Movement via Network Share': 'T1021.002',
 };
 
-// Rule -> remediation snippet (used by finding drawer and expand row).
-export const REMEDIATION = {
-  'Brute Force Attempt':       'Block the source IP, reset the targeted account, and review account-lockout policy. Enable MFA if not already.',
-  'Account Takeover Chain':    'Disable the account, force a password reset, invalidate sessions, and review recent activity for data access.',
-  'Account Lockout':           'Verify whether lockouts were from a legitimate user or an attacker. If attacker: block source, enable MFA.',
-  'User Account Created':      'Confirm the account was created by an authorized admin. If unexpected, disable it and investigate the creator.',
-  'Privilege Escalation':      'Audit the account\u2019s recent actions, remove elevated group membership if unexpected, and rotate admin credentials.',
-  'Audit Log Cleared':         'Treat as incident. Collect surrounding logs from forwarders and examine processes running near the clear event.',
-  'RDP Logon Detected':        'Verify the source IP is expected. Enforce Network Level Authentication and restrict RDP to VPN-only if exposed.',
-  'Pass-the-Hash Attempt':     'Isolate the host, rotate NTLM credentials, and investigate LSASS access. Consider Credential Guard.',
-  'Service Installed':         'Confirm the service is legitimate. Remove unknown services and inspect the binary path for persistence artifacts.',
-  'Scheduled Task Created':    'Audit the task\u2019s action and author. Remove if unauthorized and scan the target binary.',
-  'Suspicious PowerShell':     'Capture the full command line, look for obfuscation/encoding, and enable Script Block Logging if missing.',
-  'Antivirus Disabled':        'Re-enable AV immediately. Check for parent process and tamper-protection policy. Investigate as likely compromise.',
-  'Firewall Disabled':         'Re-enable the firewall and check GPO/local-policy for unauthorized changes.',
-  'Firewall Rule Changed':     'Audit the rule. Remove if unauthorized. Require GPO-controlled rules where possible.',
-  'Malware Persistence Chain': 'Isolate the host, collect memory + disk forensics, and review all persistence locations (services, tasks, Run keys).',
-  'Kerberoasting':             'Rotate SPN account passwords to long randomized values. Flag the requesting account for review.',
-  'Golden Ticket':             'Rotate krbtgt twice (24h apart) and hunt for other signs of Domain Controller compromise.',
-  'Credential Dumping':        'Isolate the host, rotate all credentials used recently, and investigate LSASS access paths.',
-  'Logon from Disabled Account': 'Confirm the account truly is disabled. If the logon succeeded, treat as major incident.',
-  'After-Hours Logon':         'Verify with the account owner. If unexpected, disable account and investigate source IP.',
-  'Suspicious Registry Modification': 'Review the key and values. Remove if unauthorized and audit the writing process.',
-  'Lateral Movement via Network Share': 'Check the accessing account and source host; rotate credentials if suspicious.',
-};
+// Per-rule remediation lives server-side (pulse/remediation.py) and
+// is attached to each finding as finding.remediation (array of step
+// strings). See findings.js::_remediationBlock for the renderer.
 
 // ---------------------------------------------------------------
 // Shared utilities

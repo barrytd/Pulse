@@ -19,7 +19,6 @@ import {
   showToast,
   toastError,
   mitreMap,
-  REMEDIATION,
   _extractTime,
   _restoreSearchFocus,
   _gradeFor,
@@ -569,7 +568,6 @@ function _buildFindingsTable(findings) {
 export function _expandRow(f, colspan) {
   var rule = f.rule || 'Unknown';
   var mitre = f.mitre || mitreMap[rule] || '';
-  var rem = REMEDIATION[rule] || 'Investigate the event in its surrounding context. Correlate with other logs from the same host and timeframe.';
   var desc = f.description || '';
   var details = f.details || '';
   var rawXml = f.raw_xml || '';
@@ -592,12 +590,26 @@ export function _expandRow(f, colspan) {
     '</div>' +
     (desc ? '<div class="expand-field" style="margin-bottom:10px;"><div class="label">Description</div><div class="val">' + escapeHtml(desc) + '</div></div>' : '') +
     (details ? '<div class="expand-field" style="margin-bottom:10px;"><div class="label">Event Details</div><div class="val mono" style="white-space:pre-wrap;">' + escapeHtml(details) + '</div></div>' : '') +
-    '<div class="remediation">' +
-      '<div class="rem-label">Remediation</div>' +
-      escapeHtml(rem) +
-    '</div>' +
+    _remediationBlock(f) +
     xmlBtn +
   '</td></tr>';
+}
+
+// Render the remediation card. Findings carry `remediation` as an array
+// of step strings (attached server-side); fall back to a generic default
+// if the API didn't include it (older cached responses, etc).
+export function _remediationBlock(f) {
+  var steps = Array.isArray(f.remediation) && f.remediation.length
+    ? f.remediation
+    : [
+        'Investigate the event in its surrounding context.',
+        'Correlate with other logs from the same host and timeframe.',
+      ];
+  var items = steps.map(function (s) { return '<li>' + escapeHtml(s) + '</li>'; }).join('');
+  return '<div class="remediation">' +
+    '<div class="rem-label">Remediation</div>' +
+    '<ol class="rem-steps">' + items + '</ol>' +
+  '</div>';
 }
 
 export function openFindingsPageDrawerByUid(uid) {
@@ -648,7 +660,6 @@ export function openFindingDrawer(f) {
     mitreLink +
     _reviewBadge(f.review_status || 'new');
 
-  var rem = REMEDIATION[rule] || 'Investigate the event in its surrounding context. Correlate with other logs from the same host and timeframe.';
   var time = f.timestamp || _extractTime(f) || '\u2014';
   var eid  = (f.event_id != null && f.event_id !== '') ? f.event_id : '\u2014';
   var desc = f.description || '';
@@ -683,10 +694,7 @@ export function openFindingDrawer(f) {
 
     '<div class="finding-drawer-section">' +
       '<div class="sec-label">Remediation</div>' +
-      '<div class="remediation">' +
-        '<div class="rem-label">Recommended action</div>' +
-        escapeHtml(rem) +
-      '</div>' +
+      _remediationBlock(f) +
     '</div>' +
 
     _renderReviewSection(f);

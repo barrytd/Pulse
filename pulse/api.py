@@ -48,6 +48,7 @@ from pulse.database import (
 )
 from pulse.detections import run_all_detections
 from pulse.emailer import dispatch_alerts
+from pulse.remediation import attach_remediation
 from pulse.monitor_service import MonitorManager
 from pulse.parser import parse_evtx
 from pulse.reporter import (
@@ -375,7 +376,7 @@ def _register_routes(app: FastAPI) -> None:
                 "score_label": score_data["label"],
                 "grade": score_data["grade"],
                 "severity_counts": sev_counts,
-                "findings": findings,
+                "findings": attach_remediation(findings),
                 "alert": alert_summary,
             }
         finally:
@@ -429,7 +430,7 @@ def _register_routes(app: FastAPI) -> None:
                     status_code=404,
                     detail=f"Scan {scan_id} not found.",
                 )
-        return {"scan_id": scan_id, "findings": findings}
+        return {"scan_id": scan_id, "findings": attach_remediation(findings)}
 
     # -------------------------------------------------------------------
     # PUT /api/finding/{id}/review — mark a finding reviewed / FP / new

@@ -62,7 +62,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ## Sprint 3 — Apr 28 – May 11, 2026 (Remediation & automation)
 
-- [ ] Remediation suggestions — each rule includes a "how to fix" recommendation with step-by-step guidance
+- [x] Remediation suggestions — each rule includes a "how to fix" recommendation with step-by-step guidance
 - [ ] Remediation tab rewrite — group fixes by rule and show MITRE mitigation IDs (M1026, etc.)
 - [x] Scheduled scans — watch a folder for new `.evtx` files and auto-scan on arrival
 - [ ] Recurring reports — auto-generate daily or weekly HTML summary reports
