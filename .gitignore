@@ -15,8 +15,9 @@ venv/
 # IDE settings (VS Code stores preferences here)
 .vscode/
 
-# Log files — these can be huge and are specific to each user
-logs/*.evtx
+# Log files — these can be huge and are specific to each user.
+# Match anywhere in the tree so stray copies in the project root never get committed.
+*.evtx
 
 # Generated reports — users will generate their own
 reports/*.txt
