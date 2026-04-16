@@ -3051,6 +3051,38 @@ def test_build_summary_report_empty_window(tmp_path):
     assert "No scans ran" in html
 
 
+def test_build_pdf_produces_pdf_bytes_with_findings():
+    """The PDF builder returns a non-empty PDF with the %PDF- header."""
+    from pulse.pdf_report import build_pdf
+    findings = [
+        {
+            "rule": "Brute Force Attempt", "severity": "HIGH",
+            "timestamp": "2026-04-16 10:00:00", "event_id": "4625",
+            "mitre": "T1110", "description": "5 failed logins",
+            "details": "account: alice  ip: 1.2.3.4",
+        },
+        {
+            "rule": "RDP Logon Detected", "severity": "LOW",
+            "timestamp": "2026-04-16 10:05:00", "event_id": "4624",
+            "mitre": "T1021.001", "description": "RDP from known IP",
+            "details": "",
+        },
+    ]
+    blob = build_pdf(findings, scan_meta={"id": 1, "scanned_at": "2026-04-16 10:00:00",
+                                          "hostname": "HOST-A"})
+    assert isinstance(blob, (bytes, bytearray))
+    assert blob[:5] == b"%PDF-"
+    # Rough sanity bound — a two-finding PDF should be at least a few KB.
+    assert len(blob) > 500
+
+
+def test_build_pdf_with_no_findings_still_renders():
+    from pulse.pdf_report import build_pdf
+    blob = build_pdf([])
+    assert blob[:5] == b"%PDF-"
+    assert len(blob) > 300
+
+
 def test_summary_cli_writes_report(tmp_path):
     """End-to-end: --summary weekly against a seeded DB writes an HTML file
     and prints the path under --quiet."""

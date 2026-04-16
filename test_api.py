@@ -623,3 +623,41 @@ def test_report_endpoint_includes_remediation_steps(client):
     # Brute Force Attempt is a known rule — should match canonical steps.
     from pulse.remediation import REMEDIATION
     assert steps == REMEDIATION["Brute Force Attempt"]
+
+
+# ---------------------------------------------------------------------------
+# PDF export
+# ---------------------------------------------------------------------------
+
+def test_export_pdf_returns_pdf_bytes(client):
+    """/api/export/{id}?format=pdf returns an attachment with PDF MIME."""
+    _seed_finding(client)
+    r = client.get("/api/export/1?format=pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert "attachment" in r.headers["content-disposition"]
+    assert "pulse_scan_1.pdf" in r.headers["content-disposition"]
+    # Every PDF begins with the %PDF- magic bytes; this is the cheapest
+    # integrity check that reportlab actually produced a valid file.
+    assert r.content[:5] == b"%PDF-"
+
+
+def test_export_pdf_for_unknown_scan_returns_404(client):
+    r = client.get("/api/export/999?format=pdf")
+    assert r.status_code == 404
+
+
+def test_export_rejects_unknown_format(client):
+    _seed_finding(client)
+    r = client.get("/api/export/1?format=xml")
+    assert r.status_code == 400
+
+
+def test_report_endpoint_supports_pdf_format(client):
+    """Back-compat: /api/report/{id}?format=pdf should also work so older
+    clients hitting that route get PDFs just like /api/export does."""
+    _seed_finding(client)
+    r = client.get("/api/report/1?format=pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert r.content[:5] == b"%PDF-"

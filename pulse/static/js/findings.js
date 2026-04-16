@@ -279,6 +279,7 @@ export async function viewScan(scanId) {
         '<span>Findings \u2014 ' + escapeHtml(fname) + '</span>' +
         '<div style="display:flex; gap:8px;">' +
           '<button class="btn-small" data-action="downloadReport" data-arg="' + scanId + '" data-format="html">Export HTML</button>' +
+          '<button class="btn-small" data-action="downloadReport" data-arg="' + scanId + '" data-format="pdf" style="background:var(--border); color:var(--text);">Export PDF</button>' +
           '<button class="btn-small" data-action="downloadReport" data-arg="' + scanId + '" data-format="json" style="background:var(--border); color:var(--text);">Export JSON</button>' +
         '</div>' +
       '</div>' +

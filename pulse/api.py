@@ -418,19 +418,37 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/report/{scan_id}
     # -------------------------------------------------------------------
     @app.get("/api/report/{scan_id}")
-    def report(scan_id: int):
-        """Return every finding recorded for a specific past scan."""
+    def report(scan_id: int, format: str = "json"):
+        """Return every finding recorded for a specific past scan.
+
+        When ?format=pdf, a binary PDF is returned as an attachment so the
+        dashboard can offer a one-click PDF download.
+        """
         findings = get_scan_findings(app.state.db_path, scan_id)
-        if not findings:
-            # Could be a bad ID, or a scan with zero findings. Distinguish
-            # by checking the scans table — if no row exists, 404.
-            history_rows = get_history(app.state.db_path, limit=200)
-            if not any(s["id"] == scan_id for s in history_rows):
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Scan {scan_id} not found.",
-                )
-        return {"scan_id": scan_id, "findings": attach_remediation(findings)}
+        # Distinguish "scan exists but zero findings" from "scan not found"
+        # by checking the scans table.
+        history_rows = get_history(app.state.db_path, limit=200)
+        scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
+        if not findings and scan_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Scan {scan_id} not found.",
+            )
+
+        decorated = attach_remediation(findings)
+
+        if format == "pdf":
+            from pulse.pdf_report import build_pdf
+            pdf_bytes = build_pdf(decorated, scan_meta=scan_row)
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'attachment; filename="pulse_scan_{scan_id}.pdf"'
+                },
+            )
+
+        return {"scan_id": scan_id, "findings": decorated}
 
     # -------------------------------------------------------------------
     # PUT /api/finding/{id}/review — mark a finding reviewed / FP / new
@@ -507,9 +525,9 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/export/{scan_id}")
     def export_report(scan_id: int, format: str = "html"):
-        """Download a formatted report for a past scan."""
-        if format not in ("html", "json"):
-            raise HTTPException(400, detail="format must be 'html' or 'json'.")
+        """Download a formatted report for a past scan (html | json | pdf)."""
+        if format not in ("html", "json", "pdf"):
+            raise HTTPException(400, detail="format must be 'html', 'json', or 'pdf'.")
 
         findings = get_scan_findings(app.state.db_path, scan_id)
         history_rows = get_history(app.state.db_path, limit=200)
@@ -536,6 +554,15 @@ def _register_routes(app: FastAPI) -> None:
                 content=content,
                 media_type="application/json",
                 headers={"Content-Disposition": f"attachment; filename=pulse_scan_{scan_id}.json"},
+            )
+
+        if format == "pdf":
+            from pulse.pdf_report import build_pdf
+            pdf_bytes = build_pdf(attach_remediation(findings), scan_meta=scan_row)
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="pulse_scan_{scan_id}.pdf"'},
             )
 
         content = _build_html_report(findings, sev_counts, scan_stats)

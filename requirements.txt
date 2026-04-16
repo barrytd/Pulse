@@ -11,3 +11,5 @@ uvicorn[standard]>=0.23.0
 python-multipart>=0.0.6
 # httpx: Required by FastAPI's TestClient in test_api.py (not used at runtime)
 httpx>=0.25.0
+# reportlab: Pure-Python PDF generator used for dashboard PDF export
+reportlab>=4.0.0
