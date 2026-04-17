@@ -65,6 +65,20 @@ export async function runSystemScan() {
       return;
     }
     var r = result.data;
+    // Zero events across every file almost always means the Security log
+    // wasn't readable — which happens when Pulse isn't running elevated.
+    // Surface that explicitly instead of a quietly-successful "0 findings".
+    if (r.total_events === 0 && !r.is_admin) {
+      status.innerHTML =
+        '<strong>Scan returned 0 events.</strong> ' +
+        'The Security event log needs administrator access to read. ' +
+        'Close Pulse, right-click the launcher and choose ' +
+        '<em>Run as administrator</em>, then try again.';
+      status.className = 'upload-status error';
+      runBtn.disabled = false;
+      toastError('Scan returned 0 events \u2014 relaunch Pulse as administrator.');
+      return;
+    }
     status.textContent =
       r.total_findings + ' finding(s) from ' +
       r.total_events + ' event(s) across ' +

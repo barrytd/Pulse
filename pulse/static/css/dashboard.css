@@ -15,7 +15,12 @@
   border-radius: 6px;
   padding: 12px 16px;
   box-shadow: var(--shadow);
+  transition: background 150ms ease;
 }
+
+.stat-card.stat-card-clickable { cursor: pointer; }
+.stat-card.stat-card-clickable:hover,
+.stat-card.selected { background: var(--hover-bg); }
 
 /* Left-border accent variants — Splunk-style status colour */
 .stat-card.accent-critical { border-left-color: #f85149; }
@@ -74,6 +79,15 @@
   font-size: 12px;
 }
 
+.mitre-row {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  transition: background 150ms ease;
+}
+.mitre-row:hover { background: var(--hover-bg); }
+
 .mitre-row .label {
   color: var(--text);
   font-weight: 500;
@@ -106,7 +120,7 @@
 
 .dash-finding-row {
   display: grid;
-  grid-template-columns: 130px 1fr 80px;
+  grid-template-columns: 130px 1fr 80px 18px;
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
@@ -115,18 +129,32 @@
   border-left: 3px solid var(--text-muted);
   border-radius: 4px;
   font-size: 12px;
+  position: relative;
 }
+
+
+.dash-finding-row .finding-status-col {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Reviewed/FP rows are muted so open items stand out. Hovering lifts
+   the mute so users can still read the row content easily. */
+.dash-finding-row.row-reviewed { opacity: 0.6; }
+.dash-finding-row.row-reviewed:hover { opacity: 1; }
 
 .dash-finding-row.sev-critical { border-left-color: #f85149; }
 .dash-finding-row.sev-high     { border-left-color: #f0883e; }
 .dash-finding-row.sev-medium   { border-left-color: #d29922; }
 .dash-finding-row.sev-low      { border-left-color: #3fb950; }
 
-.dash-finding-row[data-action] { transition: background 0.1s, border-color 0.1s; }
-.dash-finding-row[data-action]:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.04));
-  border-color: var(--accent);
+.dash-finding-row[data-action] {
+  cursor: pointer;
+  transition: background 150ms ease;
 }
+.dash-finding-row[data-action]:hover,
+.dash-finding-row.selected { background: var(--hover-bg); }
 
 .dash-finding-row .time { color: var(--text-muted); font-family: monospace; font-size: 11px; }
 .dash-finding-row .rule { color: var(--text); font-weight: 600; }
@@ -178,14 +206,93 @@
   position: relative;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-left: 3px solid #3fb950;
   border-radius: 8px;
   padding: 16px 20px;
   margin-bottom: 16px;
   box-shadow: var(--shadow);
 }
-.live-panel.idle {
-  border-left-color: var(--text-muted);
+
+/* Unified live panel — single card with header row + feed body. */
+.live-panel.live-unified {
+  padding: 0;
+}
+.live-unified-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  background: transparent;
+  color: var(--text);
+}
+.live-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+/* Column wrapper that stacks the LIVE dot+badge over the muted
+   channel/interval summary subtitle. */
+.live-header-left-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.live-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+  margin-left: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+.live-stats-inline {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.live-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+.live-stat .k {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.live-stat .v {
+  color: var(--text);
+  font-weight: 600;
+}
+.live-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.live-unified-body {
+  padding: 0;
+}
+.live-unified-body .live-feed {
+  border: 0;
+  margin: 0;
+}
+.live-unified-body .live-feed.empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  border: 0;
 }
 
 .live-header {
@@ -262,59 +369,202 @@
   line-height: 1;
 }
 
-.live-settings-popover {
-  display: none;
+/* ---------------------------------------------------------------- */
+/* Shared pulse-dropdown — reused by the monitor gear popover and    */
+/* the user-avatar menu in the topbar. Positioned by the caller.     */
+/* ---------------------------------------------------------------- */
+.pulse-dropdown {
   position: absolute;
-  right: 20px;
-  top: 52px;
-  z-index: 30;
-  width: 320px;
-  padding: 14px;
+  z-index: 50;
+  min-width: 260px;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  padding: 6px 0;
+  color: var(--text);
 }
-.live-settings-popover.open { display: block; }
+.pulse-dropdown[hidden] { display: none; }
+.pulse-dropdown-section { padding: 8px 14px; }
+.pulse-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+.pulse-dropdown-header {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
 
-.live-settings-head {
+/* Monitor gear dropdown — anchored to the gear button on the right of
+   the live-panel header. Absolute positioning anchors under the button
+   with a small gap so it visually detaches from the button. */
+.mon-gear-wrap {
+  position: relative;
+  display: inline-block;
+}
+.mon-gear-dropdown {
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 320px;
+}
+.gear-slider-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
+}
+.gear-slider-row input[type="range"] {
+  flex: 1;
+  margin: 0;
+}
+.gear-slider-value {
   font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-muted);
-  margin-bottom: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
 }
-.live-settings-close {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.live-settings-close:hover { color: var(--text); }
 
-.live-settings-row { margin-bottom: 10px; }
-.live-settings-row label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
+/* 2x3 grid of channel pills. Selected = subtle accent-blue tint;
+   unselected = muted text with a neutral border. The underlying
+   checkbox is visually hidden but still receives the change event
+   (bubbles up to the existing toggleChannelOption handler). */
+.channel-pill-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.channel-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  font-size: 12px;
   color: var(--text-muted);
-  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.channel-pill input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.channel-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.channel-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.channel-pill.selected {
+  background: rgba(56, 139, 253, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.channel-pill.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Collapsible Settings card at the top of the Monitor page. Header row
+   shows a single-line summary of the current config (channels + poll
+   interval); clicking anywhere on the row toggles the body open/closed. */
+.mon-settings-card { padding: 0; overflow: hidden; }
+.mon-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+.mon-settings-row:hover { background: rgba(255, 255, 255, 0.03); }
+.mon-settings-row.open  { border-bottom: 1px solid var(--border); }
+.mon-settings-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mon-settings-summary {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mon-settings-caret {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.mon-settings-body { padding: 12px 16px; }
+
+/* Settings body columns — slider on the left, 2x3 channel grid on the
+   right. Kept compact on purpose so the whole expanded panel stays
+   short and never pushes the live panel or feed below off-screen. */
+.mon-settings-cols {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2fr;
+  gap: 24px;
+  align-items: start;
+}
+.mon-settings-fieldlabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
   margin-bottom: 6px;
 }
-.live-settings-row input[type="range"] { width: 100%; }
-.live-settings-row .hint {
+.mon-settings-interval input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+.mon-settings-intervalval {
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 4px;
+  margin-top: 2px;
+}
+
+.channel-inline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+}
+.channel-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.channel-chip input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .live-meta {
@@ -390,6 +640,11 @@
   color: #f0883e;
   font-weight: 600;
 }
+.monitor-checks-table tbody tr {
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.monitor-checks-table tbody tr:hover td { background: var(--hover-bg); }
 
 /* Monitor Sessions — collapsible DVR cards of Start→Stop spans */
 .monitor-sessions {
@@ -411,9 +666,9 @@
   padding: 10px 14px;
   cursor: pointer;
   user-select: none;
-  transition: background 0.1s;
+  transition: background 150ms ease;
 }
-.session-head:hover { background: var(--hover-row); }
+.session-head:hover { background: var(--hover-bg); }
 .session-caret {
   width: 12px;
   color: var(--text-muted);
@@ -471,8 +726,11 @@
   color: var(--text-muted);
   font-weight: 600;
 }
-.session-findings-table tr.clickable { cursor: pointer; }
-.session-findings-table tr.clickable:hover td { background: var(--hover-row); }
+.session-findings-table tr.clickable {
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.session-findings-table tr.clickable:hover td { background: var(--hover-bg); }
 .session-findings-table tr:last-child td { border-bottom: none; }
 
 .monitor-settings {
@@ -562,9 +820,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 10px 8px;
   border-radius: 4px;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--text);
   cursor: pointer;
   user-select: none;
@@ -577,8 +836,7 @@
   flex-shrink: 0;
 }
 .channel-option span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 1;
   white-space: nowrap;
 }
 
@@ -731,6 +989,12 @@
 .history-table tr:last-child td {
   border-bottom: none;
 }
+
+.history-table tbody tr {
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.history-table tbody tr:hover td { background: var(--hover-bg); }
 
 .trend-up   { color: #10b981; font-weight: 600; }
 .trend-down { color: #ef4444; font-weight: 600; }
@@ -952,6 +1216,22 @@
 .dash-filter-search:focus { border-color: var(--accent); }
 .dash-filter-search::placeholder { color: var(--text-muted); }
 
+.dash-filter-date {
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  min-width: 140px;
+  color-scheme: light dark;
+}
+.dash-filter-date:focus { border-color: var(--accent); }
+
 .dash-filter-spacer { flex: 1; }
 
 .dash-filter-apply {
@@ -1011,4 +1291,246 @@
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-bottom: 16px;
+}
+
+/* -----------------------------------------------------------------
+   Needs Attention widget
+   Dashboard-only panel that surfaces unreviewed CRITICAL/HIGH findings
+   from the last 7 days. Left-border accent colour flips red/amber/green
+   based on the worst severity currently in the list.
+----------------------------------------------------------------- */
+.needs-attention {
+  background: var(--panel, #161b22);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.needs-attention.accent-critical { border-left-color: #f85149; }
+.needs-attention.accent-high     { border-left-color: #d29922; }
+.needs-attention.clear {
+  border-left-color: #3fb950;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #3fb950;
+  font-weight: 500;
+  font-size: 13px;
+}
+.needs-attention.clear .na-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3fb950;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.needs-attention .na-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.needs-attention .na-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.needs-attention .na-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+.needs-attention .na-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.needs-attention .na-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 140px 140px;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: background 0.12s;
+}
+.needs-attention .na-row:hover { background: rgba(255,255,255,0.04); }
+.needs-attention .na-rule { font-weight: 500; }
+.needs-attention .na-host {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.needs-attention .na-time {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.needs-attention .na-more {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.needs-attention .na-more:hover { text-decoration: underline; }
+
+/* -----------------------------------------------------------------
+   Top Triggered Rules list (security score card)
+----------------------------------------------------------------- */
+.top-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.top-rules-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.top-rules-row:hover { background: var(--hover-bg); }
+.top-rules-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top-rules-count {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: #fff;
+  background: var(--border);
+}
+.top-rules-count.sev-critical { background: #f85149; }
+.top-rules-count.sev-high     { background: #d29922; }
+.top-rules-count.sev-medium   { background: #58a6ff; }
+.top-rules-count.sev-low      { background: #3fb950; }
+
+/* -----------------------------------------------------------------
+   Dashboard live-monitor compact row (collapsed state)
+----------------------------------------------------------------- */
+/* Topbar live-monitor indicator — small green pulsing dot + "Live" text
+   shown on every page when the monitor is active. Hidden when idle.
+   Clicking navigates to the Monitor page. Reuses the existing
+   live-pulse keyframe for the dot. */
+.nav-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #3fb950;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.nav-live-indicator:hover { background: rgba(63, 185, 80, 0.10); }
+.nav-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.6);
+  animation: live-pulse 2s infinite;
+}
+
+/* -----------------------------------------------------------------
+   Reports page
+----------------------------------------------------------------- */
+.reports-table td.col-actions { white-space: nowrap; }
+.fmt-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: var(--border);
+}
+.fmt-badge.fmt-html  { background: #58a6ff; }
+.fmt-badge.fmt-pdf   { background: #f85149; }
+.fmt-badge.fmt-json  { background: #3fb950; }
+.fmt-badge.fmt-csv   { background: #d29922; }
+.fmt-badge.fmt-other { background: var(--text-muted); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-danger {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+.btn-danger:hover { background: rgba(248, 81, 73, 0.25); }
+
+/* -----------------------------------------------------------------
+   Rules page — enable/disable toggle switch
+----------------------------------------------------------------- */
+.rules-table td.col-actions { white-space: nowrap; }
+.rules-table tr.rule-row-disabled { opacity: 0.55; }
+.rules-table tr.rule-row-disabled:hover { opacity: 1; }
+.rules-table .muted { color: var(--text-muted); }
+.rule-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font-size: 12px;
+}
+.rule-toggle-track {
+  display: inline-block;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: #4b5563;
+  border-radius: 10px;
+  transition: background 0.18s;
+}
+.rule-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: left 0.18s;
+}
+.rule-toggle.on .rule-toggle-track { background: #22c55e; }
+.rule-toggle.on .rule-toggle-thumb { left: 18px; }
+.rule-toggle.off .rule-toggle-label { color: var(--text-muted); }
+.rule-toggle-label {
+  font-weight: 500;
+  font-size: 13px;
+  display: inline-block;
+  min-width: 58px;
+  text-align: left;
 }

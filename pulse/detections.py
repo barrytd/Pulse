@@ -242,6 +242,26 @@ def _parse_event_time(event):
             return None
 
 
+def _extract_computer_from_xml(xml_str):
+    """Pull the Computer field out of a raw event XML string.
+
+    Returns None on parse failure or if the element is missing. Used as a
+    post-pass fallback so per-event findings inherit the hostname from the
+    event they matched without every detection function having to set it.
+    """
+    if not xml_str:
+        return None
+    try:
+        root = ET.fromstring(xml_str)
+        comp = root.find(f"{NS}System/{NS}Computer")
+        if comp is not None and comp.text:
+            name = comp.text.strip()
+            return name or None
+    except Exception:
+        pass
+    return None
+
+
 def _get_xml_field(xml_tree, field_name):
     """Extract a named field from EventData in a parsed XML tree."""
     for el in xml_tree.findall(f"{NS}EventData/{NS}Data"):
@@ -283,6 +303,9 @@ def detect_brute_force(events):
     # Unlike a string like "2024-01-15T08:00:01", a datetime object lets you
     # do math — you can subtract two datetimes to get the gap between them.
     failure_times = {}
+    # Remember the first Computer we saw per account so the aggregate finding
+    # can carry a hostname (raw_xml isn't attached on brute-force findings).
+    failure_hosts = {}
 
     for event in events:
 
@@ -326,6 +349,7 @@ def detect_brute_force(events):
         # setdefault() creates an empty list the first time we see an account,
         # then appends to it every subsequent time.
         failure_times.setdefault(target_user, []).append(event_time)
+        failure_hosts.setdefault(target_user, event.get("computer"))
 
     # --- SLIDING WINDOW CHECK PER ACCOUNT ---
     # Now we check each account's list of failure timestamps.
@@ -364,6 +388,7 @@ def detect_brute_force(events):
                     findings.append({
                         "rule": "Brute Force Attempt",
                         "severity": "HIGH",
+                        "hostname": failure_hosts.get(account),
                         "details": (
                             f"Account '{account}' had {BRUTE_FORCE_THRESHOLD}+ failed "
                             f"login attempts within {BRUTE_FORCE_WINDOW_MINUTES} minutes "
@@ -1226,6 +1251,7 @@ def detect_account_takeover_chain(events):
     failure_times   = {}  # account -> list of failure datetimes
     success_times   = {}  # account -> list of success datetimes
     new_users_found = []  # list of (new_username, created_at) tuples
+    account_hosts   = {}  # account -> first Computer value we saw
 
     for event in events:
 
@@ -1250,6 +1276,7 @@ def detect_account_takeover_chain(events):
                     break
             if user:
                 failure_times.setdefault(user, []).append(event_time)
+                account_hosts.setdefault(user, event.get("computer"))
 
         # --- COLLECT SUCCESSFUL LOGINS (non-RDP, type 3 = network) ---
         # We're looking for the attacker getting IN, not just RDP sessions.
@@ -1261,6 +1288,7 @@ def detect_account_takeover_chain(events):
                     break
             if user:
                 success_times.setdefault(user, []).append(event_time)
+                account_hosts.setdefault(user, event.get("computer"))
 
         # --- COLLECT NEW ACCOUNT CREATION EVENTS ---
         elif event["event_id"] == EVENT_USER_CREATED:
@@ -1314,6 +1342,7 @@ def detect_account_takeover_chain(events):
         findings.append({
             "rule": "Account Takeover Chain",
             "severity": "CRITICAL",
+            "hostname": account_hosts.get(account),
             "details": (
                 f"ATTACK CHAIN DETECTED for account '{account}': "
                 f"({len(failures)}) failed logins ending at "
@@ -1355,6 +1384,7 @@ def detect_malware_persistence_chain(events):
 
     av_disabled_times  = []  # list of datetimes when AV was turned off
     services_installed = []  # list of (service_name, datetime) tuples
+    chain_host = None        # first Computer we see from a participating event
 
     for event in events:
 
@@ -1369,6 +1399,8 @@ def detect_malware_persistence_chain(events):
 
         if event["event_id"] == EVENT_AV_DISABLED:
             av_disabled_times.append(event_time)
+            if chain_host is None:
+                chain_host = event.get("computer")
 
         elif event["event_id"] == EVENT_SERVICE_INSTALLED:
             xml_tree = ET.fromstring(event["data"])
@@ -1379,6 +1411,8 @@ def detect_malware_persistence_chain(events):
                     break
             if service_name:
                 services_installed.append((service_name, event_time))
+                if chain_host is None:
+                    chain_host = event.get("computer")
 
     # If we never saw AV disabled or no services were installed, no chain.
     if not av_disabled_times or not services_installed:
@@ -1398,6 +1432,7 @@ def detect_malware_persistence_chain(events):
         findings.append({
             "rule": "Malware Persistence Chain",
             "severity": "CRITICAL",
+            "hostname": chain_host,
             "details": (
                 f"ATTACK CHAIN DETECTED: Antivirus was disabled at "
                 f"{first_av_disabled.strftime('%Y-%m-%dT%H:%M:%S')}, "
@@ -1901,5 +1936,12 @@ def run_all_detections(events):
     for f in findings:
         if f.get("details"):
             f["details"] = _resolve_sids_in_text(f["details"])
+
+    # Stamp each finding with the hostname from its source event's Computer
+    # field. Aggregate detections (brute force, chain rules) already set this
+    # explicitly; per-event detections carry raw_xml, so we pull it from there.
+    for f in findings:
+        if not f.get("hostname") and f.get("raw_xml"):
+            f["hostname"] = _extract_computer_from_xml(f["raw_xml"])
 
     return findings

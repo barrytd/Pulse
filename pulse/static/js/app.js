@@ -25,6 +25,8 @@ import {
   resetDashFilters,
   dashFilterQueryKey,
   openFindingDrawerByIdx,
+  openAttentionFinding,
+  clickStatCard,
 } from './dashboard.js';
 import {
   toggleScanSelect,
@@ -46,11 +48,13 @@ import {
   openScanDetailFindingByIdx,
   markFindingReviewed,
   markFindingFalsePositive,
-  resetFindingReview,
+  openUnreviewedCriticalHigh,
 } from './findings.js';
 import { highlightHistoryScan, runHistoryCompare } from './history.js';
+import { fleetOpenHost } from './fleet.js';
 import {
   monitorClient,
+  mountNavLiveIndicator,
   startMonitor,
   stopMonitor,
   sendMonitorTestAlert,
@@ -60,13 +64,15 @@ import {
   toggleCustomChannelEnable,
   updateCustomChannels,
   openLiveFeedFinding,
-  toggleLiveSettingsPopover,
-  updatePopoverIntervalLabel,
   savePopoverInterval,
   toggleSessionExpand,
   openSessionFinding,
   deleteMonitorSession,
   clearMonitorSessions,
+  toggleMonSettings,
+  toggleMonGearDropdown,
+  togglePollHistoryExpand,
+  togglePollHistoryFilter,
 } from './monitor.js';
 import {
   toggleBuiltinWhitelist,
@@ -86,7 +92,25 @@ import {
   sendTestWebhook,
   onScheduleKindChange,
   saveScheduleSettings,
+  switchSettingsTab,
 } from './settings.js';
+import {
+  setReportsQueryFromInput,
+  deleteReport,
+} from './reports.js';
+import {
+  toggleRuleEnabled,
+} from './rules.js';
+import {
+  mountUserMenu,
+  toggleUserMenu,
+  openProfile,
+  openAccountSettings,
+  openDocs,
+  openFeedback,
+  logOutFromMenu,
+  toggleDarkModeFromMenu,
+} from './user-menu.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -117,6 +141,9 @@ const actions = {
   resetDashFilters,
   dashFilterQueryKey,
   openFindingDrawerByIdx,
+  openAttentionFinding,
+  clickStatCard,
+  openUnreviewedCriticalHigh,
 
   // scans + findings
   toggleScanSelect,
@@ -138,11 +165,13 @@ const actions = {
   openScanDetailFindingByIdx,
   markFindingReviewed,
   markFindingFalsePositive,
-  resetFindingReview,
 
   // history
   highlightHistoryScan,
   runHistoryCompare,
+
+  // fleet
+  fleetOpenHost,
 
   // monitor
   startMonitor,
@@ -154,13 +183,15 @@ const actions = {
   toggleCustomChannelEnable,
   updateCustomChannels,
   openLiveFeedFinding,
-  toggleLiveSettingsPopover,
-  updatePopoverIntervalLabel,
   savePopoverInterval,
   toggleSessionExpand,
   openSessionFinding,
   deleteMonitorSession,
   clearMonitorSessions,
+  toggleMonSettings,
+  toggleMonGearDropdown,
+  togglePollHistoryExpand,
+  togglePollHistoryFilter,
 
   // whitelist
   toggleBuiltinWhitelist,
@@ -180,6 +211,23 @@ const actions = {
   sendTestWebhook,
   onScheduleKindChange,
   saveScheduleSettings,
+  switchSettingsTab,
+
+  // reports
+  setReportsQueryFromInput,
+  deleteReport,
+
+  // rules
+  toggleRuleEnabled,
+
+  // user menu
+  toggleUserMenu,
+  openProfile,
+  openAccountSettings,
+  openDocs,
+  openFeedback,
+  logOutFromMenu,
+  toggleDarkModeFromMenu,
 
   // admin privilege banner
   dismissAdminBanner,
@@ -256,10 +304,23 @@ function _boot() {
   var target = validPages.indexOf(startPage) >= 0 ? startPage : 'dashboard';
   navigate(target);
 
-  // Kick off the live-monitor SSE client — fire-and-forget. If the
-  // page happens to be the dashboard, mountDashLivePanel() will pick
-  // up state from monitorClient once init resolves.
+  // Kick off the live-monitor SSE client — fire-and-forget. The topbar
+  // "Live" indicator subscribes immediately so it reflects state on
+  // every page, not just the dashboard.
   monitorClient.init();
+  mountNavLiveIndicator();
+
+  // Hydrate Lucide icons once at startup. Sidebar nav, topbar user
+  // menu, and the monitor gear dropdown all render from static markup
+  // (or boot-time render) so a single pass covers them.
+  try {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  } catch (e) {}
+
+  // Populate the topbar avatar with the signed-in user's initials.
+  mountUserMenu();
 
   // Privilege banner — only fires on Windows hosts when the process
   // doesn't hold admin rights and the user hasn't already dismissed it.

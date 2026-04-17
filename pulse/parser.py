@@ -183,11 +183,15 @@ def _parse_evtx_fast(file_path, since=None):
             rec_el = sys_el.find(f"{_NS}EventRecordID")
             record_num = int(rec_el.text) if rec_el is not None else None
 
+            comp_el = sys_el.find(f"{_NS}Computer")
+            computer = (comp_el.text or "").strip() if comp_el is not None and comp_el.text else None
+
             events.append({
                 "event_id":   event_id,
                 "timestamp":  timestamp,
                 "data":       xml_string,
                 "record_num": record_num,
+                "computer":   computer,
             })
         except Exception:
             continue
@@ -261,11 +265,15 @@ def _parse_evtx_full(file_path, since=None):
                 except Exception:
                     pass
 
+            comp_el = xml_tree.find(f"{_NS}System/{_NS}Computer")
+            computer = (comp_el.text or "").strip() if comp_el is not None and comp_el.text else None
+
             events.append({
                 "event_id":   event_id,
                 "timestamp":  timestamp,
                 "data":       xml_string,
                 "record_num": record_num,
+                "computer":   computer,
             })
 
     return events

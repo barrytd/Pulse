@@ -24,6 +24,7 @@ from collections import Counter                      # Built-in: counts how ofte
 import yaml                                          # Third-party: reads YAML config files
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
+from pulse.rules_config import filter_by_enabled, get_disabled_rules
 from pulse.reporter import generate_report, SEVERITY_ORDER
 from pulse.emailer import (
     send_report, validate_email_config, dispatch_alerts,
@@ -660,6 +661,7 @@ def main():
             findings = [f for f in findings
                         if SEV.index(f["severity"]) >= SEV.index(severity_filter)]
             findings = filter_whitelist(findings, whitelist_cfg)
+            findings = filter_by_enabled(findings, get_disabled_rules(config))
 
             sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
             for f in findings:
@@ -859,6 +861,18 @@ def main():
     suppressed = before_count - len(findings)
     if suppressed > 0:
         log(f"  [*] Whitelist suppressed {suppressed} finding(s)")
+
+    # --- FILTER BY DISABLED RULES ---
+    # Honor any rule the analyst toggled off in the dashboard. Runs
+    # after whitelist so an explicitly-disabled rule wins regardless
+    # of whitelist coverage.
+    disabled_rules = get_disabled_rules(config)
+    if disabled_rules:
+        before_count = len(findings)
+        findings = filter_by_enabled(findings, disabled_rules)
+        rule_suppressed = before_count - len(findings)
+        if rule_suppressed > 0:
+            log(f"  [*] Disabled rules suppressed {rule_suppressed} finding(s)")
 
     # --- APPLY BASELINE COMPARISON ---
     # If a baseline was loaded, prepend extra findings for anything new.

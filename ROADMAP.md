@@ -41,11 +41,11 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - **Dashboard zero-state polish** — friendly banner + empty panels when the filtered window has no scans, instead of hiding everything
 - **Slack / Discord webhook delivery** — alongside email alerts, with shared cooldown, payload caps, and a Settings card with test button
 - **Frontend modularized** — `pulse/web/index.html` split into native ES modules under `pulse/static/js/` (api, dashboard, scans, findings, monitor, settings, etc.) with a central action registry replacing inline `on*` handlers
-- 271 unit tests, all passing
+- 318 unit tests, all passing
 
 ---
 
-## Sprint 2 — Apr 14–27, 2026 (Alerting & detection depth)
+## Sprint 2 — Apr 14–15, 2026 (Alerting & detection depth) — shipped v1.2.0
 
 - [x] Email alerts — send summary email when a scan finds CRITICAL/HIGH items
 - [x] Alert throttling — dedupe repeated findings so one noisy host doesn't spam inbox
@@ -60,7 +60,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 3 — Apr 28 – May 11, 2026 (Remediation & automation)
+## Sprint 3 — Apr 15–16, 2026 (Remediation & automation) — shipped v1.3.0
 
 - [x] Remediation suggestions — each rule includes a "how to fix" recommendation with step-by-step guidance
 - [x] Remediation tab rewrite — group fixes by rule and show MITRE mitigation IDs (M1026, etc.)
@@ -73,12 +73,12 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 4 — May 12–25, 2026 (Multi-host & firewall)
+## Sprint 4 — Apr 17–24, 2026 (Multi-host & firewall)
 
-- [ ] Multi-machine support — track scores per hostname, compare security posture across endpoints
-- [ ] Hostname auto-detection — parse `Computer` field from each `.evtx` event, tag findings
-- [ ] Per-host dashboard view — pick a machine, see only its history and trend
-- [ ] Fleet overview page — sortable table of all machines with score, last scan, top severity
+- [x] Multi-machine support — track scores per hostname, compare security posture across endpoints
+- [x] Hostname auto-detection — parse `Computer` field from each `.evtx` event, tag findings
+- [x] Per-host dashboard view — pick a machine, see only its history and trend
+- [x] Fleet overview page — sortable table of all machines with score, last scan, top severity
 - [ ] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
 - [ ] Suspicious outbound detection — flag connections to non-RFC1918 IPs on unusual ports
 - [ ] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
@@ -89,7 +89,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 5 — Jun 2–15, 2026 (Auth, compliance, analytics)
+## Sprint 5 — Apr 25 – May 1, 2026 (Auth, compliance, analytics)
 
 - [x] User authentication — login page backed by SQLite users table with scrypt hashes (shipped early, single-user)
 - [x] Session management — signed cookies, logout, 30-day expiry (shipped early)
@@ -103,7 +103,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 6 — Jun 16–29, 2026 (Workflows, branding, threat intel)
+## Sprint 6 — May 2–8, 2026 (Workflows, branding, threat intel)
 
 - [ ] Windows Service installer — one-time setup that installs Pulse as a Windows Service running with SYSTEM privileges, so scheduled scans and system log access always work without manual elevation
 - [ ] Incident workflow states — mark findings as acknowledged, investigating, or resolved

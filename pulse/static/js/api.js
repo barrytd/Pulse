@@ -38,6 +38,14 @@ export async function fetchFindings(scanId) {
   } catch (e) { return []; }
 }
 
+export async function fetchFleet() {
+  try {
+    var resp = await fetch('/api/fleet');
+    var data = await resp.json();
+    return data.hosts || [];
+  } catch (e) { return []; }
+}
+
 export async function fetchRuleNames() {
   if (cachedRules) return cachedRules;
   try {

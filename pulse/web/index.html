@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <link rel="stylesheet" href="/static/css/findings.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
   <div class="app">
@@ -19,36 +20,44 @@
     <!-- SIDEBAR                                                        -->
     <!-- ============================================================= -->
     <aside class="sidebar">
-      <div class="sidebar-logo">
-        <h1>PULSE</h1>
-        <span>Threat Detection</span>
-      </div>
+      <a class="sidebar-logo" data-action="navigate" data-arg="dashboard" href="#dashboard">
+        <span class="sidebar-logo-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12h4l2-6 4 12 2-6h8"/>
+          </svg>
+        </span>
+        <span class="sidebar-logo-text">
+          <span class="sidebar-logo-title">PULSE</span>
+          <span class="sidebar-logo-sub">Threat Detection</span>
+        </span>
+      </a>
 
       <nav class="sidebar-nav">
         <a class="active" data-action="navigate" data-arg="dashboard">
-          <span class="icon">&#9632;</span> Dashboard
+          <i data-lucide="layout-dashboard" class="icon"></i> Dashboard
         </a>
         <a data-action="navigate" data-arg="monitor">
-          <span class="icon">&#9679;</span> Monitor
+          <i data-lucide="activity" class="icon"></i> Monitor
         </a>
         <a data-action="navigate" data-arg="scans">
-          <span class="icon">&#9654;</span> Scans
+          <i data-lucide="file-search" class="icon"></i> Scans
+        </a>
+        <a data-action="navigate" data-arg="reports">
+          <i data-lucide="file-text" class="icon"></i> Reports
         </a>
         <a data-action="navigate" data-arg="history">
-          <span class="icon">&#9776;</span> History
+          <i data-lucide="clock" class="icon"></i> History
+        </a>
+        <a data-action="navigate" data-arg="fleet">
+          <i data-lucide="server" class="icon"></i> Fleet
         </a>
         <a data-action="navigate" data-arg="whitelist">
-          <span class="icon">&#10003;</span> Whitelist
+          <i data-lucide="shield" class="icon"></i> Whitelist
         </a>
-        <a data-action="navigate" data-arg="settings">
-          <span class="icon">&#9881;</span> Settings
+        <a data-action="navigate" data-arg="rules">
+          <i data-lucide="list-checks" class="icon"></i> Rules
         </a>
       </nav>
-
-      <div class="sidebar-footer">
-        <div class="user">Robert</div>
-        <div class="version">v1.3.0</div>
-      </div>
     </aside>
 
     <!-- ============================================================= -->
@@ -59,9 +68,62 @@
       <header class="topbar">
         <h2 id="page-title">Dashboard</h2>
         <div class="topbar-actions">
-          <button class="theme-toggle" data-action="toggleTheme" title="Toggle dark/light mode" id="theme-btn">&#9789;</button>
-          <button class="btn" data-action="openSystemScanModal" title="Scan the local Windows event logs">Scan My System</button>
-          <button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>
+          <a id="nav-live-indicator" class="nav-live-indicator" data-action="navigate" data-arg="monitor" title="Monitor is running — click to open" style="display:none;">
+            <span class="nav-live-dot"></span>
+            <span class="nav-live-text">Live</span>
+          </a>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <button class="btn btn-compact" data-action="openSystemScanModal" title="Scan the local Windows event logs">
+            <i data-lucide="scan-line"></i><span>Scan My System</span>
+          </button>
+          <button class="btn btn-compact btn-icon-only" data-action="openUploadModal" title="Upload .evtx file" aria-label="Upload .evtx file">
+            <i data-lucide="upload"></i>
+          </button>
+          <div class="user-menu" id="user-menu">
+            <button class="user-avatar" data-action="toggleUserMenu" aria-label="Account menu" type="button">
+              <span id="user-avatar-initials">R</span>
+            </button>
+            <div class="pulse-dropdown user-dropdown" id="user-dropdown" hidden>
+              <div class="pulse-dropdown-section">
+                <div class="user-dropdown-greeting">Hey, <span id="user-dropdown-name">there</span>!</div>
+                <a class="pulse-dropdown-item" data-action="openProfile">
+                  <i data-lucide="user"></i>
+                  <span>View Profile</span>
+                </a>
+                <a class="pulse-dropdown-item" data-action="openAccountSettings">
+                  <i data-lucide="settings"></i>
+                  <span>Manage Account</span>
+                </a>
+              </div>
+              <div class="pulse-dropdown-divider"></div>
+              <div class="pulse-dropdown-section">
+                <div class="pulse-dropdown-header">Appearance</div>
+                <a class="pulse-dropdown-item" data-action="toggleDarkModeFromMenu">
+                  <i data-lucide="moon"></i>
+                  <span>Dark Mode</span>
+                </a>
+              </div>
+              <div class="pulse-dropdown-divider"></div>
+              <div class="pulse-dropdown-section">
+                <div class="pulse-dropdown-header">Support</div>
+                <a class="pulse-dropdown-item" data-action="openDocs">
+                  <i data-lucide="book-open"></i>
+                  <span>Documentation</span>
+                </a>
+                <a class="pulse-dropdown-item" data-action="openFeedback">
+                  <i data-lucide="message-square"></i>
+                  <span>Give Feedback</span>
+                </a>
+              </div>
+              <div class="pulse-dropdown-divider"></div>
+              <div class="pulse-dropdown-section">
+                <a class="pulse-dropdown-item" data-action="logOutFromMenu">
+                  <i data-lucide="log-out"></i>
+                  <span>Log Out</span>
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 

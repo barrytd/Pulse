@@ -14,17 +14,21 @@ import {
   apiDeleteMonitorSession,
   apiClearMonitorSessions,
 } from './api.js';
-import { escapeHtml, toastError, showToast } from './dashboard.js';
+import { escapeHtml, toastError, showToast, sevPillHtml } from './dashboard.js';
 import { openFindingDrawer } from './findings.js';
 
-// Module-level refs that used to live on window as _dashLiveUnsub /
-// _monPageUnsub / _dingCtx.
+// Module-level refs that used to live on window as _monPageUnsub / _dingCtx.
 let _dingCtx         = null;
-let _dashLiveUnsub   = null;
 let _monPageUnsub    = null;
-// Preserve whether the dashboard gear popover was open across re-renders
-// so an incoming SSE event doesn't yank it closed mid-interaction.
-let _livePopoverOpen = false;
+// Whether the Monitor page's Settings section is expanded. Collapsed
+// by default so the page opens clean; the one-line summary above the
+// chevron tells the user what's currently configured at a glance.
+let _monSettingsExpanded = false;
+// Poll History card is collapsed by default — on an idle system every
+// poll is a zero-event row and it dominates the page. When expanded,
+// the zero-event rows are hidden unless the user flips the toggle.
+let _pollHistoryExpanded = false;
+let _pollHistoryShowAll  = false;
 
 // ---------------------------------------------------------------
 // Channel multi-select — persistent across sessions
@@ -37,6 +41,20 @@ export const BUILTIN_CHANNELS = [
   'Microsoft-Windows-PowerShell/Operational',
   'Microsoft-Windows-TaskScheduler/Operational',
 ];
+// Friendly labels shown in the UI. The raw Windows channel name stays as
+// the stored/transport value so the monitor backend still receives what
+// wevtutil expects; only the label the user sees is shortened.
+const CHANNEL_LABELS = {
+  'Security':                                     'Security',
+  'System':                                       'System',
+  'Application':                                  'Application',
+  'Windows PowerShell':                           'PowerShell (Classic)',
+  'Microsoft-Windows-PowerShell/Operational':     'PowerShell (Operational)',
+  'Microsoft-Windows-TaskScheduler/Operational':  'Task Scheduler',
+};
+function _channelLabel(name) {
+  return CHANNEL_LABELS[name] || name;
+}
 const DEFAULT_CHECKED = ['Security', 'System'];
 const LS_CHANNELS = 'pulse.monitor.channels.builtin';
 const LS_CUSTOM   = 'pulse.monitor.channels.custom';
@@ -93,7 +111,7 @@ export function getSelectedChannels() {
 
 // Summary string for the closed dropdown button.
 function _channelSummary() {
-  var sel = getSelectedChannels();
+  var sel = getSelectedChannels().map(_channelLabel);
   if (sel.length === 0) return 'No channels selected';
   if (sel.length <= 2) return sel.join(', ');
   return sel.slice(0, 2).join(', ') + ' +' + (sel.length - 2) + ' more';
@@ -112,7 +130,7 @@ export function channelMultiSelectHtml(opts) {
       '<input type="checkbox" data-action="toggleChannelOption" data-arg="' +
         escapeHtml(name) + '"' + (isChecked ? ' checked' : '') +
         (disabled ? ' disabled' : '') + ' />' +
-      '<span>' + escapeHtml(name) + '</span>' +
+      '<span>' + escapeHtml(_channelLabel(name)) + '</span>' +
     '</label>';
   }).join('');
 
@@ -149,6 +167,47 @@ function _refreshChannelSummary() {
   if (el) el.textContent = _channelSummary();
 }
 
+// Inline 2-column grid of the six built-in channels for the compact
+// Settings panel. No dropdown wrapper, no custom-channel input — just
+// the checkboxes, always visible, so nothing opens in a direction that
+// can fall off-screen.
+export function channelInlineGridHtml(opts) {
+  opts = opts || {};
+  var disabled = !!opts.disabled;
+  var checked = getCheckedBuiltinChannels();
+  var items = BUILTIN_CHANNELS.map(function (name) {
+    var isChecked = checked.indexOf(name) >= 0;
+    return '<label class="channel-chip">' +
+      '<input type="checkbox" data-action="toggleChannelOption" data-arg="' +
+        escapeHtml(name) + '"' + (isChecked ? ' checked' : '') +
+        (disabled ? ' disabled' : '') + ' />' +
+      '<span>' + escapeHtml(_channelLabel(name)) + '</span>' +
+    '</label>';
+  }).join('');
+  return '<div class="channel-inline-grid">' + items + '</div>';
+}
+
+// 2x3 pill grid used inside the gear dropdown. Selected pills use the
+// accent blue tint; unselected show muted text with a neutral border.
+// The underlying input is a hidden checkbox so `toggleChannelOption`
+// still picks up the change event and persists via localStorage.
+export function channelPillGridHtml(opts) {
+  opts = opts || {};
+  var disabled = !!opts.disabled;
+  var checked = getCheckedBuiltinChannels();
+  var items = BUILTIN_CHANNELS.map(function (name) {
+    var isChecked = checked.indexOf(name) >= 0;
+    return '<label class="channel-pill' + (isChecked ? ' selected' : '') + (disabled ? ' disabled' : '') + '">' +
+      '<input type="checkbox" data-action="toggleChannelOption" data-arg="' +
+        escapeHtml(name) + '"' + (isChecked ? ' checked' : '') +
+        (disabled ? ' disabled' : '') + ' />' +
+      '<span>' + escapeHtml(_channelLabel(name)) + '</span>' +
+    '</label>';
+  }).join('');
+  return '<div class="channel-pill-grid">' + items + '</div>';
+}
+
+
 export function toggleChannelDropdown(arg, target) {
   var root = target && target.closest('.channel-select');
   if (!root) return;
@@ -167,6 +226,11 @@ export function toggleChannelOption(arg, target) {
   }
   _saveCheckedBuiltinChannels(checked);
   _refreshChannelSummary();
+  // Keep the pill visual in sync with the hidden checkbox and refresh
+  // the "Security, System +3 more · every 5s" subtitle immediately.
+  var pill = target.closest && target.closest('.channel-pill');
+  if (pill) pill.classList.toggle('selected', !!target.checked);
+  _refreshLiveSubtitle();
 }
 
 export function toggleCustomChannelEnable(arg, target) {
@@ -188,19 +252,12 @@ export function updateCustomChannels(arg, target) {
   _refreshChannelSummary();
 }
 
-// Close dropdown/popover on outside click — installed once at module load.
-// The gear button sits outside the popover, so skip the handler when the
-// click target IS the gear (its own toggle handles open/close).
+// Close any open channel dropdown on outside click. Installed once at
+// module load.
 document.addEventListener('click', function (e) {
   document.querySelectorAll('.channel-select.open').forEach(function (el) {
     if (!el.contains(e.target)) el.classList.remove('open');
   });
-  if (e.target.closest('[data-action="toggleLiveSettingsPopover"]')) return;
-  var pop = document.querySelector('.live-settings-popover.open');
-  if (pop && !pop.contains(e.target)) {
-    pop.classList.remove('open');
-    _livePopoverOpen = false;
-  }
 });
 
 // Subtle two-tone chime when a new finding arrives. Uses Web Audio so
@@ -381,67 +438,86 @@ export const monitorClient = {
   },
 };
 
-function _liveHeaderHtml(status, opts) {
-  opts = opts || {};
+// Muted subtitle shown directly under the LIVE/IDLE badge — summarises
+// the current channels + poll interval so a user always knows what the
+// monitor is watching without opening the gear dropdown.
+function _liveSubtitleText(status) {
+  var active   = !!(status && status.active);
+  var interval = (status && status.poll_interval) || getStoredInterval() || 30;
+  var labels   = getSelectedChannels().map(_channelLabel);
+  var chanPart = labels.length === 0
+    ? 'No channels selected'
+    : (labels.length <= 2
+        ? labels.join(', ')
+        : labels.slice(0, 2).join(', ') + ' +' + (labels.length - 2) + ' more');
+  return active
+    ? chanPart + ' \u00B7 every ' + interval + 's'
+    : 'Not monitoring \u00B7 ' + chanPart;
+}
+
+function _refreshLiveSubtitle() {
+  var el = document.getElementById('mon-live-subtitle');
+  if (el) el.textContent = _liveSubtitleText(monitorClient.status);
+}
+
+// One-line header for the unified Live panel. Left cluster: pulsing dot +
+// LIVE/IDLE badge stacked above a muted subtitle of channels/interval.
+// Middle: inline Mode/Events/Findings/Last Check stats (hidden when
+// idle). Right: Test Alert + Stop (or Start Monitoring) followed by the
+// gear dropdown that owns interval + channel configuration.
+function _liveUnifiedHeaderHtml(status) {
   var active   = status && status.active;
   var interval = (status && status.poll_interval) || getStoredInterval() || 30;
-  var gearBtn  = opts.showGear
-    ? '<button class="live-btn gear" data-action="toggleLiveSettingsPopover" ' +
-      'title="Monitor settings" aria-label="Monitor settings">\u2699</button>'
+  var mode     = status && status.mode === 'live' ? 'Live (wevtutil)' : 'File scan';
+
+  var stats = active
+    ? '<div class="live-stats-inline">' +
+        '<span class="live-stat"><span class="k">Mode</span><span class="v" id="mon-mode-val">' + escapeHtml(mode) + '</span></span>' +
+        '<span class="live-stat"><span class="k">Events</span><span class="v" id="mon-events-val">' + (status.events_checked || 0) + '</span></span>' +
+        '<span class="live-stat"><span class="k">Findings</span><span class="v" id="mon-findings-val">' + (status.findings_detected || 0) + '</span></span>' +
+        '<span class="live-stat"><span class="k">Last Check</span><span class="v" id="mon-last-check">' + _timeSince(status.last_check_at) + '</span></span>' +
+      '</div>'
     : '';
-  return '<div class="live-header">' +
-    '<div class="live-dot ' + (active ? '' : 'idle') + '"></div>' +
-    '<div class="live-badge ' + (active ? '' : 'idle') + '">' + (active ? 'LIVE' : 'IDLE') + '</div>' +
-    (active
-      ? '<div class="live-interval">Polling every ' + interval + 's</div>'
-      : '<div class="live-interval">Not monitoring</div>') +
-    (active
-      ? '<button class="live-btn" style="margin-left:auto;" data-action="sendMonitorTestAlert">Test Alert</button>' +
-        '<button class="live-btn stop" style="margin-left:8px;" data-action="stopMonitor">Stop</button>' +
-        gearBtn
-      : '<button class="live-btn start" style="margin-left:auto;" data-action="startMonitor">Start Monitoring</button>' +
-        gearBtn) +
-  '</div>';
-}
 
-// Compact inline popover anchored below the gear icon. Two controls:
-// poll-interval slider + channel multi-select. Saves to localStorage
-// so the Monitor page sees the same values on next render.
-function _liveSettingsPopoverHtml(status) {
-  var active   = status && status.active;
-  var interval = (status && status.poll_interval) || getStoredInterval() || 30;
-  return '<div class="live-settings-popover" id="live-settings-popover">' +
-    '<div class="live-settings-head">Monitor Settings' +
-      '<button class="live-settings-close" data-action="toggleLiveSettingsPopover" ' +
-        'aria-label="Close">&times;</button>' +
-    '</div>' +
-    '<div class="live-settings-row">' +
-      '<label>Poll Interval</label>' +
-      '<input type="range" id="popover-interval" min="5" max="300" step="5" ' +
-        'value="' + interval + '"' +
-        (active ? ' disabled' : '') +
-        ' data-action-input="updatePopoverIntervalLabel" ' +
-        ' data-action-change="savePopoverInterval" />' +
-      '<div class="hint"><span id="popover-interval-label">' + interval + 's</span> between polls</div>' +
-    '</div>' +
-    '<div class="live-settings-row">' +
-      '<label>Channels</label>' +
-      channelMultiSelectHtml({ disabled: active }) +
-    '</div>' +
-    (active
-      ? '<div class="hint" style="margin-top:8px; color:#d29922;">Stop the monitor to change these \u2014 they apply on next start.</div>'
-      : '<div class="hint" style="margin-top:8px;">Saved automatically. Click Start Monitoring to apply.</div>') +
-  '</div>';
-}
+  var controls = active
+    ? '<button class="live-btn" data-action="sendMonitorTestAlert">Test Alert</button>' +
+      '<button class="live-btn stop" data-action="stopMonitor">Stop</button>'
+    : '<button class="live-btn start" data-action="startMonitor">Start Monitoring</button>';
 
-function _liveMetaHtml(status) {
-  if (!status || !status.active) return '';
-  var mode = status.mode === 'live' ? 'Live (wevtutil)' : 'File scan';
-  return '<div class="live-meta">' +
-    '<div class="item"><div class="k">Mode</div><div class="v">' + mode + '</div></div>' +
-    '<div class="item"><div class="k">Events Checked</div><div class="v">' + (status.events_checked || 0) + '</div></div>' +
-    '<div class="item"><div class="k">Findings</div><div class="v">' + (status.findings_detected || 0) + '</div></div>' +
-    '<div class="item"><div class="k">Last Check</div><div class="v">' + _timeSince(status.last_check_at) + '</div></div>' +
+  var gear =
+    '<div class="mon-gear-wrap" data-mon-gear>' +
+      '<button class="live-btn gear" data-action="toggleMonGearDropdown" ' +
+        'aria-label="Monitor settings" title="Monitor settings" type="button">\u2699</button>' +
+      '<div class="pulse-dropdown mon-gear-dropdown" id="mon-gear-dropdown" hidden>' +
+        '<div class="pulse-dropdown-section">' +
+          '<div class="pulse-dropdown-header">Poll Interval</div>' +
+          '<div class="gear-slider-row">' +
+            '<input type="range" id="mon-interval" min="5" max="300" step="5" ' +
+              'value="' + interval + '"' +
+              (active ? ' disabled' : '') +
+              ' data-action-input="updateMonIntervalLabel"' +
+              ' data-action-change="savePopoverInterval" />' +
+            '<span class="gear-slider-value" id="mon-interval-label">' + interval + 's</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pulse-dropdown-divider"></div>' +
+        '<div class="pulse-dropdown-section">' +
+          '<div class="pulse-dropdown-header">Channels</div>' +
+          channelPillGridHtml({ disabled: active }) +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  return '<div class="live-unified-header">' +
+    '<div class="live-header-left-stack">' +
+      '<div class="live-header-left">' +
+        '<div class="live-dot ' + (active ? '' : 'idle') + '"></div>' +
+        '<div class="live-badge ' + (active ? '' : 'idle') + '">' + (active ? 'LIVE' : 'IDLE') + '</div>' +
+      '</div>' +
+      '<div class="live-subtitle" id="mon-live-subtitle">' + escapeHtml(_liveSubtitleText(status)) + '</div>' +
+    '</div>' +
+    stats +
+    '<div class="live-header-controls">' + controls + gear + '</div>' +
   '</div>';
 }
 
@@ -455,51 +531,133 @@ function _timeSince(iso) {
   return Math.floor(sec / 3600) + 'h ago';
 }
 
-// The cached snapshot the click handler indexes into. Reset on every
-// render so the index in data-arg always maps to the same finding the
-// user just saw.
-let _liveFeedSnapshot = [];
+// Keyed map of feed items currently rendered (or renderable) in the
+// page. Stable keys let us append new rows incrementally without
+// re-rendering the entire feed on every poll — the old index-based
+// approach caused a visible blink every 5 seconds.
+let _liveFeedSnapshot = new Map();
 
-function _liveFeedHtml(feed) {
-  _liveFeedSnapshot = (feed || []).slice(0, 20);
-  if (_liveFeedSnapshot.length === 0) {
-    return '<div class="live-feed empty">Waiting for events \u2014 alerts will appear here as they\u2019re detected.</div>';
-  }
-  return '<div class="live-feed">' +
-    _liveFeedSnapshot.map(function (item, i) {
-      var f   = item.finding || {};
-      var sev = (f.severity || 'LOW').toUpperCase();
-      return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '" ' +
-             'data-action="openLiveFeedFinding" data-arg="' + i + '" style="cursor:pointer;">' +
-        '<div><div class="time">' + escapeHtml(item.at || '') + '</div></div>' +
-        '<div>' +
-          '<div class="rule">' + escapeHtml(f.rule || 'Unknown') + '</div>' +
-          '<div class="desc">' + escapeHtml(f.details || f.description || '') + '</div>' +
-        '</div>' +
-        '<div class="sev ' + sev.toLowerCase() + '">' + sev + '</div>' +
-      '</div>';
-    }).join('') +
+function _feedKey(item) {
+  var f = item.finding || {};
+  return [f.id || '', item.at || '', f.rule || '', f.timestamp || '', f.details || f.description || ''].join('::');
+}
+
+function _feedRowHtml(item, key) {
+  var f   = item.finding || {};
+  var sev = (f.severity || 'LOW').toUpperCase();
+  return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '" ' +
+         'data-action="openLiveFeedFinding" data-arg="' + escapeHtml(key) + '" ' +
+         'data-feed-key="' + escapeHtml(key) + '" style="cursor:pointer;">' +
+    '<div><div class="time">' + escapeHtml(item.at || '') + '</div></div>' +
+    '<div>' +
+      '<div class="rule">' + escapeHtml(f.rule || 'Unknown') + '</div>' +
+      '<div class="desc">' + escapeHtml(f.details || f.description || '') + '</div>' +
+    '</div>' +
+    '<div class="sev ' + sev.toLowerCase() + '">' + sev + '</div>' +
   '</div>';
 }
 
+function _liveFeedHtml(feed) {
+  _liveFeedSnapshot = new Map();
+  var items = (feed || []).slice(0, 20);
+  if (items.length === 0) {
+    return '<div class="live-feed empty" id="mon-live-feed">Waiting for events \u2014 alerts will appear here as they\u2019re detected.</div>';
+  }
+  var rows = items.map(function (item) {
+    var key = _feedKey(item);
+    _liveFeedSnapshot.set(key, item);
+    return _feedRowHtml(item, key);
+  }).join('');
+  return '<div class="live-feed" id="mon-live-feed">' + rows + '</div>';
+}
+
+// Prepend a single new finding to the existing feed without touching
+// the rows already in the DOM. Returns true if the row was added, false
+// if the key was already present (duplicate suppression).
+function _prependFeedRow(item) {
+  var key = _feedKey(item);
+  if (_liveFeedSnapshot.has(key)) return false;
+  var feed = document.getElementById('mon-live-feed');
+  if (!feed) return false;
+  _liveFeedSnapshot.set(key, item);
+  if (feed.classList.contains('empty')) {
+    feed.classList.remove('empty');
+    feed.innerHTML = '';
+  }
+  feed.insertAdjacentHTML('afterbegin', _feedRowHtml(item, key));
+  // Cap visible rows at 20 to match the initial render.
+  var rows = feed.querySelectorAll('.dash-finding-row');
+  for (var i = 20; i < rows.length; i++) {
+    var k = rows[i].dataset.feedKey;
+    if (k) _liveFeedSnapshot.delete(k);
+    rows[i].remove();
+  }
+  return true;
+}
+
+// Update header stat values in place — avoids the full-card re-render
+// that used to flash on every poll.
+function _updateHeaderStats(status) {
+  if (!status) return;
+  var ev = document.getElementById('mon-events-val');
+  if (ev) ev.textContent = status.events_checked || 0;
+  var fd = document.getElementById('mon-findings-val');
+  if (fd) fd.textContent = status.findings_detected || 0;
+  var lc = document.getElementById('mon-last-check');
+  if (lc) lc.textContent = _timeSince(status.last_check_at);
+}
+
 // Click handler wired via data-action on each live-feed row. Looks up
-// the finding in the snapshot captured at render time and opens the
-// shared slide-in drawer so live alerts get the same detail view as
-// the Findings page and the Dashboard's Last Scan Findings list.
+// the finding in the snapshot by stable key — append-only rendering
+// means index-based lookups would drift as new rows come in.
 export function openLiveFeedFinding(arg) {
-  var i = parseInt(arg, 10);
-  var item = _liveFeedSnapshot[i];
+  var item = _liveFeedSnapshot.get(arg);
   if (item && item.finding) openFindingDrawer(item.finding);
+}
+
+function _pollHistorySummary(checks) {
+  var total = (checks || []).length;
+  var hits  = (checks || []).filter(function (c) { return (c.events || 0) > 0; }).length;
+  if (total === 0) return 'No polls yet';
+  var last = (checks && checks[0]) || null;
+  var lastTxt = last ? _timeSince(last.at) : '\u2014';
+  return hits + ' of ' + total + ' polls had events \u00B7 last poll ' + lastTxt;
 }
 
 function _monitorChecksHtml(checks) {
   if (!checks || checks.length === 0) {
     return '<div style="text-align:center; padding:24px; color:var(--text-muted);">No polls yet.</div>';
   }
-  return '<table class="monitor-checks-table"><thead><tr>' +
+  var rows = checks.slice(0, 200);
+  if (!_pollHistoryShowAll) {
+    rows = rows.filter(function (c) { return (c.events || 0) > 0 || (c.findings || 0) > 0; });
+  }
+  rows = rows.slice(0, 50);
+
+  var toggleLabel = _pollHistoryShowAll
+    ? 'Show only polls with events'
+    : 'Show all polls (including empty)';
+  var toggle =
+    '<div style="display:flex; justify-content:flex-end; padding:0 0 8px;">' +
+      '<a data-action="togglePollHistoryFilter" ' +
+         'style="color:var(--text-muted); font-size:11px; cursor:pointer;">' +
+        escapeHtml(toggleLabel) +
+      '</a>' +
+    '</div>';
+
+  if (rows.length === 0) {
+    return toggle +
+      '<div style="text-align:center; padding:24px; color:var(--text-muted);">' +
+        'No polls with events in the last ' + checks.length + ' checks. ' +
+        '<a data-action="togglePollHistoryFilter" style="color:var(--accent); cursor:pointer;">Show all</a>' +
+      '</div>';
+  }
+
+  return toggle +
+    '<table class="monitor-checks-table"><thead><tr>' +
     '<th>Time</th><th>Events</th><th>Event IDs</th><th>Findings</th>' +
     '</tr></thead><tbody>' +
-    checks.slice(0, 50).map(function (c) {
+    rows.map(function (c) {
       var ids = (c.event_ids || []).join(', ') || '\u2014';
       return '<tr>' +
         '<td>' + escapeHtml(c.at || '') + '</td>' +
@@ -511,37 +669,68 @@ function _monitorChecksHtml(checks) {
     '</tbody></table>';
 }
 
-// ---------- Dashboard-embedded live panel ----------
-export function renderDashLivePanel() {
-  var mount = document.getElementById('dash-live-panel');
-  if (!mount) return;
-  var s      = monitorClient.status;
-  var active = s && s.active;
-  mount.innerHTML = '<div class="live-panel ' + (active ? '' : 'idle') + '">' +
-    _liveHeaderHtml(s, { showGear: true }) +
-    _liveSettingsPopoverHtml(s) +
-    _liveMetaHtml(s) +
-    (active ? _liveFeedHtml(monitorClient.feed) : '') +
-  '</div>';
-  if (_livePopoverOpen) {
-    var pop = document.getElementById('live-settings-popover');
-    if (pop) pop.classList.add('open');
-  }
+export function togglePollHistoryExpand() {
+  _pollHistoryExpanded = !_pollHistoryExpanded;
+  if (document.getElementById('monitor-page-root')) renderMonitorPage();
 }
 
-export function toggleLiveSettingsPopover() {
-  var pop = document.getElementById('live-settings-popover');
-  if (!pop) return;
-  _livePopoverOpen = !pop.classList.contains('open');
-  pop.classList.toggle('open', _livePopoverOpen);
+export function togglePollHistoryFilter() {
+  _pollHistoryShowAll = !_pollHistoryShowAll;
+  if (document.getElementById('monitor-page-root')) renderMonitorPage();
 }
 
-// Live label update while dragging the popover slider — mirrors
-// updateMonIntervalLabel on the Monitor page.
-export function updatePopoverIntervalLabel(arg, target) {
-  var lbl = document.getElementById('popover-interval-label');
-  if (lbl && target) lbl.textContent = target.value + 's';
+// ---------- Topbar live-monitor indicator ----------
+// Small green pulsing dot + "Live" text shown on every page when the
+// monitor is active. Hidden when idle. The anchor itself lives in
+// index.html inside .topbar-actions; we only flip display here.
+function _updateNavLiveIndicator() {
+  var el = document.getElementById('nav-live-indicator');
+  if (!el) return;
+  var active = !!(monitorClient.status && monitorClient.status.active);
+  el.style.display = active ? 'inline-flex' : 'none';
 }
+
+export function mountNavLiveIndicator() {
+  _updateNavLiveIndicator();
+  monitorClient.subscribe(function (type) {
+    if (type === 'tick') return;
+    _updateNavLiveIndicator();
+  });
+}
+
+// Kept as an exported stub so app.js's action registry still resolves
+// while any stale markup from an older page render exists. The old
+// Settings accordion has been replaced by the gear dropdown inside the
+// live-panel header — see toggleMonGearDropdown below.
+export function toggleMonSettings() { /* deprecated — noop */ }
+
+// Open/close the live-panel gear dropdown. Toggles the `hidden`
+// attribute so CSS `[hidden]` hides it; outside-click and Escape
+// handlers below close it.
+export function toggleMonGearDropdown(arg, target, event) {
+  if (event && event.stopPropagation) event.stopPropagation();
+  var dd = document.getElementById('mon-gear-dropdown');
+  if (!dd) return;
+  if (dd.hidden) dd.hidden = false;
+  else dd.hidden = true;
+}
+
+// Outside click closes the gear dropdown. A single listener at document
+// level covers every re-render since the dropdown is always in place
+// with the same id.
+document.addEventListener('click', function (e) {
+  var dd = document.getElementById('mon-gear-dropdown');
+  if (!dd || dd.hidden) return;
+  var wrap = dd.closest('[data-mon-gear]');
+  if (wrap && wrap.contains(e.target)) return;
+  dd.hidden = true;
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var dd = document.getElementById('mon-gear-dropdown');
+  if (dd && !dd.hidden) dd.hidden = true;
+});
 
 // Commit the popover slider value to localStorage on change so Start
 // picks it up and the Monitor page slider mirrors it on next render.
@@ -549,26 +738,9 @@ export function savePopoverInterval(arg, target) {
   if (!target) return;
   var n = parseInt(target.value, 10);
   if (isFinite(n)) _saveStoredInterval(n);
+  _refreshLiveSubtitle();
 }
 
-export function mountDashLivePanel() {
-  renderDashLivePanel();
-  if (_dashLiveUnsub) _dashLiveUnsub();
-  function onUpdate(type) {
-    if (!document.getElementById('dash-live-panel')) {
-      if (_dashLiveUnsub) _dashLiveUnsub();
-      return;
-    }
-    if (type === 'tick') {
-      var metaEl = document.querySelector('#dash-live-panel .live-meta .item:last-child .v');
-      if (metaEl) metaEl.textContent = _timeSince(monitorClient.status && monitorClient.status.last_check_at);
-      return;
-    }
-    renderDashLivePanel();
-  }
-  monitorClient.subscribe(onUpdate);
-  _dashLiveUnsub = function () { monitorClient.unsubscribe(onUpdate); };
-}
 
 // ---------------------------------------------------------------
 // PAGE: Monitor
@@ -583,44 +755,36 @@ export async function renderMonitorPage() {
     var s      = monitorClient.status || {};
     var active = s.active;
 
+    // Warning banner only matters when the host can't actually run
+    // live mode — surface it just above the live panel so users see it
+    // before they hit Start.
+    var platformWarning = (s.platform_supports_live === false)
+      ? '<div class="card" style="padding:10px 16px; margin-bottom:16px; color:#d29922; font-size:12px;">Live mode requires Windows \u2014 falling back to file mode.</div>'
+      : '';
+
     c.innerHTML =
       '<div id="monitor-page-root">' +
-      '<div class="live-panel ' + (active ? '' : 'idle') + '" style="margin-bottom:16px;">' +
-        _liveHeaderHtml(s) +
-        _liveMetaHtml(s) +
-      '</div>' +
 
-      '<div class="card" style="margin-bottom:16px;">' +
-        '<div class="section-label">Monitor Settings</div>' +
-        '<div class="monitor-settings">' +
-          '<div>' +
-            '<label>Poll Interval</label>' +
-            '<input type="range" id="mon-interval" min="5" max="300" step="5" ' +
-              'value="' + (s.poll_interval || getStoredInterval() || 30) + '"' +
-              (active ? ' disabled' : '') +
-              ' data-action-input="updateMonIntervalLabel" ' +
-              ' data-action-change="savePopoverInterval" />' +
-            '<div class="hint"><span id="mon-interval-label">' + (s.poll_interval || getStoredInterval() || 30) + 's</span> between polls</div>' +
-          '</div>' +
-          '<div>' +
-            '<label>Channels</label>' +
-            channelMultiSelectHtml({ disabled: active }) +
-            '<div class="hint">Pick which Windows event logs to watch. Custom lets you add one by name.</div>' +
-          '</div>' +
+      platformWarning +
+
+      '<div class="live-panel live-unified ' + (active ? '' : 'idle') + '" style="margin-bottom:16px;">' +
+        _liveUnifiedHeaderHtml(s) +
+        '<div class="live-unified-body">' +
+          _liveFeedHtml(monitorClient.feed) +
         '</div>' +
-        (s.platform_supports_live === false
-          ? '<div class="hint" style="margin-top:10px; color:#d29922;">Live mode requires Windows \u2014 falling back to file mode.</div>'
+      '</div>' +
+
+      '<div class="card mon-settings-card" style="margin-bottom:16px;">' +
+        '<div class="mon-settings-row ' + (_pollHistoryExpanded ? 'open' : '') + '" ' +
+             'data-action="togglePollHistoryExpand" role="button" tabindex="0" ' +
+             'aria-expanded="' + (_pollHistoryExpanded ? 'true' : 'false') + '">' +
+          '<div class="mon-settings-title">Poll History</div>' +
+          '<div class="mon-settings-summary" id="mon-poll-summary">' + escapeHtml(_pollHistorySummary(monitorClient.checks)) + '</div>' +
+          '<div class="mon-settings-caret">' + (_pollHistoryExpanded ? '\u25B2' : '\u25BC') + '</div>' +
+        '</div>' +
+        (_pollHistoryExpanded
+          ? '<div class="mon-settings-body" id="mon-poll-body">' + _monitorChecksHtml(monitorClient.checks) + '</div>'
           : '') +
-      '</div>' +
-
-      '<div class="card" style="margin-bottom:16px;">' +
-        '<div class="section-label">Live Feed</div>' +
-        _liveFeedHtml(monitorClient.feed) +
-      '</div>' +
-
-      '<div class="card" style="margin-bottom:16px;">' +
-        '<div class="section-label">Poll History</div>' +
-        _monitorChecksHtml(monitorClient.checks) +
       '</div>' +
 
       '<div class="card" id="monitor-sessions-section">' +
@@ -640,17 +804,45 @@ export async function renderMonitorPage() {
   // when the monitor transitions from running to stopped — that's when a
   // new session row is closed out in the DB and should show up in the list.
   var prevActive = !!(monitorClient.status && monitorClient.status.active);
-  function onUpdate(type) {
+  function onUpdate(type, data) {
     if (!document.getElementById('monitor-page-root')) {
       if (_monPageUnsub) _monPageUnsub();
       return;
     }
     if (type === 'tick') {
-      var metaEl = document.querySelector('#monitor-page-root .live-meta .item:last-child .v');
+      var metaEl = document.getElementById('mon-last-check');
       if (metaEl) metaEl.textContent = _timeSince(monitorClient.status && monitorClient.status.last_check_at);
       return;
     }
     var nowActive = !!(monitorClient.status && monitorClient.status.active);
+
+    // Active-state transitions (start/stop) change the whole layout —
+    // buttons swap, stats row appears/disappears — so fall through to a
+    // full render. Otherwise update incrementally to avoid the flash
+    // the old code produced on every poll.
+    if (type === 'finding' && prevActive === nowActive) {
+      var newItem = data && data.finding
+        ? { finding: data.finding, at: data.at }
+        : (monitorClient.feed && monitorClient.feed[0]);
+      if (newItem) _prependFeedRow(newItem);
+      _updateHeaderStats(monitorClient.status);
+      prevActive = nowActive;
+      return;
+    }
+    if (type === 'check' && prevActive === nowActive) {
+      _updateHeaderStats(monitorClient.status);
+      var sumEl = document.getElementById('mon-poll-summary');
+      if (sumEl) sumEl.textContent = _pollHistorySummary(monitorClient.checks);
+      // If the Poll History card is currently expanded, refresh just
+      // its table body — the header row and card chrome stay put.
+      if (_pollHistoryExpanded) {
+        var body = document.querySelector('#monitor-page-root .mon-settings-card:nth-of-type(3) .mon-settings-body');
+        if (body) body.innerHTML = _monitorChecksHtml(monitorClient.checks);
+      }
+      prevActive = nowActive;
+      return;
+    }
+
     render();
     if (prevActive && !nowActive) {
       // Monitor just stopped — pull the refreshed session list.
@@ -763,7 +955,7 @@ function _sessionCardHtml(sess) {
       (isActive
         ? ''
         : '<button class="session-delete" data-action="deleteMonitorSession" data-arg="' + sess.id + '" ' +
-          'aria-label="Delete session" title="Delete session">\u00D7</button>') +
+          'aria-label="Delete session" title="Delete session">&times;</button>') +
     '</div>' +
     body +
   '</div>';
@@ -789,7 +981,7 @@ function _sessionFindingsTableHtml(sess) {
       return '<tr class="clickable" data-action="openSessionFinding" ' +
         'data-arg="' + sess.id + ':' + i + '">' +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
-        '<td><span class="pill pill-' + sev.toLowerCase() + '">' + sev + '</span></td>' +
+        '<td>' + sevPillHtml(sev) + '</td>' +
         '<td style="font-weight:500;">' + escapeHtml(f.rule || '') + '</td>' +
         '<td style="color:var(--text-muted);">' + escapeHtml(desc) + '</td>' +
       '</tr>';

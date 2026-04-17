@@ -23,7 +23,9 @@ import {
   _restoreSearchFocus,
   _gradeFor,
   _gradeRank,
+  sevPillHtml,
 } from './dashboard.js';
+import { navigate } from './navigation.js';
 
 // ---------------------------------------------------------------
 // Scans page state — now with a tab for "All Findings"
@@ -348,6 +350,17 @@ export const findingsState = {
 
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 
+// One-shot filter handoff — lets other pages (e.g. the Dashboard "Needs
+// Attention" widget) deep-link into the Findings page with pre-set sev/
+// review filters. renderFindingsPage() consumes and clears it so manual
+// navigation back to the page shows the default (All / All) view.
+var _pendingFindingsFilter = null;
+
+export function openUnreviewedCriticalHigh() {
+  _pendingFindingsFilter = { sev: 'CRITICAL_HIGH', review: 'OPEN' };
+  navigate('findings');
+}
+
 export async function renderFindingsPage() {
   // Entering this view also pins the merged Scans page to the findings
   // tab so the tab bar highlights correctly and the back-button hash
@@ -365,6 +378,7 @@ export async function renderFindingsPage() {
           return Object.assign({}, f, {
             _scan_id:   s.id,
             _scan_date: s.scanned_at,
+            _scan_host: s.hostname || s.filename || '',
             _uid:       s.id + '-' + idx,
           });
         });
@@ -380,6 +394,14 @@ export async function renderFindingsPage() {
   findingsState.reviewFilter = 'ALL';
   findingsState.query        = '';
   findingsState.expanded     = null;
+
+  // Consume a one-shot pre-set filter handoff (e.g. "Needs Attention"
+  // widget on the Dashboard deep-links into unreviewed CRITICAL+HIGH).
+  if (_pendingFindingsFilter) {
+    if (_pendingFindingsFilter.sev)    findingsState.sevFilter    = _pendingFindingsFilter.sev;
+    if (_pendingFindingsFilter.review) findingsState.reviewFilter = _pendingFindingsFilter.review;
+    _pendingFindingsFilter = null;
+  }
 
   if (allFindings.length === 0) {
     c.innerHTML =
@@ -454,7 +476,9 @@ export function applyFindingsView() {
 
   if (s.sevFilter !== 'ALL') {
     rows = rows.filter(function (f) {
-      return (f.severity || 'LOW').toUpperCase() === s.sevFilter;
+      var sv = (f.severity || 'LOW').toUpperCase();
+      if (s.sevFilter === 'CRITICAL_HIGH') return sv === 'CRITICAL' || sv === 'HIGH';
+      return sv === s.sevFilter;
     });
   }
 
@@ -471,7 +495,7 @@ export function applyFindingsView() {
   var q = s.query.trim().toLowerCase();
   if (q) {
     rows = rows.filter(function (f) {
-      var hay = (f.rule || '') + ' ' + (f.details || '') + ' ' + (f.description || '') + ' ' + (f.mitre || '');
+      var hay = (f.rule || '') + ' ' + (f.details || '') + ' ' + (f.description || '') + ' ' + (f.mitre || '') + ' ' + (f._scan_host || '');
       return hay.toLowerCase().indexOf(q) >= 0;
     });
   }
@@ -490,6 +514,10 @@ export function applyFindingsView() {
         break;
       case 'scan':
         av = a._scan_date || ''; bv = b._scan_date || ''; break;
+      case 'host':
+        av = (a._scan_host || '').toLowerCase();
+        bv = (b._scan_host || '').toLowerCase();
+        break;
       default:
         av = a.timestamp || _extractTime(a) || '';
         bv = b.timestamp || _extractTime(b) || '';
@@ -575,7 +603,9 @@ function _buildFindingsTable(findings) {
       th('rule', 'Rule') +
       '<th>MITRE ATT&amp;CK</th>' +
       '<th>Description</th>' +
+      th('host', 'Host') +
       th('scan', 'Scan') +
+      '<th>Status</th>' +
     '</tr></thead>' +
     '<tbody>' +
     findings.map(function (f) {
@@ -594,24 +624,25 @@ function _buildFindingsTable(findings) {
       var reviewStatus = f.review_status || 'new';
       var rowCls = 'clickable sev-row sev-' + sev.toLowerCase();
       if (reviewStatus !== 'new') rowCls += ' row-reviewed';
-      var ruleCell = escapeHtml(rule);
-      if (reviewStatus !== 'new') ruleCell += ' ' + _reviewBadge(reviewStatus);
+      var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
 
-      var main = '<tr class="' + rowCls + '" ' +
+      var main = '<tr class="' + rowCls + '"' + fidAttr + ' ' +
                  'data-action="toggleFindingExpand" data-arg="' + f._uid + '">' +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
         '<td class="mono">' + escapeHtml(f.event_id || '-') + '</td>' +
-        '<td><span class="pill pill-' + sev.toLowerCase() + '">' + sev + '</span></td>' +
-        '<td style="font-weight:500;">' + ruleCell + '</td>' +
+        '<td>' + sevPillHtml(sev) + '</td>' +
+        '<td style="font-weight:500;">' + escapeHtml(rule) + '</td>' +
         '<td>' + mitreTag + '</td>' +
         '<td style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
+        '<td class="col-host">' + escapeHtml(f._scan_host || '-') + '</td>' +
         '<td><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
           'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + f._scan_id + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
+        '<td class="col-status" data-status-slot="pill">' + _statusPillHtml(reviewStatus) + '</td>' +
       '</tr>';
 
       if (!isOpen) return main;
-      return main + _expandRow(f, 7);
+      return main + _expandRow(f, 9);
     }).join('') +
     '</tbody></table>';
 }
@@ -706,7 +737,55 @@ function _reviewBadge(status) {
   if (status === 'false_positive') {
     return '<span class="review-badge review-fp">False positive</span>';
   }
-  return '<span class="review-badge review-new">New</span>';
+  // Unreviewed ('new' / null / undefined) — no badge so the header stays
+  // uncluttered and the badge is meaningful when it does appear.
+  return '';
+}
+
+// Small colored dot (compact lists) / pill (full tables) rendered for any
+// finding row so the UI can show review state at a glance.
+export function _statusDotHtml(status) {
+  if (status === 'reviewed') {
+    return '<span class="finding-status-dot status-reviewed" title="Reviewed" aria-label="Reviewed"></span>';
+  }
+  if (status === 'false_positive') {
+    return '<span class="finding-status-dot status-fp" title="False positive" aria-label="False positive"></span>';
+  }
+  return '';
+}
+
+export function _statusPillHtml(status) {
+  if (status === 'reviewed') {
+    return '<span class="status-pill status-reviewed">Reviewed</span>';
+  }
+  if (status === 'false_positive') {
+    return '<span class="status-pill status-fp">False positive</span>';
+  }
+  return '';
+}
+
+// Re-render status widgets + muted row state for every DOM element carrying
+// `data-finding-id === id`. Called when the drawer toggles review state so
+// the tables behind it update in place without a full re-render.
+function _notifyFindingStatusChanged(id, status) {
+  if (id == null) return;
+  var rows = document.querySelectorAll('[data-finding-id="' + id + '"]');
+  rows.forEach(function (row) {
+    if (status && status !== 'new') row.classList.add('row-reviewed');
+    else row.classList.remove('row-reviewed');
+    row.querySelectorAll('[data-status-slot]').forEach(function (slot) {
+      var variant = slot.getAttribute('data-status-slot');
+      slot.innerHTML = variant === 'pill' ? _statusPillHtml(status) : _statusDotHtml(status);
+    });
+  });
+  // Broadcast so listeners that show their own derived view (e.g. the
+  // Dashboard "Needs Attention" widget, which removes reviewed items
+  // entirely rather than just muting them) can re-render.
+  try {
+    document.dispatchEvent(new CustomEvent('pulse:review-toggled', {
+      detail: { id: id, status: status },
+    }));
+  } catch (e) { /* no-op — old browsers without CustomEvent */ }
 }
 
 export function openFindingDrawer(f) {
@@ -754,7 +833,7 @@ export function openFindingDrawer(f) {
 
     (rawXml ? '<div class="finding-drawer-section">' +
       '<details class="raw-xml-toggle">' +
-        '<summary class="sec-label" style="cursor:pointer; list-style:revert;">Raw Event XML</summary>' +
+        '<summary class="sec-label" style="cursor:pointer;">Raw Event XML</summary>' +
         '<div class="finding-drawer-details" style="max-height:320px; margin-top:8px;">' + escapeHtml(rawXml) + '</div>' +
       '</details>' +
     '</div>' : '') +
@@ -775,31 +854,76 @@ export function openFindingDrawer(f) {
 
 function _renderReviewSection(f) {
   var noteVal = f.review_note || '';
-  var reviewedAt = f.reviewed_at
-    ? '<div class="review-meta">Reviewed at ' + escapeHtml(f.reviewed_at) + '</div>'
-    : '';
+  var status = f.review_status || 'new';
+  var reviewedAtHtml = (status !== 'new' && f.reviewed_at)
+    ? '<div class="review-meta-prominent" id="drawer-review-meta">' +
+        '<span class="review-meta-icon">\u29BF</span>' +
+        '<span>Last reviewed at <strong>' + escapeHtml(f.reviewed_at) + '</strong></span>' +
+      '</div>'
+    : '<div class="review-meta-prominent" id="drawer-review-meta" style="display:none;"></div>';
+
   return '<div class="finding-drawer-section">' +
     '<div class="sec-label">Review</div>' +
-    reviewedAt +
+    reviewedAtHtml +
     '<textarea id="drawer-review-note" class="review-note-input" placeholder="Optional note (why reviewed, who owns follow-up, etc.)">' +
       escapeHtml(noteVal) +
     '</textarea>' +
-    '<div class="review-buttons">' +
-      '<button class="btn btn-primary" data-action="markFindingReviewed" id="btn-review-reviewed">Mark reviewed</button>' +
-      '<button class="btn" data-action="markFindingFalsePositive" id="btn-review-fp">False positive</button>' +
-      '<button class="btn" data-action="resetFindingReview" id="btn-review-new">Reset</button>' +
+    '<div class="review-toggles">' +
+      '<button type="button" class="review-toggle review-toggle-reviewed' +
+        (status === 'reviewed' ? ' active' : '') + '" ' +
+        'data-action="markFindingReviewed" id="btn-review-reviewed" ' +
+        'aria-pressed="' + (status === 'reviewed' ? 'true' : 'false') + '">' +
+        '<span class="review-check" aria-hidden="true"></span>' +
+        '<span class="review-label">' +
+          (status === 'reviewed' ? 'Reviewed' : 'Mark reviewed') +
+        '</span>' +
+      '</button>' +
+      '<button type="button" class="review-toggle review-toggle-fp' +
+        (status === 'false_positive' ? ' active' : '') + '" ' +
+        'data-action="markFindingFalsePositive" id="btn-review-fp" ' +
+        'aria-pressed="' + (status === 'false_positive' ? 'true' : 'false') + '">' +
+        '<span class="review-check" aria-hidden="true"></span>' +
+        '<span class="review-label">' +
+          (status === 'false_positive' ? 'False Positive' : 'False positive') +
+        '</span>' +
+      '</button>' +
     '</div>' +
   '</div>';
 }
 
 function _updateReviewButtonStates(status) {
-  var map = { reviewed: 'btn-review-reviewed', false_positive: 'btn-review-fp', new: 'btn-review-new' };
-  Object.keys(map).forEach(function (k) {
-    var el = document.getElementById(map[k]);
-    if (!el) return;
-    if (k === status) el.classList.add('btn-active');
-    else el.classList.remove('btn-active');
-  });
+  var reviewed = document.getElementById('btn-review-reviewed');
+  var fp       = document.getElementById('btn-review-fp');
+  if (reviewed) {
+    var isR = status === 'reviewed';
+    reviewed.classList.toggle('active', isR);
+    reviewed.setAttribute('aria-pressed', isR ? 'true' : 'false');
+    var rLabel = reviewed.querySelector('.review-label');
+    if (rLabel) rLabel.textContent = isR ? 'Reviewed' : 'Mark reviewed';
+  }
+  if (fp) {
+    var isF = status === 'false_positive';
+    fp.classList.toggle('active', isF);
+    fp.setAttribute('aria-pressed', isF ? 'true' : 'false');
+    var fLabel = fp.querySelector('.review-label');
+    if (fLabel) fLabel.textContent = isF ? 'False Positive' : 'False positive';
+  }
+}
+
+// Rebuild the prominent "Last reviewed at" line in place so the drawer
+// updates without re-rendering the whole review section.
+function _updateReviewMeta(reviewedAt, status) {
+  var el = document.getElementById('drawer-review-meta');
+  if (!el) return;
+  if (status !== 'new' && reviewedAt) {
+    el.style.display = '';
+    el.innerHTML =
+      '<span class="review-meta-icon">\u29BF</span>' +
+      '<span>Last reviewed at <strong>' + escapeHtml(reviewedAt) + '</strong></span>';
+  } else {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
 }
 
 async function _submitReview(status) {
@@ -817,8 +941,9 @@ async function _submitReview(status) {
   _drawerFinding.review_status = r.data.review_status;
   _drawerFinding.review_note = r.data.review_note;
   _drawerFinding.reviewed_at = r.data.reviewed_at;
-  // Re-render the sev line badge + button highlight; cheaper than the
-  // full drawer rebuild.
+
+  // Re-render the sev-line badge. The badge is hidden when status is 'new'
+  // so we rebuild only the non-badge children each time.
   var sevLine = document.getElementById('drawer-sev-line');
   if (sevLine) {
     var pill = sevLine.querySelector('.sev-pill');
@@ -826,20 +951,33 @@ async function _submitReview(status) {
     sevLine.innerHTML = '';
     if (pill) sevLine.appendChild(pill);
     if (mitreEl) sevLine.appendChild(mitreEl);
-    sevLine.insertAdjacentHTML('beforeend', _reviewBadge(r.data.review_status));
+    var badge = _reviewBadge(r.data.review_status);
+    if (badge) sevLine.insertAdjacentHTML('beforeend', badge);
   }
+
   _updateReviewButtonStates(r.data.review_status);
+  _updateReviewMeta(r.data.reviewed_at, r.data.review_status);
+  _notifyFindingStatusChanged(_drawerFinding.id, r.data.review_status);
+
   invalidateFindingsCache();
   showToast(
-    r.data.review_status === 'reviewed'     ? 'Marked reviewed' :
+    r.data.review_status === 'reviewed'       ? 'Marked reviewed' :
     r.data.review_status === 'false_positive' ? 'Marked false positive' :
-    'Review reset'
+                                                'Review cleared'
   );
 }
 
-export function markFindingReviewed()      { _submitReview('reviewed'); }
-export function markFindingFalsePositive() { _submitReview('false_positive'); }
-export function resetFindingReview()       { _submitReview('new'); }
+// Toggle semantics: clicking an already-active status clears it back to
+// 'new'; clicking the other status switches to it. Only one status can be
+// active at a time, enforced server-side too.
+export function markFindingReviewed() {
+  var cur = _drawerFinding && _drawerFinding.review_status;
+  _submitReview(cur === 'reviewed' ? 'new' : 'reviewed');
+}
+export function markFindingFalsePositive() {
+  var cur = _drawerFinding && _drawerFinding.review_status;
+  _submitReview(cur === 'false_positive' ? 'new' : 'false_positive');
+}
 
 export function closeFindingDrawer() {
   document.getElementById('finding-drawer').classList.remove('open');
@@ -868,7 +1006,7 @@ export function openScanDetailFindingByIdx(idx) {
 export function buildFindingsTable(findings) {
   _scanDetailFindings = findings;
   return '<table class="findings-table"><thead><tr>' +
-    '<th>Time</th><th>Severity</th><th>Rule</th><th>MITRE ATT&CK</th><th>Description</th>' +
+    '<th>Time</th><th>Severity</th><th>Rule</th><th>MITRE ATT&CK</th><th>Description</th><th>Status</th>' +
     '</tr></thead><tbody>' +
     findings.map(function (f, i) {
       var sev = (f.severity || 'LOW').toUpperCase();
@@ -882,13 +1020,18 @@ export function buildFindingsTable(findings) {
       var shortDetails = details.length > 120 ? details.substring(0, 120) + '...' : details;
       var timeMatch = details.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
       var time = f.timestamp || (timeMatch ? timeMatch[1] + ' ' + timeMatch[2] : '-');
+      var status = f.review_status || 'new';
+      var rowCls = 'clickable' + (status !== 'new' ? ' row-reviewed' : '');
+      var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
 
-      return '<tr class="clickable" data-action="openScanDetailFindingByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
+      return '<tr class="' + rowCls + '"' + fidAttr + ' ' +
+             'data-action="openScanDetailFindingByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
         '<td class="col-time">' + time + '</td>' +
-        '<td class="col-severity"><span class="pill pill-' + sev.toLowerCase(1) + '">' + sev + '</span></td>' +
+        '<td class="col-severity">' + sevPillHtml(sev) + '</td>' +
         '<td class="col-rule">' + rule + '</td>' +
         '<td class="col-mitre">' + mitreLink + '</td>' +
-        '<td>' + escapeHtml(shortDetails) + '</td></tr>';
+        '<td>' + escapeHtml(shortDetails) + '</td>' +
+        '<td class="col-status" data-status-slot="pill">' + _statusPillHtml(status) + '</td></tr>';
     }).join('') +
     '</tbody></table>';
 }

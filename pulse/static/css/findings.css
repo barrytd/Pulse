@@ -25,8 +25,12 @@
   vertical-align: top;
 }
 
-.findings-table tr:hover td {
-  background: var(--hover-row);
+.findings-table tbody tr {
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.findings-table tbody tr:hover td {
+  background: var(--hover-bg);
 }
 
 .findings-table .col-time {
@@ -225,6 +229,31 @@
   margin-bottom: 8px;
 }
 
+/* Prominent "Last reviewed at" banner in the drawer — bigger, bolder,
+   subtly accented so the user can see at a glance whether this finding
+   has ever been actioned and when. */
+.review-meta-prominent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(63, 185, 80, 0.08);
+  border: 1px solid rgba(63, 185, 80, 0.25);
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.review-meta-prominent .review-meta-icon {
+  color: #3fb950;
+  font-size: 16px;
+  line-height: 1;
+}
+.review-meta-prominent strong {
+  font-family: monospace;
+  font-weight: 600;
+}
+
 .review-note-input {
   width: 100%;
   min-height: 64px;
@@ -240,23 +269,135 @@
   box-sizing: border-box;
 }
 
-.review-buttons {
+/* Toggle buttons with an inline "checkbox" that fills in on activation.
+   Clicking an already-active button sends the finding back to 'new'. */
+.review-toggles {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.review-buttons .btn-active {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.review-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.review-toggle:hover { background: rgba(255, 255, 255, 0.04); }
+
+/* The checkbox — an outlined square that fills when the parent toggle
+   is active. ::after draws the checkmark or X depending on which toggle. */
+.review-toggle .review-check {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
-.data-table tr.row-reviewed {
-  opacity: 0.55;
+/* Reviewed — green */
+.review-toggle-reviewed.active {
+  background: rgba(63, 185, 80, 0.12);
+  border-color: #3fb950;
+  color: #3fb950;
 }
-.data-table tr.row-reviewed:hover {
+.review-toggle-reviewed.active .review-check {
+  background: #3fb950;
+  border-color: #3fb950;
+}
+.review-toggle-reviewed.active .review-check::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0px;
+  width: 4px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* False positive — amber */
+.review-toggle-fp.active {
+  background: rgba(210, 153, 34, 0.12);
+  border-color: #d29922;
+  color: #d29922;
+}
+.review-toggle-fp.active .review-check {
+  background: #d29922;
+  border-color: #d29922;
+}
+.review-toggle-fp.active .review-check::before,
+.review-toggle-fp.active .review-check::after {
+  content: "";
+  position: absolute;
+  left: 6.5px;
+  top: 2px;
+  width: 2px;
+  height: 9px;
+  background: #fff;
+  border-radius: 1px;
+}
+.review-toggle-fp.active .review-check::before { transform: rotate(45deg); }
+.review-toggle-fp.active .review-check::after  { transform: rotate(-45deg); }
+
+/* Row-level treatments used by every findings surface (full table, compact
+   dashboard list, scan-detail table) so reviewed/FP findings fade back. */
+.data-table tr.row-reviewed,
+.findings-table tr.row-reviewed {
+  opacity: 0.6;
+}
+.data-table tr.row-reviewed:hover,
+.findings-table tr.row-reviewed:hover {
   opacity: 1;
 }
+
+/* Status column pill + dashboard dot — same colour language as the drawer
+   toggles so the whole surface reads consistently. */
+.status-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.status-pill.status-reviewed {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.35);
+}
+.status-pill.status-fp {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+  border: 1px solid rgba(210, 153, 34, 0.35);
+}
+
+.finding-status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.finding-status-dot.status-reviewed { background: #3fb950; }
+.finding-status-dot.status-fp       { background: #d29922; }
+
+.col-status { white-space: nowrap; }
+.col-host   { white-space: nowrap; font-family: var(--mono, monospace); font-size: 12px; color: var(--text-muted); }
 
 /* Splunk-style data table — alternating rows, hover, colored left border */
 .data-table {
@@ -283,11 +424,13 @@
 .data-table thead th.sortable:hover { color: var(--text); }
 
 .data-table tbody tr {
-  transition: background 0.1s;
+  transition: background 150ms ease;
 }
 
 .data-table tbody tr:nth-child(even) td { background: var(--hover-row); }
-.data-table tbody tr:hover td { background: var(--accent-glow); }
+.data-table tbody tr:hover td { background: var(--hover-bg); }
+.data-table tbody tr.clickable,
+.data-table tbody tr[data-action] { cursor: pointer; }
 
 .data-table tbody td {
   padding: 10px 14px;

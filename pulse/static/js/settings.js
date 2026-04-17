@@ -28,6 +28,30 @@ const EMAIL_PROVIDER_PRESETS = {
   other:   { host: '',                      port: 587, help: '' }
 };
 
+// Left-nav tab layout — each tab maps to a builder that returns the
+// right-hand content HTML. Kept module-level so `setActiveSettingsTab`
+// can pre-select a tab before navigate('settings') runs.
+const SETTINGS_TABS = [
+  { id: 'profile',       label: 'Profile',         icon: 'user' },
+  { id: 'notifications', label: 'Notifications',   icon: 'bell' },
+  { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar' },
+  { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
+  { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
+];
+let _activeSettingsTab = 'profile';
+
+export function setActiveSettingsTab(name) {
+  if (SETTINGS_TABS.some(function (t) { return t.id === name; })) {
+    _activeSettingsTab = name;
+  }
+}
+
+export function switchSettingsTab(arg) {
+  if (!arg) return;
+  setActiveSettingsTab(arg);
+  renderSettingsPage();
+}
+
 export async function renderSettingsPage() {
   var c = document.getElementById('content');
   c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading...</div>';
@@ -141,11 +165,8 @@ export async function renderSettingsPage() {
 
   var currentTheme = getTheme();
 
-  c.innerHTML =
-    '<div class="page-head">' +
-      '<div class="page-head-title">Configure Pulse</div>' +
-    '</div>' +
-
+  // --- Profile tab ----------------------------------------------------
+  var profileHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">My Account</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -161,8 +182,10 @@ export async function renderSettingsPage() {
         '<button class="btn btn-primary" data-action="saveAccount">Save account changes</button>' +
         '<button class="btn" data-action="signOut">Sign out</button>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
+  // --- Notifications tab ---------------------------------------------
+  var emailSmtpHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Email Notifications</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -186,8 +209,9 @@ export async function renderSettingsPage() {
       '<div class="form-actions">' +
         '<button class="btn btn-primary" data-action="saveEmailSettings">Save email settings</button>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
+  var thresholdAlertsHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Threshold Alerts</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -206,8 +230,9 @@ export async function renderSettingsPage() {
         '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
         '<button class="btn" data-action="sendTestAlert">Send test alert</button>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
+  var liveMonitorEmailsHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Live Monitor Emails</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -222,8 +247,10 @@ export async function renderSettingsPage() {
       '<div class="form-actions">' +
         '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
+  // --- Scheduled Scans tab -------------------------------------------
+  var scheduledHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Scheduled Scans</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -284,8 +311,9 @@ export async function renderSettingsPage() {
         '<button class="btn btn-primary" data-action="saveScheduleSettings"' +
           (schedSupported ? '' : ' disabled') + '>Save schedule</button>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
+  var webhookHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Slack / Discord Notifications</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -304,8 +332,10 @@ export async function renderSettingsPage() {
         '<button class="btn btn-primary" data-action="saveWebhookSettings">Save webhook settings</button>' +
         '<button class="btn" data-action="sendTestWebhook">Send test notification</button>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
+  // --- Advanced tab --------------------------------------------------
+  var scanDefaultsHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Scan Defaults</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -319,8 +349,10 @@ export async function renderSettingsPage() {
         '<input type="text" value="' + escapeHtml((config.settings.format || '').toUpperCase()) + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
       '<div class="form-row"><label>Default severity</label>' +
         '<input type="text" value="' + escapeHtml(config.settings.severity || '') + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
-    '</div>' +
+    '</div>';
 
+  // --- Appearance tab ------------------------------------------------
+  var appearanceHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Appearance</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -331,8 +363,9 @@ export async function renderSettingsPage() {
           '<option value="dark"'  + (currentTheme === 'dark'  ? ' selected' : '') + '>Dark (default)</option>' +
           '<option value="light"' + (currentTheme === 'light' ? ' selected' : '') + '>Light</option>' +
         '</select></div>' +
-    '</div>' +
+    '</div>';
 
+  var rulesCardHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Available Detection Rules (' + rules.rules.length + ')</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -343,14 +376,68 @@ export async function renderSettingsPage() {
           return '<span class="whitelist-item">' + escapeHtml(r) + '</span>';
         }).join('') +
       '</div>' +
-    '</div>' +
-
-    '<div class="card">' +
-      '<div class="section-label">Resources</div>' +
-      '<p><a href="/docs" target="_blank" style="color:var(--accent); text-decoration:none;">\u2192 API Documentation (Swagger)</a></p>' +
     '</div>';
 
-  onEmailProviderChange();
+  var resourcesHtml =
+    '<div class="card">' +
+      '<div class="section-label">Resources</div>' +
+      '<p><a href="/docs" target="_blank" data-default="allow" style="color:var(--accent); text-decoration:none;">\u2192 API Documentation (Swagger)</a></p>' +
+    '</div>';
+
+  // --- Compose tab panels --------------------------------------------
+  var panels = {
+    profile:       profileHtml,
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml,
+    scheduled:     scheduledHtml,
+    appearance:    appearanceHtml,
+    // SMTP is powerful but noisy — tucked behind a <details> so the
+    // Advanced tab reads as a configuration inventory, not a form wall.
+    advanced:
+      '<details class="settings-collapsible" style="margin-bottom:16px;">' +
+        '<summary><span class="settings-collapsible-title">SMTP Server</span>' +
+          '<span class="settings-collapsible-hint">Outbound email for threshold + monitor alerts</span>' +
+        '</summary>' +
+        emailSmtpHtml +
+      '</details>' +
+      scanDefaultsHtml +
+      rulesCardHtml +
+      resourcesHtml,
+  };
+
+  var tabNavHtml = '<nav class="settings-tab-nav">' +
+    SETTINGS_TABS.map(function (t) {
+      var active = (t.id === _activeSettingsTab) ? ' active' : '';
+      return '<a class="settings-tab-link' + active + '" ' +
+               'data-action="switchSettingsTab" data-arg="' + t.id + '">' +
+        '<i data-lucide="' + t.icon + '"></i>' +
+        '<span>' + escapeHtml(t.label) + '</span>' +
+      '</a>';
+    }).join('') +
+  '</nav>';
+
+  var activeTab = SETTINGS_TABS.find(function (t) { return t.id === _activeSettingsTab; }) || SETTINGS_TABS[0];
+
+  c.innerHTML =
+    '<div class="page-head">' +
+      '<div class="page-head-title">' + escapeHtml(activeTab.label) + '</div>' +
+    '</div>' +
+    '<div class="settings-layout">' +
+      tabNavHtml +
+      '<div class="settings-tab-content">' + (panels[_activeSettingsTab] || panels.profile) + '</div>' +
+    '</div>';
+
+  // Rehydrate the Lucide tab icons — these are rendered dynamically so
+  // they missed the boot-time createIcons() call.
+  try {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  } catch (e) {}
+
+  // The SMTP provider presets fan out to rows that default to hidden
+  // — only the Notifications/Advanced tabs render them, so gate the
+  // sync so it doesn't throw on Profile/Scheduled.
+  if (document.getElementById('email-provider')) onEmailProviderChange();
 }
 
 export async function saveAccount() {

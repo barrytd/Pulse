@@ -7,12 +7,15 @@ import { renderDashboardPage } from './dashboard.js';
 import { renderMonitorPage } from './monitor.js';
 import { renderScansPage, setScansPageTab } from './findings.js';
 import { renderHistoryPage } from './history.js';
+import { renderFleetPage } from './fleet.js';
 import { renderWhitelistPage } from './whitelist.js';
 import { renderSettingsPage } from './settings.js';
+import { renderReportsPage } from './reports.js';
+import { renderRulesPage } from './rules.js';
 
 // "findings" is no longer a top-level page — it's a tab on Scans.
 // Still in validPages for hash-backcompat (old bookmarks land right).
-export const validPages = ['dashboard','monitor','scans','findings','history','whitelist','settings'];
+export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','whitelist','rules','settings'];
 
 // Current page — mutable module state. Exposed via getter so other
 // modules can peek (see theme.js).
@@ -49,8 +52,11 @@ export function navigate(page) {
     dashboard: renderDashboardPage,
     monitor:   renderMonitorPage,
     history:   renderHistoryPage,
+    fleet:     renderFleetPage,
     whitelist: renderWhitelistPage,
     settings:  renderSettingsPage,
+    reports:   renderReportsPage,
+    rules:     renderRulesPage,
   };
 
   (renderers[page] || renderDashboardPage)();
@@ -66,3 +72,20 @@ function _updateTitle(title) {
   var titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = title;
 }
+
+// Like navigate(), but pushes a new history entry so the browser back
+// button returns to the previous page. Used by stat-card clicks on the
+// dashboard so analysts can drill down and pop back with Back.
+export function navigateWithHistory(page) {
+  var target = page === 'findings' ? 'scans' : page;
+  if (location.hash !== '#' + target) {
+    history.pushState(null, '', '#' + target);
+  }
+  navigate(page);
+}
+
+// Wire up browser back/forward so popstate re-renders the page.
+window.addEventListener('popstate', function () {
+  var hash = (location.hash || '').replace('#', '') || 'dashboard';
+  if (validPages.indexOf(hash) >= 0) navigate(hash);
+});

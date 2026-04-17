@@ -171,6 +171,15 @@
   background: var(--accent-glow);
 }
 
+.drop-zone.drop-error {
+  border-color: #dc3545;
+  background: rgba(220, 53, 69, 0.08);
+}
+.drop-zone.drop-error .drop-text,
+.drop-zone.drop-error .drop-text strong {
+  color: #dc3545;
+}
+
 .drop-zone .drop-icon {
   font-size: 32px;
   margin-bottom: 8px;

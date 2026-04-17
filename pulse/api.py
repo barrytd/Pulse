@@ -50,13 +50,17 @@ from pulse.auth import (
 from pulse.database import (
     REVIEW_STATUSES,
     count_users, create_user, delete_all_monitor_sessions,
-    delete_monitor_session, delete_scans, get_history,
+    delete_monitor_session, delete_scans, get_fleet_summary, get_history,
     get_monitor_session_findings, get_scan_findings,
     get_user_by_email, get_user_by_id, init_db,
     list_monitor_sessions, save_scan,
     set_finding_review, update_user_email, update_user_password,
 )
 from pulse.detections import run_all_detections
+from pulse.rules_config import (
+    RULE_META, filter_by_enabled, get_disabled_rules,
+    get_rule_names, set_rule_enabled,
+)
 from pulse.emailer import dispatch_alerts
 from pulse.remediation import attach_remediation
 from pulse.monitor_service import MonitorManager
@@ -424,6 +428,12 @@ def _register_routes(app: FastAPI) -> None:
             # Apply whitelist so the API gives the same answers as the CLI.
             findings = _filter_with_whitelist(findings, app.state.config_path)
 
+            # Honor user-disabled rules from pulse.yaml. This runs after
+            # whitelist so the disabled-rules list wins over noisy rules
+            # even if the whitelist wouldn't have caught them.
+            _cfg = _read_config(app.state.config_path)
+            findings = filter_by_enabled(findings, get_disabled_rules(_cfg))
+
             score_data = calculate_score_from_findings(findings)
 
             sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
@@ -494,6 +504,15 @@ def _register_routes(app: FastAPI) -> None:
                 detail="limit must be between 1 and 200.",
             )
         return {"scans": get_history(app.state.db_path, limit=limit)}
+
+    # -------------------------------------------------------------------
+    # GET /api/fleet — per-host rollup (Sprint 4 Thread A)
+    # -------------------------------------------------------------------
+    @app.get("/api/fleet")
+    def fleet():
+        """Return one row per tracked hostname with score, last scan, and
+        finding totals. Powers the Fleet overview page."""
+        return {"hosts": get_fleet_summary(app.state.db_path)}
 
     # -------------------------------------------------------------------
     # DELETE /api/scans — delete one or many scans (+ cascading findings)
@@ -696,6 +715,91 @@ def _register_routes(app: FastAPI) -> None:
             content=content,
             headers={"Content-Disposition": f"attachment; filename=pulse_scan_{scan_id}.html"},
         )
+
+    # -------------------------------------------------------------------
+    # GET /api/reports — list persisted reports on disk (reports/ dir)
+    # -------------------------------------------------------------------
+    @app.get("/api/reports")
+    def list_reports():
+        """
+        List every file in the ``reports/`` directory. Returns filename,
+        format (extension), byte size, and generated timestamp derived
+        either from the filename (pulse_report_YYYYMMDD_HHMMSS.ext) or
+        the file's mtime. No database tracking yet — this is a straight
+        directory listing.
+        """
+        reports_dir = "reports"
+        items: list[dict] = []
+        if os.path.isdir(reports_dir):
+            for name in os.listdir(reports_dir):
+                path = os.path.join(reports_dir, name)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                ext = os.path.splitext(name)[1].lstrip(".").lower() or "?"
+                # Best-effort: parse pulse_*_YYYYMMDD_HHMMSS into ISO
+                ts = None
+                import re as _re
+                m = _re.search(r"(\d{8})_(\d{6})", name)
+                if m:
+                    d, t = m.group(1), m.group(2)
+                    ts = f"{d[:4]}-{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}:{t[4:6]}"
+                if not ts:
+                    import datetime as _dt
+                    ts = _dt.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                items.append({
+                    "filename": name,
+                    "format": ext,
+                    "size_bytes": st.st_size,
+                    "generated_at": ts,
+                })
+        items.sort(key=lambda r: r["generated_at"], reverse=True)
+        return {"reports": items}
+
+    # -------------------------------------------------------------------
+    # GET /api/reports/{filename} — download a persisted report
+    # -------------------------------------------------------------------
+    @app.get("/api/reports/{filename}")
+    def download_report(filename: str):
+        # Defence in depth: os.path.basename strips any path, then we
+        # re-check the resolved path is still inside reports/ so a
+        # crafted filename cannot escape the directory.
+        safe = os.path.basename(filename)
+        if not safe or safe != filename:
+            raise HTTPException(400, detail="Invalid filename.")
+        path = os.path.realpath(os.path.join("reports", safe))
+        root = os.path.realpath("reports")
+        if not path.startswith(root + os.sep) and path != root:
+            raise HTTPException(400, detail="Invalid filename.")
+        if not os.path.isfile(path):
+            raise HTTPException(404, detail="Report not found.")
+        return FileResponse(
+            path,
+            headers={"Content-Disposition": f'attachment; filename="{safe}"'},
+        )
+
+    # -------------------------------------------------------------------
+    # DELETE /api/reports/{filename} — remove a persisted report from disk
+    # -------------------------------------------------------------------
+    @app.delete("/api/reports/{filename}")
+    def delete_report(filename: str):
+        safe = os.path.basename(filename)
+        if not safe or safe != filename:
+            raise HTTPException(400, detail="Invalid filename.")
+        path = os.path.realpath(os.path.join("reports", safe))
+        root = os.path.realpath("reports")
+        if not path.startswith(root + os.sep) and path != root:
+            raise HTTPException(400, detail="Invalid filename.")
+        if not os.path.isfile(path):
+            raise HTTPException(404, detail="Report not found.")
+        try:
+            os.remove(path)
+        except OSError as e:
+            raise HTTPException(500, detail=f"Could not delete: {e}")
+        return {"deleted": safe}
 
     # -------------------------------------------------------------------
     # GET /api/config — read current whitelist + settings + email + alerts
@@ -993,6 +1097,9 @@ def _register_routes(app: FastAPI) -> None:
         except FileNotFoundError as exc:
             raise HTTPException(500, detail=str(exc))
 
+        # Include admin status so the dashboard can warn when a scan comes
+        # back empty because the Security.evtx log wasn't readable.
+        result["is_admin"] = _system_scan_is_admin()
         return result
 
     # -------------------------------------------------------------------
@@ -1072,6 +1179,49 @@ def _register_routes(app: FastAPI) -> None:
     def list_rules():
         """Return the names of all detection rules Pulse can run."""
         return {"rules": _get_rule_names()}
+
+    # -------------------------------------------------------------------
+    # GET /api/rules/details — rules page payload (name, event_id,
+    # severity, mitre, enabled). The dashboard uses this to render the
+    # full Rules table; /api/rules keeps the lightweight name-only shape
+    # the dashboard filter dropdowns already depend on.
+    # -------------------------------------------------------------------
+    @app.get("/api/rules/details")
+    def list_rules_details():
+        config = _read_config(app.state.config_path)
+        disabled = set(get_disabled_rules(config))
+        rows = []
+        for name in _get_rule_names():
+            meta = RULE_META.get(name, {})
+            rows.append({
+                "name":     name,
+                "event_id": meta.get("event_id"),
+                "severity": meta.get("severity", "LOW"),
+                "mitre":    meta.get("mitre"),
+                "enabled":  name not in disabled,
+            })
+        return {"rules": rows}
+
+    # -------------------------------------------------------------------
+    # PUT /api/rules/{name}/enabled — toggle a rule on/off in pulse.yaml
+    # -------------------------------------------------------------------
+    @app.put("/api/rules/{name}/enabled")
+    async def set_rule_enabled_endpoint(name: str, request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if "enabled" not in body:
+            raise HTTPException(400, detail="Missing 'enabled' boolean in body.")
+        enabled = bool(body.get("enabled"))
+
+        if name not in RULE_META:
+            raise HTTPException(404, detail=f"Unknown rule: {name}")
+
+        config = _read_config(app.state.config_path)
+        set_rule_enabled(config, name, enabled)
+        _write_config(app.state.config_path, config)
+        return {"name": name, "enabled": enabled}
 
     # -------------------------------------------------------------------
     # Live monitor endpoints
@@ -1276,16 +1426,7 @@ def _write_config(config_path, config):
 
 def _get_rule_names():
     """Return a sorted list of all detection rule names."""
-    return sorted([
-        "Brute Force Attempt", "User Account Created", "Privilege Escalation",
-        "Audit Log Cleared", "RDP Logon Detected", "Pass-the-Hash Attempt",
-        "Service Installed", "Antivirus Disabled", "Firewall Disabled",
-        "Firewall Rule Changed", "Account Lockout", "Scheduled Task Created",
-        "Suspicious PowerShell", "Account Takeover Chain", "Malware Persistence Chain",
-        "Kerberoasting", "Golden Ticket", "Credential Dumping",
-        "Logon from Disabled Account", "After-Hours Logon",
-        "Suspicious Registry Modification", "Lateral Movement via Network Share",
-    ])
+    return get_rule_names()
 
 
 def _scheduled_scan_view(config):

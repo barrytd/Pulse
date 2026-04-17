@@ -224,6 +224,40 @@ def test_history_rejects_bad_limit(client):
 
 
 # ---------------------------------------------------------------------------
+# /api/fleet — per-host rollup surfaced to the Fleet overview page
+# ---------------------------------------------------------------------------
+
+def test_fleet_empty_when_no_scans(client):
+    """A fresh DB has no hosts."""
+    resp = client.get("/api/fleet")
+    assert resp.status_code == 200
+    assert resp.json() == {"hosts": []}
+
+
+def test_fleet_rolls_up_by_hostname(client):
+    """Each distinct hostname should appear once with its aggregate stats."""
+    # The /api/scan path won't produce finding-level hostnames here (fake
+    # .evtx headers parse to zero events), so write scans through the DB
+    # directly to exercise the rollup end-to-end.
+    from pulse import database
+    db_path = client.app.state.db_path
+    database.save_scan(db_path, [
+        {"rule": "RDP Logon Detected", "severity": "HIGH", "hostname": "HOST-A"},
+        {"rule": "User Account Created", "severity": "MEDIUM", "hostname": "HOST-A"},
+    ], filename="a.evtx")
+    database.save_scan(db_path, [
+        {"rule": "Audit Log Cleared", "severity": "CRITICAL", "hostname": "HOST-B"},
+    ], filename="b.evtx")
+
+    body = client.get("/api/fleet").json()
+    hosts = {row["hostname"]: row for row in body["hosts"]}
+    assert set(hosts) == {"HOST-A", "HOST-B"}
+    assert hosts["HOST-A"]["scan_count"] == 1
+    assert hosts["HOST-A"]["total_findings"] == 2
+    assert hosts["HOST-B"]["worst_severity"] == "CRITICAL"
+
+
+# ---------------------------------------------------------------------------
 # /api/report/{scan_id}
 # ---------------------------------------------------------------------------
 

@@ -103,7 +103,7 @@ function _buildWhitelistTable(rows) {
         : '<span class="origin-badge custom">custom</span>';
       var action = r.origin === 'custom'
         ? '<button class="icon-btn" title="Remove" data-wl-key="' + escapeHtml(r.key) +
-          '" data-wl-value="' + attrEscape(r.value) + '" data-action="removeWhitelistRowBtn">&times;</button>'
+          '" data-wl-value="' + attrEscape(r.value) + '" data-action="removeWhitelistRowBtn">\u2715</button>'
         : '';
       return '<tr>' +
         '<td>' + r.type + '</td>' +

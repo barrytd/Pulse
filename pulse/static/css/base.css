@@ -10,6 +10,7 @@
   --text-light:  #8b949e;
   --topbar-bg:   #ffffff;
   --hover-row:   #f6f8fa;
+  --hover-bg:    rgba(0, 0, 0, 0.04);
   --shadow:      0 1px 3px rgba(0,0,0,0.08);
   --accent:      #3b82f6;
   --accent-glow: rgba(59,130,246,0.15);
@@ -24,6 +25,7 @@
   --text-light:  #484f58;
   --topbar-bg:   #161b22;
   --hover-row:   #1c2129;
+  --hover-bg:    rgba(255, 255, 255, 0.04);
   --shadow:      0 1px 3px rgba(0,0,0,0.3);
   --accent:      #58a6ff;
   --accent-glow: rgba(88,166,255,0.12);

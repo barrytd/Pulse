@@ -12,15 +12,15 @@ import {
   apiExportUrl,
   invalidateScansCache,
 } from './api.js';
-import { openFindingDrawer } from './findings.js';
-import { mountDashLivePanel } from './monitor.js';
+import { openFindingDrawer, _statusDotHtml } from './findings.js';
 
 // ---------------------------------------------------------------
 // Shared state
 // ---------------------------------------------------------------
 
 // Splunk-style dashboard filter state. Persisted in URL query params.
-export let dashFilterState = { time: 'today', sev: 'all', rule: 'all', source: 'all', q: '' };
+// `from`/`to` are YYYY-MM-DD strings used only when `time === 'custom'`.
+export let dashFilterState = { time: 'today', sev: 'all', rule: 'all', source: 'all', q: '', from: '', to: '' };
 let dashFiltersHydrated = false;
 
 // MITRE lookup used by multiple pages.
@@ -73,6 +73,14 @@ export function escapeHtml(str) {
   var div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// Centralized severity pill helper so every page renders the same
+// colored badge. No icon — the text + color communicates severity.
+export function sevPillHtml(sev) {
+  var up = String(sev || 'LOW').toUpperCase();
+  var lo = up.toLowerCase();
+  return '<span class="pill pill-' + lo + '">' + up + '</span>';
 }
 
 // HTML-attribute-safe escape — escapes quotes so the string can sit
@@ -205,13 +213,15 @@ export function parseDashFiltersFromURL() {
   dashFiltersHydrated = true;
   try {
     var qp = new URLSearchParams(window.location.search);
-    var validTime = ['today', '7d', '30d', '90d'];
+    var validTime = ['today', '7d', '30d', '90d', 'custom'];
     var validSev  = ['all', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
     if (qp.has('time')   && validTime.indexOf(qp.get('time'))   >= 0) dashFilterState.time   = qp.get('time');
     if (qp.has('sev')    && validSev.indexOf(qp.get('sev'))     >= 0) dashFilterState.sev    = qp.get('sev');
     if (qp.has('rule'))   dashFilterState.rule   = qp.get('rule')   || 'all';
     if (qp.has('source')) dashFilterState.source = qp.get('source') || 'all';
     if (qp.has('q'))      dashFilterState.q      = qp.get('q')      || '';
+    if (qp.has('from'))   dashFilterState.from   = qp.get('from')   || '';
+    if (qp.has('to'))     dashFilterState.to     = qp.get('to')     || '';
   } catch (e) {}
 }
 
@@ -224,21 +234,40 @@ export function writeDashFiltersToURL() {
   if (st.rule   !== 'all')   qp.set('rule',   st.rule);
   if (st.source !== 'all')   qp.set('source', st.source);
   if (st.q)                  qp.set('q',      st.q);
+  if (st.time === 'custom') {
+    if (st.from) qp.set('from', st.from);
+    if (st.to)   qp.set('to',   st.to);
+  }
   var qs = qp.toString();
   var url = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
   history.replaceState({}, '', url);
 }
 
-// Cutoff Date object for "scan.scanned_at >= cutoff".
+// Cutoff Date object for "scan.scanned_at >= cutoff". Legacy helper —
+// still used by callers that only need the lower bound.
 export function _dashTimeCutoff(range) {
+  return _dashTimeRange(range, dashFilterState.from, dashFilterState.to).start;
+}
+
+// Returns { start, end } for the selected range. Open-ended where the
+// user hasn't picked a bound (e.g. custom with only a From date set).
+export function _dashTimeRange(range, from, to) {
   var now = new Date();
-  if (range === 'today') {
-    var d = new Date(now); d.setHours(0, 0, 0, 0); return d;
+  var farFuture = new Date(now.getTime() + 365 * 86400000);
+  if (range === 'custom') {
+    var s = from ? new Date(from + 'T00:00:00') : new Date(0);
+    var e = to   ? new Date(to   + 'T23:59:59') : farFuture;
+    if (isNaN(s.getTime())) s = new Date(0);
+    if (isNaN(e.getTime())) e = farFuture;
+    return { start: s, end: e };
   }
-  if (range === '7d')  return new Date(now.getTime() - 7  * 86400000);
-  if (range === '30d') return new Date(now.getTime() - 30 * 86400000);
-  if (range === '90d') return new Date(now.getTime() - 90 * 86400000);
-  return new Date(0);
+  var start;
+  if (range === 'today') { start = new Date(now); start.setHours(0, 0, 0, 0); }
+  else if (range === '7d')  start = new Date(now.getTime() - 7  * 86400000);
+  else if (range === '30d') start = new Date(now.getTime() - 30 * 86400000);
+  else if (range === '90d') start = new Date(now.getTime() - 90 * 86400000);
+  else start = new Date(0);
+  return { start: start, end: farFuture };
 }
 
 // Parse "YYYY-MM-DD HH:MM:SS" (local) into a Date. Tolerant of ISO too.
@@ -256,11 +285,11 @@ export function _parseScanDate(s) {
 
 // Filter the scans list by Time Range + Source.
 export function filterScansByDashState(scans) {
-  var cutoff = _dashTimeCutoff(dashFilterState.time);
+  var range = _dashTimeRange(dashFilterState.time, dashFilterState.from, dashFilterState.to);
   var src = dashFilterState.source;
   return scans.filter(function (s) {
     var d = _parseScanDate(s.scanned_at);
-    if (!d || d < cutoff) return false;
+    if (!d || d < range.start || d > range.end) return false;
     if (src !== 'all') {
       var who = s.hostname || s.filename || '';
       if (who !== src) return false;
@@ -291,10 +320,10 @@ export function filterFindingsByDashState(findings) {
 
 // Daily-score objects from /api/score/daily have `.date` like "YYYY-MM-DD".
 export function filterDailyByDashState(daily) {
-  var cutoff = _dashTimeCutoff(dashFilterState.time);
+  var range = _dashTimeRange(dashFilterState.time, dashFilterState.from, dashFilterState.to);
   return (daily || []).filter(function (d) {
     var dt = _parseScanDate(d.date);
-    return dt && dt >= cutoff;
+    return dt && dt >= range.start && dt <= range.end;
   });
 }
 
@@ -319,10 +348,11 @@ export function _categoriesFromDeductions(deds) {
 
 export function _dashFilterBarHtml(rules, sources) {
   var timeOpts = [
-    { v: 'today', l: 'Today' },
-    { v: '7d',    l: 'Last 7 days' },
-    { v: '30d',   l: 'Last 30 days' },
-    { v: '90d',   l: 'Last 90 days' },
+    { v: 'today',  l: 'Today' },
+    { v: '7d',     l: 'Last 7 days' },
+    { v: '30d',    l: 'Last 30 days' },
+    { v: '90d',    l: 'Last 90 days' },
+    { v: 'custom', l: 'Custom range' },
   ];
   var sevOpts = [
     { v: 'all',      l: 'All' },
@@ -344,22 +374,42 @@ export function _dashFilterBarHtml(rules, sources) {
     (sources || []).map(function (s) { return { v: s, l: s }; }));
   var st = dashFilterState;
 
+  // Custom range inputs only render when the Time Range dropdown is set
+  // to Custom. Change events on the <input type="date"> re-trigger apply.
+  var customHtml = (st.time === 'custom')
+    ? '<div class="dash-filter-group">' +
+        '<label class="dash-filter-label">From</label>' +
+        '<input type="date" class="dash-filter-date" id="f-from" value="' + escapeHtml(st.from || '') + '" ' +
+          'data-action-change="applyDashFilters" />' +
+      '</div>' +
+      '<div class="dash-filter-group">' +
+        '<label class="dash-filter-label">To</label>' +
+        '<input type="date" class="dash-filter-date" id="f-to" value="' + escapeHtml(st.to || '') + '" ' +
+          'data-action-change="applyDashFilters" />' +
+      '</div>'
+    : '';
+
   return '<div class="dash-filter-bar">' +
     '<div class="dash-filter-group">' +
       '<label class="dash-filter-label">Time Range</label>' +
-      '<select class="dash-filter-select" id="f-time">' + opts(timeOpts, st.time) + '</select>' +
+      '<select class="dash-filter-select" id="f-time" data-action-change="applyDashFilters">' +
+        opts(timeOpts, st.time) + '</select>' +
     '</div>' +
+    customHtml +
     '<div class="dash-filter-group">' +
       '<label class="dash-filter-label">Severity</label>' +
-      '<select class="dash-filter-select" id="f-severity">' + opts(sevOpts, st.sev) + '</select>' +
+      '<select class="dash-filter-select" id="f-severity" data-action-change="applyDashFilters">' +
+        opts(sevOpts, st.sev) + '</select>' +
     '</div>' +
     '<div class="dash-filter-group">' +
       '<label class="dash-filter-label">Rule</label>' +
-      '<select class="dash-filter-select" id="f-rule">' + opts(ruleOpts, st.rule) + '</select>' +
+      '<select class="dash-filter-select" id="f-rule" data-action-change="applyDashFilters">' +
+        opts(ruleOpts, st.rule) + '</select>' +
     '</div>' +
     '<div class="dash-filter-group">' +
       '<label class="dash-filter-label">Source</label>' +
-      '<select class="dash-filter-select" id="f-source">' + opts(sourceOpts, st.source) + '</select>' +
+      '<select class="dash-filter-select" id="f-source" data-action-change="applyDashFilters">' +
+        opts(sourceOpts, st.source) + '</select>' +
     '</div>' +
     '<div class="dash-filter-group" style="flex:1; min-width:200px;">' +
       '<label class="dash-filter-label">Search</label>' +
@@ -367,7 +417,6 @@ export function _dashFilterBarHtml(rules, sources) {
         'placeholder="user, IP, event ID..." value="' + escapeHtml(st.q || '') + '" ' +
         'data-action-keydown="dashFilterQueryKey" />' +
     '</div>' +
-    '<button class="dash-filter-apply" data-action="applyDashFilters">Apply</button>' +
     '<a class="dash-filter-reset" data-action="resetDashFilters">Reset</a>' +
   '</div>';
 }
@@ -383,18 +432,22 @@ export function applyDashFilters() {
   var r = document.getElementById('f-rule');
   var src = document.getElementById('f-source');
   var q   = document.getElementById('f-query');
+  var from = document.getElementById('f-from');
+  var to   = document.getElementById('f-to');
   var st = dashFilterState;
-  if (t)   st.time   = t.value;
-  if (s)   st.sev    = s.value;
-  if (r)   st.rule   = r.value;
-  if (src) st.source = src.value;
-  if (q)   st.q      = (q.value || '').trim();
+  if (t)    st.time   = t.value;
+  if (s)    st.sev    = s.value;
+  if (r)    st.rule   = r.value;
+  if (src)  st.source = src.value;
+  if (q)    st.q      = (q.value || '').trim();
+  if (from) st.from   = from.value || '';
+  if (to)   st.to     = to.value   || '';
   writeDashFiltersToURL();
   renderDashboardPage();
 }
 
 export function resetDashFilters() {
-  dashFilterState = { time: 'today', sev: 'all', rule: 'all', source: 'all', q: '' };
+  dashFilterState = { time: 'today', sev: 'all', rule: 'all', source: 'all', q: '', from: '', to: '' };
   writeDashFiltersToURL();
   renderDashboardPage();
 }
@@ -451,13 +504,41 @@ export function _renderTrend(t) {
          ' (' + Math.abs(t.pct) + '%)</div>';
 }
 
-export function _trendStatCard(label, value, sub, trend, accentClass, valueColorClass) {
-  return '<div class="stat-card ' + (accentClass || 'accent-neutral') + '">' +
+export function _trendStatCard(label, value, sub, trend, accentClass, valueColorClass, statKind) {
+  var kindAttr = statKind
+    ? ' data-action="clickStatCard" data-arg="' + statKind + '" data-stat-kind="' + statKind + '" role="button" tabindex="0"'
+    : '';
+  return '<div class="stat-card ' + (accentClass || 'accent-neutral') +
+         (statKind ? ' stat-card-clickable' : '') + '"' + kindAttr + '>' +
     '<div class="label">' + label + '</div>' +
     '<div class="value ' + (valueColorClass || '') + '">' + value + '</div>' +
     _renderTrend(trend) +
     (sub ? '<div class="sub">' + sub + '</div>' : '') +
   '</div>';
+}
+
+// Which stat card is currently selected on the dashboard. Persists the
+// visual selection across re-renders within the same page load.
+var _selectedStatKind = null;
+
+export function clickStatCard(kind) {
+  var cards = document.querySelectorAll('.stat-card[data-stat-kind]');
+  cards.forEach(function (c) { c.classList.remove('selected'); });
+  var target = null;
+  cards.forEach(function (c) { if (c.dataset.statKind === kind) target = c; });
+  if (target) target.classList.add('selected');
+  _selectedStatKind = kind;
+
+  if (kind === 'score') {
+    var panel = document.querySelector('.today-security-score');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  import('./navigation.js').then(function (m) {
+    if (kind === 'rules') m.navigateWithHistory('rules');
+    else if (kind === 'findings') m.navigateWithHistory('findings');
+    else if (kind === 'scans') m.navigateWithHistory('scans');
+  });
 }
 
 export function _accentForScore(score) {
@@ -513,7 +594,11 @@ export function _dashFindingsHtml(findings) {
       var rule = f.rule || 'Unknown';
       var details = f.details || f.description || '';
       var time = f.timestamp || _extractTime(f) || '-';
-      return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '" ' +
+      var status = f.review_status || 'new';
+      var rowCls = 'dash-finding-row sev-' + sev.toLowerCase() +
+                   (status !== 'new' ? ' row-reviewed' : '');
+      var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
+      return '<div class="' + rowCls + '"' + fidAttr + ' ' +
              'data-action="openFindingDrawerByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
         '<div>' +
           '<div class="time">' + escapeHtml(time) + '</div>' +
@@ -523,15 +608,159 @@ export function _dashFindingsHtml(findings) {
           '<div class="desc">' + escapeHtml(details) + '</div>' +
         '</div>' +
         '<div class="sev ' + sev.toLowerCase() + '">' + sev + '</div>' +
+        '<div class="finding-status-col" data-status-slot="dot">' + _statusDotHtml(status) + '</div>' +
       '</div>';
     }).join('') +
   '</div>';
 }
 
-export function openFindingDrawerByIdx(idx) {
+export function openFindingDrawerByIdx(idx, target) {
   var f = _dashRecentFindings[idx];
+  if (!f) return;
+  _selectDashFindingRow(target);
+  openFindingDrawer(f);
+}
+
+function _selectDashFindingRow(target) {
+  document.querySelectorAll('.dash-finding-row.selected').forEach(function (r) {
+    if (r !== target) r.classList.remove('selected');
+  });
+  if (target) target.classList.add('selected');
+}
+
+// ---------------------------------------------------------------
+// Needs Attention widget — unreviewed CRITICAL/HIGH in the last 7 days
+// across every scan. Always uses a fixed 7-day window regardless of
+// the dashboard filter bar so outstanding items stay visible while an
+// analyst drills into narrower slices with the filters.
+// ---------------------------------------------------------------
+
+var _attentionFindings = []; // full list, shared with the drawer opener
+
+async function _fetchAttentionFindings(allScans) {
+  var cutoff = Date.now() - 7 * 86400000;
+  var recent = (allScans || []).filter(function (s) {
+    if (!s.total_findings) return false;
+    var t = Date.parse(s.scanned_at || '');
+    return !isNaN(t) && t >= cutoff;
+  });
+  if (recent.length === 0) return [];
+
+  var batches = await Promise.all(recent.map(function (s) {
+    return fetchFindings(s.id).then(function (fs) {
+      return fs.map(function (f) {
+        return Object.assign({}, f, {
+          _scan_id:   s.id,
+          _scan_date: s.scanned_at,
+          _scan_host: s.hostname || s.filename || '',
+        });
+      });
+    }).catch(function () { return []; });
+  }));
+
+  var all = [];
+  batches.forEach(function (b) { all = all.concat(b); });
+
+  // Unreviewed CRITICAL/HIGH only. Explicitly exclude false_positive.
+  all = all.filter(function (f) {
+    var sv = (f.severity || '').toUpperCase();
+    if (sv !== 'CRITICAL' && sv !== 'HIGH') return false;
+    var st = f.review_status || 'new';
+    return st === 'new';
+  });
+
+  // Most recent first, CRITICAL before HIGH as a stable tie-breaker so
+  // the top of the list is always the most urgent thing.
+  all.sort(function (a, b) {
+    var sa = (a.severity || '').toUpperCase() === 'CRITICAL' ? 0 : 1;
+    var sb = (b.severity || '').toUpperCase() === 'CRITICAL' ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    var at = a.timestamp || _extractTime(a) || a._scan_date || '';
+    var bt = b.timestamp || _extractTime(b) || b._scan_date || '';
+    return at < bt ? 1 : at > bt ? -1 : 0;
+  });
+
+  return all;
+}
+
+export function _needsAttentionHtml(findings) {
+  var total = findings.length;
+
+  if (total === 0) {
+    return '<div class="needs-attention clear na-empty">' +
+      '<span>No critical or high findings need attention</span>' +
+    '</div>';
+  }
+
+  var hasCritical = findings.some(function (f) {
+    return (f.severity || '').toUpperCase() === 'CRITICAL';
+  });
+  var accentCls = hasCritical ? 'accent-critical' : 'accent-high';
+
+  var visible = findings.slice(0, 3);
+  var rowsHtml = visible.map(function (f, i) {
+    var sev  = (f.severity || 'HIGH').toUpperCase();
+    var rule = f.rule || 'Unknown';
+    var host = f._scan_host || '-';
+    var time = f.timestamp || _extractTime(f) || (f._scan_date || '-');
+    var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
+    return '<div class="na-row"' + fidAttr + ' ' +
+           'data-action="openAttentionFinding" data-arg="' + i + '" style="cursor:pointer;">' +
+      '<span class="na-rule">' + escapeHtml(rule) + '</span>' +
+      sevPillHtml(sev) +
+      '<span class="na-host">' + escapeHtml(host) + '</span>' +
+      '<span class="na-time">' + escapeHtml(time) + '</span>' +
+    '</div>';
+  }).join('');
+
+  var moreLink = total > 3
+    ? '<a class="na-more" data-action="openUnreviewedCriticalHigh" style="cursor:pointer;">' +
+        'and ' + (total - 3) + ' more unreviewed finding' + (total - 3 === 1 ? '' : 's') + ' \u2192' +
+      '</a>'
+    : '';
+
+  return '<div class="needs-attention ' + accentCls + '">' +
+    '<div class="na-header">' +
+      '<span class="na-title">Needs Attention</span>' +
+      '<span class="na-sub">Unreviewed critical / high \u2014 last 7 days</span>' +
+    '</div>' +
+    '<div class="na-rows">' + rowsHtml + '</div>' +
+    moreLink +
+  '</div>';
+}
+
+export function openAttentionFinding(idx) {
+  var f = _attentionFindings[Number(idx)];
   if (f) openFindingDrawer(f);
 }
+
+// In-place widget refresh. Called after a review toggle so the list
+// stays accurate without rebuilding the whole dashboard. Mutates the
+// cached finding's review_status then re-renders just our container.
+function _refreshNeedsAttentionFromCache() {
+  var mount = document.getElementById('dash-needs-attention');
+  if (!mount) return;
+  var live = _attentionFindings.filter(function (f) {
+    return (f.review_status || 'new') === 'new';
+  });
+  _attentionFindings = live;
+  mount.innerHTML = _needsAttentionHtml(live);
+}
+
+function _onReviewToggled(ev) {
+  if (!ev || !ev.detail) return;
+  var id = ev.detail.id;
+  var status = ev.detail.status;
+  var changed = false;
+  _attentionFindings.forEach(function (f) {
+    if (f.id != null && String(f.id) === String(id)) {
+      f.review_status = status;
+      changed = true;
+    }
+  });
+  if (changed) _refreshNeedsAttentionFromCache();
+}
+document.addEventListener('pulse:review-toggled', _onReviewToggled);
 
 // ---------------------------------------------------------------
 // Score-over-time chart (shared by dashboard + history)
@@ -553,7 +782,46 @@ export function _initScoreLineChart(dailyScores) {
   var textMuted  = styles.getPropertyValue('--text-muted').trim() || '#8b949e';
   var border     = styles.getPropertyValue('--border').trim() || '#30363d';
 
+  // Points dropping below the B-grade threshold (70) are highlighted so
+  // the regression jumps out at a glance. Red for <50, amber for 50-69.
+  var CRIT  = '#f85149';
+  var WARN  = '#d29922';
+  var pointColors = scores.map(function (v) {
+    if (v < 50) return CRIT;
+    if (v < 70) return WARN;
+    return accent;
+  });
+
   if (_scoreChartInstance) { _scoreChartInstance.destroy(); }
+
+  // afterDraw plugin: draws a dashed horizontal reference line at y=70
+  // ("B grade threshold"). Kept inline — global Chart.register would
+  // leak the line into every other chart on the page.
+  var bGradeLine = {
+    id: 'bGradeLine',
+    afterDraw: function (chart) {
+      var yScale = chart.scales.y;
+      var xScale = chart.scales.x;
+      if (!yScale || !xScale) return;
+      var y = yScale.getPixelForValue(70);
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = textMuted;
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xScale.left, y);
+      ctx.lineTo(xScale.right, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = textMuted;
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('B grade threshold', xScale.right - 2, y - 2);
+      ctx.restore();
+    }
+  };
 
   _scoreChartInstance = new Chart(canvas.getContext('2d'), {
     type: 'line',
@@ -566,8 +834,10 @@ export function _initScoreLineChart(dailyScores) {
         borderWidth: 2,
         fill: true,
         tension: 0.3,
-        pointRadius: 3,
-        pointBackgroundColor: accent,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: pointColors,
         pointBorderWidth: 0,
       }]
     },
@@ -588,7 +858,8 @@ export function _initScoreLineChart(dailyScores) {
           border: { color: border },
         }
       }
-    }
+    },
+    plugins: [bGradeLine],
   });
 }
 
@@ -662,6 +933,36 @@ export async function renderDashboardPage() {
                    'Privilege Escalation', 'Execution'];
   var mitreBarsHtml = _mitreBarsHtml(mitreCats, filteredCategories);
 
+  // Top triggered rules — aggregate deductions in the filtered window
+  // and keep the worst severity seen per rule so the badge color maps
+  // to how dangerous the rule is, not the severity of the last hit.
+  var ruleAgg = {};
+  filteredDeductions.forEach(function (d) {
+    var r = d.rule || 'Unknown';
+    if (!ruleAgg[r]) ruleAgg[r] = { count: 0, severity: 'LOW' };
+    ruleAgg[r].count++;
+    var sv = (d.severity || 'LOW').toUpperCase();
+    var rank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+    if ((rank[sv] || 0) > (rank[ruleAgg[r].severity] || 0)) {
+      ruleAgg[r].severity = sv;
+    }
+  });
+  var topRules = Object.keys(ruleAgg).map(function (r) {
+    return { rule: r, count: ruleAgg[r].count, severity: ruleAgg[r].severity };
+  }).sort(function (a, b) {
+    return b.count - a.count;
+  }).slice(0, 5);
+  var topRulesHtml = topRules.length === 0
+    ? '<div class="dash-empty-note" style="font-size:12px; margin:4px 0 0 0;">No rules triggered in this window.</div>'
+    : '<div class="top-rules-list">' +
+        topRules.map(function (r) {
+          return '<div class="top-rules-row">' +
+            '<span class="top-rules-name">' + escapeHtml(r.rule) + '</span>' +
+            '<span class="top-rules-count sev-' + r.severity.toLowerCase() + '">' + r.count + '</span>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+
   var latestWithFindings = scans.find(function (s) { return s.total_findings > 0; });
   var recentFindings = [];
   if (latestWithFindings) {
@@ -674,6 +975,12 @@ export async function renderDashboardPage() {
   }
 
   var filterBarHtml = _dashFilterBarHtml(rules, sourceList);
+
+  // Needs Attention always uses a fixed 7-day window on the full scan
+  // list, independent of the dashboard filter bar. Runs after the other
+  // fetches since it reuses allScans and issues its own per-scan fetches.
+  _attentionFindings = await _fetchAttentionFindings(allScans);
+  var attentionHtml = '<div id="dash-needs-attention">' + _needsAttentionHtml(_attentionFindings) + '</div>';
 
   var emptyBannerHtml = '';
   if (scans.length === 0) {
@@ -697,25 +1004,28 @@ export async function renderDashboardPage() {
   c.innerHTML =
     filterBarHtml +
     emptyBannerHtml +
+    attentionHtml +
     '<div class="stat-row">' +
       _trendStatCard('Daily Score',
                      score + ' <span style="font-size:14px; opacity:0.7;">(' + grade + ')</span>',
-                     scoreLabel, scoreTrend, _accentForScore(scoreNum), scoreColorClass(scoreNum)) +
+                     scoreLabel, scoreTrend, _accentForScore(scoreNum), scoreColorClass(scoreNum),
+                     'score') +
       _trendStatCard('Unique Rules',
                      uniqueRulesFiltered,
                      filtersOn ? 'Matching filter' : 'Triggered today', rulesTrend,
-                     uniqueRulesFiltered > 0 ? 'accent-high' : 'accent-neutral') +
+                     uniqueRulesFiltered > 0 ? 'accent-high' : 'accent-neutral',
+                     null, 'rules') +
       _trendStatCard('Total Findings', totalFindings,
-                     filtersOn ? 'In filtered window' : 'Across all scans', findTrend, 'accent-info') +
+                     filtersOn ? 'In filtered window' : 'Across all scans', findTrend, 'accent-info',
+                     null, 'findings') +
       _trendStatCard('Scans Run', scans.length,
-                     filtersOn ? 'In filtered window' : 'Since first install', null, 'accent-neutral') +
+                     filtersOn ? 'In filtered window' : 'Since first install', null, 'accent-neutral',
+                     null, 'scans') +
     '</div>' +
-
-    '<div id="dash-live-panel"></div>' +
 
     '<div class="middle-row">' +
 
-      '<div class="card">' +
+      '<div class="card today-security-score">' +
         '<div class="section-label">Today\u2019s Security Score</div>' +
         '<div class="score-display">' +
           '<div class="score-ring-container">' +
@@ -755,13 +1065,18 @@ export async function renderDashboardPage() {
           '<div class="section-label">MITRE ATT&amp;CK Categories</div>' +
           mitreBarsHtml +
         '</div>' +
+
+        '<div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">' +
+          '<div class="section-label">Top Triggered Rules</div>' +
+          topRulesHtml +
+        '</div>' +
       '</div>' +
 
       '<div class="card">' +
         '<div class="section-label">Score History</div>' +
         '<div class="score-chart-wrap"><canvas id="score-line-chart"></canvas></div>' +
         buildDailyScoreTable(dailyScores.slice(0, 7)) +
-        '<div class="history-footer"><a href="#" data-action="navigate" data-arg="history">View full history \u2192</a></div>' +
+        '<div class="history-footer"><a href="#" data-action="navigate" data-arg="history">View full history &rarr;</a></div>' +
       '</div>' +
     '</div>' +
 
@@ -769,7 +1084,7 @@ export async function renderDashboardPage() {
       ? '<div class="card">' +
           '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
             '<span>Last Scan Findings</span>' +
-            '<a href="#" data-action="navigate" data-arg="findings" style="color:var(--accent); font-size:11px; font-weight:600; text-decoration:none;">View all findings \u2192</a>' +
+            '<a href="#" data-action="navigate" data-arg="findings" style="color:var(--accent); font-size:11px; font-weight:600; text-decoration:none;">View all findings &rarr;</a>' +
           '</div>' +
           _dashFindingsHtml(recentFindings) +
         '</div>'
@@ -779,6 +1094,4 @@ export async function renderDashboardPage() {
     );
 
   _initScoreLineChart(dailyScores);
-
-  mountDashLivePanel();
 }

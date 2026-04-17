@@ -28,6 +28,7 @@ import socket
 import smtplib
 from datetime import datetime
 from pathlib import Path
+from email.mime.application import MIMEApplication  # PDF attachment part
 from email.mime.multipart import MIMEMultipart  # Container: holds text + HTML
 from email.mime.text import MIMEText            # Plain text / HTML body parts
 
@@ -156,8 +157,56 @@ def filter_alert_findings(findings, threshold):
     return result
 
 
+# ---------------------------------------------------------------------------
+# PDF attachment helpers
+# ---------------------------------------------------------------------------
+
+def _build_pdf_bytes(findings, scan_meta):
+    """Render a PDF report for these findings. Returns bytes or None on failure.
+
+    We never let a PDF failure block the email — the caller is expected to
+    drop a note into the body instead."""
+    try:
+        from pulse.pdf_report import build_pdf
+        return build_pdf(findings, scan_meta=scan_meta)
+    except Exception:
+        return None
+
+
+def _pdf_filename(scan_meta, scan_dt):
+    """Name the attachment: pulse-report-YYYY-MM-DD-scan<id>.pdf.
+
+    Falls back to a date-only filename when the caller has no scan_id
+    (e.g. live monitor alerts that don't correspond to a saved scan row).
+    """
+    date = (scan_dt or datetime.now()).strftime("%Y-%m-%d")
+    scan_id = (scan_meta or {}).get("scan_id") or (scan_meta or {}).get("id")
+    if scan_id:
+        return f"pulse-report-{date}-scan{scan_id}.pdf"
+    return f"pulse-report-{date}.pdf"
+
+
+def _wrap_with_pdf(inner, pdf_bytes, filename):
+    """Wrap an `alternative` text/html container in a `mixed` multipart
+    that also carries the PDF. The text+html alternative stays intact so
+    email clients keep rendering the rich body."""
+    outer = MIMEMultipart("mixed")
+    # Copy headers (From/To/Subject etc.) from the inner payload so the
+    # caller can keep setting them on the original MIMEMultipart.
+    for key, value in inner.items():
+        outer[key] = value
+        del inner[key]
+    outer.attach(inner)
+
+    attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+    attachment.add_header("Content-Disposition", "attachment", filename=filename)
+    outer.attach(attachment)
+    return outer
+
+
 def send_alert(email_config, alert_config, triggering_findings,
-               scan_dt=None, db_path=None):
+               scan_dt=None, db_path=None, pdf_bytes=None, pdf_filename=None,
+               pdf_failure_note=False):
     """
     Sends a short threshold-tripped alert email.
 
@@ -216,16 +265,20 @@ def send_alert(email_config, alert_config, triggering_findings,
         sev = (f.get("severity") or "LOW").upper()
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-    msg = MIMEMultipart("alternative")
-    msg["From"]    = sender
-    msg["To"]      = alert_recipient
-    msg["Subject"] = _build_alert_subject(severity_counts, len(triggering_findings), hostname)
+    inner = MIMEMultipart("alternative")
+    inner["From"]    = sender
+    inner["To"]      = alert_recipient
+    inner["Subject"] = _build_alert_subject(severity_counts, len(triggering_findings), hostname)
 
-    plain = _build_alert_plain_body(severity_counts, triggering_findings, hostname, scan_dt)
-    html  = _build_alert_html_body(severity_counts, triggering_findings, hostname, scan_dt)
+    plain = _build_alert_plain_body(severity_counts, triggering_findings, hostname, scan_dt,
+                                    pdf_failed=pdf_failure_note)
+    html  = _build_alert_html_body(severity_counts, triggering_findings, hostname, scan_dt,
+                                   pdf_failed=pdf_failure_note)
 
-    msg.attach(MIMEText(plain, "plain"))
-    msg.attach(MIMEText(html,  "html"))
+    inner.attach(MIMEText(plain, "plain"))
+    inner.attach(MIMEText(html,  "html"))
+
+    msg = _wrap_with_pdf(inner, pdf_bytes, pdf_filename) if pdf_bytes else inner
 
     try:
         with smtplib.SMTP(smtp_host, smtp_port) as server:
@@ -245,49 +298,65 @@ def send_alert(email_config, alert_config, triggering_findings,
         return False
 
 
-def dispatch_alerts(db_path, findings, email_config, alert_config, webhook_config=None):
+def _severity_counts(findings):
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for f in findings or []:
+        sev = (f.get("severity") or "LOW").upper()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
+
+
+def dispatch_alerts(db_path, findings, email_config, alert_config,
+                    webhook_config=None, delivery_config=None, scan_meta=None):
     """
-    Threshold-filter, cooldown-check, send, and record one alert dispatch.
+    Threshold-filter, cooldown-check, and fan out to every enabled channel.
 
-    This is the single entry point both the CLI (main.py) and the API
-    (POST /api/scan) use after a scan finishes. It centralises:
-      1. Checking alerts.enabled
-      2. Filtering findings by alerts.threshold
-      3. Dropping rules whose cooldown window is still active
-      4. Sending one email + one webhook covering the remaining fresh findings
-      5. Recording an alert_log row per unique rule on success
+    Single entry point used by:
+      - CLI scan (main.py)
+      - /api/scan upload + /api/scan/system
+      - scheduled_scan runner
+      - live-monitor loop
 
-    Email and webhook share one cooldown window — we don't want two channels
-    independently double-notifying for the same rule.
+    Flow:
+      1. Gate on alerts.enabled.
+      2. Apply global alerts.threshold and cooldown to build `fresh` list.
+      3. For each delivery channel (email / slack / discord):
+         - check `delivery.<channel>.enabled`
+         - apply per-channel `critical_only` tightening
+         - send; per-channel failures never block the others
+      4. Record an alert_log row per rule if ANY channel succeeded.
 
     Parameters:
-        db_path (str | None):      SQLite path. None skips cooldown + record.
-        findings (list):           All findings from the scan.
-        email_config (dict):       SMTP credentials (email section of pulse.yaml).
-        alert_config (dict):       alerts section of pulse.yaml.
-        webhook_config (dict | None): webhook section of pulse.yaml. Skipped
-                                   entirely when None or when enabled=false.
+        db_path (str | None):           SQLite path; None skips cooldown + record.
+        findings (list):                All findings from the scan.
+        email_config (dict):            email section of pulse.yaml (SMTP).
+        alert_config (dict):            alerts section of pulse.yaml.
+        webhook_config (dict | None):   Legacy single-URL webhook block — only
+                                        used when delivery_config is absent so
+                                        old pulse.yaml configs keep working.
+        delivery_config (dict | None):  New delivery.{email,slack,discord} block.
+        scan_meta (dict | None):        Optional scan context passed to the
+                                        email (PDF filename) and webhooks
+                                        (host/score/grade/report_path).
 
-    Returns:
-        dict with keys:
-            enabled   (bool) - alerts.enabled was true
-            threshold (str)  - effective threshold used
-            over_threshold (int) - findings at or above threshold
-            skipped_rules  (list[str]) - rules suppressed by cooldown
-            fresh (int)      - findings that passed cooldown
-            sent  (bool)     - True if email sent
-            webhook_sent (bool) - True if webhook POST succeeded
-            recipient (str | None)
+    Returns dict with:
+        enabled, threshold, over_threshold, skipped_rules,
+        fresh, sent (email), webhook_sent (any webhook), slack_sent,
+        discord_sent, pdf_attached, recipient.
     """
     result = {
-        "enabled": False,
-        "threshold": None,
+        "enabled":        False,
+        "threshold":      None,
         "over_threshold": 0,
-        "skipped_rules": [],
-        "fresh": 0,
-        "sent": False,
-        "webhook_sent": False,
-        "recipient": None,
+        "skipped_rules":  [],
+        "fresh":          0,
+        "sent":           False,
+        "webhook_sent":   False,
+        "slack_sent":     False,
+        "discord_sent":   False,
+        "pdf_attached":   False,
+        "recipient":      None,
     }
 
     alert_config = alert_config or {}
@@ -307,9 +376,6 @@ def dispatch_alerts(db_path, findings, email_config, alert_config, webhook_confi
     if not alertable:
         return result
 
-    # Cooldown filter — drop findings whose rule was alerted recently.
-    # Imported lazily so importing emailer doesn't require database at
-    # module load (keeps the dependency graph thin).
     from pulse.database import record_alert, was_recently_alerted
 
     fresh = []
@@ -326,21 +392,96 @@ def dispatch_alerts(db_path, findings, email_config, alert_config, webhook_confi
     if not fresh:
         return result
 
-    email_ok = send_alert(email_config, alert_config, fresh)
+    # --- Per-channel config resolution --------------------------------
+    # If `delivery` is supplied, it's authoritative. Otherwise fall back
+    # to legacy email/webhook flags so pre-delivery pulse.yaml files and
+    # the existing test suite keep working.
+    delivery = delivery_config or {}
+    email_cfg = delivery.get("email") or {}
+    slack_cfg = delivery.get("slack") or {}
+    disc_cfg  = delivery.get("discord") or {}
+
+    legacy_mode = delivery_config is None
+
+    email_enabled = email_cfg.get("enabled", True) if not legacy_mode else True
+    # Per-channel critical-only tightens the global threshold further.
+    def _apply_channel_threshold(only):
+        if not only:
+            return fresh
+        return filter_alert_findings(fresh, "CRITICAL")
+
+    email_fresh = _apply_channel_threshold(email_cfg.get("critical_only"))
+    slack_fresh = _apply_channel_threshold(slack_cfg.get("critical_only"))
+    disc_fresh  = _apply_channel_threshold(disc_cfg.get("critical_only"))
+
+    meta = scan_meta or {}
+    scan_dt     = meta.get("scan_dt") or datetime.now()
+    hostname    = meta.get("hostname") or _get_hostname()
+    score       = meta.get("score")
+    grade       = meta.get("grade")
+    report_path = meta.get("report_path")
+
+    # --- Email -------------------------------------------------------
+    email_ok = False
+    if email_enabled and email_fresh:
+        pdf_bytes = None
+        pdf_filename = None
+        pdf_failed = False
+        if email_cfg.get("attach_pdf", True):
+            pdf_filename = _pdf_filename(meta, scan_dt)
+            pdf_bytes = _build_pdf_bytes(email_fresh, meta)
+            if pdf_bytes is None:
+                pdf_failed = True
+        email_ok = send_alert(
+            email_config, alert_config, email_fresh,
+            scan_dt=scan_dt,
+            pdf_bytes=pdf_bytes, pdf_filename=pdf_filename,
+            pdf_failure_note=pdf_failed,
+        )
+        result["pdf_attached"] = bool(pdf_bytes and email_ok)
     result["sent"] = bool(email_ok)
     result["recipient"] = (alert_config.get("recipient")
                            or (email_config or {}).get("recipient"))
 
-    webhook_ok = False
-    if webhook_config and webhook_config.get("enabled"):
-        from pulse.webhook import send_webhook
-        webhook_ok = send_webhook(webhook_config, fresh)
-        result["webhook_sent"] = bool(webhook_ok)
+    # --- Slack -------------------------------------------------------
+    slack_ok = False
+    if not legacy_mode:
+        if slack_cfg.get("enabled") and slack_fresh:
+            from pulse.webhook import send_slack
+            slack_ok = send_slack(
+                slack_cfg.get("webhook_url"), slack_fresh,
+                hostname=hostname, score=score, grade=grade,
+                report_path=report_path, scan_dt=scan_dt,
+            )
+    result["slack_sent"] = bool(slack_ok)
 
-    # Record per-rule cooldown if either channel delivered — we don't want
-    # to keep retrying a rule just because one channel failed and would
-    # otherwise resend next scan.
-    if (email_ok or webhook_ok) and db_path:
+    # --- Discord -----------------------------------------------------
+    discord_ok = False
+    if not legacy_mode:
+        if disc_cfg.get("enabled") and disc_fresh:
+            from pulse.webhook import send_discord
+            discord_ok = send_discord(
+                disc_cfg.get("webhook_url"), disc_fresh,
+                hostname=hostname, score=score, grade=grade,
+                report_path=report_path, scan_dt=scan_dt,
+            )
+    result["discord_sent"] = bool(discord_ok)
+
+    # --- Legacy single-URL webhook fallback --------------------------
+    legacy_ok = False
+    if legacy_mode and webhook_config and webhook_config.get("enabled"):
+        from pulse.webhook import send_webhook
+        legacy_ok = send_webhook(
+            webhook_config, fresh,
+            hostname=hostname, score=score, grade=grade,
+            report_path=report_path, scan_dt=scan_dt,
+        )
+
+    result["webhook_sent"] = bool(slack_ok or discord_ok or legacy_ok)
+
+    # Record per-rule cooldown if anything delivered.
+    any_ok = email_ok or slack_ok or discord_ok or legacy_ok
+    if any_ok and db_path:
         unique_rules = {}
         for f in fresh:
             unique_rules[f.get("rule", "")] = f.get("severity")
@@ -365,7 +506,7 @@ def _build_alert_subject(severity_counts, total, hostname):
     return f"[PULSE ALERT] {level} - {total} {noun}{suffix}"
 
 
-def _build_alert_plain_body(severity_counts, findings, hostname, scan_dt):
+def _build_alert_plain_body(severity_counts, findings, hostname, scan_dt, pdf_failed=False):
     """Plain-text alert body. Short: host, time, top N rules tripped."""
     sorted_f = sorted(findings, key=lambda f: _SEVERITY_ORDER.get(f.get("severity", "LOW"), 3))
     shown    = sorted_f[:_MAX_ALERT_FINDINGS_SHOWN]
@@ -401,13 +542,15 @@ def _build_alert_plain_body(severity_counts, findings, hostname, scan_dt):
     lines += [
         "",
         "Run `python main.py --format html` for the full report.",
-        "",
-        "-- Pulse",
     ]
+    if pdf_failed:
+        lines.append("")
+        lines.append("NOTE: PDF attachment could not be generated.")
+    lines += ["", "-- Pulse"]
     return "\n".join(lines)
 
 
-def _build_alert_html_body(severity_counts, findings, hostname, scan_dt):
+def _build_alert_html_body(severity_counts, findings, hostname, scan_dt, pdf_failed=False):
     """Compact HTML alert body. Same palette as send_report but smaller."""
     accent = _header_color(severity_counts)
     sorted_f = sorted(findings, key=lambda f: _SEVERITY_ORDER.get(f.get("severity", "LOW"), 3))
@@ -475,6 +618,7 @@ def _build_alert_html_body(severity_counts, findings, hostname, scan_dt):
                        font-family:Arial,sans-serif; font-size:11px;
                        color:#888888;">
           Run <code>python main.py --format html</code> for the full report.
+          {"<br/><span style='color:#c0392b;'>PDF attachment could not be generated.</span>" if pdf_failed else ""}
         </td></tr>
       </table>
     </td></tr>
@@ -483,7 +627,8 @@ def _build_alert_html_body(severity_counts, findings, hostname, scan_dt):
 
 
 def send_report(email_config, severity_counts, total_findings,
-                findings=None, scan_dt=None, report_path=None):
+                findings=None, scan_dt=None, report_path=None,
+                pdf_bytes=None, pdf_filename=None, pdf_failure_note=False):
     """
     Sends the full report as an HTML email body (no attachment).
 
@@ -529,18 +674,22 @@ def send_report(email_config, severity_counts, total_findings,
     report_url = Path(os.path.abspath(html_path)).as_uri()
 
     # --- BUILD THE MESSAGE ---
-    msg = MIMEMultipart("alternative")
-    msg["From"]    = sender
-    msg["To"]      = recipient
-    msg["Subject"] = _build_subject(severity_counts, total_findings)
+    inner = MIMEMultipart("alternative")
+    inner["From"]    = sender
+    inner["To"]      = recipient
+    inner["Subject"] = _build_subject(severity_counts, total_findings)
 
-    plain = _build_plain_body(severity_counts, total_findings)
+    plain = _build_plain_body(severity_counts, total_findings,
+                              pdf_failed=pdf_failure_note)
     html  = _build_html_body(severity_counts, total_findings,
                              findings or [], scan_dt, hostname,
-                             report_url=report_url)
+                             report_url=report_url,
+                             pdf_failed=pdf_failure_note)
 
-    msg.attach(MIMEText(plain, "plain"))
-    msg.attach(MIMEText(html,  "html"))
+    inner.attach(MIMEText(plain, "plain"))
+    inner.attach(MIMEText(html,  "html"))
+
+    msg = _wrap_with_pdf(inner, pdf_bytes, pdf_filename) if pdf_bytes else inner
 
     # --- SEND ---
     try:
@@ -635,7 +784,7 @@ def _build_subject(severity_counts, total_findings):
 # Plain-text body (fallback for clients that cannot render HTML)
 # ---------------------------------------------------------------------------
 
-def _build_plain_body(severity_counts, total_findings):
+def _build_plain_body(severity_counts, total_findings, pdf_failed=False):
     """Builds the plain-text email body with a brief summary."""
     lines = [
         "Pulse - Windows Event Log Analyzer",
@@ -652,10 +801,10 @@ def _build_plain_body(severity_counts, total_findings):
         f"  LOW      : {severity_counts.get('LOW', 0)}",
         "",
         "Full report saved to your reports/ folder.",
-        "",
-        "-- Pulse",
-        "   https://github.com/barrytd/Pulse",
     ]
+    if pdf_failed:
+        lines += ["", "NOTE: PDF attachment could not be generated."]
+    lines += ["", "-- Pulse", "   https://github.com/barrytd/Pulse"]
     return "\n".join(lines)
 
 
@@ -664,7 +813,8 @@ def _build_plain_body(severity_counts, total_findings):
 # ---------------------------------------------------------------------------
 
 def _build_html_body(severity_counts, total_findings, findings,
-                     scan_dt=None, hostname=None, report_url=None):
+                     scan_dt=None, hostname=None, report_url=None,
+                     pdf_failed=False):
     """
     Builds a table-based HTML email body with inline CSS.
 
@@ -869,6 +1019,11 @@ def _build_html_body(severity_counts, total_findings, findings,
     else:
         path_line = ""
 
+    pdf_note = (
+        '<div style="margin-top:8px; color:#c0392b; font-weight:bold;">'
+        'PDF attachment could not be generated.</div>'
+        if pdf_failed else ""
+    )
     footer = f"""
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
            style="background:#f6f8fa; border-top:1px solid #e1e4e8;">
@@ -876,6 +1031,7 @@ def _build_html_body(severity_counts, total_findings, findings,
         <td style="padding:16px 32px; font-family:Arial,sans-serif;
                    font-size:11px; color:#999999; text-align:center;">
           Full report saved to:{path_line}
+          {pdf_note}
           <div style="margin-top:8px;">
             <a href="https://github.com/barrytd/Pulse"
                style="color:#777777; text-decoration:none;">github.com/barrytd/Pulse</a>

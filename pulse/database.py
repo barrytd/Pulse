@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS findings (
     description   TEXT,
     details       TEXT,
     raw_xml       TEXT,
+    hostname      TEXT,
     review_status TEXT DEFAULT 'new',
     review_note   TEXT,
     reviewed_at   TEXT
@@ -151,6 +152,7 @@ def init_db(db_path):
             ("review_status", "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'"),
             ("review_note",   "ALTER TABLE findings ADD COLUMN review_note TEXT"),
             ("reviewed_at",   "ALTER TABLE findings ADD COLUMN reviewed_at TEXT"),
+            ("hostname",      "ALTER TABLE findings ADD COLUMN hostname TEXT"),
         ):
             try:
                 conn.execute(ddl)
@@ -177,7 +179,10 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
         int: The scan_id of the newly inserted scan row.
     """
     scanned_at    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    hostname      = _get_hostname()
+    # Prefer the hostname(s) present on the findings themselves — that's the
+    # machine the events actually came from. Falls back to the local
+    # machine name so uploaded-but-hostname-less scans still have a value.
+    hostname      = _dominant_hostname(findings) or _get_hostname()
     files_scanned = scan_stats.get("files_scanned", 0) if scan_stats else 0
     total_events  = scan_stats.get("total_events",  0) if scan_stats else 0
     total_findings = len(findings)
@@ -207,13 +212,14 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
                 f.get("description"),
                 f.get("details"),
                 f.get("raw_xml"),
+                f.get("hostname"),
             ))
 
         conn.executemany(
             """INSERT INTO findings
                (scan_id, timestamp, event_id, severity, rule,
-                mitre, description, details, raw_xml)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                mitre, description, details, raw_xml, hostname)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             rows
         )
 
@@ -328,7 +334,7 @@ def get_scan_findings(db_path, scan_id):
     with _connect(db_path) as conn:
         cursor = conn.execute(
             """SELECT id, timestamp, event_id, severity, rule,
-                      mitre, description, details, raw_xml,
+                      mitre, description, details, raw_xml, hostname,
                       review_status, review_note, reviewed_at
                FROM findings
                WHERE scan_id = ?
@@ -380,7 +386,7 @@ def set_finding_review(db_path, finding_id, status, note=None):
         )
         row = conn.execute(
             """SELECT id, scan_id, timestamp, event_id, severity, rule,
-                      mitre, description, details, raw_xml,
+                      mitre, description, details, raw_xml, hostname,
                       review_status, review_note, reviewed_at
                FROM findings WHERE id = ?""",
             (int(finding_id),),
@@ -388,9 +394,96 @@ def set_finding_review(db_path, finding_id, status, note=None):
         if not row:
             return None
         cols = ("id", "scan_id", "timestamp", "event_id", "severity", "rule",
-                "mitre", "description", "details", "raw_xml",
+                "mitre", "description", "details", "raw_xml", "hostname",
                 "review_status", "review_note", "reviewed_at")
         return dict(zip(cols, row))
+
+
+def get_fleet_summary(db_path):
+    """Roll up scan + finding counts per hostname for the Fleet overview.
+
+    Returns one row per distinct ``scans.hostname`` with:
+        - hostname       (str)
+        - scan_count     (int)   total scans recorded for this host
+        - last_scan_at   (str)   scanned_at of the newest scan
+        - total_findings (int)   sum of total_findings across every scan
+        - latest_score   (int|None)  score from the newest scan
+        - latest_grade   (str|None)  letter grade from the newest scan
+        - worst_severity (str|None)  highest severity seen across all findings
+
+    Scans without a hostname are excluded — they predate Sprint 4 or came
+    from logs with no Computer field, which can't be attributed to a host.
+    The list is sorted by last_scan_at DESC.
+    """
+    sev_rank = {
+        "CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 4,
+    }
+    try:
+        with _connect(db_path) as conn:
+            # Two queries are simpler than one window-function query and
+            # SQLite's min/max-over-group gymnastics. First query: per-host
+            # aggregates. Second: newest scan row per host so we can read
+            # its score + grade without relying on GROUP BY argmax tricks.
+            cursor = conn.execute(
+                """SELECT hostname,
+                          COUNT(*)                    AS scan_count,
+                          MAX(scanned_at)             AS last_scan_at,
+                          COALESCE(SUM(total_findings), 0) AS total_findings
+                   FROM scans
+                   WHERE hostname IS NOT NULL AND hostname != ''
+                   GROUP BY hostname
+                   ORDER BY last_scan_at DESC"""
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                return []
+
+            out = []
+            for host, scans, last_at, total_findings in rows:
+                latest = conn.execute(
+                    """SELECT score, score_label
+                       FROM scans
+                       WHERE hostname = ?
+                       ORDER BY id DESC
+                       LIMIT 1""",
+                    (host,),
+                ).fetchone()
+                latest_score = latest[0] if latest else None
+                latest_grade = latest[1] if latest else None
+
+                worst_row = conn.execute(
+                    """SELECT MIN(CASE f.severity
+                                      WHEN 'CRITICAL' THEN 1
+                                      WHEN 'HIGH'     THEN 2
+                                      WHEN 'MEDIUM'   THEN 3
+                                      WHEN 'LOW'      THEN 4
+                                      ELSE 5 END) AS rank,
+                              f.severity
+                       FROM findings f
+                       JOIN scans s ON s.id = f.scan_id
+                       WHERE s.hostname = ?""",
+                    (host,),
+                ).fetchone()
+                worst = None
+                if worst_row and worst_row[0] is not None and worst_row[0] < 5:
+                    # MIN() + ANY value trick: the returned severity isn't
+                    # guaranteed to match the minimum rank across all rows in
+                    # SQLite, so map the numeric rank back explicitly.
+                    rank_to_sev = {v: k for k, v in sev_rank.items()}
+                    worst = rank_to_sev.get(worst_row[0])
+
+                out.append({
+                    "hostname":       host,
+                    "scan_count":     int(scans or 0),
+                    "last_scan_at":   last_at,
+                    "total_findings": int(total_findings or 0),
+                    "latest_score":   int(latest_score) if latest_score is not None else None,
+                    "latest_grade":   latest_grade,
+                    "worst_severity": worst,
+                })
+            return out
+    except Exception:
+        return []
 
 
 def delete_scans(db_path, scan_ids):
@@ -690,3 +783,23 @@ def _get_hostname():
         return socket.gethostname()
     except Exception:
         return "Unknown"
+
+
+def _dominant_hostname(findings):
+    """Return the hostname that appears on the most findings, or None.
+
+    Used to tag a scan with the machine its log events came from — which is
+    not necessarily the machine running Pulse (uploaded .evtx files often
+    come from elsewhere).
+    """
+    if not findings:
+        return None
+    counts = {}
+    for f in findings:
+        host = (f.get("hostname") or "").strip()
+        if not host:
+            continue
+        counts[host] = counts.get(host, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda kv: kv[1])[0]
