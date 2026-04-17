@@ -26,7 +26,7 @@ import {
 } from './dashboard.js';
 
 // ---------------------------------------------------------------
-// Scans page state
+// Scans page state — now with a tab for "All Findings"
 // ---------------------------------------------------------------
 export const scansState = {
   raw:      [],
@@ -35,6 +35,32 @@ export const scansState = {
   sortDir:  'desc',
   selected: {},
 };
+
+// Which tab is active on the merged Scans page. Persisted so
+// navigating away and back remembers where you were.
+let scansPageTab = 'scans'; // 'scans' | 'findings'
+
+export function getScansPageTab() { return scansPageTab; }
+
+export function setScansPageTab(tab) {
+  if (tab !== 'scans' && tab !== 'findings') return;
+  scansPageTab = tab;
+  renderScansPage();
+}
+
+function _scansTabsBarHtml() {
+  function tab(key, label) {
+    var active = scansPageTab === key;
+    return '<div class="scans-tab' + (active ? ' active' : '') + '" ' +
+           'data-action="setScansPageTab" data-arg="' + key + '">' +
+      escapeHtml(label) +
+    '</div>';
+  }
+  return '<div class="scans-tabs">' +
+    tab('scans',    'Scans') +
+    tab('findings', 'All Findings') +
+  '</div>';
+}
 
 // Called via data-action on the per-row checkbox. Second arg is the
 // clicked element, third is the event — stop propagation so the row
@@ -104,11 +130,18 @@ export async function deleteSelectedScans() {
 }
 
 export async function renderScansPage() {
+  // When the "All Findings" tab is active, delegate to the findings
+  // loader but render it under the shared tab bar (see renderFindingsPage).
+  if (scansPageTab === 'findings') {
+    return renderFindingsPage();
+  }
+
   var c = document.getElementById('content');
   scansState.raw = await fetchScans(200);
 
   if (scansState.raw.length === 0) {
     c.innerHTML =
+      _scansTabsBarHtml() +
       '<div class="empty-state cta">' +
         '<div class="empty-icon">&#128269;</div>' +
         '<h3>No scans yet</h3>' +
@@ -178,6 +211,7 @@ export function applyScansView() {
 
   var c = document.getElementById('content');
   c.innerHTML =
+    _scansTabsBarHtml() +
     '<div class="page-head">' +
       '<div class="page-head-title"><strong>' + rows.length + '</strong> of ' + s.raw.length + ' scans</div>' +
       '<div class="page-head-actions">' +
@@ -305,6 +339,10 @@ export const findingsState = {
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 
 export async function renderFindingsPage() {
+  // Entering this view also pins the merged Scans page to the findings
+  // tab so the tab bar highlights correctly and the back-button hash
+  // (#scans) keeps the tab when the user returns.
+  scansPageTab = 'findings';
   var c = document.getElementById('content');
   var scans = await fetchScans(200);
 
@@ -335,6 +373,7 @@ export async function renderFindingsPage() {
 
   if (allFindings.length === 0) {
     c.innerHTML =
+      _scansTabsBarHtml() +
       '<div class="empty-state cta">' +
         '<div class="empty-icon">&#10003;</div>' +
         '<h3>No findings</h3>' +
@@ -485,6 +524,7 @@ export function applyFindingsView() {
 
   var c = document.getElementById('content');
   c.innerHTML =
+    _scansTabsBarHtml() +
     '<div class="page-head">' +
       '<div class="page-head-title"><strong>' + rows.length + '</strong> of ' + s.raw.length + ' findings</div>' +
     '</div>' +
