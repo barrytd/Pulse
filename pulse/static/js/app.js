@@ -54,6 +54,10 @@ import {
   stopMonitor,
   sendMonitorTestAlert,
   updateMonIntervalLabel,
+  toggleChannelDropdown,
+  toggleChannelOption,
+  toggleCustomChannelEnable,
+  updateCustomChannels,
 } from './monitor.js';
 import {
   toggleBuiltinWhitelist,
@@ -135,6 +139,10 @@ const actions = {
   stopMonitor,
   sendMonitorTestAlert,
   updateMonIntervalLabel,
+  toggleChannelDropdown,
+  toggleChannelOption,
+  toggleCustomChannelEnable,
+  updateCustomChannels,
 
   // whitelist
   toggleBuiltinWhitelist,

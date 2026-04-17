@@ -352,6 +352,101 @@
   font-size: 12px;
 }
 
+/* Channel multi-select — custom dropdown with checkboxes */
+.channel-select {
+  position: relative;
+  width: 100%;
+}
+.channel-select-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.channel-select-btn:hover:not(:disabled) { border-color: var(--accent); }
+.channel-select-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.channel-select-summary {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-select-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+.channel-select.open .channel-select-arrow { transform: rotate(180deg); }
+
+.channel-select-menu {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.channel-select.open .channel-select-menu { display: block; }
+
+.channel-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.channel-option:hover { background: var(--hover-bg, rgba(255, 255, 255, 0.04)); }
+.channel-option input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.channel-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-select-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.channel-custom-input {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.channel-custom-input:focus { border-color: var(--accent); }
+
 /* ------------------------------------------------------------------ */
 /* Middle row — score ring + history table                              */
 /* ------------------------------------------------------------------ */

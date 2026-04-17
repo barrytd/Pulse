@@ -18,6 +18,165 @@ let _dingCtx       = null;
 let _dashLiveUnsub = null;
 let _monPageUnsub  = null;
 
+// ---------------------------------------------------------------
+// Channel multi-select — persistent across sessions
+// ---------------------------------------------------------------
+export const BUILTIN_CHANNELS = [
+  'Security',
+  'System',
+  'Application',
+  'Windows PowerShell',
+  'Microsoft-Windows-PowerShell/Operational',
+  'Microsoft-Windows-TaskScheduler/Operational',
+];
+const DEFAULT_CHECKED = ['Security', 'System'];
+const LS_CHANNELS = 'pulse.monitor.channels.builtin';
+const LS_CUSTOM   = 'pulse.monitor.channels.custom';
+
+export function getCheckedBuiltinChannels() {
+  try {
+    var raw = localStorage.getItem(LS_CHANNELS);
+    if (raw == null) return DEFAULT_CHECKED.slice();
+    var arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter(function (c) { return BUILTIN_CHANNELS.indexOf(c) >= 0; }) : DEFAULT_CHECKED.slice();
+  } catch (e) { return DEFAULT_CHECKED.slice(); }
+}
+
+function _saveCheckedBuiltinChannels(arr) {
+  try { localStorage.setItem(LS_CHANNELS, JSON.stringify(arr)); } catch (e) {}
+}
+
+export function getCustomChannels() {
+  try {
+    var raw = localStorage.getItem(LS_CUSTOM);
+    if (!raw) return [];
+    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  } catch (e) { return []; }
+}
+
+function _saveCustomChannelsRaw(raw) {
+  try { localStorage.setItem(LS_CUSTOM, raw || ''); } catch (e) {}
+}
+
+// Full effective channel list for starting the monitor.
+export function getSelectedChannels() {
+  var combined = getCheckedBuiltinChannels().concat(getCustomChannels());
+  // De-dupe, preserve order.
+  var seen = {};
+  return combined.filter(function (c) {
+    if (seen[c]) return false;
+    seen[c] = true;
+    return true;
+  });
+}
+
+// Summary string for the closed dropdown button.
+function _channelSummary() {
+  var sel = getSelectedChannels();
+  if (sel.length === 0) return 'No channels selected';
+  if (sel.length <= 2) return sel.join(', ');
+  return sel.slice(0, 2).join(', ') + ' +' + (sel.length - 2) + ' more';
+}
+
+export function channelMultiSelectHtml(opts) {
+  opts = opts || {};
+  var disabled = !!opts.disabled;
+  var checked = getCheckedBuiltinChannels();
+  var customRaw = localStorage.getItem(LS_CUSTOM) || '';
+  var customEnabled = customRaw.length > 0;
+
+  var items = BUILTIN_CHANNELS.map(function (name) {
+    var isChecked = checked.indexOf(name) >= 0;
+    return '<label class="channel-option">' +
+      '<input type="checkbox" data-action="toggleChannelOption" data-arg="' +
+        escapeHtml(name) + '"' + (isChecked ? ' checked' : '') +
+        (disabled ? ' disabled' : '') + ' />' +
+      '<span>' + escapeHtml(name) + '</span>' +
+    '</label>';
+  }).join('');
+
+  return '<div class="channel-select" id="channel-select" data-channel-select>' +
+    '<button type="button" class="channel-select-btn" ' +
+      'data-action="toggleChannelDropdown"' + (disabled ? ' disabled' : '') + '>' +
+      '<span class="channel-select-summary" id="channel-select-summary">' +
+        escapeHtml(_channelSummary()) +
+      '</span>' +
+      '<span class="channel-select-arrow">\u25BE</span>' +
+    '</button>' +
+    '<div class="channel-select-menu" id="channel-select-menu">' +
+      items +
+      '<div class="channel-select-divider"></div>' +
+      '<label class="channel-option">' +
+        '<input type="checkbox" id="channel-custom-toggle" ' +
+          'data-action="toggleCustomChannelEnable"' +
+          (customEnabled ? ' checked' : '') +
+          (disabled ? ' disabled' : '') + ' />' +
+        '<span>Custom\u2026</span>' +
+      '</label>' +
+      '<input type="text" class="channel-custom-input" id="channel-custom-input" ' +
+        'placeholder="Comma-separated channel names" ' +
+        'value="' + escapeHtml(customRaw) + '" ' +
+        'data-action-input="updateCustomChannels"' +
+        (customEnabled ? '' : ' style="display:none;"') +
+        (disabled ? ' disabled' : '') + ' />' +
+    '</div>' +
+  '</div>';
+}
+
+function _refreshChannelSummary() {
+  var el = document.getElementById('channel-select-summary');
+  if (el) el.textContent = _channelSummary();
+  // Notify other mounted instances (dashboard popover <-> monitor page) to redraw.
+  monitorClient._notify('channels');
+}
+
+export function toggleChannelDropdown(arg, target) {
+  var root = target && target.closest('.channel-select');
+  if (!root) return;
+  root.classList.toggle('open');
+}
+
+export function toggleChannelOption(arg, target) {
+  if (!target) return;
+  var name = target.dataset.arg;
+  if (!name) return;
+  var checked = getCheckedBuiltinChannels();
+  if (target.checked) {
+    if (checked.indexOf(name) < 0) checked.push(name);
+  } else {
+    checked = checked.filter(function (c) { return c !== name; });
+  }
+  _saveCheckedBuiltinChannels(checked);
+  _refreshChannelSummary();
+}
+
+export function toggleCustomChannelEnable(arg, target) {
+  var input = document.getElementById('channel-custom-input');
+  if (!input) return;
+  if (target.checked) {
+    input.style.display = '';
+    input.focus();
+  } else {
+    input.style.display = 'none';
+    input.value = '';
+    _saveCustomChannelsRaw('');
+    _refreshChannelSummary();
+  }
+}
+
+export function updateCustomChannels(arg, target) {
+  _saveCustomChannelsRaw(target.value || '');
+  _refreshChannelSummary();
+}
+
+// Close dropdown on outside click — installed once at module load.
+document.addEventListener('click', function (e) {
+  var openEls = document.querySelectorAll('.channel-select.open');
+  openEls.forEach(function (el) {
+    if (!el.contains(e.target)) el.classList.remove('open');
+  });
+});
+
 // Subtle two-tone chime when a new finding arrives. Uses Web Audio so
 // there's no asset to ship.
 export function playDing() {
@@ -129,19 +288,12 @@ export const monitorClient = {
   },
 
   // Pull start-time settings from the Monitor page form if the user
-  // is on that page; otherwise send {} and let the server keep its
-  // existing config.
+  // is on that page; otherwise fall back to whatever the persistent
+  // channel multi-select has stored so the dashboard Start button works.
   _readSettingsForm() {
     var intervalInput = document.getElementById('mon-interval');
-    var channelsInput = document.getElementById('mon-channels');
-    if (!intervalInput && !channelsInput) return {};
-    var cfg = {};
+    var cfg = { channels: getSelectedChannels() };
     if (intervalInput) cfg.poll_interval = parseInt(intervalInput.value, 10) || 30;
-    if (channelsInput) {
-      cfg.channels = channelsInput.value.split(',')
-        .map(function (s) { return s.trim(); })
-        .filter(Boolean);
-    }
     return cfg;
   },
 
@@ -337,10 +489,8 @@ export async function renderMonitorPage() {
           '</div>' +
           '<div>' +
             '<label>Channels</label>' +
-            '<input type="text" id="mon-channels" value="' +
-              escapeHtml((s.channels || ['Security','System']).join(', ')) + '"' +
-              (active ? ' disabled' : '') + ' />' +
-            '<div class="hint">Comma-separated Windows log channels (live mode)</div>' +
+            channelMultiSelectHtml({ disabled: active }) +
+            '<div class="hint">Pick which Windows event logs to watch. Custom lets you add one by name.</div>' +
           '</div>' +
         '</div>' +
         (s.platform_supports_live === false
