@@ -5,6 +5,28 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-16 — v1.3.0
+
+### Added
+- **Scan My System** (`pulse/system_scan.py`, `POST /api/scan/system`) — reads directly from `C:\Windows\System32\winevt\Logs\` with a lookback window; no upload step. Modal picker offers 24h / 3d / 7d / 30d / custom ranges and a "send alert when complete" toggle
+- **Scheduled scans** (`pulse/scheduled_scan.py`) — cron-style recurring system scans configured from the Settings page; next-run timestamp surfaced in the dashboard
+- **Admin-privilege banner** — on Windows when Pulse isn't elevated, a non-blocking banner nudges the user to restart as admin for full Security-log coverage. Dismissal persists per browser via localStorage
+- **Channels multi-select** — Monitor page's channel picker is now a dropdown of checkboxes for Security / System / Application / Windows PowerShell / PowerShell Operational / TaskScheduler Operational, plus a free-text "Custom…" field. Selection persists across sessions
+- **Clickable live-feed findings** — every row in the live monitor feed opens the shared slide-in detail drawer (rule, severity, MITRE link, remediation, review workflow) — the same drawer the Findings page uses
+- **Dashboard live-panel gear popover** — compact settings popover next to Start Monitoring with the poll-interval slider and the same channel multi-select, so dashboard users never need to leave the page to reconfigure
+- **Scans + Findings merge** — Findings is now the "All Findings" tab on the Scans page with a shared tab bar; the sidebar link is gone, old `#findings` hashes redirect so bookmarks still land correctly
+- **Scope column on Scans** — replaces the empty Duration column. System scans show their lookback ("Last 7 days", "Last 24 hours", ...); manual uploads show "Manual upload". Persisted on the `scans.scope` column; older rows fall back to filename
+- **Monitor Sessions** (`monitor_sessions` table, `pulse/monitor_service.py`, `/api/monitor/sessions*`) — DVR-style record of every Start→Stop span with poll + events + findings counters. Monitor page renders collapsible session cards below Poll History; expand to see a session's findings, click one to open the shared drawer. Per-card delete and Clear-all controls; scans carry `session_id` so cascading cleanup removes linked findings
+
+### Changed
+- Dashboard sidebar no longer lists Findings as a top-level page
+- `scans` table gains `scope` and `session_id` columns (migrated with `ALTER TABLE IF NOT EXISTS`-style try/except so existing DBs upgrade cleanly)
+
+### Tests
+- Test count: 271 → 286, all passing
+
+---
+
 ## 2026-04-16
 
 ### Added

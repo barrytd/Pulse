@@ -6,4 +6,4 @@
 #
 # It can be empty, but we'll use it to define the project version.
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
