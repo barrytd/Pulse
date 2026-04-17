@@ -122,6 +122,12 @@
 .dash-finding-row.sev-medium   { border-left-color: #d29922; }
 .dash-finding-row.sev-low      { border-left-color: #3fb950; }
 
+.dash-finding-row[data-action] { transition: background 0.1s, border-color 0.1s; }
+.dash-finding-row[data-action]:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.04));
+  border-color: var(--accent);
+}
+
 .dash-finding-row .time { color: var(--text-muted); font-family: monospace; font-size: 11px; }
 .dash-finding-row .rule { color: var(--text); font-weight: 600; }
 .dash-finding-row .desc {

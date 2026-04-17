@@ -58,6 +58,7 @@ import {
   toggleChannelOption,
   toggleCustomChannelEnable,
   updateCustomChannels,
+  openLiveFeedFinding,
 } from './monitor.js';
 import {
   toggleBuiltinWhitelist,
@@ -143,6 +144,7 @@ const actions = {
   toggleChannelOption,
   toggleCustomChannelEnable,
   updateCustomChannels,
+  openLiveFeedFinding,
 
   // whitelist
   toggleBuiltinWhitelist,

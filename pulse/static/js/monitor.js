@@ -11,6 +11,7 @@ import {
   apiMonitorTestAlert,
 } from './api.js';
 import { escapeHtml, toastError } from './dashboard.js';
+import { openFindingDrawer } from './findings.js';
 
 // Module-level refs that used to live on window as _dashLiveUnsub /
 // _monPageUnsub / _dingCtx.
@@ -386,15 +387,22 @@ function _timeSince(iso) {
   return Math.floor(sec / 3600) + 'h ago';
 }
 
+// The cached snapshot the click handler indexes into. Reset on every
+// render so the index in data-arg always maps to the same finding the
+// user just saw.
+let _liveFeedSnapshot = [];
+
 function _liveFeedHtml(feed) {
-  if (!feed || feed.length === 0) {
+  _liveFeedSnapshot = (feed || []).slice(0, 20);
+  if (_liveFeedSnapshot.length === 0) {
     return '<div class="live-feed empty">Waiting for events \u2014 alerts will appear here as they\u2019re detected.</div>';
   }
   return '<div class="live-feed">' +
-    feed.slice(0, 20).map(function (item) {
+    _liveFeedSnapshot.map(function (item, i) {
       var f   = item.finding || {};
       var sev = (f.severity || 'LOW').toUpperCase();
-      return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '">' +
+      return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '" ' +
+             'data-action="openLiveFeedFinding" data-arg="' + i + '" style="cursor:pointer;">' +
         '<div><div class="time">' + escapeHtml(item.at || '') + '</div></div>' +
         '<div>' +
           '<div class="rule">' + escapeHtml(f.rule || 'Unknown') + '</div>' +
@@ -404,6 +412,16 @@ function _liveFeedHtml(feed) {
       '</div>';
     }).join('') +
   '</div>';
+}
+
+// Click handler wired via data-action on each live-feed row. Looks up
+// the finding in the snapshot captured at render time and opens the
+// shared slide-in drawer so live alerts get the same detail view as
+// the Findings page and the Dashboard's Last Scan Findings list.
+export function openLiveFeedFinding(arg) {
+  var i = parseInt(arg, 10);
+  var item = _liveFeedSnapshot[i];
+  if (item && item.finding) openFindingDrawer(item.finding);
 }
 
 function _monitorChecksHtml(checks) {
