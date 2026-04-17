@@ -25,6 +25,53 @@
   gap: 12px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Admin privilege banner                                              */
+/* Amber/yellow, sits below the topbar, dismissible per session.       */
+/* ------------------------------------------------------------------ */
+.admin-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #7c5a00;
+  color: #fff4d6;
+  border-bottom: 1px solid #5b4200;
+  padding: 10px 24px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.admin-banner-icon {
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.admin-banner-text {
+  flex: 1 1 auto;
+}
+.admin-banner-close {
+  flex: 0 0 auto;
+  background: transparent;
+  color: #fff4d6;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  font-size: 16px;
+  cursor: pointer;
+}
+.admin-banner-close:hover {
+  border-color: #fff4d6;
+}
+body.light .admin-banner {
+  background: #fff3c4;
+  color: #6b4b00;
+  border-bottom-color: #d9b95b;
+}
+body.light .admin-banner-close {
+  color: #6b4b00;
+  border-color: rgba(107,75,0,0.3);
+}
+
 .btn {
   padding: 7px 16px;
   border-radius: 6px;

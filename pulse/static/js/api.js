@@ -61,6 +61,47 @@ export async function apiScan(file) {
   }
 }
 
+// POST /api/scan/system — kicks off a local Windows event-log scan.
+// Body: { days: int, alert: bool }. 400 on non-Windows hosts.
+export async function apiScanSystem(days, alert) {
+  try {
+    var resp = await fetch('/api/scan/system', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: days, alert: !!alert }),
+    });
+    var data = await resp.json().catch(function () { return {}; });
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
+// GET /api/scheduler/status — current schedule + next-run.
+export async function apiSchedulerStatus() {
+  try {
+    var resp = await fetch('/api/scheduler/status');
+    return resp.json();
+  } catch (e) {
+    return {};
+  }
+}
+
+// POST /api/scheduler/config — save the scheduled-scan config.
+export async function apiSaveSchedulerConfig(body) {
+  try {
+    var resp = await fetch('/api/scheduler/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    var data = await resp.json().catch(function () { return {}; });
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
 // DELETE /api/scans with a list of ids. Returns { ok, status, data }.
 export async function apiDeleteScans(ids) {
   try {

@@ -15,6 +15,11 @@ import {
   copyTutorialCmd,
 } from './upload.js';
 import {
+  openSystemScanModal,
+  closeSystemScanModal,
+  runSystemScan,
+} from './system-scan.js';
+import {
   downloadReport,
   applyDashFilters,
   resetDashFilters,
@@ -66,6 +71,8 @@ import {
   sendTestAlert,
   saveWebhookSettings,
   sendTestWebhook,
+  onScheduleKindChange,
+  saveScheduleSettings,
 } from './settings.js';
 
 // Central action registry — replaces the old window[action] lookup.
@@ -85,6 +92,11 @@ const actions = {
   closeTutorialModal,
   switchTutorialTab,
   copyTutorialCmd,
+
+  // scan my system (additive — does not replace upload)
+  openSystemScanModal,
+  closeSystemScanModal,
+  runSystemScan,
 
   // dashboard
   downloadReport,
@@ -140,7 +152,37 @@ const actions = {
   sendTestAlert,
   saveWebhookSettings,
   sendTestWebhook,
+  onScheduleKindChange,
+  saveScheduleSettings,
+
+  // admin privilege banner
+  dismissAdminBanner,
 };
+
+// Hide the banner for the rest of the session and persist the choice.
+function dismissAdminBanner() {
+  var el = document.getElementById('admin-banner');
+  if (el) el.style.display = 'none';
+  try { localStorage.setItem('pulseAdminBannerDismissed', '1'); } catch (e) {}
+}
+
+// Only show on Windows hosts where the process is not elevated. Hide
+// unconditionally elsewhere so there's no flash on Linux/Mac.
+async function _maybeShowAdminBanner() {
+  var el = document.getElementById('admin-banner');
+  if (!el) return;
+  try {
+    if (localStorage.getItem('pulseAdminBannerDismissed') === '1') return;
+  } catch (e) { /* ignore — private mode blocks localStorage */ }
+  try {
+    var resp = await fetch('/api/health');
+    if (!resp.ok) return;
+    var info = await resp.json();
+    if (info.platform_windows && !info.is_admin) {
+      el.style.display = 'flex';
+    }
+  } catch (e) { /* health is best-effort */ }
+}
 
 // Event delegation. Any element with data-action="fnName" (or a per-event
 // data-action-<evt>="fnName") gets routed to actions[fnName](arg, target, event).
@@ -192,6 +234,10 @@ function _boot() {
   // page happens to be the dashboard, mountDashLivePanel() will pick
   // up state from monitorClient once init resolves.
   monitorClient.init();
+
+  // Privilege banner — only fires on Windows hosts when the process
+  // doesn't hold admin rights and the user hasn't already dismissed it.
+  _maybeShowAdminBanner();
 }
 
 if (document.readyState === 'loading') {

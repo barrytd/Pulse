@@ -14,6 +14,7 @@ import {
   apiSendTestAlert,
   apiSaveWebhookConfig,
   apiSendTestWebhook,
+  apiSaveSchedulerConfig,
 } from './api.js';
 import { escapeHtml, showToast, toastError } from './dashboard.js';
 import { getTheme } from './theme.js';
@@ -91,6 +92,51 @@ export async function renderSettingsPage() {
   var intervalOpts = intervalChoices.map(function (ch) {
     var sel = (monitorInterval === ch.v) ? ' selected' : '';
     return '<option value="' + ch.v + '"' + sel + '>' + ch.label + '</option>';
+  }).join('');
+
+  var sched = config.scheduled_scan || {};
+  var schedKind = sched.schedule || 'daily';
+  var schedEnabled = !!sched.enabled;
+  var schedSupported = sched.platform_supported !== false;
+  var schedWeekday = (sched.weekday != null) ? Number(sched.weekday) : 1;
+  var schedTime = sched.time || '09:00';
+  var schedDays = sched.days || 7;
+  var schedCron = sched.cron || '';
+  var schedNextRun = sched.next_run || '';
+  var schedDesc = sched.description || 'Disabled';
+  var webhookConfigured = !!wh.url_set;
+  var emailConfigured   = !!em.password_set;
+
+  var rangeChoices = [
+    { v: 1,  label: 'Last 24 hours' },
+    { v: 3,  label: 'Last 3 days' },
+    { v: 7,  label: 'Last 7 days' },
+    { v: 30, label: 'Last 30 days' },
+  ];
+  var rangeOpts = rangeChoices.map(function (ch) {
+    var sel = (schedDays === ch.v) ? ' selected' : '';
+    return '<option value="' + ch.v + '"' + sel + '>' + ch.label + '</option>';
+  }).join('');
+  // If the stored value doesn't match one of the presets, add a "custom" option.
+  var hasPreset = rangeChoices.some(function (ch) { return ch.v === schedDays; });
+  if (!hasPreset) {
+    rangeOpts += '<option value="' + schedDays + '" selected>Custom (' + schedDays + ' days)</option>';
+  }
+
+  var kindOpts = [
+    { v: 'daily',  label: 'Daily' },
+    { v: 'weekly', label: 'Weekly' },
+    { v: 'custom', label: 'Custom (cron)' },
+  ].map(function (o) {
+    var sel = (schedKind === o.v) ? ' selected' : '';
+    return '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
+  }).join('');
+
+  var weekdayOpts = [
+    'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'
+  ].map(function (name, i) {
+    var sel = (schedWeekday === i) ? ' selected' : '';
+    return '<option value="' + i + '"' + sel + '>' + name + '</option>';
   }).join('');
 
   var currentTheme = getTheme();
@@ -175,6 +221,68 @@ export async function renderSettingsPage() {
         '<select id="alert-monitor-interval">' + intervalOpts + '</select></div>' +
       '<div class="form-actions">' +
         '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Scheduled Scans</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Automatically scan your local Windows event logs on a schedule. ' +
+        (schedSupported
+          ? 'Findings are saved to history and can fire the alert methods below.'
+          : '<strong>This host is not Windows \u2014 system scans are disabled.</strong>') +
+      '</p>' +
+
+      '<div class="form-row"><label>Scheduled scanning</label>' +
+        '<label class="form-checkbox"><input type="checkbox" id="sched-enabled"' +
+          (schedEnabled ? ' checked' : '') +
+          (schedSupported ? '' : ' disabled') +
+          '/> Enable automated scans</label></div>' +
+
+      '<div class="form-row"><label>Time range</label>' +
+        '<select id="sched-days">' + rangeOpts + '</select></div>' +
+
+      '<div class="form-row"><label>Schedule</label>' +
+        '<select id="sched-kind" data-action-change="onScheduleKindChange">' + kindOpts + '</select></div>' +
+
+      '<div class="form-row" id="sched-daily-row" style="display:' + (schedKind === 'daily' ? 'flex' : 'none') + ';">' +
+        '<label>Time of day</label>' +
+        '<input type="time" id="sched-time-daily" value="' + escapeHtml(schedTime) + '"/></div>' +
+
+      '<div class="form-row" id="sched-weekly-row" style="display:' + (schedKind === 'weekly' ? 'flex' : 'none') + ';">' +
+        '<label>Day &amp; time</label>' +
+        '<div style="display:flex; gap:8px; flex:1;">' +
+          '<select id="sched-weekday" style="flex:1;">' + weekdayOpts + '</select>' +
+          '<input type="time" id="sched-time-weekly" value="' + escapeHtml(schedTime) + '"/>' +
+        '</div></div>' +
+
+      '<div class="form-row" id="sched-cron-row" style="display:' + (schedKind === 'custom' ? 'flex' : 'none') + ';">' +
+        '<label>Cron expression</label>' +
+        '<input type="text" id="sched-cron" value="' + escapeHtml(schedCron) + '" placeholder="0 9 * * 1-5" autocomplete="off"/></div>' +
+      '<div class="form-row" id="sched-cron-help" style="display:' + (schedKind === 'custom' ? 'flex' : 'none') + ';">' +
+        '<span></span>' +
+        '<span style="font-size:12px; color:var(--text-muted);">5 fields: minute hour day-of-month month day-of-week (Monday=0). Supports <span class="mono">*</span>, plain numbers, commas, and <span class="mono">*/N</span> steps.</span>' +
+      '</div>' +
+
+      '<div class="form-row"><label>Alert methods</label>' +
+        '<div style="display:flex; gap:16px; flex-wrap:wrap;">' +
+          '<label class="form-checkbox"><input type="checkbox" id="sched-alert-email"' +
+            (sched.alert_email ? ' checked' : '') + (emailConfigured ? '' : ' disabled') +
+            '/> Email' + (emailConfigured ? '' : ' (not configured)') + '</label>' +
+          '<label class="form-checkbox"><input type="checkbox" id="sched-alert-slack"' +
+            (sched.alert_slack ? ' checked' : '') + (webhookConfigured ? '' : ' disabled') +
+            '/> Slack / Discord' + (webhookConfigured ? '' : ' (no webhook)') + '</label>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="form-row"><label>Next scan</label>' +
+        '<span id="sched-next-run" style="color:var(--text-muted); font-size:13px;">' +
+          escapeHtml(schedDesc) + (schedNextRun ? ' \u2014 ' + escapeHtml(_formatNextRun(schedNextRun)) : '') +
+        '</span></div>' +
+
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary" data-action="saveScheduleSettings"' +
+          (schedSupported ? '' : ' disabled') + '>Save schedule</button>' +
       '</div>' +
     '</div>' +
 
@@ -411,5 +519,73 @@ export async function sendTestWebhook() {
     showToast('Test notification posted');
   } catch (e) {
     toastError('Network error: ' + e.message);
+  }
+}
+
+// Swap the time/weekday/cron rows on schedule-kind change.
+export function onScheduleKindChange() {
+  var sel = document.getElementById('sched-kind');
+  if (!sel) return;
+  var kind = sel.value;
+  var show = function (id, on) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = on ? 'flex' : 'none';
+  };
+  show('sched-daily-row',  kind === 'daily');
+  show('sched-weekly-row', kind === 'weekly');
+  show('sched-cron-row',   kind === 'custom');
+  show('sched-cron-help',  kind === 'custom');
+}
+
+export async function saveScheduleSettings() {
+  var kind = document.getElementById('sched-kind').value;
+  var time;
+  if (kind === 'daily') {
+    time = document.getElementById('sched-time-daily').value || '09:00';
+  } else if (kind === 'weekly') {
+    time = document.getElementById('sched-time-weekly').value || '09:00';
+  } else {
+    time = '09:00';
+  }
+  var body = {
+    enabled:       document.getElementById('sched-enabled').checked,
+    days:          Number(document.getElementById('sched-days').value) || 7,
+    schedule:      kind,
+    time:          time,
+    weekday:       Number(document.getElementById('sched-weekday').value || 1),
+    cron:          (document.getElementById('sched-cron').value || '').trim(),
+    alert_email:   document.getElementById('sched-alert-email').checked,
+    alert_slack:   document.getElementById('sched-alert-slack').checked,
+    // Slack and Discord share a single webhook channel in Pulse, so the
+    // UI exposes one toggle — keep the backend contract both flags so
+    // future per-service toggles don't need a schema change.
+    alert_discord: document.getElementById('sched-alert-slack').checked,
+  };
+  try {
+    var r = await apiSaveSchedulerConfig(body);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Save failed.');
+      return;
+    }
+    showToast('Schedule saved');
+    var span = document.getElementById('sched-next-run');
+    if (span && r.data) {
+      var desc = r.data.schedule || 'Scheduled';
+      var nx = r.data.next_run ? ' \u2014 ' + _formatNextRun(r.data.next_run) : '';
+      span.textContent = desc + nx;
+    }
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+function _formatNextRun(iso) {
+  if (!iso) return '';
+  try {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return 'next run ' + d.toLocaleString();
+  } catch (e) {
+    return iso;
   }
 }

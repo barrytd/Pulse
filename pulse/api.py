@@ -55,6 +55,13 @@ from pulse.reporter import (
     _build_html_report, _build_json_report, _calculate_score,
     calculate_score_from_findings,
 )
+from pulse.scheduled_scan import (
+    ScheduledScanRunner, compute_next_run, describe_schedule,
+    normalize_schedule_config,
+)
+from pulse.system_scan import is_admin as _system_scan_is_admin
+from pulse.system_scan import is_supported_platform as _system_scan_supported
+from pulse.system_scan import scan_system
 from pulse.whitelist import filter_whitelist
 
 
@@ -122,6 +129,50 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
         config_path=config_path,
         config_getter=lambda: _read_config(config_path),
     )
+
+    # Scheduled-scan runner. Reads scheduled_scan from pulse.yaml every loop,
+    # computes the next fire time, sleeps until then, runs the system scan.
+    # Started lazily on FastAPI startup so tests that never boot the app
+    # don't leak background tasks.
+    def _get_sched_cfg():
+        return (_read_config(config_path) or {}).get("scheduled_scan") or {}
+
+    async def _run_scheduled_scan(cfg):
+        # Run the (blocking) parser + detection pipeline in a worker thread so
+        # we don't stall the event loop for SSE clients during a scheduled run.
+        full_cfg = _read_config(config_path) or {}
+        days = int(cfg.get("days") or 7)
+        send_alerts = (
+            bool(cfg.get("alert_email"))
+            or bool(cfg.get("alert_slack"))
+            or bool(cfg.get("alert_discord"))
+        )
+        # If none of the alert channels are ticked we still save the scan.
+        return await asyncio.to_thread(
+            scan_system,
+            app.state.db_path,
+            full_cfg,
+            days,
+            send_alerts,
+        )
+
+    app.state.scheduled_scan = ScheduledScanRunner(
+        get_config=_get_sched_cfg,
+        run_once=_run_scheduled_scan,
+    )
+
+    @app.on_event("startup")
+    async def _start_scheduler():
+        app.state.scheduled_scan.start()
+        # Admin-status hint — logged once so the operator sees it without
+        # needing to poll /api/health. Only interesting on Windows.
+        if _system_scan_supported():
+            kind = "administrator" if _system_scan_is_admin() else "standard user"
+            print(f"  [*] Pulse is running as a {kind}.")
+
+    @app.on_event("shutdown")
+    async def _stop_scheduler():
+        await app.state.scheduled_scan.stop()
 
     _register_routes(app)
 
@@ -291,8 +342,14 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/health")
     def health():
-        """Simple aliveness check. Returns version info."""
-        return {"status": "ok", "version": __version__}
+        """Simple aliveness check. Returns version info + privilege hints
+        so the dashboard can surface the "run as admin" banner."""
+        return {
+            "status":  "ok",
+            "version": __version__,
+            "platform_windows": _system_scan_supported(),
+            "is_admin":         _system_scan_is_admin(),
+        }
 
     # -------------------------------------------------------------------
     # POST /api/scan
@@ -654,6 +711,7 @@ def _register_routes(app: FastAPI) -> None:
                 "flavor":   webhook.get("flavor") or "",
                 "url_set":  bool((webhook.get("url") or "").strip()),
             },
+            "scheduled_scan": _scheduled_scan_view(config),
         }
 
     # -------------------------------------------------------------------
@@ -853,6 +911,98 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(502, detail="Webhook POST failed. Check the URL and try again.")
 
         return {"status": "sent"}
+
+    # -------------------------------------------------------------------
+    # POST /api/scan/system — one-shot scan of the local Windows event logs
+    # -------------------------------------------------------------------
+    @app.post("/api/scan/system")
+    async def scan_system_endpoint(request: Request):
+        """Scan the local machine's C:\\Windows\\System32\\winevt\\Logs\\ directly.
+        Body (all optional):
+          days:   int 1-365, default 1
+          alert:  bool, fire configured alerts when CRITICAL/HIGH findings hit
+        """
+        if not _system_scan_supported():
+            raise HTTPException(400, detail="System scan requires Windows")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        try:
+            days = int(body.get("days", 1) or 1)
+        except (TypeError, ValueError):
+            raise HTTPException(400, detail="days must be an integer")
+        if days < 1 or days > 365:
+            raise HTTPException(400, detail="days must be between 1 and 365")
+
+        send_alerts = bool(body.get("alert", True))
+
+        config = _read_config(app.state.config_path) or {}
+        try:
+            result = await asyncio.to_thread(
+                scan_system,
+                app.state.db_path,
+                config,
+                days,
+                send_alerts,
+            )
+        except RuntimeError as exc:
+            # Platform guard from inside scan_system (belt-and-braces).
+            raise HTTPException(400, detail=str(exc))
+        except FileNotFoundError as exc:
+            raise HTTPException(500, detail=str(exc))
+
+        return result
+
+    # -------------------------------------------------------------------
+    # GET /api/scheduler/status — read-only scheduler state for the dashboard
+    # -------------------------------------------------------------------
+    @app.get("/api/scheduler/status")
+    def scheduler_status():
+        cfg = (_read_config(app.state.config_path) or {}).get("scheduled_scan") or {}
+        next_run = compute_next_run(cfg)
+        return {
+            "enabled":  bool(cfg.get("enabled")),
+            "schedule": describe_schedule(cfg),
+            "next_run": next_run.isoformat() if next_run else None,
+            "platform_supported": _system_scan_supported(),
+            "is_admin":            _system_scan_is_admin(),
+        }
+
+    # -------------------------------------------------------------------
+    # POST /api/scheduler/config — save the scheduled-scan configuration
+    # -------------------------------------------------------------------
+    @app.post("/api/scheduler/config")
+    async def scheduler_config(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            cleaned = normalize_schedule_config(body)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc))
+
+        config = _read_config(app.state.config_path) or {}
+        config["scheduled_scan"] = cleaned
+        _write_config(app.state.config_path, config)
+
+        # Nudge the running scheduler to re-read config so the next fire
+        # time reflects the save without restarting the server.
+        try:
+            app.state.scheduled_scan.reload()
+        except AttributeError:
+            pass
+
+        next_run = compute_next_run(cleaned)
+        return {
+            "status":   "ok",
+            "config":   cleaned,
+            "schedule": describe_schedule(cleaned),
+            "next_run": next_run.isoformat() if next_run else None,
+        }
 
     # -------------------------------------------------------------------
     # PUT /api/config/whitelist — update the whitelist
@@ -1055,6 +1205,26 @@ def _get_rule_names():
         "Logon from Disabled Account", "After-Hours Logon",
         "Suspicious Registry Modification", "Lateral Movement via Network Share",
     ])
+
+
+def _scheduled_scan_view(config):
+    """Build the scheduled_scan slice of GET /api/config."""
+    cfg = (config or {}).get("scheduled_scan") or {}
+    next_run = compute_next_run(cfg)
+    return {
+        "enabled":       bool(cfg.get("enabled", False)),
+        "days":          int(cfg.get("days", 7) or 7),
+        "schedule":      cfg.get("schedule") or "daily",
+        "time":          cfg.get("time") or "09:00",
+        "weekday":       int(cfg.get("weekday", 1) or 0),
+        "cron":          cfg.get("cron") or "",
+        "alert_email":   bool(cfg.get("alert_email", True)),
+        "alert_slack":   bool(cfg.get("alert_slack", False)),
+        "alert_discord": bool(cfg.get("alert_discord", False)),
+        "description":   describe_schedule(cfg),
+        "next_run":      next_run.isoformat() if next_run else None,
+        "platform_supported": _system_scan_supported(),
+    }
 
 
 def _filter_with_whitelist(findings, config_path):

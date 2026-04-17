@@ -63,9 +63,21 @@
         <h2 id="page-title">Dashboard</h2>
         <div class="topbar-actions">
           <button class="theme-toggle" data-action="toggleTheme" title="Toggle dark/light mode" id="theme-btn">&#9789;</button>
+          <button class="btn" data-action="openSystemScanModal" title="Scan the local Windows event logs">Scan My System</button>
           <button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>
         </div>
       </header>
+
+      <!-- Admin privilege banner — only rendered by JS on Windows when the
+           process is not elevated. Dismissal is per-session in localStorage. -->
+      <div id="admin-banner" class="admin-banner" style="display:none;" role="status">
+        <span class="admin-banner-icon" aria-hidden="true">&#9888;</span>
+        <span class="admin-banner-text">
+          Some features require administrator privileges. System scans may be limited.
+          For full access to Windows Security logs, restart Pulse as administrator.
+        </span>
+        <button class="admin-banner-close" data-action="dismissAdminBanner" aria-label="Dismiss">&times;</button>
+      </div>
 
       <!-- Content — dynamically rendered by JS based on active page -->
       <div class="content" id="content">
@@ -97,6 +109,53 @@
       <div class="modal-actions">
         <button class="btn" data-action="closeUploadModal">Cancel</button>
         <button class="btn btn-primary" id="scan-btn" data-action="uploadAndScan" disabled>Scan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- SCAN MY SYSTEM MODAL                                            -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="system-scan-modal">
+    <div class="modal">
+      <h3>Scan My System</h3>
+      <p>Reads directly from <span class="mono">C:\Windows\System32\winevt\Logs\</span> and runs every detection rule. No upload required.</p>
+
+      <div class="form-row">
+        <label>Time range</label>
+        <select id="sys-scan-range">
+          <option value="1">Last 24 hours</option>
+          <option value="3">Last 3 days</option>
+          <option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="custom">Custom...</option>
+        </select>
+      </div>
+
+      <div class="form-row" id="sys-scan-custom-row" style="display:none;">
+        <label>Custom range</label>
+        <div style="display:flex; gap:8px;">
+          <input type="number" id="sys-scan-custom-amount" min="1" max="365" value="14" style="width:90px;" />
+          <select id="sys-scan-custom-unit">
+            <option value="days" selected>days</option>
+            <option value="hours">hours</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Alerts</label>
+        <label class="form-checkbox">
+          <input type="checkbox" id="sys-scan-alert" checked />
+          Send alert when complete (uses configured email / Slack / Discord)
+        </label>
+      </div>
+
+      <div class="upload-status" id="sys-scan-status"></div>
+
+      <div class="modal-actions">
+        <button class="btn" data-action="closeSystemScanModal">Cancel</button>
+        <button class="btn btn-primary" id="sys-scan-run" data-action="runSystemScan">Run Scan</button>
       </div>
     </div>
   </div>

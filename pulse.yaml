@@ -1,84 +1,36 @@
-# pulse.yaml
-# ----------
-# Default settings for Pulse. These are used when you don't pass CLI flags.
-# CLI flags always override these values.
-#
-# Example:
-#   If you set format: html here and run "python main.py", you get HTML.
-#   If you run "python main.py --format txt", you get TXT (CLI wins).
-
-# Where to look for .evtx log files.
 logs: logs
-
-# Report format: txt, html, or json.
 format: txt
-
-# Minimum severity to include in the report.
-# Options: LOW, MEDIUM, HIGH, CRITICAL
 severity: LOW
-
-# Output file path. Set to null to auto-generate a filename.
-# Example: output: reports/my_report.html
 output: null
-
-# Email delivery - send the finished report automatically after a scan.
-# Use --email flag to trigger. Requires these settings to be filled in.
-#
-# smtp_host: your mail server (e.g. smtp.gmail.com for Gmail)
-# smtp_port: 587 for TLS (most common), 465 for SSL
-# sender:    the address the email is sent FROM
-# recipient: where to send the report
-# password:  your email password or app password
-#
-# Gmail users: generate an App Password at myaccount.google.com/apppasswords
-# (required if you have 2-factor authentication enabled)
 email:
   smtp_host: smtp.gmail.com
   smtp_port: 587
   sender: perezrobert0235249@gmail.com
   recipient: perezrobert0235249@gmail.com
   password: null
-
-# Email alerts - automatic "something bad happened" notifications.
-# Different from --email: --email sends the full report on demand, alerts
-# fire automatically ONLY when a scan finds something at or above the
-# threshold. Terse subject, short body — meant to wake you up.
-#
-# enabled:          master switch. false = no alerts, ever.
-# threshold:        minimum severity that triggers an alert.
-#                   Options: LOW, MEDIUM, HIGH, CRITICAL
-# recipient:        where alerts go. null = use email.recipient above.
-# cooldown_minutes: don't re-alert on the same rule within this window.
-#                   Prevents spamming your inbox during a --watch loop.
 alerts:
   enabled: false
   threshold: HIGH
   recipient: null
   cooldown_minutes: 60
-
-# Live monitor - settings for --watch mode.
 monitor:
-  interval: 30   # seconds between polls
-
-# Database - Pulse saves every scan to a local SQLite file so you can
-# track trends and compare results over time.
-# Set path to null to disable database saving entirely.
+  interval: 30
 database:
   path: pulse.db
-
-# Whitelist - suppress known-good items from triggering findings.
-# Any finding that matches a whitelisted value is silently removed.
-# This reduces false positives in noisy environments.
-#
-# accounts: usernames to ignore (e.g. service accounts that always fail logins)
-# rules:    rule names to skip entirely (e.g. RDP Logon Detected)
-# services: service names to ignore (e.g. legitimate services you installed)
-# ips:      IP addresses to ignore (e.g. your jump host IP for RDP)
 whitelist:
   accounts: []
   rules: []
-  # Add your own known-good service names here.
-  # Common software (gaming, hardware, Google, Microsoft, etc.) is already
-  # suppressed automatically by Pulse's built-in list in pulse/known_good.py.
   services: []
   ips: []
+auth:
+  session_secret: be94fbfd7304bc34e734fc024c75c4558ebce72bca224d408a51359495a8b4b2
+scheduled_scan:
+  enabled: false
+  days: 7
+  schedule: daily
+  time: "09:00"
+  weekday: 1
+  cron: ""
+  alert_email: true
+  alert_slack: false
+  alert_discord: false
