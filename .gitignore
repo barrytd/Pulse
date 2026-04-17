@@ -38,5 +38,9 @@ Thumbs.db
 # Environment variables / secrets (NEVER push these to GitHub)
 .env
 
+# Per-user config with secrets (session_secret, SMTP password, webhook URLs).
+# Template lives in pulse.yaml.example — copy it to pulse.yaml locally.
+pulse.yaml
+
 # Claude Code settings (local to each developer, not needed in repo)
 .claude/

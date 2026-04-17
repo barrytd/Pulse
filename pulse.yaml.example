@@ -1,0 +1,70 @@
+# pulse.yaml.example
+# -------------------
+# Copy this file to pulse.yaml and fill in your own values:
+#     cp pulse.yaml.example pulse.yaml     (macOS / Linux)
+#     copy pulse.yaml.example pulse.yaml   (Windows)
+#
+# pulse.yaml is gitignored and should never be committed — it holds
+# per-user settings and secrets (session_secret, SMTP password, webhook URLs).
+# Only this .example file with placeholder values belongs in the repo.
+
+logs: logs
+format: txt
+severity: LOW
+output: null
+
+email:
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  sender: you@example.com
+  recipient: you@example.com
+  # App password for your SMTP provider. Never commit a real value.
+  password: null
+
+alerts:
+  enabled: false
+  threshold: HIGH
+  recipient: null
+  cooldown_minutes: 60
+
+monitor:
+  interval: 30
+
+database:
+  path: pulse.db
+
+whitelist:
+  accounts: []
+  rules: []
+  services: []
+  ips: []
+
+auth:
+  # Generate your own with:  python -c "import secrets; print(secrets.token_hex(32))"
+  # Must be unique per install. Never commit a real value.
+  session_secret: REPLACE_ME_WITH_A_FRESH_64_HEX_SECRET
+
+delivery:
+  email:
+    enabled: true
+    attach_pdf: true
+    critical_only: false
+  slack:
+    enabled: false
+    webhook_url: ""
+    critical_only: false
+  discord:
+    enabled: false
+    webhook_url: ""
+    critical_only: false
+
+scheduled_scan:
+  enabled: false
+  days: 7
+  schedule: daily
+  time: "09:00"
+  weekday: 1
+  cron: ""
+  alert_email: true
+  alert_slack: false
+  alert_discord: false
