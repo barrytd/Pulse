@@ -90,13 +90,27 @@ def test_scan_rejects_missing_file(client):
     assert response.status_code == 422
 
 
-def test_scan_accepts_evtx_extension(client):
-    """A file ending in .evtx should be accepted even if its contents are garbage.
-    The parser returns an empty event list for unreadable files, so the API
-    should return a well-formed scan with zero findings."""
+_EVTX_HEADER = b"ElfFile\x00"  # matches _EVTX_MAGIC in pulse/api.py
+
+
+def test_scan_rejects_evtx_extension_with_wrong_magic(client):
+    """A .evtx extension alone is not enough — the header must match too,
+    so renamed junk never reaches the parser."""
     response = client.post(
         "/api/scan",
         files={"file": ("fake.evtx", b"not really an evtx file", "application/octet-stream")},
+    )
+    assert response.status_code == 400
+    assert "evtx" in response.json()["detail"].lower()
+
+
+def test_scan_accepts_valid_evtx_header(client):
+    """A file with the ElfFile magic header is accepted. The parser returns
+    an empty event list for truncated bodies, so we get a well-formed scan
+    with zero findings."""
+    response = client.post(
+        "/api/scan",
+        files={"file": ("fake.evtx", _EVTX_HEADER + b"\x00" * 100, "application/octet-stream")},
     )
     assert response.status_code == 200
     body = response.json()
@@ -106,11 +120,29 @@ def test_scan_accepts_evtx_extension(client):
     assert body["filename"] == "fake.evtx"
 
 
+def test_scan_rejects_oversize_upload(client):
+    """Uploads larger than the 500 MB guard should be refused with 413.
+    We don't actually send 500 MB — we patch the guard to a tiny value for
+    the test and send a body just over that limit."""
+    import pulse.api as api_mod
+    original = api_mod._UPLOAD_MAX_BYTES
+    api_mod._UPLOAD_MAX_BYTES = 1024  # 1 KB
+    try:
+        response = client.post(
+            "/api/scan",
+            files={"file": ("big.evtx", _EVTX_HEADER + b"\x00" * 4096, "application/octet-stream")},
+        )
+        assert response.status_code == 413
+        assert "limit" in response.json()["detail"].lower()
+    finally:
+        api_mod._UPLOAD_MAX_BYTES = original
+
+
 def test_scan_result_has_expected_shape(client):
     """Every scan response should include the standard fields so clients can rely on them."""
     response = client.post(
         "/api/scan",
-        files={"file": ("x.evtx", b"", "application/octet-stream")},
+        files={"file": ("x.evtx", _EVTX_HEADER, "application/octet-stream")},
     )
     body = response.json()
     for field in ("scan_id", "filename", "total_events", "total_findings",
@@ -134,7 +166,7 @@ def test_history_empty_when_no_scans(client):
 
 def test_history_returns_scans_after_scanning(client):
     """After one scan, /api/history should return one entry."""
-    client.post("/api/scan", files={"file": ("a.evtx", b"", "application/octet-stream")})
+    client.post("/api/scan", files={"file": ("a.evtx", _EVTX_HEADER, "application/octet-stream")})
     response = client.get("/api/history")
     scans = response.json()["scans"]
     assert len(scans) == 1
@@ -143,9 +175,9 @@ def test_history_returns_scans_after_scanning(client):
 
 def test_history_newest_first(client):
     """Multiple scans should be returned newest-first (highest id first)."""
-    client.post("/api/scan", files={"file": ("a.evtx", b"", "application/octet-stream")})
-    client.post("/api/scan", files={"file": ("b.evtx", b"", "application/octet-stream")})
-    client.post("/api/scan", files={"file": ("c.evtx", b"", "application/octet-stream")})
+    client.post("/api/scan", files={"file": ("a.evtx", _EVTX_HEADER, "application/octet-stream")})
+    client.post("/api/scan", files={"file": ("b.evtx", _EVTX_HEADER, "application/octet-stream")})
+    client.post("/api/scan", files={"file": ("c.evtx", _EVTX_HEADER, "application/octet-stream")})
 
     scans = client.get("/api/history").json()["scans"]
     assert len(scans) == 3
@@ -156,7 +188,7 @@ def test_history_newest_first(client):
 def test_history_respects_limit(client):
     """The ?limit= query parameter should cap the returned list."""
     for _ in range(5):
-        client.post("/api/scan", files={"file": ("x.evtx", b"", "application/octet-stream")})
+        client.post("/api/scan", files={"file": ("x.evtx", _EVTX_HEADER, "application/octet-stream")})
 
     scans = client.get("/api/history?limit=2").json()["scans"]
     assert len(scans) == 2
@@ -165,7 +197,7 @@ def test_history_respects_limit(client):
 def test_delete_scans_removes_rows_and_cascades_findings(client):
     """DELETE /api/scans removes the selected scans and their findings."""
     for name in ("a.evtx", "b.evtx", "c.evtx"):
-        client.post("/api/scan", files={"file": (name, b"", "application/octet-stream")})
+        client.post("/api/scan", files={"file": (name, _EVTX_HEADER, "application/octet-stream")})
 
     scans = client.get("/api/history").json()["scans"]
     assert len(scans) == 3
@@ -205,7 +237,7 @@ def test_report_returns_findings_for_existing_scan(client):
     """A valid scan ID should return that scan's findings list (possibly empty)."""
     scan_response = client.post(
         "/api/scan",
-        files={"file": ("x.evtx", b"", "application/octet-stream")},
+        files={"file": ("x.evtx", _EVTX_HEADER, "application/octet-stream")},
     )
     scan_id = scan_response.json()["scan_id"]
 
@@ -224,7 +256,7 @@ def test_report_returns_findings_for_existing_scan(client):
 def test_scan_cleans_up_temp_file(client):
     """The temp file created during /api/scan should not linger on disk afterwards."""
     tmp_dir_before = set(os.listdir(tempfile.gettempdir()))
-    client.post("/api/scan", files={"file": ("x.evtx", b"", "application/octet-stream")})
+    client.post("/api/scan", files={"file": ("x.evtx", _EVTX_HEADER, "application/octet-stream")})
     tmp_dir_after = set(os.listdir(tempfile.gettempdir()))
 
     # No new .evtx temp files left behind.

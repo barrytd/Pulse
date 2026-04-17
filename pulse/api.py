@@ -29,6 +29,13 @@ import os
 import tempfile
 from typing import Optional
 
+# Upload guards. .evtx files begin with the ASCII bytes "ElfFile" followed by
+# a NUL; anything else is either a wrong file type or crafted garbage. Cap at
+# 500 MB so a hostile client can't DoS the server by streaming forever.
+_EVTX_MAGIC = b"ElfFile\x00"
+_UPLOAD_MAX_BYTES = 500 * 1024 * 1024
+_UPLOAD_CHUNK = 1024 * 1024
+
 import yaml
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -101,10 +108,17 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     # Make sure the database has its tables before any request comes in.
     init_db(db_path)
 
+    # Swagger / ReDoc / OpenAPI endpoints are gated behind PULSE_DOCS=1 so a
+    # production deploy doesn't leak the full endpoint surface. Flip it on in
+    # development with: set PULSE_DOCS=1 (Windows) or PULSE_DOCS=1 (bash).
+    _docs_enabled = os.environ.get("PULSE_DOCS", "").strip().lower() in ("1", "true", "yes", "on")
     app = FastAPI(
         title="Pulse API",
         description="REST API for the Pulse Windows event log analyzer.",
         version=__version__,
+        docs_url="/docs" if _docs_enabled else None,
+        redoc_url="/redoc" if _docs_enabled else None,
+        openapi_url="/openapi.json" if _docs_enabled else None,
     )
 
     # Attach config so route handlers can reach it without globals.
@@ -373,15 +387,36 @@ def _register_routes(app: FastAPI) -> None:
                 detail="Only .evtx files are accepted.",
             )
 
-        # Write the upload to a temp file so the parser (which expects a
-        # path, not a stream) can read it. delete=False lets us close the
-        # handle on Windows before re-opening it for parsing.
+        # Stream the upload to a temp file in chunks so a malicious client
+        # can't exhaust memory with a huge body. Reject at the size cap and
+        # reject if the header doesn't match the .evtx magic so renamed junk
+        # never hits the parser. delete=False lets us close the handle on
+        # Windows before re-opening it for parsing.
         suffix = ".evtx"
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         try:
-            contents = await file.read()
-            tmp.write(contents)
+            written = 0
+            header = b""
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                if len(header) < len(_EVTX_MAGIC):
+                    header += chunk[: len(_EVTX_MAGIC) - len(header)]
+                written += len(chunk)
+                if written > _UPLOAD_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB limit.",
+                    )
+                tmp.write(chunk)
             tmp.close()
+
+            if not header.startswith(_EVTX_MAGIC):
+                raise HTTPException(
+                    status_code=400,
+                    detail="File is not a valid .evtx log (header magic mismatch).",
+                )
 
             events = parse_evtx(tmp.name)
             findings = run_all_detections(events)
