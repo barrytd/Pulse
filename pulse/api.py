@@ -42,8 +42,11 @@ from pulse.auth import (
 )
 from pulse.database import (
     REVIEW_STATUSES,
-    count_users, create_user, delete_scans, get_history, get_scan_findings,
-    get_user_by_email, get_user_by_id, init_db, save_scan,
+    count_users, create_user, delete_all_monitor_sessions,
+    delete_monitor_session, delete_scans, get_history,
+    get_monitor_session_findings, get_scan_findings,
+    get_user_by_email, get_user_by_id, init_db,
+    list_monitor_sessions, save_scan,
     set_finding_review, update_user_email, update_user_password,
 )
 from pulse.detections import run_all_detections
@@ -1082,6 +1085,48 @@ def _register_routes(app: FastAPI) -> None:
         if limit < 1 or limit > 100:
             raise HTTPException(400, detail="limit must be between 1 and 100.")
         return {"checks": app.state.monitor.recent_checks(limit=limit)}
+
+    # -------------------------------------------------------------------
+    # Monitor sessions — one row per Start→Stop span, with linked findings
+    # -------------------------------------------------------------------
+    @app.get("/api/monitor/sessions")
+    def monitor_sessions(limit: int = 100):
+        """List monitor sessions, newest first."""
+        if limit < 1 or limit > 500:
+            raise HTTPException(400, detail="limit must be between 1 and 500.")
+        return {"sessions": list_monitor_sessions(app.state.db_path, limit=limit)}
+
+    @app.get("/api/monitor/sessions/{session_id}/findings")
+    def monitor_session_findings(session_id: int):
+        """All findings detected during one monitor session."""
+        findings = get_monitor_session_findings(app.state.db_path, session_id)
+        return {"session_id": session_id, "findings": attach_remediation(findings)}
+
+    @app.delete("/api/monitor/sessions/{session_id}")
+    def monitor_session_delete(session_id: int):
+        """Delete one session plus its scans and findings."""
+        # Refuse to delete the currently-active session so the dashboard
+        # doesn't end up with a dangling session_id on fresh scans.
+        active_id = getattr(app.state.monitor, "session_id", None)
+        if active_id is not None and int(active_id) == int(session_id):
+            raise HTTPException(400, detail="Stop monitoring before deleting the active session.")
+        ok = delete_monitor_session(app.state.db_path, session_id)
+        if not ok:
+            raise HTTPException(404, detail="Session not found")
+        return {"deleted": 1}
+
+    @app.delete("/api/monitor/sessions")
+    def monitor_sessions_clear():
+        """Wipe every monitor session and its linked scans/findings.
+
+        Active session is preserved — callers should stop monitoring first
+        if they want a full reset.
+        """
+        active_id = getattr(app.state.monitor, "session_id", None)
+        if active_id is not None:
+            raise HTTPException(400, detail="Stop monitoring before clearing sessions.")
+        count = delete_all_monitor_sessions(app.state.db_path)
+        return {"deleted": count}
 
     @app.post("/api/monitor/test-alert")
     async def monitor_test_alert():

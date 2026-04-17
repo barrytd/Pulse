@@ -286,6 +286,45 @@ export async function apiMonitorTestAlert() {
   return { ok: resp.ok, status: resp.status, data: body };
 }
 
+// Monitor sessions — DVR-style record of every Start→Stop span.
+export async function apiMonitorSessions(limit) {
+  try {
+    var resp = await fetch('/api/monitor/sessions?limit=' + (limit || 100));
+    var data = await resp.json();
+    return data.sessions || [];
+  } catch (e) { return []; }
+}
+
+export async function apiMonitorSessionFindings(sessionId) {
+  try {
+    var resp = await fetch('/api/monitor/sessions/' + encodeURIComponent(sessionId) + '/findings');
+    var data = await resp.json();
+    return data.findings || [];
+  } catch (e) { return []; }
+}
+
+export async function apiDeleteMonitorSession(sessionId) {
+  try {
+    var resp = await fetch('/api/monitor/sessions/' + encodeURIComponent(sessionId), {
+      method: 'DELETE',
+    });
+    var data = await resp.json().catch(function () { return {}; });
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
+export async function apiClearMonitorSessions() {
+  try {
+    var resp = await fetch('/api/monitor/sessions', { method: 'DELETE' });
+    var data = await resp.json().catch(function () { return {}; });
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
 // ---------------------------------------------------------------
 // Report export URL builder — the <a download> flow doesn't go
 // through fetch(), but the URL gets constructed here so api.js

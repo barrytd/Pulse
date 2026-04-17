@@ -94,6 +94,22 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
+# One row per "start monitoring → stop monitoring" span. Scans generated
+# by the live monitor point back here via scans.session_id so the UI can
+# group a session's findings together ("DVR for the monitor").
+_CREATE_MONITOR_SESSIONS = """
+CREATE TABLE IF NOT EXISTS monitor_sessions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at     TEXT    NOT NULL,
+    ended_at       TEXT,
+    duration_sec   INTEGER,
+    poll_count     INTEGER DEFAULT 0,
+    events_checked INTEGER DEFAULT 0,
+    findings_count INTEGER DEFAULT 0,
+    channels       TEXT
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -114,12 +130,17 @@ def init_db(db_path):
         conn.execute(_CREATE_FINDINGS)
         conn.execute(_CREATE_ALERT_LOG)
         conn.execute(_CREATE_USERS)
+        conn.execute(_CREATE_MONITOR_SESSIONS)
         try:
             conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
         except sqlite3.OperationalError:
             pass
         try:
             conn.execute("ALTER TABLE scans ADD COLUMN scope TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE scans ADD COLUMN session_id INTEGER")
         except sqlite3.OperationalError:
             pass
         try:
@@ -137,7 +158,7 @@ def init_db(db_path):
                 pass
 
 
-def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None):
+def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None):
     """
     Saves a completed scan and all its findings to the database.
 
@@ -165,10 +186,11 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
         cursor = conn.execute(
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
-                total_findings, score, score_label, filename, scope)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                total_findings, score, score_label, filename, scope,
+                session_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
-             total_findings, score, score_label, filename, scope)
+             total_findings, score, score_label, filename, scope, session_id)
         )
         scan_id = cursor.lastrowid
 
@@ -383,6 +405,134 @@ def delete_scans(db_path, scan_ids):
             f"DELETE FROM scans WHERE id IN ({placeholders})", ids
         )
         return cursor.rowcount or 0
+
+
+# ---------------------------------------------------------------------------
+# Monitor sessions — one row per Start/Stop span on the live monitor
+# ---------------------------------------------------------------------------
+
+def create_monitor_session(db_path, started_at=None, channels=None):
+    """Insert a new monitor session and return its id."""
+    started_at = started_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    channels_txt = ",".join(channels) if channels else None
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            """INSERT INTO monitor_sessions
+               (started_at, channels)
+               VALUES (?, ?)""",
+            (started_at, channels_txt),
+        )
+        return cursor.lastrowid
+
+
+def close_monitor_session(db_path, session_id, poll_count, events_checked, findings_count):
+    """Stamp the session's ended_at + duration + final counters."""
+    ended_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT started_at FROM monitor_sessions WHERE id = ?",
+            (int(session_id),),
+        ).fetchone()
+        duration_sec = None
+        if row:
+            try:
+                started = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+                duration_sec = int((datetime.now() - started).total_seconds())
+            except Exception:
+                duration_sec = None
+        conn.execute(
+            """UPDATE monitor_sessions
+               SET ended_at = ?, duration_sec = ?, poll_count = ?,
+                   events_checked = ?, findings_count = ?
+               WHERE id = ?""",
+            (ended_at, duration_sec, int(poll_count or 0),
+             int(events_checked or 0), int(findings_count or 0), int(session_id)),
+        )
+
+
+def list_monitor_sessions(db_path, limit=100):
+    """Return monitor sessions newest-first, with findings_count rolled up
+    from linked scans so an interrupted session (no close) still shows a
+    sensible count."""
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT ms.id, ms.started_at, ms.ended_at, ms.duration_sec,
+                          ms.poll_count, ms.events_checked, ms.findings_count,
+                          ms.channels,
+                          COALESCE(SUM(s.total_findings), 0) AS live_findings
+                   FROM monitor_sessions ms
+                   LEFT JOIN scans s ON s.session_id = ms.id
+                   GROUP BY ms.id
+                   ORDER BY ms.id DESC
+                   LIMIT ?""",
+                (int(limit),),
+            )
+            cols = [d[0] for d in cursor.description]
+            out = []
+            for row in cursor.fetchall():
+                d = dict(zip(cols, row))
+                # Prefer the closed-out stored count; otherwise use the live
+                # roll-up so "currently active" sessions still show a number.
+                if not d.get("findings_count"):
+                    d["findings_count"] = int(d.get("live_findings") or 0)
+                d.pop("live_findings", None)
+                out.append(d)
+            return out
+    except Exception:
+        return []
+
+
+def get_monitor_session_findings(db_path, session_id):
+    """Return every finding whose parent scan is linked to this session."""
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
+                          f.rule, f.mitre, f.description, f.details, f.raw_xml,
+                          f.review_status, f.review_note, f.reviewed_at,
+                          s.scanned_at
+                   FROM findings f
+                   JOIN scans s ON s.id = f.scan_id
+                   WHERE s.session_id = ?
+                   ORDER BY f.id DESC""",
+                (int(session_id),),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
+def delete_monitor_session(db_path, session_id):
+    """Delete a single session plus all scans (and findings via cascade)
+    that belonged to it. Returns True if a session row was removed."""
+    try:
+        with _connect(db_path) as conn:
+            conn.execute(
+                "DELETE FROM scans WHERE session_id = ?",
+                (int(session_id),),
+            )
+            cursor = conn.execute(
+                "DELETE FROM monitor_sessions WHERE id = ?",
+                (int(session_id),),
+            )
+            return (cursor.rowcount or 0) > 0
+    except Exception:
+        return False
+
+
+def delete_all_monitor_sessions(db_path):
+    """Wipe every session + its linked scans/findings. Returns count deleted."""
+    try:
+        with _connect(db_path) as conn:
+            conn.execute(
+                "DELETE FROM scans WHERE session_id IS NOT NULL",
+            )
+            cursor = conn.execute("DELETE FROM monitor_sessions")
+            return cursor.rowcount or 0
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------

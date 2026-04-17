@@ -9,8 +9,12 @@ import {
   apiMonitorStart,
   apiMonitorStop,
   apiMonitorTestAlert,
+  apiMonitorSessions,
+  apiMonitorSessionFindings,
+  apiDeleteMonitorSession,
+  apiClearMonitorSessions,
 } from './api.js';
-import { escapeHtml, toastError } from './dashboard.js';
+import { escapeHtml, toastError, showToast } from './dashboard.js';
 import { openFindingDrawer } from './findings.js';
 
 // Module-level refs that used to live on window as _dashLiveUnsub /
@@ -614,16 +618,28 @@ export async function renderMonitorPage() {
         _liveFeedHtml(monitorClient.feed) +
       '</div>' +
 
-      '<div class="card">' +
+      '<div class="card" style="margin-bottom:16px;">' +
         '<div class="section-label">Poll History</div>' +
         _monitorChecksHtml(monitorClient.checks) +
+      '</div>' +
+
+      '<div class="card" id="monitor-sessions-section">' +
+        _sessionsSectionHtml() +
       '</div>' +
       '</div>';
   }
 
+  // Kick off an initial sessions load so the section populates when the
+  // page first mounts. Fire-and-forget — the section re-renders itself.
+  _loadMonitorSessions();
+
   render();
 
   if (_monPageUnsub) _monPageUnsub();
+  // Track previous active state so we can refresh the sessions list exactly
+  // when the monitor transitions from running to stopped — that's when a
+  // new session row is closed out in the DB and should show up in the list.
+  var prevActive = !!(monitorClient.status && monitorClient.status.active);
   function onUpdate(type) {
     if (!document.getElementById('monitor-page-root')) {
       if (_monPageUnsub) _monPageUnsub();
@@ -634,10 +650,219 @@ export async function renderMonitorPage() {
       if (metaEl) metaEl.textContent = _timeSince(monitorClient.status && monitorClient.status.last_check_at);
       return;
     }
+    var nowActive = !!(monitorClient.status && monitorClient.status.active);
     render();
+    if (prevActive && !nowActive) {
+      // Monitor just stopped — pull the refreshed session list.
+      _loadMonitorSessions();
+    }
+    prevActive = nowActive;
   }
   monitorClient.subscribe(onUpdate);
   _monPageUnsub = function () { monitorClient.unsubscribe(onUpdate); };
+}
+
+// ---------------------------------------------------------------
+// Monitor Sessions — DVR-style record of Start→Stop spans
+// ---------------------------------------------------------------
+// Module state kept across Monitor-page re-renders so expanded cards and
+// fetched findings don't get wiped every time an SSE event arrives.
+let _monitorSessions         = [];
+let _expandedSessionId       = null;
+let _sessionFindingsCache    = {};   // { [id]: [finding, ...] }
+let _sessionFindingsLoading  = {};   // { [id]: true } while in-flight
+
+async function _loadMonitorSessions() {
+  _monitorSessions = await apiMonitorSessions(200);
+  _renderSessionsSection();
+}
+
+function _sessionFindingKey(f) { return 'sess-' + (f.id || Math.random()); }
+
+function _humanDuration(sec) {
+  if (sec == null || sec < 0) return '—';
+  if (sec < 60) return sec + 's';
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  if (m < 60) return s ? m + 'm ' + s + 's' : m + ' min';
+  var h = Math.floor(m / 60);
+  var rm = m % 60;
+  return rm ? h + 'h ' + rm + 'm' : h + 'h';
+}
+
+function _sessionHeaderLabel(sess) {
+  // "Apr 16 21:15 – 21:35 · 20 min · 3 findings"
+  var start = sess.started_at || '';
+  var end   = sess.ended_at   || '';
+  var dur   = _humanDuration(sess.duration_sec);
+  var findings = sess.findings_count || 0;
+  var starts = start.split(' ');
+  var ends   = end.split(' ');
+  var label = '';
+  if (starts.length >= 2) {
+    // "YYYY-MM-DD HH:MM:SS" → "Mon DD HH:MM"
+    var d = starts[0];
+    var t = (starts[1] || '').slice(0, 5);
+    label = _shortDate(d) + ' ' + t;
+    if (ends[1]) label += ' – ' + ends[1].slice(0, 5);
+    else         label += ' – (active)';
+  } else {
+    label = start || 'Session ' + sess.id;
+  }
+  label += ' · ' + dur + ' · ' + findings + ' finding' + (findings === 1 ? '' : 's');
+  return label;
+}
+
+function _shortDate(ymd) {
+  // "2026-04-16" → "Apr 16". Purely cosmetic; falls back to the raw text.
+  var parts = (ymd || '').split('-');
+  if (parts.length !== 3) return ymd || '';
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var mi = parseInt(parts[1], 10) - 1;
+  if (!(mi >= 0 && mi < 12)) return ymd;
+  return months[mi] + ' ' + (parts[2] || '').replace(/^0/, '');
+}
+
+function _sessionsSectionHtml() {
+  if (!_monitorSessions || _monitorSessions.length === 0) {
+    return '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
+        '<span>Monitor Sessions</span>' +
+      '</div>' +
+      '<div style="text-align:center; padding:24px; color:var(--text-muted);">' +
+        'No sessions yet. Start monitoring and one will appear here when you stop.' +
+      '</div>';
+  }
+  var cards = _monitorSessions.map(_sessionCardHtml).join('');
+  return '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
+      '<span>Monitor Sessions</span>' +
+      '<button class="btn-small" data-action="clearMonitorSessions" ' +
+        'style="background:var(--border); color:var(--text);">Clear all</button>' +
+    '</div>' +
+    '<div class="monitor-sessions">' + cards + '</div>';
+}
+
+function _sessionCardHtml(sess) {
+  var isOpen = _expandedSessionId === sess.id;
+  var isActive = !sess.ended_at;
+  var badge = isActive
+    ? '<span class="session-badge active">Active</span>'
+    : '';
+  var body = '';
+  if (isOpen) {
+    if (_sessionFindingsLoading[sess.id]) {
+      body = '<div class="session-body"><div style="padding:16px; color:var(--text-muted); text-align:center;">Loading findings…</div></div>';
+    } else {
+      body = '<div class="session-body">' + _sessionFindingsTableHtml(sess) + '</div>';
+    }
+  }
+  return '<div class="session-card' + (isOpen ? ' open' : '') + '">' +
+    '<div class="session-head" data-action="toggleSessionExpand" data-arg="' + sess.id + '">' +
+      '<span class="session-caret">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' +
+      '<span class="session-label">' + escapeHtml(_sessionHeaderLabel(sess)) + '</span>' +
+      badge +
+      (isActive
+        ? ''
+        : '<button class="session-delete" data-action="deleteMonitorSession" data-arg="' + sess.id + '" ' +
+          'aria-label="Delete session" title="Delete session">\u00D7</button>') +
+    '</div>' +
+    body +
+  '</div>';
+}
+
+function _sessionFindingsTableHtml(sess) {
+  var findings = _sessionFindingsCache[sess.id] || [];
+  if (findings.length === 0) {
+    return '<div style="padding:16px; color:var(--text-muted); text-align:center;">' +
+      'No findings recorded during this session.' +
+    '</div>';
+  }
+  // Stash a per-session index on the module so the click handler can
+  // look the finding up without re-fetching.
+  return '<table class="session-findings-table"><thead><tr>' +
+      '<th>Time</th><th>Severity</th><th>Rule</th><th>Description</th>' +
+    '</tr></thead><tbody>' +
+    findings.map(function (f, i) {
+      var sev  = (f.severity || 'LOW').toUpperCase();
+      var desc = f.description || f.details || '';
+      if (desc.length > 140) desc = desc.substring(0, 140) + '\u2026';
+      var time = f.timestamp || '';
+      return '<tr class="clickable" data-action="openSessionFinding" ' +
+        'data-arg="' + sess.id + ':' + i + '">' +
+        '<td class="col-time">' + escapeHtml(time) + '</td>' +
+        '<td><span class="pill pill-' + sev.toLowerCase() + '">' + sev + '</span></td>' +
+        '<td style="font-weight:500;">' + escapeHtml(f.rule || '') + '</td>' +
+        '<td style="color:var(--text-muted);">' + escapeHtml(desc) + '</td>' +
+      '</tr>';
+    }).join('') +
+    '</tbody></table>';
+}
+
+function _renderSessionsSection() {
+  var el = document.getElementById('monitor-sessions-section');
+  if (!el) return;
+  el.innerHTML = _sessionsSectionHtml();
+}
+
+export async function toggleSessionExpand(arg) {
+  var id = parseInt(arg, 10);
+  if (!isFinite(id)) return;
+  if (_expandedSessionId === id) {
+    _expandedSessionId = null;
+    _renderSessionsSection();
+    return;
+  }
+  _expandedSessionId = id;
+  if (!_sessionFindingsCache[id]) {
+    _sessionFindingsLoading[id] = true;
+    _renderSessionsSection();
+    var findings = await apiMonitorSessionFindings(id);
+    _sessionFindingsCache[id] = findings;
+    delete _sessionFindingsLoading[id];
+  }
+  _renderSessionsSection();
+}
+
+// Called from data-action on a session findings row. Arg is "sessId:idx".
+export function openSessionFinding(arg) {
+  var parts = String(arg || '').split(':');
+  var id  = parseInt(parts[0], 10);
+  var idx = parseInt(parts[1], 10);
+  var list = _sessionFindingsCache[id];
+  if (!list) return;
+  var f = list[idx];
+  if (f) openFindingDrawer(f);
+}
+
+export async function deleteMonitorSession(arg) {
+  var id = parseInt(arg, 10);
+  if (!isFinite(id)) return;
+  if (!confirm('Delete this monitor session and all its findings? This cannot be undone.')) return;
+  var r = await apiDeleteMonitorSession(id);
+  if (!r.ok) {
+    toastError((r.data && r.data.detail) || 'Delete failed.');
+    return;
+  }
+  // Drop cached state for this session and refresh the list.
+  if (_expandedSessionId === id) _expandedSessionId = null;
+  delete _sessionFindingsCache[id];
+  delete _sessionFindingsLoading[id];
+  showToast('Session deleted', 'success');
+  await _loadMonitorSessions();
+}
+
+export async function clearMonitorSessions() {
+  if (!_monitorSessions || _monitorSessions.length === 0) return;
+  if (!confirm('Delete every monitor session and its findings? This cannot be undone.')) return;
+  var r = await apiClearMonitorSessions();
+  if (!r.ok) {
+    toastError((r.data && r.data.detail) || 'Clear failed.');
+    return;
+  }
+  _expandedSessionId      = null;
+  _sessionFindingsCache   = {};
+  _sessionFindingsLoading = {};
+  showToast('Sessions cleared', 'success');
+  await _loadMonitorSessions();
 }
 
 // Wrapper-style top-level entry points some onclick handlers use.

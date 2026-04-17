@@ -63,6 +63,10 @@ import {
   toggleLiveSettingsPopover,
   updatePopoverIntervalLabel,
   savePopoverInterval,
+  toggleSessionExpand,
+  openSessionFinding,
+  deleteMonitorSession,
+  clearMonitorSessions,
 } from './monitor.js';
 import {
   toggleBuiltinWhitelist,
@@ -153,6 +157,10 @@ const actions = {
   toggleLiveSettingsPopover,
   updatePopoverIntervalLabel,
   savePopoverInterval,
+  toggleSessionExpand,
+  openSessionFinding,
+  deleteMonitorSession,
+  clearMonitorSessions,
 
   // whitelist
   toggleBuiltinWhitelist,

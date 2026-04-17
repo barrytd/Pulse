@@ -24,7 +24,11 @@ from collections import deque
 from datetime import datetime, timedelta
 
 from pulse.detections import run_all_detections
-from pulse.database import save_scan
+from pulse.database import (
+    close_monitor_session,
+    create_monitor_session,
+    save_scan,
+)
 from pulse.emailer import dispatch_alerts
 from pulse.monitor import (
     _apply_whitelist,
@@ -69,6 +73,11 @@ class MonitorManager:
         self.events_checked      = 0
         self.findings_detected   = 0
         self.poll_count          = 0
+
+        # Current monitor-session row. Set when start() fires, cleared when
+        # stop() closes the session. Every save_scan() from _poll_once() is
+        # tagged with this so the Monitor page can list per-session findings.
+        self.session_id          = None
 
         # Short-term check history so the Monitor page can show even polls
         # that produced no findings ("events checked, nothing to alert on").
@@ -160,6 +169,17 @@ class MonitorManager:
             self.findings_detected = 0
             self.poll_count        = 0
             self.check_history.clear()
+
+            # New session row per start — records the full Start→Stop span.
+            try:
+                self.session_id = await asyncio.to_thread(
+                    create_monitor_session,
+                    self.db_path,
+                    self.started_at,
+                    self.channels,
+                )
+            except Exception:
+                self.session_id = None
             self._last_ids         = {}
             self._seen_keys        = set()
             self._recent_events.clear()
@@ -187,6 +207,23 @@ class MonitorManager:
                 except (asyncio.TimeoutError, asyncio.CancelledError):
                     self._task.cancel()
             self._task = None
+
+            # Close the session row with the final counters. Swallow errors
+            # so a DB write hiccup never blocks stop().
+            if self.session_id is not None:
+                try:
+                    await asyncio.to_thread(
+                        close_monitor_session,
+                        self.db_path,
+                        self.session_id,
+                        self.poll_count,
+                        self.events_checked,
+                        self.findings_detected,
+                    )
+                except Exception:
+                    pass
+                self.session_id = None
+
             await self._broadcast_status()
             return self.status()
 
@@ -393,6 +430,8 @@ class MonitorManager:
                     None,
                     None,
                     f"[monitor] {self.mode} poll {self.poll_count}",
+                    "Live monitor",
+                    self.session_id,
                 )
             except Exception:
                 pass
