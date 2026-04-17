@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS scans (
     total_findings INTEGER DEFAULT 0,
     score          INTEGER,
     score_label    TEXT,
-    filename       TEXT
+    filename       TEXT,
+    scope          TEXT
 );
 """
 
@@ -118,6 +119,10 @@ def init_db(db_path):
         except sqlite3.OperationalError:
             pass
         try:
+            conn.execute("ALTER TABLE scans ADD COLUMN scope TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
             conn.execute("ALTER TABLE findings ADD COLUMN raw_xml TEXT")
         except sqlite3.OperationalError:
             pass
@@ -132,7 +137,7 @@ def init_db(db_path):
                 pass
 
 
-def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None):
+def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None):
     """
     Saves a completed scan and all its findings to the database.
 
@@ -143,6 +148,9 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
         score (int):        Optional security score (0-100).
         score_label (str):  Optional label e.g. "HIGH RISK".
         filename (str):     Optional name of the scanned file.
+        scope (str):        Human-readable scope of what this scan covered —
+                            e.g. "Last 7 days" for a system scan, or
+                            "Manual upload" for a dropped .evtx.
 
     Returns:
         int: The scan_id of the newly inserted scan row.
@@ -157,10 +165,10 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
         cursor = conn.execute(
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
-                total_findings, score, score_label, filename)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                total_findings, score, score_label, filename, scope)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
-             total_findings, score, score_label, filename)
+             total_findings, score, score_label, filename, scope)
         )
         scan_id = cursor.lastrowid
 
@@ -210,7 +218,7 @@ def get_history(db_path, limit=20):
             cursor = conn.execute(
                 """SELECT id, scanned_at, hostname, files_scanned,
                           total_events, total_findings, score, score_label,
-                          filename
+                          filename, scope
                    FROM scans
                    ORDER BY id DESC
                    LIMIT ?""",

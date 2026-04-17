@@ -404,6 +404,7 @@ def _register_routes(app: FastAPI) -> None:
                 score=score_data["score"],
                 score_label=score_data["label"],
                 filename=file.filename,
+                scope="Manual upload",
             )
 
             # Fire threshold-based alerts if configured. SMTP can be slow,

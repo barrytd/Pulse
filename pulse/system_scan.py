@@ -66,6 +66,20 @@ def is_supported_platform():
     return platform.system() == "Windows"
 
 
+def _scope_label(days):
+    """Human-readable scope for a system scan with a lookback window.
+
+    Maps the common dropdown choices to the labels the UI shows
+    ("Last 24 hours", "Last 7 days", ...) and falls back to a generic
+    "Last N days" for custom ranges.
+    """
+    if days is None or days <= 0:
+        return "All time"
+    if days == 1:
+        return "Last 24 hours"
+    return "Last {} days".format(int(days))
+
+
 def _resolve_log_paths(log_dir=None, names=DEFAULT_SYSTEM_LOGS):
     """Return the absolute paths of the default system logs that actually
     exist on disk. Missing files are silently skipped so a machine without
@@ -174,6 +188,7 @@ def scan_system(
         score=score_data["score"],
         score_label=score_data["label"],
         filename="System Scan",
+        scope=_scope_label(days),
     )
 
     alert_summary = {"enabled": False, "sent": False}

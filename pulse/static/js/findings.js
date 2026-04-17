@@ -237,6 +237,16 @@ export function applyScansView() {
   _restoreSearchFocus('scans-search-box');
 }
 
+// Pick what to show in the Scope column. Back-compat: older scans predate
+// the `scope` column and will have null — fall back to the filename, and
+// finally to an em dash so the cell is never blank.
+function _scopeLabel(row) {
+  if (row && row.scope) return row.scope;
+  if (row && row.filename === 'System Scan') return 'System scan';
+  if (row && row.filename) return row.filename;
+  return '\u2014';
+}
+
 function _buildScansTable(rows) {
   var s = scansState;
   var sortable = function (col, label, style) {
@@ -264,7 +274,7 @@ function _buildScansTable(rows) {
       sortable('findings', 'Findings') +
       sortable('score',    'Score') +
       sortable('grade',    'Grade') +
-      '<th>Duration</th>' +
+      '<th>Scope</th>' +
     '</tr></thead>' +
     '<tbody>' +
     rows.map(function (row) {
@@ -284,7 +294,7 @@ function _buildScansTable(rows) {
         '<td style="font-weight:700; color:' + scoreColor(row.score) + '">' +
           (row.score != null ? row.score : '-') + '</td>' +
         '<td>' + (grade ? '<span class="grade-pill grade-' + grade + '">' + grade + '</span>' : '-') + '</td>' +
-        '<td style="color:var(--text-muted);">\u2014</td>' +
+        '<td style="color:var(--text-muted);">' + escapeHtml(_scopeLabel(row)) + '</td>' +
       '</tr>';
     }).join('') +
     '</tbody></table>';
