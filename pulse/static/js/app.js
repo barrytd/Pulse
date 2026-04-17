@@ -59,6 +59,9 @@ import {
   toggleCustomChannelEnable,
   updateCustomChannels,
   openLiveFeedFinding,
+  toggleLiveSettingsPopover,
+  updatePopoverIntervalLabel,
+  savePopoverInterval,
 } from './monitor.js';
 import {
   toggleBuiltinWhitelist,
@@ -145,6 +148,9 @@ const actions = {
   toggleCustomChannelEnable,
   updateCustomChannels,
   openLiveFeedFinding,
+  toggleLiveSettingsPopover,
+  updatePopoverIntervalLabel,
+  savePopoverInterval,
 
   // whitelist
   toggleBuiltinWhitelist,

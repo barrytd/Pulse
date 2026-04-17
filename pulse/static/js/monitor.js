@@ -15,9 +15,12 @@ import { openFindingDrawer } from './findings.js';
 
 // Module-level refs that used to live on window as _dashLiveUnsub /
 // _monPageUnsub / _dingCtx.
-let _dingCtx       = null;
-let _dashLiveUnsub = null;
-let _monPageUnsub  = null;
+let _dingCtx         = null;
+let _dashLiveUnsub   = null;
+let _monPageUnsub    = null;
+// Preserve whether the dashboard gear popover was open across re-renders
+// so an incoming SSE event doesn't yank it closed mid-interaction.
+let _livePopoverOpen = false;
 
 // ---------------------------------------------------------------
 // Channel multi-select — persistent across sessions
@@ -33,6 +36,19 @@ export const BUILTIN_CHANNELS = [
 const DEFAULT_CHECKED = ['Security', 'System'];
 const LS_CHANNELS = 'pulse.monitor.channels.builtin';
 const LS_CUSTOM   = 'pulse.monitor.channels.custom';
+const LS_INTERVAL = 'pulse.monitor.interval';
+
+export function getStoredInterval() {
+  try {
+    var raw = localStorage.getItem(LS_INTERVAL);
+    var n = parseInt(raw, 10);
+    return (isFinite(n) && n >= 5 && n <= 300) ? n : null;
+  } catch (e) { return null; }
+}
+
+function _saveStoredInterval(n) {
+  try { localStorage.setItem(LS_INTERVAL, String(n)); } catch (e) {}
+}
 
 export function getCheckedBuiltinChannels() {
   try {
@@ -127,8 +143,6 @@ export function channelMultiSelectHtml(opts) {
 function _refreshChannelSummary() {
   var el = document.getElementById('channel-select-summary');
   if (el) el.textContent = _channelSummary();
-  // Notify other mounted instances (dashboard popover <-> monitor page) to redraw.
-  monitorClient._notify('channels');
 }
 
 export function toggleChannelDropdown(arg, target) {
@@ -170,12 +184,19 @@ export function updateCustomChannels(arg, target) {
   _refreshChannelSummary();
 }
 
-// Close dropdown on outside click — installed once at module load.
+// Close dropdown/popover on outside click — installed once at module load.
+// The gear button sits outside the popover, so skip the handler when the
+// click target IS the gear (its own toggle handles open/close).
 document.addEventListener('click', function (e) {
-  var openEls = document.querySelectorAll('.channel-select.open');
-  openEls.forEach(function (el) {
+  document.querySelectorAll('.channel-select.open').forEach(function (el) {
     if (!el.contains(e.target)) el.classList.remove('open');
   });
+  if (e.target.closest('[data-action="toggleLiveSettingsPopover"]')) return;
+  var pop = document.querySelector('.live-settings-popover.open');
+  if (pop && !pop.contains(e.target)) {
+    pop.classList.remove('open');
+    _livePopoverOpen = false;
+  }
 });
 
 // Subtle two-tone chime when a new finding arrives. Uses Web Audio so
@@ -288,13 +309,19 @@ export const monitorClient = {
     }
   },
 
-  // Pull start-time settings from the Monitor page form if the user
-  // is on that page; otherwise fall back to whatever the persistent
-  // channel multi-select has stored so the dashboard Start button works.
+  // Pull start-time settings from whichever of the two sliders is live
+  // (Monitor page full slider, or the dashboard gear-popover slider),
+  // falling back to the persistent localStorage value so the dashboard
+  // Start button works even when no slider is mounted.
   _readSettingsForm() {
-    var intervalInput = document.getElementById('mon-interval');
+    var intervalInput = document.getElementById('mon-interval')
+      || document.getElementById('popover-interval');
     var cfg = { channels: getSelectedChannels() };
     if (intervalInput) cfg.poll_interval = parseInt(intervalInput.value, 10) || 30;
+    else {
+      var stored = getStoredInterval();
+      if (stored != null) cfg.poll_interval = stored;
+    }
     return cfg;
   },
 
@@ -350,9 +377,14 @@ export const monitorClient = {
   },
 };
 
-function _liveHeaderHtml(status) {
+function _liveHeaderHtml(status, opts) {
+  opts = opts || {};
   var active   = status && status.active;
-  var interval = (status && status.poll_interval) || 30;
+  var interval = (status && status.poll_interval) || getStoredInterval() || 30;
+  var gearBtn  = opts.showGear
+    ? '<button class="live-btn gear" data-action="toggleLiveSettingsPopover" ' +
+      'title="Monitor settings" aria-label="Monitor settings">\u2699</button>'
+    : '';
   return '<div class="live-header">' +
     '<div class="live-dot ' + (active ? '' : 'idle') + '"></div>' +
     '<div class="live-badge ' + (active ? '' : 'idle') + '">' + (active ? 'LIVE' : 'IDLE') + '</div>' +
@@ -361,8 +393,40 @@ function _liveHeaderHtml(status) {
       : '<div class="live-interval">Not monitoring</div>') +
     (active
       ? '<button class="live-btn" style="margin-left:auto;" data-action="sendMonitorTestAlert">Test Alert</button>' +
-        '<button class="live-btn stop" style="margin-left:8px;" data-action="stopMonitor">Stop</button>'
-      : '<button class="live-btn start" data-action="startMonitor">Start Monitoring</button>') +
+        '<button class="live-btn stop" style="margin-left:8px;" data-action="stopMonitor">Stop</button>' +
+        gearBtn
+      : '<button class="live-btn start" style="margin-left:auto;" data-action="startMonitor">Start Monitoring</button>' +
+        gearBtn) +
+  '</div>';
+}
+
+// Compact inline popover anchored below the gear icon. Two controls:
+// poll-interval slider + channel multi-select. Saves to localStorage
+// so the Monitor page sees the same values on next render.
+function _liveSettingsPopoverHtml(status) {
+  var active   = status && status.active;
+  var interval = (status && status.poll_interval) || getStoredInterval() || 30;
+  return '<div class="live-settings-popover" id="live-settings-popover">' +
+    '<div class="live-settings-head">Monitor Settings' +
+      '<button class="live-settings-close" data-action="toggleLiveSettingsPopover" ' +
+        'aria-label="Close">&times;</button>' +
+    '</div>' +
+    '<div class="live-settings-row">' +
+      '<label>Poll Interval</label>' +
+      '<input type="range" id="popover-interval" min="5" max="300" step="5" ' +
+        'value="' + interval + '"' +
+        (active ? ' disabled' : '') +
+        ' data-action-input="updatePopoverIntervalLabel" ' +
+        ' data-action-change="savePopoverInterval" />' +
+      '<div class="hint"><span id="popover-interval-label">' + interval + 's</span> between polls</div>' +
+    '</div>' +
+    '<div class="live-settings-row">' +
+      '<label>Channels</label>' +
+      channelMultiSelectHtml({ disabled: active }) +
+    '</div>' +
+    (active
+      ? '<div class="hint" style="margin-top:8px; color:#d29922;">Stop the monitor to change these \u2014 they apply on next start.</div>'
+      : '<div class="hint" style="margin-top:8px;">Saved automatically. Click Start Monitoring to apply.</div>') +
   '</div>';
 }
 
@@ -450,10 +514,37 @@ export function renderDashLivePanel() {
   var s      = monitorClient.status;
   var active = s && s.active;
   mount.innerHTML = '<div class="live-panel ' + (active ? '' : 'idle') + '">' +
-    _liveHeaderHtml(s) +
+    _liveHeaderHtml(s, { showGear: true }) +
+    _liveSettingsPopoverHtml(s) +
     _liveMetaHtml(s) +
     (active ? _liveFeedHtml(monitorClient.feed) : '') +
   '</div>';
+  if (_livePopoverOpen) {
+    var pop = document.getElementById('live-settings-popover');
+    if (pop) pop.classList.add('open');
+  }
+}
+
+export function toggleLiveSettingsPopover() {
+  var pop = document.getElementById('live-settings-popover');
+  if (!pop) return;
+  _livePopoverOpen = !pop.classList.contains('open');
+  pop.classList.toggle('open', _livePopoverOpen);
+}
+
+// Live label update while dragging the popover slider — mirrors
+// updateMonIntervalLabel on the Monitor page.
+export function updatePopoverIntervalLabel(arg, target) {
+  var lbl = document.getElementById('popover-interval-label');
+  if (lbl && target) lbl.textContent = target.value + 's';
+}
+
+// Commit the popover slider value to localStorage on change so Start
+// picks it up and the Monitor page slider mirrors it on next render.
+export function savePopoverInterval(arg, target) {
+  if (!target) return;
+  var n = parseInt(target.value, 10);
+  if (isFinite(n)) _saveStoredInterval(n);
 }
 
 export function mountDashLivePanel() {
@@ -500,10 +591,12 @@ export async function renderMonitorPage() {
         '<div class="monitor-settings">' +
           '<div>' +
             '<label>Poll Interval</label>' +
-            '<input type="range" id="mon-interval" min="5" max="300" step="5" value="' + (s.poll_interval || 30) + '"' +
+            '<input type="range" id="mon-interval" min="5" max="300" step="5" ' +
+              'value="' + (s.poll_interval || getStoredInterval() || 30) + '"' +
               (active ? ' disabled' : '') +
-              ' data-action-input="updateMonIntervalLabel" />' +
-            '<div class="hint"><span id="mon-interval-label">' + (s.poll_interval || 30) + 's</span> between polls</div>' +
+              ' data-action-input="updateMonIntervalLabel" ' +
+              ' data-action-change="savePopoverInterval" />' +
+            '<div class="hint"><span id="mon-interval-label">' + (s.poll_interval || getStoredInterval() || 30) + 's</span> between polls</div>' +
           '</div>' +
           '<div>' +
             '<label>Channels</label>' +

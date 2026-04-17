@@ -175,6 +175,7 @@
 /* Live monitor panel                                                   */
 /* ------------------------------------------------------------------ */
 .live-panel {
+  position: relative;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-left: 3px solid #3fb950;
@@ -252,6 +253,69 @@
 .live-btn.start:hover { background: #2ea043; border-color: #2ea043; }
 .live-btn.stop  { background: transparent; color: #f85149; border-color: #f85149; }
 .live-btn.stop:hover { background: rgba(248,81,73,0.1); }
+
+/* Gear icon — compact square button for the live-panel settings popover */
+.live-btn.gear {
+  margin-left: 6px;
+  padding: 6px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.live-settings-popover {
+  display: none;
+  position: absolute;
+  right: 20px;
+  top: 52px;
+  z-index: 30;
+  width: 320px;
+  padding: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.live-settings-popover.open { display: block; }
+
+.live-settings-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.live-settings-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.live-settings-close:hover { color: var(--text); }
+
+.live-settings-row { margin-bottom: 10px; }
+.live-settings-row label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.live-settings-row input[type="range"] { width: 100%; }
+.live-settings-row .hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
 
 .live-meta {
   display: flex;
