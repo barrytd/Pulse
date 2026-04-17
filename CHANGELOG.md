@@ -5,6 +5,31 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-16
+
+### Added
+- **Remediation module** (`pulse/remediation.py`) — single source of truth for per-rule "how to fix" steps plus MITRE ATT&CK mitigation IDs (M1026, M1027, etc.). `attach_remediation(findings)` decorates each finding with `remediation` steps + `mitigations` chips so every downstream consumer (HTML/PDF/dashboard drawer) gets the same content
+- **Remediation tab rewrite** (`pulse/reporter.py`) — grouped by rule with finding-count badges and clickable MITRE mitigation chips linking to `attack.mitre.org/mitigations/<ID>`
+- **Finding review workflow** (`pulse/database.py`, `pulse/api.py`, `pulse/static/js/findings.js`) — mark any finding as `reviewed` or `false_positive` from the dashboard drawer; state is keyed by a stable `finding_uid` hash and persists across future scans. Two new endpoints (`PUT /api/findings/{uid}/review`, `DELETE /api/findings/{uid}/review`) + a filter dropdown on the Findings page
+- **Scheduled scans** (`--schedule FOLDER`) — folder-watch mode that auto-scans every new `.evtx` file dropped into the directory. Dedupes by mtime so re-saved files don't trigger repeat runs
+- **Recurring summary reports** (`--summary {daily,weekly,monthly}`) — aggregates scans across a 1/7/30-day window into a single HTML digest (total scans, avg score, severity breakdown, top rules with progress bars, affected hosts, worst scan callout). Pair with `--email` for a cron-able digest
+- **PDF export** (`pulse/pdf_report.py`) — ReportLab-based formatted report with cover page, severity summary table, per-finding cards including remediation steps + MITRE mitigations. `GET /api/report/{id}?format=pdf` + a new "Export PDF" button on the scan detail view
+- **Scan comparison** (`pulse/comparison.py`, `pulse/api.py`, `pulse/static/js/history.js`) — `GET /api/compare?a=&b=` returns `{new, resolved, shared}` keyed by (rule, description). History page gains two scan dropdowns + Compare button that renders a three-column diff (New / Shared / Resolved)
+- **`--quiet` / `--json-only` CLI flags** — machine-friendly output for cron pipelines. `--quiet` suppresses progress/animation output; `--json-only` writes JSON to stdout and silences everything else so `pulse ... | jq` just works
+- **`--config PATH` CLI flag** — load settings from a custom YAML file instead of the default `pulse.yaml`. Pre-parsed before the main argparse pass so config-driven defaults still apply
+
+### Changed
+- **`.gitignore`** — tightened `logs/*.evtx` to `*.evtx` so stray event logs anywhere in the tree are never committed; added `pulse.db`
+- **American spelling** in user-visible dashboard text (modularized, color, flavor) — matches the project's US-English copy direction without mass-rewriting existing British spellings elsewhere
+
+### Dependencies
+- `reportlab>=4.0.0` — PDF generation (pure Python, no native deps)
+
+### Tests
+- Test count: 271 → 324, all passing (new coverage for remediation grouping, MITRE chips in HTML, summary report aggregation, PDF byte output, diff bucket logic, review workflow endpoints, `--quiet`/`--json-only`/`--schedule`/`--summary`/`--config` CLI paths)
+
+---
+
 ## 2026-04-15
 
 ### Added
