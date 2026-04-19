@@ -13,6 +13,7 @@ import {
   apiMonitorSessionFindings,
   apiDeleteMonitorSession,
   apiClearMonitorSessions,
+  apiDeleteMonitorSessionsBatch,
 } from './api.js';
 import { escapeHtml, toastError, showToast, sevPillHtml } from './dashboard.js';
 import { openFindingDrawer } from './findings.js';
@@ -863,6 +864,9 @@ let _monitorSessions         = [];
 let _expandedSessionId       = null;
 let _sessionFindingsCache    = {};   // { [id]: [finding, ...] }
 let _sessionFindingsLoading  = {};   // { [id]: true } while in-flight
+// session id -> true. Active sessions can't be selected (backend refuses
+// to delete them) so they're filtered out before adding here.
+let _selectedSessions        = {};
 
 async function _loadMonitorSessions() {
   _monitorSessions = await apiMonitorSessions(200);
@@ -924,11 +928,37 @@ function _sessionsSectionHtml() {
         'No sessions yet. Start monitoring and one will appear here when you stop.' +
       '</div>';
   }
+
+  // Prune selections against the current inactive-session list.
+  var inactive = _monitorSessions.filter(function (s) { return !!s.ended_at; });
+  var inactiveIds = {};
+  inactive.forEach(function (s) { inactiveIds[s.id] = true; });
+  Object.keys(_selectedSessions).forEach(function (k) {
+    if (!inactiveIds[k]) delete _selectedSessions[k];
+  });
+
+  var nSelected = Object.keys(_selectedSessions).length;
+  var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
+  var allSelected = inactive.length > 0 && inactive.every(function (s) {
+    return _selectedSessions[s.id];
+  });
+
   var cards = _monitorSessions.map(_sessionCardHtml).join('');
   return '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
       '<span>Monitor Sessions</span>' +
-      '<button class="btn-small" data-action="clearMonitorSessions" ' +
-        'style="background:var(--border); color:var(--text);">Clear all</button>' +
+      '<label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted); cursor:pointer;">' +
+        '<input type="checkbox" id="sessions-select-all" ' +
+          (allSelected ? 'checked ' : '') +
+          'data-action="toggleMonitorSessionSelectAll" aria-label="Select all sessions" />' +
+        'Select all' +
+      '</label>' +
+    '</div>' +
+    '<div id="sessions-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
+      '<span class="bulk-bar-count">' + nSelected + ' selected</span>' +
+      '<button class="btn btn-danger" id="sessions-delete-btn" data-action="deleteSelectedMonitorSessions">' +
+        'Delete ' + nSelected + ' session' + (nSelected === 1 ? '' : 's') +
+      '</button>' +
+      '<a class="bulk-bar-clear" data-action="toggleMonitorSessionSelectAll" data-arg="false">Clear selection</a>' +
     '</div>' +
     '<div class="monitor-sessions">' + cards + '</div>';
 }
@@ -947,11 +977,22 @@ function _sessionCardHtml(sess) {
       body = '<div class="session-body">' + _sessionFindingsTableHtml(sess) + '</div>';
     }
   }
+  var selectCell = '';
+  if (!isActive) {
+    var checked = _selectedSessions[sess.id] ? 'checked' : '';
+    selectCell = '<input type="checkbox" class="session-select" ' + checked +
+      ' data-action="toggleMonitorSessionSelect" data-arg="' + sess.id + '" ' +
+      'aria-label="Select session" />';
+  }
   return '<div class="session-card' + (isOpen ? ' open' : '') + '">' +
-    '<div class="session-head" data-action="toggleSessionExpand" data-arg="' + sess.id + '">' +
-      '<span class="session-caret">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' +
-      '<span class="session-label">' + escapeHtml(_sessionHeaderLabel(sess)) + '</span>' +
-      badge +
+    '<div class="session-head">' +
+      '<span data-action="stopClickPropagation" style="display:inline-flex; align-items:center; margin-right:8px;">' + selectCell + '</span>' +
+      '<span class="session-expand" data-action="toggleSessionExpand" data-arg="' + sess.id + '" ' +
+        'style="display:flex; align-items:center; gap:8px; flex:1; cursor:pointer;">' +
+        '<span class="session-caret">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' +
+        '<span class="session-label">' + escapeHtml(_sessionHeaderLabel(sess)) + '</span>' +
+        badge +
+      '</span>' +
       (isActive
         ? ''
         : '<button class="session-delete" data-action="deleteMonitorSession" data-arg="' + sess.id + '" ' +
@@ -959,6 +1000,56 @@ function _sessionCardHtml(sess) {
     '</div>' +
     body +
   '</div>';
+}
+
+export function toggleMonitorSessionSelect(arg, target, ev) {
+  if (ev) ev.stopPropagation();
+  var id = parseInt(arg, 10);
+  if (!isFinite(id)) return;
+  // Active sessions cannot be selected — backend refuses to delete them.
+  var sess = _monitorSessions.find(function (s) { return s.id === id; });
+  if (!sess || !sess.ended_at) return;
+  if (_selectedSessions[id]) delete _selectedSessions[id];
+  else _selectedSessions[id] = true;
+  _renderSessionsSection();
+}
+
+export function toggleMonitorSessionSelectAll(arg, target) {
+  var checked;
+  if (target && typeof target.checked === 'boolean') checked = target.checked;
+  else checked = (arg === true || arg === 'true');
+  _selectedSessions = {};
+  if (checked) {
+    _monitorSessions.forEach(function (s) {
+      if (s.ended_at) _selectedSessions[s.id] = true;
+    });
+  }
+  _renderSessionsSection();
+}
+
+export async function deleteSelectedMonitorSessions() {
+  var ids = Object.keys(_selectedSessions).map(function (k) { return +k; });
+  if (ids.length === 0) return;
+  var msg = 'Delete ' + ids.length + ' monitor session' + (ids.length === 1 ? '' : 's') +
+            ' and all linked findings? This cannot be undone.';
+  if (!window.confirm(msg)) return;
+  var r = await apiDeleteMonitorSessionsBatch(ids);
+  if (!r.ok) {
+    toastError((r.data && r.data.detail) || 'Delete failed.');
+    return;
+  }
+  var deleted = r.data && typeof r.data.deleted === 'number' ? r.data.deleted : ids.length;
+  (r.data && r.data.failed || []).forEach(function (f) {
+    toastError('Session ' + f.id + ': ' + (f.message || 'delete failed'));
+  });
+  ids.forEach(function (id) {
+    if (_expandedSessionId === id) _expandedSessionId = null;
+    delete _sessionFindingsCache[id];
+    delete _sessionFindingsLoading[id];
+  });
+  _selectedSessions = {};
+  showToast('Deleted ' + deleted + ' session' + (deleted === 1 ? '' : 's'), 'success');
+  await _loadMonitorSessions();
 }
 
 function _sessionFindingsTableHtml(sess) {

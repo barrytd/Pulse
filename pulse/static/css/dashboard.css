@@ -1294,6 +1294,48 @@
 }
 
 /* -----------------------------------------------------------------
+   Dashboard empty-state inline bar
+   Slim single-line notice shown above "Needs Attention" when no scans
+   fall in the selected filter window. Same height as the clear-state
+   green bar — blue left-border accent differentiates it.
+----------------------------------------------------------------- */
+.dash-empty-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.dash-empty-inline .dash-empty-ico { color: var(--text-muted); flex-shrink: 0; }
+.dash-empty-inline .dash-empty-text { flex: 1; }
+.dash-empty-inline .dash-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dash-empty-inline .dash-empty-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+}
+.dash-empty-inline .dash-empty-link {
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 150ms ease, filter 150ms ease;
+}
+.dash-empty-inline .dash-empty-link.primary { color: var(--accent); font-weight: 500; }
+.dash-empty-inline .dash-empty-link.primary:hover { filter: brightness(1.15); }
+.dash-empty-inline .dash-empty-link.secondary { color: var(--text-muted); }
+.dash-empty-inline .dash-empty-link.secondary:hover { color: var(--text); }
+
+/* -----------------------------------------------------------------
    Needs Attention widget
    Dashboard-only panel that surfaces unreviewed CRITICAL/HIGH findings
    from the last 7 days. Left-border accent colour flips red/amber/green
@@ -1533,4 +1575,80 @@
   display: inline-block;
   min-width: 58px;
   text-align: left;
+}
+
+/* ------------------------------------------------------------------ */
+/* Firewall page — block list + placeholder rules tab                 */
+/* ------------------------------------------------------------------ */
+/* Empty state shared by Block List (no IPs yet) and Firewall Rules
+   (coming soon). Same clean card shell as other empty states in the
+   app, centered icon + message + optional primary action. */
+.firewall-empty {
+  text-align: center;
+  padding: 56px 24px;
+}
+.firewall-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: var(--hover-row);
+  color: var(--text-muted);
+}
+.firewall-empty-icon i {
+  width: 28px;
+  height: 28px;
+  stroke-width: 1.75;
+}
+.firewall-empty h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.firewall-empty p {
+  margin: 0 auto 16px;
+  max-width: 440px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* Add-IP-manually modal — reuses .modal-overlay / .modal shells. */
+.add-block-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.add-block-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.add-block-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.add-block-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+  cursor: pointer;
+  user-select: none;
 }

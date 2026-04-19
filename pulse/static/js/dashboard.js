@@ -148,7 +148,9 @@ export function downloadReport(scanId, target, e) {
   var url = apiExportUrl(scanId, fmt);
   var a = document.createElement('a');
   a.href = url;
-  a.download = 'pulse_scan_' + scanId + '.' + fmt;
+  // No `a.download` — let the server's Content-Disposition decide the
+  // filename so it reflects the display number ("pulse_scan_1.pdf"),
+  // not the raw DB id.
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -636,6 +638,7 @@ function _selectDashFindingRow(target) {
 // ---------------------------------------------------------------
 
 var _attentionFindings = []; // full list, shared with the drawer opener
+var _lastFilteredScanCount = 0; // drives whether the green "clear" bar renders
 
 async function _fetchAttentionFindings(allScans) {
   var cutoff = Date.now() - 7 * 86400000;
@@ -650,9 +653,10 @@ async function _fetchAttentionFindings(allScans) {
     return fetchFindings(s.id).then(function (fs) {
       return fs.map(function (f) {
         return Object.assign({}, f, {
-          _scan_id:   s.id,
-          _scan_date: s.scanned_at,
-          _scan_host: s.hostname || s.filename || '',
+          _scan_id:     s.id,
+          _scan_number: s.number,
+          _scan_date:   s.scanned_at,
+          _scan_host:   s.hostname || s.filename || '',
         });
       });
     }).catch(function () { return []; });
@@ -683,10 +687,16 @@ async function _fetchAttentionFindings(allScans) {
   return all;
 }
 
-export function _needsAttentionHtml(findings) {
+export function _needsAttentionHtml(findings, scansInWindow) {
   var total = findings.length;
+  var hasScans = (scansInWindow == null)
+    ? _lastFilteredScanCount > 0
+    : scansInWindow > 0;
 
   if (total === 0) {
+    // Positive confirmation only makes sense when the system has actually
+    // scanned something in the selected window. Otherwise the widget hides.
+    if (!hasScans) return '';
     return '<div class="needs-attention clear na-empty">' +
       '<span>No critical or high findings need attention</span>' +
     '</div>';
@@ -979,25 +989,38 @@ export async function renderDashboardPage() {
   // Needs Attention always uses a fixed 7-day window on the full scan
   // list, independent of the dashboard filter bar. Runs after the other
   // fetches since it reuses allScans and issues its own per-scan fetches.
+  _lastFilteredScanCount = scans.length;
   _attentionFindings = await _fetchAttentionFindings(allScans);
-  var attentionHtml = '<div id="dash-needs-attention">' + _needsAttentionHtml(_attentionFindings) + '</div>';
+  var attentionInner = _needsAttentionHtml(_attentionFindings, scans.length);
+  var attentionHtml = '<div id="dash-needs-attention">' + attentionInner + '</div>';
 
+  // Slim inline empty-state row. Only shown when no scans fall in the
+  // selected filter window. Same visual height as the "Needs Attention"
+  // clear bar — left-border accent flips to blue to differentiate.
   var emptyBannerHtml = '';
   if (scans.length === 0) {
     var bannerMsg = filtersOn
-      ? 'No scans match these filters. Try a wider time range or click Reset.'
+      ? 'No scans match these filters'
       : (dashFilterState.time === 'today'
-          ? 'No scans yet today. Upload a log or start the live monitor to get started.'
-          : 'No scans in this window yet.');
+          ? 'No scans yet today'
+          : 'No scans in this window yet');
+    var inboxIcon =
+      '<svg class="dash-empty-ico" viewBox="0 0 24 24" width="14" height="14" ' +
+        'fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>' +
+        '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>' +
+      '</svg>';
+    var actionsHtml = filtersOn
+      ? '<a class="dash-empty-link primary" data-action="resetDashFilters">Reset filters</a>'
+      : '<a class="dash-empty-link primary" data-action="openUploadModal">Upload .evtx</a>' +
+        '<span class="dash-empty-divider" aria-hidden="true"></span>' +
+        '<a class="dash-empty-link secondary" data-action="navigate" data-arg="monitor">Open Monitor</a>';
     emptyBannerHtml =
-      '<div class="card" style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">' +
-        '<div class="dash-empty-note" style="margin:0;">' + bannerMsg + '</div>' +
-        '<div style="display:flex; gap:10px;">' +
-          (filtersOn
-            ? '<a class="btn" data-action="resetDashFilters" style="cursor:pointer;">Reset filters</a>'
-            : '<a class="btn btn-primary" data-action="openUploadModal" style="cursor:pointer;">Upload .evtx</a>' +
-              '<a class="btn" data-action="navigate" data-arg="monitor" style="cursor:pointer;">Open Monitor</a>') +
-        '</div>' +
+      '<div class="dash-empty-inline">' +
+        inboxIcon +
+        '<span class="dash-empty-text">' + bannerMsg + '</span>' +
+        '<span class="dash-empty-actions">' + actionsHtml + '</span>' +
       '</div>';
   }
 

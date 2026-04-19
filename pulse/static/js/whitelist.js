@@ -1,11 +1,15 @@
 // whitelist.js — Whitelist page. Reads config, posts changes via
 // api.js wrappers, and renders a typed table with optional built-ins.
+// Bulk-select mirrors the Scans page pattern — per-row checkbox plus a
+// sticky action bar — but only custom rows carry a checkbox since
+// built-ins live in code and can't be removed at runtime.
 'use strict';
 
 import {
   apiGetConfig,
   apiWhitelistBuiltin,
   apiSaveWhitelist,
+  apiDeleteWhitelistEntries,
 } from './api.js';
 import {
   escapeHtml,
@@ -26,7 +30,21 @@ const whitelistState = {
   showBuiltin: false,
   addType: 'accounts',
   addValue: '',
+  // Selected custom entries, keyed "<type>|<value>" so the same value
+  // appearing under different types doesn't collide.
+  selected: {},
 };
+
+function _selectionKey(key, value) {
+  return key + '|' + value;
+}
+
+function _selectedEntries() {
+  return Object.keys(whitelistState.selected).map(function (k) {
+    var i = k.indexOf('|');
+    return { key: k.slice(0, i), value: k.slice(i + 1) };
+  });
+}
 
 export async function renderWhitelistPage() {
   var c = document.getElementById('content');
@@ -53,10 +71,20 @@ export async function renderWhitelistPage() {
 
   var rows = customRows.concat(whitelistState.showBuiltin ? builtinRows : []);
 
+  // Drop any selections that no longer correspond to a current custom row.
+  var validKeys = {};
+  customRows.forEach(function (r) { validKeys[_selectionKey(r.key, r.value)] = true; });
+  Object.keys(whitelistState.selected).forEach(function (k) {
+    if (!validKeys[k]) delete whitelistState.selected[k];
+  });
+
   var typeOpts = WL_TYPES.map(function (t) {
     var sel = whitelistState.addType === t.key ? ' selected' : '';
     return '<option value="' + t.key + '"' + sel + '>' + t.label + '</option>';
   }).join('');
+
+  var nSelected = _selectedEntries().length;
+  var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
   c.innerHTML =
     '<div class="page-head">' +
@@ -85,16 +113,36 @@ export async function renderWhitelistPage() {
       '</p>' +
     '</div>' +
 
+    '<div id="whitelist-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
+      '<span class="bulk-bar-count">' + nSelected + ' selected</span>' +
+      '<button class="btn btn-danger" id="whitelist-delete-btn" data-action="deleteSelectedWhitelist">' +
+        'Delete ' + nSelected + ' entr' + (nSelected === 1 ? 'y' : 'ies') +
+      '</button>' +
+      '<a class="bulk-bar-clear" data-action="toggleWhitelistSelectAll" data-arg="false">Clear selection</a>' +
+    '</div>' +
+
     '<div class="card" style="padding:0; overflow:hidden;">' +
       (rows.length === 0
         ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No whitelist entries yet.</div>'
-        : _buildWhitelistTable(rows)) +
+        : _buildWhitelistTable(rows, customRows)) +
     '</div>';
 }
 
-function _buildWhitelistTable(rows) {
+function _buildWhitelistTable(rows, customRows) {
+  var allCustomSelected = customRows.length > 0 && customRows.every(function (r) {
+    return whitelistState.selected[_selectionKey(r.key, r.value)];
+  });
+  var headCheckbox = '<th style="width:32px;">' +
+    (customRows.length > 0
+      ? '<input type="checkbox" id="whitelist-select-all" ' +
+        (allCustomSelected ? 'checked ' : '') +
+        'data-action="toggleWhitelistSelectAll" aria-label="Select all custom entries" />'
+      : '') +
+    '</th>';
+
   return '<table class="data-table">' +
     '<thead><tr>' +
+      headCheckbox +
       '<th>Type</th><th>Value</th><th>Source</th><th style="width:60px; text-align:right;">Actions</th>' +
     '</tr></thead><tbody>' +
     rows.map(function (r) {
@@ -105,7 +153,16 @@ function _buildWhitelistTable(rows) {
         ? '<button class="icon-btn" title="Remove" data-wl-key="' + escapeHtml(r.key) +
           '" data-wl-value="' + attrEscape(r.value) + '" data-action="removeWhitelistRowBtn">\u2715</button>'
         : '';
+      var selectCell = '';
+      if (r.origin === 'custom') {
+        var k = _selectionKey(r.key, r.value);
+        var checked = whitelistState.selected[k] ? 'checked' : '';
+        selectCell = '<input type="checkbox" ' + checked +
+          ' data-action="toggleWhitelistSelect" data-arg="' + attrEscape(k) +
+          '" aria-label="Select entry" />';
+      }
       return '<tr>' +
+        '<td data-action="stopClickPropagation" style="width:32px;">' + selectCell + '</td>' +
         '<td>' + r.type + '</td>' +
         '<td class="mono">' + escapeHtml(r.value) + '</td>' +
         '<td>' + badge + '</td>' +
@@ -125,8 +182,53 @@ export function toggleBuiltinWhitelist(show, target) {
   renderWhitelistPage();
 }
 
-// Wired via data-action-change on the type <select>. Mirrors the old
-// inline "whitelistState.addType = this.value" onchange.
+export function toggleWhitelistSelect(key, target, ev) {
+  if (ev) ev.stopPropagation();
+  if (!key) return;
+  if (whitelistState.selected[key]) delete whitelistState.selected[key];
+  else whitelistState.selected[key] = true;
+  // Re-render just enough to update the bulk bar + header-checkbox —
+  // a full page re-render would re-fetch config. The bar count is
+  // stored in-DOM so patch it directly.
+  renderWhitelistPage();
+}
+
+export async function toggleWhitelistSelectAll(arg, target) {
+  var checked;
+  if (target && typeof target.checked === 'boolean') checked = target.checked;
+  else checked = (arg === true || arg === 'true');
+  whitelistState.selected = {};
+  if (checked) {
+    var config = await apiGetConfig();
+    var wl = config.whitelist || {};
+    WL_TYPES.forEach(function (t) {
+      (wl[t.key] || []).forEach(function (v) {
+        whitelistState.selected[_selectionKey(t.key, v)] = true;
+      });
+    });
+  }
+  renderWhitelistPage();
+}
+
+export async function deleteSelectedWhitelist() {
+  var entries = _selectedEntries();
+  if (entries.length === 0) return;
+  var msg = 'Delete ' + entries.length + ' whitelist entr' +
+            (entries.length === 1 ? 'y' : 'ies') +
+            '? This cannot be undone.';
+  if (!window.confirm(msg)) return;
+  var result = await apiDeleteWhitelistEntries(entries);
+  if (!result.ok) {
+    toastError('Delete failed: ' + ((result.data && result.data.detail) || 'network error'));
+    return;
+  }
+  var deleted = result.data && typeof result.data.deleted === 'number' ? result.data.deleted : entries.length;
+  showToast('Removed ' + deleted + ' entr' + (deleted === 1 ? 'y' : 'ies'), 'success');
+  whitelistState.selected = {};
+  renderWhitelistPage();
+}
+
+// Wired via data-action-change on the type <select>.
 export function setWhitelistAddType(arg, target) {
   if (target && typeof target.value === 'string') {
     whitelistState.addType = target.value;
@@ -173,6 +275,7 @@ export async function removeWhitelistRow(key, value) {
     body[key] = items;
     var r = await apiSaveWhitelist(body);
     if (!r.ok) throw new Error('Save failed');
+    delete whitelistState.selected[_selectionKey(key, value)];
     showToast('Removed');
     renderWhitelistPage();
   } catch (e) {

@@ -125,6 +125,51 @@ export async function apiDeleteScans(ids) {
   }
 }
 
+// Shared helper for the batch DELETE endpoints. Keeps every bulk-delete
+// path on the dashboard speaking the same response envelope so the
+// page modules that consume it stay near-identical.
+async function _apiBatchDelete(url, body) {
+  try {
+    var resp = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    var data = null;
+    try { data = await resp.json(); } catch (_) { data = null; }
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
+// DELETE /api/history/batch with a list of scan ids — delegates to the
+// scans batch endpoint server-side but keeps the module's own resource
+// name in the URL so the history page isn't leaking /api/scans details.
+export async function apiDeleteHistory(ids) {
+  return _apiBatchDelete('/api/history/batch', { ids: ids });
+}
+
+// DELETE /api/reports/batch with a list of filenames.
+export async function apiDeleteReports(filenames) {
+  return _apiBatchDelete('/api/reports/batch', { filenames: filenames });
+}
+
+// DELETE /api/block-ip/batch with a list of IPs.
+export async function apiUnblockBatch(ips) {
+  return _apiBatchDelete('/api/block-ip/batch', { ips: ips });
+}
+
+// DELETE /api/monitor/sessions/batch with a list of session ids.
+export async function apiDeleteMonitorSessionsBatch(ids) {
+  return _apiBatchDelete('/api/monitor/sessions/batch', { ids: ids });
+}
+
+// DELETE /api/whitelist/batch with a list of {key, value} entries.
+export async function apiDeleteWhitelistEntries(entries) {
+  return _apiBatchDelete('/api/whitelist/batch', { entries: entries });
+}
+
 // ---------------------------------------------------------------
 // Config / whitelist / rules list
 // ---------------------------------------------------------------

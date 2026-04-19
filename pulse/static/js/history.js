@@ -2,11 +2,19 @@
 // (separate from dashboard's score chart) so the two can coexist.
 'use strict';
 
-import { fetchScans, apiCompareScans } from './api.js';
+import {
+  fetchScans,
+  apiCompareScans,
+  apiDeleteHistory,
+  invalidateScansCache,
+  invalidateFindingsCache,
+} from './api.js';
 import {
   escapeHtml,
   scoreColor,
   scoreColorClass,
+  showToast,
+  toastError,
   _gradeFor,
   _trendStatCard,
   _accentForScore,
@@ -15,12 +23,15 @@ import { buildFindingsTable } from './findings.js';
 
 let _historyChartInstance = null;
 let _historyHighlightIdx  = -1;
+// scan id -> true. Matches the Scans page selection model.
+let _selectedHistory = {};
 
 export async function renderHistoryPage() {
   var c = document.getElementById('content');
   var scans = await fetchScans(200);
 
   if (scans.length === 0) {
+    _selectedHistory = {};
     c.innerHTML =
       '<div class="empty-state cta">' +
         '<div class="empty-icon">&#128200;</div>' +
@@ -30,6 +41,13 @@ export async function renderHistoryPage() {
       '</div>';
     return;
   }
+
+  // Prune selections pointing at scans that no longer exist.
+  var known = {};
+  scans.forEach(function (s) { known[s.id] = true; });
+  Object.keys(_selectedHistory).forEach(function (k) {
+    if (!known[k]) delete _selectedHistory[k];
+  });
 
   var withScore = scans.filter(function (s) { return s.score != null; });
   var avg  = withScore.length
@@ -41,6 +59,9 @@ export async function renderHistoryPage() {
   var worst = withScore.length
     ? Math.min.apply(null, withScore.map(function (s) { return s.score; }))
     : '-';
+
+  var nSelected = Object.keys(_selectedHistory).length;
+  var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
   c.innerHTML =
     '<div class="page-head">' +
@@ -61,6 +82,14 @@ export async function renderHistoryPage() {
 
     _buildComparePanel(scans) +
 
+    '<div id="history-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
+      '<span class="bulk-bar-count">' + nSelected + ' selected</span>' +
+      '<button class="btn btn-danger" id="history-delete-btn" data-action="deleteSelectedHistory">' +
+        'Delete ' + nSelected + ' scan' + (nSelected === 1 ? '' : 's') +
+      '</button>' +
+      '<a class="bulk-bar-clear" data-action="toggleHistorySelectAll" data-arg="false">Clear selection</a>' +
+    '</div>' +
+
     '<div class="card" style="padding:0; overflow:hidden;">' +
       _buildHistoryTable(scans) +
     '</div>';
@@ -71,7 +100,8 @@ export async function renderHistoryPage() {
 function _buildComparePanel(scans) {
   if (!scans || scans.length < 2) return '';
   var options = scans.map(function (s) {
-    var label = '#' + s.id + ' \u00b7 ' + (s.scanned_at || '') +
+    var num = s.number != null ? s.number : s.id;
+    var label = '#' + num + ' \u00b7 ' + (s.scanned_at || '') +
                 ' \u00b7 ' + (s.filename || 'Unknown') +
                 ' \u00b7 ' + s.total_findings + ' finding(s)';
     return '<option value="' + s.id + '">' + escapeHtml(label) + '</option>';
@@ -122,8 +152,8 @@ function _renderDiff(diff) {
   var b = diff.scan_b || {};
   var meta =
     '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:12px; color:var(--text-muted);">' +
-      '<span><strong>Before:</strong> #' + a.id + ' \u00b7 ' + escapeHtml(a.scanned_at || '') + ' \u00b7 ' + (a.total_findings || 0) + ' finding(s)</span>' +
-      '<span><strong>After:</strong> #' + b.id + ' \u00b7 ' + escapeHtml(b.scanned_at || '') + ' \u00b7 ' + (b.total_findings || 0) + ' finding(s)</span>' +
+      '<span><strong>Before:</strong> #' + (a.number != null ? a.number : a.id) + ' \u00b7 ' + escapeHtml(a.scanned_at || '') + ' \u00b7 ' + (a.total_findings || 0) + ' finding(s)</span>' +
+      '<span><strong>After:</strong> #' + (b.number != null ? b.number : b.id) + ' \u00b7 ' + escapeHtml(b.scanned_at || '') + ' \u00b7 ' + (b.total_findings || 0) + ' finding(s)</span>' +
     '</div>';
   return meta +
     '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">' +
@@ -150,8 +180,14 @@ function _diffColumn(label, findings, accent, hint) {
 }
 
 function _buildHistoryTable(scans) {
+  var allSelected = scans.length > 0 && scans.every(function (s) {
+    return _selectedHistory[s.id];
+  });
   return '<table class="data-table">' +
     '<thead><tr>' +
+      '<th style="width:32px;"><input type="checkbox" id="history-select-all" ' +
+        (allSelected ? 'checked ' : '') +
+        'data-action="toggleHistorySelectAll" aria-label="Select all scans" /></th>' +
       '<th>Date / Time</th><th>File</th><th>Findings</th><th>Score</th><th>Grade</th><th>Trend</th>' +
     '</tr></thead><tbody>' +
     scans.map(function (scan, i) {
@@ -162,8 +198,13 @@ function _buildHistoryTable(scans) {
         if (diff > 0) trend = '<span class="trend-up">\u2191 +' + diff + '</span>';
         else if (diff < 0) trend = '<span class="trend-down">\u2193 ' + diff + '</span>';
       }
+      var checked = _selectedHistory[scan.id] ? 'checked' : '';
       return '<tr class="clickable history-row" data-scan-id="' + scan.id + '" ' +
         'data-action="highlightHistoryScan" data-arg="' + scan.id + '">' +
+        '<td data-action="stopClickPropagation" style="width:32px;">' +
+          '<input type="checkbox" ' + checked +
+            ' data-action="toggleHistorySelect" data-arg="' + scan.id + '" ' +
+            'aria-label="Select scan ' + scan.id + '" /></td>' +
         '<td>' + escapeHtml(scan.scanned_at || '-') + '</td>' +
         '<td style="color:var(--text-muted);">' + escapeHtml(scan.filename || 'Unknown') + '</td>' +
         '<td>' + scan.total_findings + '</td>' +
@@ -174,6 +215,45 @@ function _buildHistoryTable(scans) {
       '</tr>';
     }).join('') +
     '</tbody></table>';
+}
+
+export function toggleHistorySelect(id, target, ev) {
+  if (ev) ev.stopPropagation();
+  id = String(id);
+  if (_selectedHistory[id]) delete _selectedHistory[id];
+  else _selectedHistory[id] = true;
+  renderHistoryPage();
+}
+
+export async function toggleHistorySelectAll(arg, target) {
+  var checked;
+  if (target && typeof target.checked === 'boolean') checked = target.checked;
+  else checked = (arg === true || arg === 'true');
+  _selectedHistory = {};
+  if (checked) {
+    var scans = await fetchScans(200);
+    scans.forEach(function (s) { _selectedHistory[s.id] = true; });
+  }
+  renderHistoryPage();
+}
+
+export async function deleteSelectedHistory() {
+  var ids = Object.keys(_selectedHistory).map(function (k) { return +k; });
+  if (ids.length === 0) return;
+  var msg = 'Delete ' + ids.length + ' scan' + (ids.length === 1 ? '' : 's') +
+            ' and all associated findings? This cannot be undone.';
+  if (!window.confirm(msg)) return;
+  var result = await apiDeleteHistory(ids);
+  if (!result.ok) {
+    toastError('Delete failed: ' + ((result.data && result.data.detail) || 'network error'));
+    return;
+  }
+  var deleted = result.data && typeof result.data.deleted === 'number' ? result.data.deleted : ids.length;
+  showToast('Deleted ' + deleted + ' scan' + (deleted === 1 ? '' : 's'), 'success');
+  _selectedHistory = {};
+  invalidateScansCache();
+  invalidateFindingsCache();
+  renderHistoryPage();
 }
 
 // Clicking a table row highlights the matching point on the chart.

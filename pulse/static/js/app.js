@@ -4,7 +4,7 @@
 'use strict';
 
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
-import { navigate, validPages } from './navigation.js';
+import { navigate, validPages, parsePath } from './navigation.js';
 import {
   openUploadModal,
   closeUploadModal,
@@ -49,9 +49,34 @@ import {
   markFindingReviewed,
   markFindingFalsePositive,
   openUnreviewedCriticalHigh,
+  stageBlockFromFinding,
+  blockNowFromFinding,
+  openForceBlockModal,
+  closeForceBlockModal,
+  forceBlockInputCheck,
+  confirmForceBlock,
 } from './findings.js';
-import { highlightHistoryScan, runHistoryCompare } from './history.js';
+import {
+  highlightHistoryScan,
+  runHistoryCompare,
+  toggleHistorySelect,
+  toggleHistorySelectAll,
+  deleteSelectedHistory,
+} from './history.js';
 import { fleetOpenHost } from './fleet.js';
+import {
+  setFirewallTab,
+  firewallPushOne,
+  firewallPushAll,
+  firewallUnblock,
+  openAddBlockModal,
+  closeAddBlockModal,
+  addBlockInputCheck,
+  submitAddBlock,
+  toggleBlockSelect,
+  toggleBlockSelectAll,
+  deleteSelectedBlocks,
+} from './firewall.js';
 import {
   monitorClient,
   mountNavLiveIndicator,
@@ -80,6 +105,9 @@ import {
   whitelistAddValueKey,
   addWhitelistEntry,
   removeWhitelistRowBtn,
+  toggleWhitelistSelect,
+  toggleWhitelistSelectAll,
+  deleteSelectedWhitelist,
 } from './whitelist.js';
 import {
   saveAccount,
@@ -97,6 +125,9 @@ import {
 import {
   setReportsQueryFromInput,
   deleteReport,
+  toggleReportSelect,
+  toggleReportSelectAll,
+  deleteSelectedReports,
 } from './reports.js';
 import {
   toggleRuleEnabled,
@@ -165,13 +196,35 @@ const actions = {
   openScanDetailFindingByIdx,
   markFindingReviewed,
   markFindingFalsePositive,
+  stageBlockFromFinding,
+  blockNowFromFinding,
+  openForceBlockModal,
+  closeForceBlockModal,
+  forceBlockInputCheck,
+  confirmForceBlock,
 
   // history
   highlightHistoryScan,
   runHistoryCompare,
+  toggleHistorySelect,
+  toggleHistorySelectAll,
+  deleteSelectedHistory,
 
   // fleet
   fleetOpenHost,
+
+  // firewall
+  setFirewallTab,
+  firewallPushOne,
+  firewallPushAll,
+  firewallUnblock,
+  openAddBlockModal,
+  closeAddBlockModal,
+  addBlockInputCheck,
+  submitAddBlock,
+  toggleBlockSelect,
+  toggleBlockSelectAll,
+  deleteSelectedBlocks,
 
   // monitor
   startMonitor,
@@ -188,6 +241,9 @@ const actions = {
   openSessionFinding,
   deleteMonitorSession,
   clearMonitorSessions,
+  toggleMonitorSessionSelect,
+  toggleMonitorSessionSelectAll,
+  deleteSelectedMonitorSessions,
   toggleMonSettings,
   toggleMonGearDropdown,
   togglePollHistoryExpand,
@@ -199,6 +255,9 @@ const actions = {
   whitelistAddValueKey,
   addWhitelistEntry,
   removeWhitelistRowBtn,
+  toggleWhitelistSelect,
+  toggleWhitelistSelectAll,
+  deleteSelectedWhitelist,
 
   // settings
   saveAccount,
@@ -216,6 +275,9 @@ const actions = {
   // reports
   setReportsQueryFromInput,
   deleteReport,
+  toggleReportSelect,
+  toggleReportSelectAll,
+  deleteSelectedReports,
 
   // rules
   toggleRuleEnabled,
@@ -284,7 +346,11 @@ function _installDelegator(eventName) {
       if (eventName === 'click' && target.tagName === 'A') {
         var href = target.getAttribute('href');
         var allow = target.dataset.default === 'allow';
-        if (!allow && (!href || href === '#')) e.preventDefault();
+        // Any <a data-action> gets preventDefault by default — we're
+        // handling the click ourselves and don't want hash/empty hrefs
+        // to dirty the URL or trigger native nav. Opt back in with
+        // data-default="allow" for real external links.
+        if (!allow && (!href || href === '#' || href.charAt(0) === '#')) e.preventDefault();
       }
       fn(arg, target, e);
     }
@@ -299,10 +365,18 @@ function _boot() {
   // Theme first so the UI doesn't flash.
   initTheme();
 
-  // Resolve starting page from the hash; fall back to dashboard.
-  var startPage = (location.hash || '').replace('#', '') || 'dashboard';
-  var target = validPages.indexOf(startPage) >= 0 ? startPage : 'dashboard';
-  navigate(target);
+  // Resolve starting page from the URL pathname. Back-compat: older
+  // bookmarks used "#scans" style hashes — honour them by translating
+  // into a pathname before routing.
+  var path = location.pathname;
+  if ((path === '/' || path === '') && location.hash) {
+    var legacy = location.hash.replace('#', '');
+    if (validPages.indexOf(legacy) >= 0) path = '/' + legacy;
+  }
+  var parsed = parsePath(path);
+  // replace:true so the first history entry carries a real state object
+  // and popstate from a later push returns here cleanly.
+  navigate(parsed.page, { replace: true, scanId: parsed.scanId });
 
   // Kick off the live-monitor SSE client — fire-and-forget. The topbar
   // "Live" indicator subscribes immediately so it reflects state on

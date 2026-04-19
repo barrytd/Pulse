@@ -27,6 +27,7 @@ import asyncio
 import json
 import os
 import tempfile
+from datetime import datetime
 from typing import Optional
 
 # Upload guards. .evtx files begin with the ASCII bytes "ElfFile" followed by
@@ -245,9 +246,11 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     # GET / — Web dashboard (requires login)
     # -------------------------------------------------------------------
-    @app.get("/", include_in_schema=False)
-    def dashboard(request: Request):
-        """Serve the dashboard, redirecting to /login if not signed in."""
+    def _serve_dashboard(request: Request):
+        """Shared handler for every SPA page path. Serves the dashboard
+        HTML shell; client-side routing reads `location.pathname` on boot
+        and renders the correct page. Falls back to the login redirect
+        when auth is required and the session cookie is missing/invalid."""
         if app.state.auth_required:
             cookie = request.cookies.get(SESSION_COOKIE_NAME)
             from pulse.auth import verify_session_cookie
@@ -255,6 +258,33 @@ def _register_routes(app: FastAPI) -> None:
             if user_id is None:
                 return RedirectResponse(url="/login", status_code=302)
         return FileResponse(_dashboard_path, media_type="text/html")
+
+    @app.get("/", include_in_schema=False)
+    def dashboard(request: Request):
+        return _serve_dashboard(request)
+
+    # Every top-level SPA page gets its own path so the browser's back /
+    # forward buttons and hard refreshes land on the right page. The
+    # client reads `location.pathname` on boot and navigates accordingly.
+    # Order matters: these must be registered before any catch-all so
+    # /login and /docs keep winning against `/{page}` matching.
+    _SPA_PAGES = (
+        "dashboard", "monitor", "scans", "reports", "history",
+        "fleet", "firewall", "whitelist", "rules", "settings", "findings",
+    )
+    for _page in _SPA_PAGES:
+        app.add_api_route(
+            f"/{_page}",
+            _serve_dashboard,
+            methods=["GET"],
+            include_in_schema=False,
+        )
+
+    # Individual scan detail view — /scans/123 maps to the same shell;
+    # the client routes into viewScan() based on the numeric segment.
+    @app.get("/scans/{scan_id:int}", include_in_schema=False)
+    def spa_scan_detail(scan_id: int, request: Request):
+        return _serve_dashboard(request)
 
     # -------------------------------------------------------------------
     # GET /login — public login/signup page
@@ -398,6 +428,7 @@ def _register_routes(app: FastAPI) -> None:
         # Windows before re-opening it for parsing.
         suffix = ".evtx"
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        upload_started = datetime.now()
         try:
             written = 0
             header = b""
@@ -445,6 +476,7 @@ def _register_routes(app: FastAPI) -> None:
                 "total_events": len(events),
                 "files_scanned": 1,
             }
+            duration_sec = max(0, int((datetime.now() - upload_started).total_seconds()))
             scan_id = save_scan(
                 app.state.db_path,
                 findings,
@@ -453,6 +485,7 @@ def _register_routes(app: FastAPI) -> None:
                 score_label=score_data["label"],
                 filename=file.filename,
                 scope="Manual upload",
+                duration_sec=duration_sec,
             )
 
             # Fire threshold-based alerts if configured. SMTP can be slow,
@@ -515,10 +548,129 @@ def _register_routes(app: FastAPI) -> None:
         return {"hosts": get_fleet_summary(app.state.db_path)}
 
     # -------------------------------------------------------------------
+    # Block list — stage / list / push / unblock
+    # -------------------------------------------------------------------
+    @app.get("/api/block-list")
+    def block_list_get(user_id: int = Depends(require_login)):
+        """Return every row in the Pulse IP block list."""
+        from pulse import blocker
+        return {
+            "rows": blocker.list_blocks(app.state.db_path),
+            "windows": blocker.is_windows(),
+            "is_admin": blocker._is_admin(),
+        }
+
+    @app.post("/api/block-ip")
+    async def block_ip_post(request: Request, user_id: int = Depends(require_login)):
+        """Stage a source IP for blocking. Optional {confirm: true} pushes
+        it to Windows Firewall immediately (Windows + admin required)."""
+        from pulse import blocker
+
+        body = await request.json() if await request.body() else {}
+        ip = (body.get("ip") or "").strip()
+        if not ip:
+            raise HTTPException(400, detail="'ip' is required.")
+        comment = body.get("comment")
+        finding_id = body.get("finding_id")
+        confirm = bool(body.get("confirm"))
+        # `force=true` bypasses the RFC1918 safety check for the
+        # insider-threat case. Hard refusals (loopback, link-local, self-
+        # block) still apply server-side.
+        force = bool(body.get("force"))
+
+        user = get_user_by_id(app.state.db_path, user_id) or {}
+        user_email = user.get("email")
+
+        staged = blocker.stage_ip(
+            app.state.db_path,
+            ip,
+            comment=comment,
+            finding_id=finding_id,
+            source="dashboard",
+            user=user_email,
+            force=force,
+        )
+        if not staged["ok"]:
+            return JSONResponse({"ok": False, "message": staged["message"]}, status_code=400)
+
+        push_result = None
+        if confirm:
+            push_result = blocker.push_pending(
+                app.state.db_path, source="dashboard", user=user_email,
+            )
+
+        return {
+            "ok": True,
+            "row": staged["row"],
+            "forced": staged.get("forced", False),
+            "push": push_result,
+        }
+
+    @app.post("/api/block-list/push")
+    def block_list_push(user_id: int = Depends(require_login)):
+        from pulse import blocker
+        user = get_user_by_id(app.state.db_path, user_id) or {}
+        return blocker.push_pending(app.state.db_path, source="dashboard", user=user.get("email"))
+
+    # Bulk unblock — mirrors the scans batch pattern. Body: {"ips": [...]}.
+    # Each IP is fed through unblock_ip the same way the single-item
+    # endpoint does so we pick up the same audit log and firewall
+    # delete-rule logic. Returns {deleted, failed: [{ip, message}]}.
+    # Registered BEFORE the /{ip:path} catch-all so "batch" doesn't get
+    # swallowed as an IP string.
+    @app.delete("/api/block-ip/batch")
+    def block_ip_delete_batch(payload: dict = Body(...), user_id: int = Depends(require_login)):
+        from pulse import blocker
+        ips = payload.get("ips") if isinstance(payload, dict) else None
+        if not isinstance(ips, list) or not ips:
+            raise HTTPException(400, detail="Body must be {\"ips\": [...]}")
+        user = get_user_by_id(app.state.db_path, user_id) or {}
+        email = user.get("email")
+        deleted = 0
+        failed: list[dict] = []
+        for raw in ips:
+            ip = str(raw).strip()
+            if not ip:
+                continue
+            result = blocker.unblock_ip(
+                app.state.db_path, ip, source="dashboard", user=email,
+            )
+            if result.get("ok"):
+                deleted += 1
+            else:
+                failed.append({"ip": ip, "message": result.get("message", "unblock failed")})
+        return {"deleted": deleted, "failed": failed}
+
+    @app.delete("/api/block-ip/{ip:path}")
+    def block_ip_delete(ip: str, user_id: int = Depends(require_login)):
+        from pulse import blocker
+        user = get_user_by_id(app.state.db_path, user_id) or {}
+        result = blocker.unblock_ip(
+            app.state.db_path, ip, source="dashboard", user=user.get("email"),
+        )
+        status = 200 if result["ok"] else 400
+        return JSONResponse(result, status_code=status)
+
+    # -------------------------------------------------------------------
     # DELETE /api/scans — delete one or many scans (+ cascading findings)
     # -------------------------------------------------------------------
     @app.delete("/api/scans")
     def delete_scans_endpoint(payload: dict = Body(...)):
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list) or not ids:
+            raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
+        try:
+            ids_int = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            raise HTTPException(400, detail="All ids must be integers.")
+        deleted = delete_scans(app.state.db_path, ids_int)
+        return {"deleted": deleted}
+
+    # History page deletes the same underlying rows — expose a matching
+    # /batch route so the frontend module can speak in terms of its own
+    # resource name without the scans module leaking across pages.
+    @app.delete("/api/history/batch")
+    def delete_history_batch(payload: dict = Body(...)):
         ids = payload.get("ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not ids:
             raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
@@ -555,11 +707,12 @@ def _register_routes(app: FastAPI) -> None:
         if format == "pdf":
             from pulse.pdf_report import build_pdf
             pdf_bytes = build_pdf(decorated, scan_meta=scan_row)
+            display_num = (scan_row or {}).get("number") or scan_id
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",
                 headers={
-                    "Content-Disposition": f'attachment; filename="pulse_scan_{scan_id}.pdf"'
+                    "Content-Disposition": f'attachment; filename="pulse_scan_{display_num}.pdf"'
                 },
             )
 
@@ -693,12 +846,14 @@ def _register_routes(app: FastAPI) -> None:
             "latest": scan_row.get("scanned_at", "-"),
         }
 
+        display_num = (scan_row or {}).get("number") or scan_id
+
         if format == "json":
             content = _build_json_report(findings, sev_counts, scan_stats)
             return Response(
                 content=content,
                 media_type="application/json",
-                headers={"Content-Disposition": f"attachment; filename=pulse_scan_{scan_id}.json"},
+                headers={"Content-Disposition": f"attachment; filename=pulse_scan_{display_num}.json"},
             )
 
         if format == "pdf":
@@ -707,13 +862,13 @@ def _register_routes(app: FastAPI) -> None:
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="pulse_scan_{scan_id}.pdf"'},
+                headers={"Content-Disposition": f'attachment; filename="pulse_scan_{display_num}.pdf"'},
             )
 
         content = _build_html_report(findings, sev_counts, scan_stats)
         return HTMLResponse(
             content=content,
-            headers={"Content-Disposition": f"attachment; filename=pulse_scan_{scan_id}.html"},
+            headers={"Content-Disposition": f"attachment; filename=pulse_scan_{display_num}.html"},
         )
 
     # -------------------------------------------------------------------
@@ -758,6 +913,38 @@ def _register_routes(app: FastAPI) -> None:
                 })
         items.sort(key=lambda r: r["generated_at"], reverse=True)
         return {"reports": items}
+
+    # -------------------------------------------------------------------
+    # DELETE /api/reports/batch — remove many persisted reports at once
+    # Body: {"filenames": ["a.pdf", "b.html", ...]}. Registered before the
+    # /{filename} route so "batch" isn't interpreted as a filename.
+    # -------------------------------------------------------------------
+    @app.delete("/api/reports/batch")
+    def delete_reports_batch(payload: dict = Body(...)):
+        names = payload.get("filenames") if isinstance(payload, dict) else None
+        if not isinstance(names, list) or not names:
+            raise HTTPException(400, detail="Body must be {\"filenames\": [...]}")
+        deleted = 0
+        failed: list[dict] = []
+        root = os.path.realpath("reports")
+        for raw in names:
+            safe = os.path.basename(str(raw))
+            if not safe or safe != str(raw):
+                failed.append({"filename": str(raw), "message": "Invalid filename."})
+                continue
+            path = os.path.realpath(os.path.join("reports", safe))
+            if not path.startswith(root + os.sep) and path != root:
+                failed.append({"filename": safe, "message": "Invalid filename."})
+                continue
+            if not os.path.isfile(path):
+                failed.append({"filename": safe, "message": "Report not found."})
+                continue
+            try:
+                os.remove(path)
+                deleted += 1
+            except OSError as e:
+                failed.append({"filename": safe, "message": str(e)})
+        return {"deleted": deleted, "failed": failed}
 
     # -------------------------------------------------------------------
     # GET /api/reports/{filename} — download a persisted report
@@ -1151,6 +1338,44 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     # -------------------------------------------------------------------
+    # DELETE /api/whitelist/batch — remove many custom whitelist entries
+    # in one request. Body: {"entries": [{"key": "services", "value": "foo"}]}.
+    # Built-in entries aren't stored in pulse.yaml so nothing the caller
+    # sends can touch them; the UI also hides checkboxes for built-ins so
+    # they can't be selected.
+    # -------------------------------------------------------------------
+    @app.delete("/api/whitelist/batch")
+    def delete_whitelist_batch(payload: dict = Body(...)):
+        entries = payload.get("entries") if isinstance(payload, dict) else None
+        if not isinstance(entries, list) or not entries:
+            raise HTTPException(400, detail="Body must be {\"entries\": [{key,value},...]}")
+        allowed_keys = {"accounts", "services", "ips", "rules"}
+        # Group values-to-remove by key for a single save pass.
+        remove: dict[str, set] = {k: set() for k in allowed_keys}
+        for raw in entries:
+            if not isinstance(raw, dict):
+                raise HTTPException(400, detail="Each entry must be an object.")
+            k = raw.get("key")
+            v = raw.get("value")
+            if k not in allowed_keys or not isinstance(v, str):
+                raise HTTPException(400, detail="Invalid entry.")
+            remove[k].add(v)
+
+        config = _read_config(app.state.config_path)
+        wl = config.get("whitelist", {}) or {}
+        deleted = 0
+        for k in allowed_keys:
+            if not remove[k]:
+                continue
+            before = list(wl.get(k, []) or [])
+            after = [v for v in before if v not in remove[k]]
+            deleted += len(before) - len(after)
+            wl[k] = after
+        config["whitelist"] = wl
+        _write_config(app.state.config_path, config)
+        return {"deleted": deleted, "whitelist": wl}
+
+    # -------------------------------------------------------------------
     # PUT /api/config/whitelist — update the whitelist
     # -------------------------------------------------------------------
     @app.put("/api/config/whitelist")
@@ -1286,6 +1511,35 @@ def _register_routes(app: FastAPI) -> None:
         """All findings detected during one monitor session."""
         findings = get_monitor_session_findings(app.state.db_path, session_id)
         return {"session_id": session_id, "findings": attach_remediation(findings)}
+
+    # Bulk delete — body {"ids": [...]}. Registered before the
+    # /{session_id:int} route even though the typed path param already
+    # rejects non-int matches; keeping it above for symmetry with the
+    # other batch endpoints.
+    @app.delete("/api/monitor/sessions/batch")
+    def monitor_sessions_delete_batch(payload: dict = Body(...)):
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list) or not ids:
+            raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
+        try:
+            ids_int = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            raise HTTPException(400, detail="All ids must be integers.")
+        # Refuse to delete the active session — same rule as the
+        # single-item endpoint. Report as a failure rather than aborting
+        # the whole batch.
+        active_id = getattr(app.state.monitor, "session_id", None)
+        deleted = 0
+        failed: list[dict] = []
+        for sid in ids_int:
+            if active_id is not None and int(active_id) == sid:
+                failed.append({"id": sid, "message": "Session is active."})
+                continue
+            if delete_monitor_session(app.state.db_path, sid):
+                deleted += 1
+            else:
+                failed.append({"id": sid, "message": "Not found."})
+        return {"deleted": deleted, "failed": failed}
 
     @app.delete("/api/monitor/sessions/{session_id}")
     def monitor_session_delete(session_id: int):

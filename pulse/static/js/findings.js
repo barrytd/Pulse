@@ -302,15 +302,29 @@ function _buildScansTable(rows) {
     '</tbody></table>';
 }
 
-export async function viewScan(scanId) {
+export async function viewScan(scanId, opts) {
   // scanId may arrive as string via data-arg; normalize.
   scanId = Number(scanId);
+  opts = opts || {};
+  // Push /scans/{id} into history when the user initiated the nav, so
+  // browser Back returns to the scans list. When popstate called us,
+  // the URL is already correct and push:false skips the write.
+  if (opts.push !== false) {
+    var path = '/scans/' + scanId;
+    var state = { page: 'scans', scanId: scanId };
+    if (location.pathname !== path) {
+      history.pushState(state, '', path + (location.search || ''));
+    } else {
+      history.replaceState(state, '', path + (location.search || ''));
+    }
+  }
   var c = document.getElementById('content');
   var scans = await fetchScans(50);
   var scan = scans.find(function (s) { return s.id === scanId; });
   var findings = await fetchFindings(scanId);
   var fname = scan ? (scan.filename || 'Unknown') : 'Unknown';
-  document.getElementById('page-title').textContent = fname + ' \u2014 Scan #' + scanId;
+  var displayNum = scan && scan.number != null ? scan.number : scanId;
+  document.getElementById('page-title').textContent = fname + ' \u2014 Scan #' + displayNum;
 
   c.innerHTML =
     '<div class="back-link" data-action="navigate" data-arg="scans">\u2190 Back to Scans</div>' +
@@ -376,10 +390,11 @@ export async function renderFindingsPage() {
       return fetchFindings(s.id).then(function (fs) {
         return fs.map(function (f, idx) {
           return Object.assign({}, f, {
-            _scan_id:   s.id,
-            _scan_date: s.scanned_at,
-            _scan_host: s.hostname || s.filename || '',
-            _uid:       s.id + '-' + idx,
+            _scan_id:     s.id,
+            _scan_number: s.number,
+            _scan_date:   s.scanned_at,
+            _scan_host:   s.hostname || s.filename || '',
+            _uid:         s.id + '-' + idx,
           });
         });
       });
@@ -636,7 +651,7 @@ function _buildFindingsTable(findings) {
         '<td style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
         '<td class="col-host">' + escapeHtml(f._scan_host || '-') + '</td>' +
         '<td><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
-          'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + f._scan_id + '</a>' +
+          'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
         '<td class="col-status" data-status-slot="pill">' + _statusPillHtml(reviewStatus) + '</td>' +
       '</tr>';
@@ -668,7 +683,7 @@ export function _expandRow(f, colspan) {
         ? '<a href="https://attack.mitre.org/techniques/' + mitre.replace('.', '/') + '/" target="_blank" style="color:var(--accent); text-decoration:none;" class="mono">' + mitre + '</a>'
         : '-') +
       _expandField('Source Scan',
-        '<a href="#" data-action="viewScan" data-arg="' + f._scan_id + '" style="color:var(--accent); text-decoration:none;">#' + f._scan_id + '</a> \u2014 ' + escapeHtml(f._scan_date || '')) +
+        '<a href="#" data-action="viewScan" data-arg="' + f._scan_id + '" style="color:var(--accent); text-decoration:none;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a> \u2014 ' + escapeHtml(f._scan_date || '')) +
     '</div>' +
     (desc ? '<div class="expand-field" style="margin-bottom:10px;"><div class="label">Description</div><div class="val">' + escapeHtml(desc) + '</div></div>' : '') +
     (details ? '<div class="expand-field" style="margin-bottom:10px;"><div class="label">Event Details</div><div class="val mono" style="white-space:pre-wrap;">' + escapeHtml(details) + '</div></div>' : '') +
@@ -788,6 +803,301 @@ function _notifyFindingStatusChanged(id, status) {
   } catch (e) { /* no-op — old browsers without CustomEvent */ }
 }
 
+// Rules whose findings carry a source IP worth blocking at the firewall.
+// Anything outside this set doesn't get a "Stage Block" button — a
+// privilege escalation finding inside your own forest rarely has an
+// attackable remote IP, for example.
+const _BLOCKABLE_RULES = {
+  'Brute Force Attempt': true,
+  'RDP Logon Detected': true,
+  'Pass-the-Hash Attempt': true,
+};
+
+// Classify an IPv4 so the UI can decide whether to offer a block button
+// or show an explanatory note. Returns one of: 'public', 'loopback',
+// 'private', 'link-local', 'multicast', 'unspecified', 'reserved', or null
+// for a malformed string. Mirrors the backend validation in blocker.py.
+function _classifyIpv4(ip) {
+  if (!ip) return null;
+  var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (!m) return null;
+  var a = +m[1], b = +m[2], c = +m[3], d = +m[4];
+  if (a > 255 || b > 255 || c > 255 || d > 255) return null;
+  if (a === 0) return 'unspecified';
+  if (a === 127) return 'loopback';
+  if (a === 10) return 'private';
+  if (a === 192 && b === 168) return 'private';
+  if (a === 172 && b >= 16 && b <= 31) return 'private';
+  if (a === 169 && b === 254) return 'link-local';
+  if (a >= 224 && a <= 239) return 'multicast';
+  if (a >= 240) return 'reserved';
+  return 'public';
+}
+
+// Pull the first IPv4 out of a blob of text. Unlike the old helper we do
+// NOT filter by class here — the caller classifies and decides whether to
+// offer a block, a warning, or nothing.
+function _extractSourceIp(text) {
+  if (!text) return null;
+  var rx = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
+  var m;
+  while ((m = rx.exec(text)) !== null) {
+    if (_classifyIpv4(m[0])) return m[0];
+  }
+  return null;
+}
+
+function _stageBlockSection(f) {
+  if (!f || !_BLOCKABLE_RULES[f.rule]) return '';
+  var ip = _extractSourceIp(f.details || '') || _extractSourceIp(f.description || '');
+  if (!ip) return '';
+  var cls = _classifyIpv4(ip);
+  var date = (f.timestamp || _extractTime(f) || '').split(' ')[0] || 'today';
+  var comment = (f.rule || '') + ' on ' + date + ' (finding #' + (f.id || '?') + ')';
+  var ipEsc = escapeHtml(ip);
+  var fidEsc = escapeHtml(String(f.id == null ? '' : f.id));
+  var cEsc = escapeHtml(comment);
+  var shared =
+    'data-arg="' + ipEsc + '" ' +
+    'data-finding-id="' + fidEsc + '" ' +
+    'data-comment="' + cEsc + '"';
+
+  // Non-public IPs are safety-rejected by the backend. Render the same
+  // section so the operator sees the extracted IP, but with disabled
+  // buttons and a concrete explanation of why Pulse won't block it.
+  // RFC1918 ("private") is a *soft* refusal: insider-threat scenarios can
+  // justify blocking an internal host, so we surface an amber override
+  // link that opens a type-to-confirm modal. Everything else (loopback,
+  // link-local, multicast, reserved, unspecified) is a hard refusal.
+  if (cls !== 'public') {
+    var reason = {
+      'loopback':    'loopback address (127.0.0.0/8) — blocking would cut off local services',
+      'private':     'private LAN address (RFC1918) — blocking would cut off internal hosts',
+      'link-local':  'link-local address (169.254.0.0/16) — used for auto-configuration',
+      'multicast':   'multicast address — not an individual attacker',
+      'reserved':    'reserved address range — not routable',
+      'unspecified': 'unspecified address (0.0.0.0)',
+    }[cls] || 'non-routable address';
+    var overrideHtml = '';
+    var altHtml = '';
+    if (cls === 'private') {
+      overrideHtml =
+        '<a class="stage-block-override" ' +
+          'data-action="openForceBlockModal" ' + shared + '>' +
+          'Override and block this internal IP' +
+        '</a>';
+      altHtml =
+        '<div class="stage-block-alt">' +
+          'For stronger isolation consider: disabling the AD account, ' +
+          'switch port shutdown by your network admin, or Microsoft Defender ' +
+          'device isolation.' +
+        '</div>';
+    }
+    return '<div class="finding-drawer-section">' +
+      '<div class="sec-label">Block Source IP</div>' +
+      '<div class="stage-block-row stage-block-row-muted">' +
+        '<div class="stage-block-meta">' +
+          '<div class="stage-block-ip">' + ipEsc + '</div>' +
+          '<div class="stage-block-hint">' +
+            '<strong>Not blockable:</strong> ' + escapeHtml(reason) + '. ' +
+            'Pulse refuses these to prevent self-lockouts.' +
+          '</div>' +
+          overrideHtml +
+        '</div>' +
+        '<div class="stage-block-actions">' +
+          '<button type="button" class="btn btn-secondary stage-block-btn staged" disabled>Not blockable</button>' +
+        '</div>' +
+      '</div>' +
+      altHtml +
+    '</div>';
+  }
+
+  return '<div class="finding-drawer-section">' +
+    '<div class="sec-label">Block Source IP</div>' +
+    '<div class="stage-block-row">' +
+      '<div class="stage-block-meta">' +
+        '<div class="stage-block-ip" data-block-ip="' + ipEsc + '">' + ipEsc + '</div>' +
+        '<div class="stage-block-hint">Adds an inbound deny rule tagged <code>Pulse-managed</code>. ' +
+          '<strong>Block Now</strong> requires admin; <strong>Stage</strong> queues it for later push.</div>' +
+      '</div>' +
+      '<div class="stage-block-actions">' +
+        '<button type="button" class="btn btn-secondary stage-block-btn" ' +
+          'data-action="stageBlockFromFinding" ' + shared + '>Stage</button>' +
+        '<button type="button" class="btn btn-primary stage-block-btn" ' +
+          'data-action="blockNowFromFinding" ' + shared + '>Block Now</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function _blockButtonGroup(target) {
+  // Find the sibling button so a click on one disables both.
+  var row = target.closest('.stage-block-row');
+  if (!row) return [target];
+  return Array.prototype.slice.call(row.querySelectorAll('.stage-block-btn'));
+}
+
+async function _submitBlock(ip, target, confirm, force) {
+  if (!ip || !target) return;
+  if (target.disabled) return;
+  var comment = target.getAttribute('data-comment') || '';
+  var fidRaw  = target.getAttribute('data-finding-id') || '';
+  var findingId = fidRaw === '' ? null : Number(fidRaw);
+  var group = _blockButtonGroup(target);
+  group.forEach(function (b) { b.disabled = true; });
+  var originalText = target.textContent;
+  target.textContent = confirm ? 'Blocking…' : 'Staging…';
+  try {
+    var resp = await fetch('/api/block-ip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ip: ip,
+        comment: comment,
+        finding_id: findingId,
+        confirm: !!confirm,
+        force: !!force,
+      }),
+    });
+    var data = {};
+    try { data = await resp.json(); } catch (e) {}
+    if (!resp.ok) {
+      var msg = (data && data.message) || (data && data.detail) || 'Could not stage block';
+      toastError(msg);
+      group.forEach(function (b) { b.disabled = false; });
+      target.textContent = originalText;
+      return false;
+    }
+    var wasForced = !!(data && data.forced);
+    var forcedSuffix = wasForced ? ' (forced override \u2014 internal IP)' : '';
+    var stagedCls = wasForced ? 'staged staged-forced' : 'staged';
+    // Stage succeeded. If this was Block Now, inspect the push result.
+    var push = data && data.push;
+    if (confirm && push && push.ok === false) {
+      // Staged but push failed — surface the real reason (admin, etc.).
+      toastError('Staged ' + ip + ', but push failed: ' + (push.message || 'see CLI'));
+      group.forEach(function (b) {
+        b.disabled = true;
+        b.className = b.className.replace(/\bstaged(-forced)?\b/g, '').trim();
+        stagedCls.split(' ').forEach(function (c) { b.classList.add(c); });
+      });
+      target.textContent = 'Staged \u2014 push failed';
+      return true;
+    }
+    if (confirm && push && push.ok) {
+      showToast('Blocked ' + ip + forcedSuffix);
+      group.forEach(function (b) {
+        b.disabled = true;
+        stagedCls.split(' ').forEach(function (c) { b.classList.add(c); });
+      });
+      target.textContent = wasForced ? 'Blocked (forced)' : 'Blocked';
+      return true;
+    }
+    // Stage-only path (or Block Now where push was skipped for some reason).
+    showToast('Staged ' + ip + ' for blocking' + forcedSuffix);
+    group.forEach(function (b) {
+      b.disabled = true;
+      stagedCls.split(' ').forEach(function (c) { b.classList.add(c); });
+    });
+    target.textContent = wasForced ? 'Staged (forced)' : 'Staged \u2014 pending push';
+    return true;
+  } catch (e) {
+    toastError('Network error while blocking');
+    group.forEach(function (b) { b.disabled = false; });
+    target.textContent = originalText;
+    return false;
+  }
+}
+
+export function stageBlockFromFinding(ip, target) {
+  return _submitBlock(ip, target, false, false);
+}
+
+export function blockNowFromFinding(ip, target) {
+  return _submitBlock(ip, target, true, false);
+}
+
+// -----------------------------------------------------------------------
+// Force-block modal (type-to-confirm override for RFC1918 addresses)
+// -----------------------------------------------------------------------
+// The modal element lives in the base template. We remember the originating
+// button so we can mutate it on success (disabled + "Staged (forced)" amber
+// state, same contract as the normal stage path).
+var _forceBlockSource = null;
+
+export function openForceBlockModal(ip, target) {
+  if (!ip) return;
+  var modal = document.getElementById('force-block-modal');
+  if (!modal) return;
+  _forceBlockSource = {
+    ip: ip,
+    comment: target ? (target.getAttribute('data-comment') || '') : '',
+    findingId: target ? (target.getAttribute('data-finding-id') || '') : '',
+  };
+  var ipLabel = document.getElementById('force-block-ip-label');
+  if (ipLabel) ipLabel.textContent = ip;
+  var input = document.getElementById('force-block-input');
+  if (input) {
+    input.value = '';
+    input.setAttribute('placeholder', ip);
+  }
+  var btn = document.getElementById('force-block-confirm-btn');
+  if (btn) btn.disabled = true;
+  modal.classList.add('open');
+  if (input) setTimeout(function () { input.focus(); }, 30);
+}
+
+export function closeForceBlockModal() {
+  var modal = document.getElementById('force-block-modal');
+  if (modal) modal.classList.remove('open');
+  _forceBlockSource = null;
+}
+
+// Input handler — enables the "Block anyway" button only when the typed
+// value matches the IP exactly.
+export function forceBlockInputCheck(arg, target) {
+  var btn = document.getElementById('force-block-confirm-btn');
+  if (!btn || !_forceBlockSource) return;
+  btn.disabled = (target && target.value.trim() === _forceBlockSource.ip) ? false : true;
+}
+
+export async function confirmForceBlock() {
+  if (!_forceBlockSource) return;
+  var btn = document.getElementById('force-block-confirm-btn');
+  if (!btn || btn.disabled) return;
+  var src = _forceBlockSource;
+  // Locate the originating "Not blockable" button in the drawer so we can
+  // flip it to "Staged (forced)" on success. The muted button has no
+  // data-action of its own, so we match by the surrounding row's IP label.
+  var targetBtn = null;
+  var rows = document.querySelectorAll('.stage-block-row-muted');
+  rows.forEach(function (row) {
+    var ipEl = row.querySelector('.stage-block-ip');
+    if (ipEl && ipEl.textContent.trim() === src.ip) {
+      targetBtn = row.querySelector('.stage-block-btn');
+    }
+  });
+  if (!targetBtn) {
+    // Fall back to a synthetic target so _submitBlock still runs; we just
+    // can't visually update the button state.
+    targetBtn = document.createElement('button');
+  }
+  targetBtn.setAttribute('data-comment', src.comment);
+  targetBtn.setAttribute('data-finding-id', src.findingId);
+  targetBtn.disabled = false;
+  btn.disabled = true;
+  btn.textContent = 'Blocking\u2026';
+  // confirm=true: stage + push in one click. If the process isn't elevated
+  // the backend still stages, then surfaces the push failure via toast —
+  // the user doesn't have to know what the CLI is.
+  var ok = await _submitBlock(src.ip, targetBtn, true, true);
+  if (ok) {
+    closeForceBlockModal();
+  } else {
+    btn.textContent = 'Block anyway';
+  }
+}
+
 export function openFindingDrawer(f) {
   if (!f) return;
   _drawerFinding = f;
@@ -842,6 +1152,8 @@ export function openFindingDrawer(f) {
       '<div class="sec-label">Remediation</div>' +
       _remediationBlock(f) +
     '</div>' +
+
+    _stageBlockSection(f) +
 
     _renderReviewSection(f);
 

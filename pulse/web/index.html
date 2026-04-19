@@ -20,7 +20,7 @@
     <!-- SIDEBAR                                                        -->
     <!-- ============================================================= -->
     <aside class="sidebar">
-      <a class="sidebar-logo" data-action="navigate" data-arg="dashboard" href="#dashboard">
+      <a class="sidebar-logo" data-action="navigate" data-arg="dashboard">
         <span class="sidebar-logo-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2 12h4l2-6 4 12 2-6h8"/>
@@ -50,6 +50,9 @@
         </a>
         <a data-action="navigate" data-arg="fleet">
           <i data-lucide="server" class="icon"></i> Fleet
+        </a>
+        <a data-action="navigate" data-arg="firewall">
+          <i data-lucide="brick-wall" class="icon"></i> Firewall
         </a>
         <a data-action="navigate" data-arg="whitelist">
           <i data-lucide="shield" class="icon"></i> Whitelist
@@ -340,6 +343,36 @@
     </div>
     <div class="finding-drawer-body" id="drawer-body"></div>
   </aside>
+
+  <!-- ============================================================= -->
+  <!-- FORCE-BLOCK CONFIRMATION MODAL (RFC1918 override)              -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="force-block-modal" role="dialog" aria-label="Force-block internal IP">
+    <div class="modal">
+      <h3>Force-block internal IP</h3>
+      <p class="force-block-body">
+        You are about to block <strong id="force-block-ip-label">?</strong> on your
+        local network. Internal addresses normally shouldn't be blocked at the
+        firewall — this may cut off a legitimate host. Proceed only if you are
+        certain this device is hostile and you have authorization.
+      </p>
+      <p class="force-block-note">
+        This will add an inbound deny rule to Windows Firewall immediately.
+        Pulse must be running as Administrator for the push to succeed.
+      </p>
+      <label class="force-block-label" for="force-block-input">
+        Type the IP to confirm
+      </label>
+      <input type="text" id="force-block-input" class="force-block-input"
+             autocomplete="off" spellcheck="false"
+             data-action-input="forceBlockInputCheck" />
+      <div class="modal-actions">
+        <button class="btn" data-action="closeForceBlockModal">Cancel</button>
+        <button class="btn btn-danger" id="force-block-confirm-btn"
+                data-action="confirmForceBlock" disabled>Block anyway</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ============================================================= -->
   <!-- JAVASCRIPT                                                      -->

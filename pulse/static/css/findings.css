@@ -188,6 +188,152 @@
   word-break: break-word;
 }
 
+.stage-block-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.stage-block-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.stage-block-ip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+.stage-block-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.stage-block-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.stage-block-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.stage-block-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-width: 112px;
+  justify-content: center;
+}
+.stage-block-btn.staged {
+  background: var(--border);
+  color: var(--text-muted);
+  cursor: default;
+  border-color: var(--border);
+}
+/* Forced-override variant — amber tint signals that this was a soft-refusal
+   override (internal IP blocked on purpose), distinct from a normal block. */
+.stage-block-btn.staged.staged-forced {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+/* Muted state used for non-blockable IPs (loopback, RFC1918 without force,
+   etc). Same layout, faded styling so the operator sees the extracted IP. */
+.stage-block-row-muted {
+  opacity: 0.85;
+  background: transparent;
+  border-style: dashed;
+}
+.stage-block-row-muted .stage-block-ip {
+  color: var(--text-muted);
+}
+/* Amber override link shown under the "Not blockable" explanation for
+   RFC1918 IPs. Clicking opens the type-to-confirm modal. */
+.stage-block-override {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #f59e0b;
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(245, 158, 11, 0.5);
+  align-self: flex-start;
+}
+.stage-block-override:hover {
+  color: #fbbf24;
+  border-bottom-color: #fbbf24;
+}
+/* One-line informational note below the block section — softer than the
+   main hint so it reads as a "for reference" pointer rather than a step. */
+.stage-block-alt {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------------ */
+/* Force-block confirmation modal                                     */
+/* ------------------------------------------------------------------ */
+.force-block-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  margin: 10px 0 10px;
+}
+.force-block-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 2px solid rgba(245, 158, 11, 0.45);
+  border-radius: 3px;
+}
+.force-block-body strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #f59e0b;
+}
+.force-block-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.force-block-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-sizing: border-box;
+  margin-bottom: 14px;
+}
+.force-block-input:focus {
+  outline: none;
+  border-color: #f59e0b;
+}
+
 .finding-drawer-details {
   background: var(--bg);
   border: 1px solid var(--border);

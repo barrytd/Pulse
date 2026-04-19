@@ -130,6 +130,8 @@ def scan_system(
             f"Windows event log folder not found: {base}"
         )
 
+    scan_started = datetime.now()
+
     since = None
     if days and days > 0:
         # Use UTC because wevtutil expects UTC timestamps on the filter.
@@ -181,6 +183,7 @@ def scan_system(
         "files_scanned": files_scanned,
     }
     init_db(db_path)
+    duration_sec = max(0, int((datetime.now() - scan_started).total_seconds()))
     scan_id = save_scan(
         db_path,
         findings,
@@ -189,6 +192,7 @@ def scan_system(
         score_label=score_data["label"],
         filename="System Scan",
         scope=_scope_label(days),
+        duration_sec=duration_sec,
     )
 
     alert_summary = {"enabled": False, "sent": False}

@@ -24,6 +24,7 @@ from collections import Counter                      # Built-in: counts how ofte
 import yaml                                          # Third-party: reads YAML config files
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
+from pulse import firewall_parser
 from pulse.rules_config import filter_by_enabled, get_disabled_rules
 from pulse.reporter import generate_report, SEVERITY_ORDER
 from pulse.emailer import (
@@ -283,6 +284,57 @@ def build_arg_parser(config=None):
         help="Emit the JSON report to stdout instead of writing a file. Implies --quiet.",
     )
 
+    # --- IP BLOCK LIST FLAGS ---
+    # Pulse-owned block list of source IPs that get pushed into Windows
+    # Firewall as inbound deny rules. Each --block-* flag short-circuits
+    # the normal scan flow — the CLI runs the block action and exits.
+    parser.add_argument(
+        "--block-ip",
+        metavar="IP",
+        help="Stage a source IP for blocking. Combine with --comment and optionally --confirm to push immediately.",
+    )
+    parser.add_argument(
+        "--comment",
+        metavar="TEXT",
+        default=None,
+        help="Free-text reason attached to --block-ip (e.g. 'brute force on 2026-04-18').",
+    )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Used with --block-ip: stage + immediately push to Windows Firewall.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Used with --block-ip: allow staging an RFC1918 (internal) IP. Loopback/link-local/multicast/self-block are still refused.",
+    )
+    parser.add_argument(
+        "--block-list",
+        action="store_true",
+        help="Print every IP in the Pulse block list with its status.",
+    )
+    parser.add_argument(
+        "--block-push",
+        action="store_true",
+        help="Push every pending block-list entry into Windows Firewall.",
+    )
+    parser.add_argument(
+        "--unblock-ip",
+        metavar="IP",
+        help="Remove an IP from the Pulse block list. If active, the firewall rule is deleted too.",
+    )
+    parser.add_argument(
+        "--firewall-log",
+        metavar="PATH",
+        default=None,
+        help="Parse this Windows Firewall pfirewall.log alongside the .evtx scan and add "
+             "sensitive-port / port-scan findings. Omit the value to use the default "
+             "%%WINDIR%%\\System32\\LogFiles\\Firewall\\pfirewall.log.",
+        nargs="?",
+        const="__default__",
+    )
+
     return parser
 
 
@@ -488,6 +540,68 @@ def _print_history(db_path):
     print()
 
 
+def _run_block_command(args, db_path, log):
+    """Dispatch --block-ip / --block-list / --block-push / --unblock-ip.
+
+    All four short-circuit the normal scan flow — this runs, prints a
+    human-readable summary via `log`, and main() returns immediately.
+    """
+    from pulse import blocker
+
+    if args.block_list:
+        rows = blocker.list_blocks(db_path)
+        if not rows:
+            log("  Block list is empty.")
+            return
+        log(f"  {'ID':<4} {'IP':<18} {'Status':<8} {'Added':<20} {'Pushed':<20} Comment")
+        log("  " + "-" * 90)
+        for r in rows:
+            log(
+                f"  {r['id']:<4} {r['ip_address']:<18} {r['status']:<8} "
+                f"{(r['added_at'] or '-'):<20} {(r['pushed_at'] or '-'):<20} "
+                f"{r.get('comment') or ''}"
+            )
+        return
+
+    if args.block_push:
+        if not blocker.is_windows():
+            log("  [!] --block-push only works on Windows. Pending entries left as-is.")
+            return
+        if not blocker._is_admin():
+            log("  [!] Administrator privileges are required. Re-run Pulse as admin.")
+            return
+        result = blocker.push_pending(db_path, source="cli")
+        log(f"  [*] {result['message']}")
+        for f in result.get("failures", []):
+            log(f"      - {f['ip']}: {f['error']}")
+        return
+
+    if args.unblock_ip:
+        result = blocker.unblock_ip(db_path, args.unblock_ip, source="cli")
+        prefix = "[*]" if result["ok"] else "[!]"
+        log(f"  {prefix} {result['message']}")
+        return
+
+    # --block-ip staging. If --confirm was passed, push immediately.
+    if args.block_ip:
+        staged = blocker.stage_ip(
+            db_path, args.block_ip, comment=args.comment, source="cli", force=args.force
+        )
+        prefix = "[*]" if staged["ok"] else "[!]"
+        log(f"  {prefix} {staged['message']}")
+        if staged["ok"] and args.confirm:
+            if not blocker.is_windows():
+                log("  [!] --confirm skipped: netsh is only available on Windows.")
+                return
+            if not blocker._is_admin():
+                log("  [!] --confirm skipped: run as administrator to push firewall rules.")
+                return
+            pushed = blocker.push_pending(db_path, source="cli")
+            log(f"  [*] {pushed['message']}")
+            for f in pushed.get("failures", []):
+                log(f"      - {f['ip']}: {f['error']}")
+
+
 def _run_summary(period, db_path, config, email_flag, log, quiet):
     """
     Build a daily/weekly/monthly summary report from pulse.db and optionally
@@ -596,6 +710,13 @@ def main():
     # Always initialise the DB (creates tables if they don't exist yet).
     if db_path:
         init_db(db_path)
+
+    # --- IP BLOCK LIST MODES ---
+    # Each of these short-circuits the normal scan flow. They operate
+    # purely against pulse.db (+ netsh on Windows) and never parse .evtx.
+    if args.block_ip or args.block_list or args.block_push or args.unblock_ip:
+        _run_block_command(args, db_path, log)
+        return
 
     # --- HISTORY MODE ---
     # If --history was passed, print past scans and exit immediately.
@@ -841,6 +962,19 @@ def main():
     # --- STEP 4: RUN DETECTIONS ---
     log("  [*] Running detection rules...")
     findings = run_all_detections(all_events)
+
+    # Optional: pull findings from the Windows Firewall log too. Only
+    # runs when --firewall-log was passed; default is no-op so this stays
+    # opt-in until the user has firewall logging enabled.
+    fw_log_arg = getattr(args, "firewall_log", None)
+    if fw_log_arg:
+        fw_path = None if fw_log_arg == "__default__" else fw_log_arg
+        fw_findings = firewall_parser.scan_firewall_log(fw_path)
+        if fw_findings:
+            log(f"  [*] Firewall log added {len(fw_findings)} finding(s)")
+            findings += fw_findings
+        else:
+            log("  [*] Firewall log produced no findings (or file missing).")
 
     # --- FILTER BY SEVERITY ---
     # SEVERITY_ORDER is a list where position = rank.

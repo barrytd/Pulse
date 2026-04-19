@@ -5,6 +5,29 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-19 — unreleased
+
+### Added
+- **Windows Firewall log parser** (`pulse/firewall_parser.py`) — reads `pfirewall.log` (default `%windir%\System32\LogFiles\Firewall\pfirewall.log`), skips private / loopback / link-local sources, and surfaces two detection classes: **port scan** (one public IP, many DROPs across many dst-ports in a short window) and **sensitive-port probe** (single DROP on 3389 / 22 / 445 / 3306 / 5985 from a public IP)
+- **IP block list** (`pulse/blocker.py`, `ip_block_list` table, `/api/block-list`, `/api/block-ip`, `/api/block-ip/{ip}/push`, `/api/unblock-ip/{ip}`) — manage a Pulse-owned list of blocked source IPs. Each row has status `pending` / `active`, optional comment (e.g. "brute force on 2026-04-15"), and a rule name prefixed `Pulse-managed:` so user-authored firewall rules are never touched. Safety rails reject RFC1918, loopback, link-local, multicast, and the local machine's own IPs
+- **One-click "Block source IP" action** — every finding with a discoverable source IP (Brute Force, RDP, Pass-the-Hash, etc.) now shows a Block button in the detail drawer. Stages the IP with a pre-filled comment linking back to the finding; a second click (or `--confirm`) pushes it to Windows Firewall via `netsh advfirewall`
+- **Firewall page** (`pulse/static/js/firewall.js`) — sidebar entry with two tabs: **Blocked IPs** (Pulse-managed rows with push / unblock controls and an Add-block modal) and **Firewall Log** (parsed detections from `pfirewall.log`). Non-Windows hosts can stage / list / audit; push surfaces a clear "skipped on Linux" message
+- **Block-list CLI** (`main.py`) — `--block-ip <ip> [--comment TEXT] [--confirm]`, `--block-list`, `--block-push`, `--unblock-ip <ip> [--force]`, `--firewall-log [PATH]` for cron / scripted workflows
+- **Scan duration tracking** (`scans.duration_sec` column) — every scan records wall-clock time from parse start to save. Surfaced in the PDF header ("Duration: 1m 23s") and available to the UI
+- **PDF report redesign** (`pulse/pdf_report.py`) — cleaner two-column layout with grade-coloured 60pt score ring on the left; title + generated date + Scan # + Host + Scope + Duration on the right; a new `Score: 76 (C) · Moderate Risk` summary line (colored bits in the grade's ring color) above small severity pills. Each finding card shows rule name → full description → mono meta line (timestamp · Event ID · MITRE link · User · Source IP) → "REMEDIATION" label + HR + numbered steps → MITRE / mitigation pills. Grade palette: A #639922, B #378ADD, C #BA7517, D #E24B4A, F #A32D2D. Risk labels: A Secure, B Low Risk, C Moderate Risk, D High Risk, F Critical Risk
+- **Position-based scan numbering** — the displayed "Scan #N" is now the row's position in current history (oldest = #1), computed via a correlated subquery in `get_history` and a new `get_scan_number()` helper. Delete every scan and the next one shows as **Scan #1** again. Internal auto-increment DB id stays unchanged; only the number shown in the PDF header, dashboard findings table, Findings detail drawer, Scan detail page title, History compare dropdown / diff headers, and download filenames (`pulse_scan_{N}.pdf`) uses the new position
+- **Real SPA URL routing** (`pulse/static/js/navigation.js`, `pulse/api.py`) — every sidebar nav now calls `history.pushState({page}, '', '/pageName')`; browser Back / Forward / Refresh behave like a normal site. Page boot parses `location.pathname` so refreshing on `/fleet` lands on Fleet instead of Dashboard, and `/scans/{id}` deep-links straight into a scan detail view. FastAPI serves the SPA shell for every top-level path (`/dashboard`, `/monitor`, `/scans`, `/scans/{id}`, `/reports`, `/history`, `/fleet`, `/firewall`, `/whitelist`, `/rules`, `/settings`) — auth-gated, so an unauthenticated deep-link still redirects to `/login`
+- **Bulk-select + batch-delete** on Reports, Whitelist, Firewall Block List, Monitor Sessions, and History — copies the Scans page pattern exactly: per-row checkbox + select-all header + sticky action bar with a single confirm prompt. Five new backend endpoints (`DELETE /api/reports/batch`, `/api/whitelist/batch`, `/api/block-ip/batch`, `/api/monitor/sessions/batch`, `/api/history/batch`) plus matching `apiDelete*` helpers in `pulse/static/js/api.js`. Built-in whitelist entries show no checkbox (can't be removed); active monitor sessions are skipped for the same reason
+
+### Changed
+- Dashboard download links no longer hardcode `a.download` — the browser honours the server's `Content-Disposition`, so the filename reflects the display number instead of the raw DB id
+- Finding metadata attached on the dashboard + findings page now carries `_scan_number` alongside `_scan_id` so the display can use the position while navigation still hits the stable DB id
+
+### Tests
+- 258 passing (`test_detections.py` + `test_api.py`), including two `build_pdf` cases. New coverage in `test_blocker.py` (470 LOC / 428 test LOC, staging safety rails, push / unblock lifecycle, non-Windows no-op path) and `test_firewall_parser.py` (port-scan aggregation, sensitive-port detection, private-IP skipping)
+
+---
+
 ## 2026-04-16 — v1.3.0
 
 ### Added

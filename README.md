@@ -48,10 +48,18 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - **HTML report** - professional SOC dashboard with security score, scan stats, severity filters, remediation tab, and dark mode
 - **JSON report** - structured machine-readable output for piping into Splunk, ELK, or Python scripts
 - **CSV export** - spreadsheet format that opens in Excel or Google Sheets
-- **Security Score** - a score out of 100 at the top of HTML reports, colour-coded from SECURE to CRITICAL RISK
+- **PDF report** - grade-coloured score ring, scope + duration, per-finding cards with full description, mono meta line, numbered remediation steps, and MITRE / mitigation pills
+- **Security Score** - a score out of 100 at the top of every report, graded A–F (A #639922 Secure · B #378ADD Low Risk · C #BA7517 Moderate Risk · D #E24B4A High Risk · F #A32D2D Critical Risk)
 - **MITRE ATT&CK tagging** - each finding links to its ATT&CK technique on attack.mitre.org
 - **Email delivery** - send the finished HTML report via SMTP after a scan with `--email`
 - **Slack / Discord webhook** - post threat findings to a channel via incoming webhook (auto-detects flavor from URL); fires alongside email and shares a per-rule cooldown
+
+### Firewall & Response
+- **Windows Firewall log parser** - reads `pfirewall.log`, surfaces port-scan aggregates and sensitive-port probes (3389 / 22 / 445 / 3306 / 5985) from public IPs; intra-LAN chatter is skipped
+- **IP block list** - Pulse-owned list of blocked source IPs pushed into Windows Firewall via `netsh advfirewall`. Every rule is prefixed `Pulse-managed:` so user-authored firewall rules are never touched; RFC1918, loopback, link-local, and your own IPs are rejected at stage time
+- **One-click block from finding** - any finding with a discoverable source IP shows a Block button in the detail drawer; the staged entry carries a comment linking back to the finding
+- **Firewall page** - dashboard tab with Blocked IPs (stage / push / unblock) and a Firewall Log view of parsed detections
+- **Block-list CLI** - `--block-ip <ip> [--comment TEXT] [--confirm]`, `--block-list`, `--block-push`, `--unblock-ip <ip> [--force]`, `--firewall-log [PATH]`
 
 ### Live Monitoring
 - **CLI `--watch` mode** - queries live Windows event channels (Security, System) in real time via `wevtutil`, ANSI-coloured terminal alerts, configurable `--interval`
@@ -60,8 +68,9 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - Auto-resumes monitoring across page reloads and server restarts via `localStorage`
 
 ### Scan History
-- **SQLite database** - every scan saved to `pulse.db` automatically
+- **SQLite database** - every scan saved to `pulse.db` automatically, including wall-clock duration
 - **`--history` flag** - view past scans with security scores and trend arrows (↑/↓)
+- **Position-based scan numbers** - "Scan #N" is the row's position in current history (oldest = #1); delete everything and the next scan shows as #1 again. Internal DB id stays stable for lookups
 
 ### Interactive Mode
 - **`--interactive` flag** - after a scan, browse findings one by one in the terminal
@@ -87,7 +96,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **271 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, and webhook delivery tested
+- **405 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, and IP block-list lifecycle tested
 
 ---
 
@@ -99,29 +108,34 @@ Pulse/
 │   ├── parser.py           # Reads and parses .evtx log files
 │   ├── detections.py       # 24 detection rules + attack chain correlation
 │   ├── reporter.py         # Generates text, HTML, JSON, and CSV reports
+│   ├── pdf_report.py       # ReportLab PDF report with grade-coloured score ring
 │   ├── emailer.py          # SMTP email delivery + CRITICAL/HIGH alert emails
 │   ├── webhook.py          # Slack / Discord webhook delivery
 │   ├── monitor.py          # CLI live monitoring via wevtutil
 │   ├── monitor_service.py  # Async in-process live monitor (SSE-backed, for the dashboard)
-│   ├── database.py         # SQLite scan history
+│   ├── database.py         # SQLite scan history (with position-based display numbering)
+│   ├── firewall_parser.py  # Windows Firewall log parser + port-scan / sensitive-port detections
+│   ├── blocker.py          # IP block list — stage, push (netsh), unblock, lifecycle
 │   ├── interactive.py      # Interactive terminal mode
 │   ├── animations.py       # ECG heartbeat terminal animation
 │   ├── api.py              # FastAPI REST API + SSE stream for live monitor
 │   ├── auth.py             # Single-user auth: scrypt hashing + signed session cookies
 │   ├── whitelist.py        # Whitelist filtering shared by CLI and API
 │   ├── known_good.py       # Built-in known-good service whitelist
-│   ├── static/js/          # Native ES modules: api, dashboard, scans, findings, monitor, settings, etc.
+│   ├── static/js/          # Native ES modules: api, dashboard, scans, findings, firewall, monitor, settings, etc.
 │   └── web/
 │       ├── index.html      # Single-page dashboard
 │       └── login.html      # Sign-in / first-user signup page
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
 ├── pulse.db                # SQLite scan history database
-├── test_detections.py      # Detection engine tests
-├── test_api.py             # REST API tests
-├── test_alerts.py          # Email alert tests
-├── test_auth.py            # Auth + session cookie tests
-├── test_webhook.py         # Slack / Discord webhook tests
+├── test_detections.py        # Detection engine tests
+├── test_api.py               # REST API tests
+├── test_alerts.py            # Email alert tests
+├── test_auth.py              # Auth + session cookie tests
+├── test_webhook.py           # Slack / Discord webhook tests
+├── test_firewall_parser.py   # Firewall log parser + detection tests
+├── test_blocker.py           # IP block-list lifecycle + safety-rail tests
 ├── main.py                 # Entry point - run this to analyse logs
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies

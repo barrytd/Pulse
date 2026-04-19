@@ -95,6 +95,44 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
+# IP block list — Pulse-managed inbound deny rules that get pushed into
+# Windows Firewall via `netsh advfirewall`. Each row represents one IP we
+# want (or have pushed) a firewall rule for. `status` tracks the lifecycle:
+#   'pending' — staged in the DB but not yet in the firewall
+#   'active'  — rule has been pushed to Windows Firewall
+# The `rule_name` column stores the exact netsh rule name so we can find
+# and delete it later. Every rule name starts with "Pulse-managed:" so we
+# never touch user-created firewall rules.
+_CREATE_IP_BLOCK_LIST = """
+CREATE TABLE IF NOT EXISTS ip_block_list (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address  TEXT    NOT NULL UNIQUE,
+    comment     TEXT,
+    status      TEXT    NOT NULL DEFAULT 'pending',
+    added_at    TEXT    NOT NULL,
+    pushed_at   TEXT,
+    rule_name   TEXT,
+    finding_id  INTEGER
+);
+"""
+
+# Audit log — every block-list action is recorded here so a reviewer can
+# reconstruct who did what. Separate from alert_log (which is email spam
+# cooldown). Source is 'dashboard' or 'cli'. user is the signed-in email
+# when the action came through the API; None for CLI actions.
+_CREATE_AUDIT_LOG = """
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT    NOT NULL,
+    action      TEXT    NOT NULL,
+    ip_address  TEXT,
+    comment     TEXT,
+    source      TEXT    NOT NULL DEFAULT 'cli',
+    user        TEXT,
+    detail      TEXT
+);
+"""
+
 # One row per "start monitoring → stop monitoring" span. Scans generated
 # by the live monitor point back here via scans.session_id so the UI can
 # group a session's findings together ("DVR for the monitor").
@@ -131,6 +169,8 @@ def init_db(db_path):
         conn.execute(_CREATE_FINDINGS)
         conn.execute(_CREATE_ALERT_LOG)
         conn.execute(_CREATE_USERS)
+        conn.execute(_CREATE_IP_BLOCK_LIST)
+        conn.execute(_CREATE_AUDIT_LOG)
         conn.execute(_CREATE_MONITOR_SESSIONS)
         try:
             conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
@@ -142,6 +182,10 @@ def init_db(db_path):
             pass
         try:
             conn.execute("ALTER TABLE scans ADD COLUMN session_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE scans ADD COLUMN duration_sec INTEGER")
         except sqlite3.OperationalError:
             pass
         try:
@@ -160,7 +204,7 @@ def init_db(db_path):
                 pass
 
 
-def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None):
+def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None):
     """
     Saves a completed scan and all its findings to the database.
 
@@ -192,10 +236,11 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
                 total_findings, score, score_label, filename, scope,
-                session_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                session_id, duration_sec)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
-             total_findings, score, score_label, filename, scope, session_id)
+             total_findings, score, score_label, filename, scope,
+             session_id, duration_sec)
         )
         scan_id = cursor.lastrowid
 
@@ -243,12 +288,16 @@ def get_history(db_path, limit=20):
     """
     try:
         with _connect(db_path) as conn:
+            # `number` = position in current scan history, oldest = 1. Uses
+            # a correlated subquery so it survives deletions (unlike the raw
+            # auto-increment `id`, which skips values when rows are dropped).
             cursor = conn.execute(
-                """SELECT id, scanned_at, hostname, files_scanned,
-                          total_events, total_findings, score, score_label,
-                          filename, scope
-                   FROM scans
-                   ORDER BY id DESC
+                """SELECT s.id, s.scanned_at, s.hostname, s.files_scanned,
+                          s.total_events, s.total_findings, s.score, s.score_label,
+                          s.filename, s.scope, s.duration_sec,
+                          (SELECT COUNT(*) FROM scans s2 WHERE s2.id <= s.id) AS number
+                   FROM scans s
+                   ORDER BY s.id DESC
                    LIMIT ?""",
                 (limit,)
             )
@@ -256,6 +305,23 @@ def get_history(db_path, limit=20):
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
     except Exception:
         return []
+
+
+def get_scan_number(db_path, scan_id):
+    """
+    Return the display number (position in current scan history, oldest = 1)
+    for a given DB id. Returns None if the scan doesn't exist.
+    """
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM scans WHERE id <= ? "
+                "AND EXISTS (SELECT 1 FROM scans WHERE id = ?)",
+                (scan_id, scan_id),
+            ).fetchone()
+            return int(row[0]) if row and row[0] else None
+    except Exception:
+        return None
 
 
 def get_findings_since(db_path, days):

@@ -41,7 +41,12 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - **Dashboard zero-state polish** — friendly banner + empty panels when the filtered window has no scans, instead of hiding everything
 - **Slack / Discord webhook delivery** — alongside email alerts, with shared cooldown, payload caps, and a Settings card with test button
 - **Frontend modularized** — `pulse/web/index.html` split into native ES modules under `pulse/static/js/` (api, dashboard, scans, findings, monitor, settings, etc.) with a central action registry replacing inline `on*` handlers
-- 318 unit tests, all passing
+- **Firewall feature set** — `pfirewall.log` parser, Pulse-managed IP block list with `netsh` push / unblock, one-click block-from-finding, Firewall page with Blocked IPs + Firewall Log tabs, CLI `--block-ip / --block-list / --block-push / --unblock-ip / --firewall-log`
+- **PDF report overhaul** — grade-coloured score ring + title / scope / duration / colored score line, per-finding cards with full description, mono meta line, numbered remediation, MITRE / mitigation pills
+- **Position-based scan numbering** — displayed "Scan #" tracks position in current history, so deleting all scans resets back to #1 (internal DB id preserved for lookups)
+- **Real SPA URL routing** — every page has its own path (`/dashboard`, `/monitor`, `/scans/{id}`, etc.); browser Back / Forward / Refresh / deep-linking all work
+- **Bulk-select + batch-delete on every list page** — Scans, Reports, Whitelist, Firewall Block List, Monitor Sessions, History all share the same checkbox + sticky action bar pattern with matching `DELETE /api/<resource>/batch` endpoints
+- 405 unit tests, all passing
 
 ---
 
@@ -79,11 +84,11 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Hostname auto-detection — parse `Computer` field from each `.evtx` event, tag findings
 - [x] Per-host dashboard view — pick a machine, see only its history and trend
 - [x] Fleet overview page — sortable table of all machines with score, last scan, top severity
-- [ ] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
-- [ ] Suspicious outbound detection — flag connections to non-RFC1918 IPs on unusual ports
+- [x] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
+- [x] Suspicious outbound detection — flag DROPs from public IPs to high-value ports (3389, 22, 445, 3306, 5985), plus port-scan aggregation across many dst-ports
 - [ ] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
-- [ ] **IP block list** — manage a Pulse-owned list of blocked source IPs that gets pushed into Windows Firewall (`netsh advfirewall`) as inbound deny rules. Each entry has an optional comment field (e.g. "brute force on 2026-04-15", "Tor exit node") so an analyst remembers why it was added. Add/remove from the dashboard, see "Pulse-managed" tag on each rule so user-created rules are never touched
-- [ ] One-click "block source IP" action — on any finding with a source IP (Brute Force, RDP Logon, etc.) the dashboard shows a Block button that adds the IP to the block list with a pre-filled comment linking back to the finding
+- [x] **IP block list** — Pulse-owned list of blocked source IPs pushed into Windows Firewall via `netsh advfirewall` as inbound deny rules. Every rule is prefixed `Pulse-managed:` so user-authored rules are never touched; optional comment per entry; add / push / unblock from the Firewall page and CLI
+- [x] One-click "block source IP" action — any finding with a source IP shows a Block button in the detail drawer that stages the IP with a comment linking back to the finding
 - [ ] Audit log — track who scanned what and when within the dashboard
 - [ ] Export fleet CSV — one-row-per-host summary for spreadsheets
 
@@ -100,6 +105,10 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Compliance report view — dashboard page showing coverage per framework
 - [ ] Score-over-time chart — line chart of daily scores, 30 / 90 day windows
 - [ ] Trend analytics page — rule frequency heatmap, top offenders, week-over-week delta
+- [ ] PostgreSQL migration — replace SQLite with PostgreSQL, include a migration script that moves existing pulse.db data automatically, keep SQLite as fallback for local single-user installs
+- [ ] Multi-user account management — admin can create, edit, and deactivate user accounts from the dashboard
+- [ ] Data isolation — each user only sees their own scans, findings, and reports, admins can see all
+- [ ] Admin activity history — dashboard page where admins can see every user action (blocks, unblocks, scans run, reports deleted, findings reviewed) with who/what/when/why, filterable by user and action type, exportable as CSV
 
 ---
 
@@ -115,3 +124,6 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Threat intel integration — correlate source IPs with AbuseIPDB / OTX feeds
 - [ ] IOC lookup panel — paste an IP or hash, query intel feeds, cache results locally
 - [ ] Weekly threat brief — auto-emailed digest of top findings across the fleet
+- [ ] Public landing page — a clean page explaining what Pulse does with a download link for the CLI and an email signup for updates
+- [ ] Email waitlist — store signups in the database, exportable as CSV
+- [ ] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
