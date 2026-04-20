@@ -40,6 +40,7 @@ _UPLOAD_CHUNK = 1024 * 1024
 
 import yaml
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -103,8 +104,17 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     Returns:
         FastAPI: Ready-to-run app. Pass it to uvicorn or FastAPI's TestClient.
     """
+    # PULSE_ENV=production signals a hosted deploy (Render, etc.). In that
+    # mode we read secrets from env vars, pin pulse.db to an absolute path so
+    # the working directory can't drift, and lock /docs + CORS down.
+    _is_production = os.environ.get("PULSE_ENV", "").strip().lower() == "production"
+
     if db_path is None:
-        db_path = "pulse.db"
+        # Use an absolute path rooted at the current working directory so
+        # relative paths don't resolve differently once a background thread
+        # or subprocess changes cwd. Matters on Render, where the service
+        # runs from a specific working dir but spawned tasks may not.
+        db_path = os.path.abspath("pulse.db")
 
     if config_path is None:
         config_path = os.path.join(
@@ -115,10 +125,13 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     # Make sure the database has its tables before any request comes in.
     init_db(db_path)
 
-    # Swagger / ReDoc / OpenAPI endpoints are gated behind PULSE_DOCS=1 so a
-    # production deploy doesn't leak the full endpoint surface. Flip it on in
-    # development with: set PULSE_DOCS=1 (Windows) or PULSE_DOCS=1 (bash).
-    _docs_enabled = os.environ.get("PULSE_DOCS", "").strip().lower() in ("1", "true", "yes", "on")
+    # Swagger / ReDoc / OpenAPI endpoints are disabled in production by
+    # default so a hosted deploy doesn't leak the full endpoint surface.
+    # Locally, opt in with PULSE_DOCS=1 (Windows set or bash export).
+    _docs_enabled = (
+        not _is_production
+        and os.environ.get("PULSE_DOCS", "").strip().lower() in ("1", "true", "yes", "on")
+    )
     app = FastAPI(
         title="Pulse API",
         description="REST API for the Pulse Windows event log analyzer.",
@@ -135,13 +148,26 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
 
     # Resolve (and if needed, generate + persist) the session signing secret
     # so every logged-in browser cookie can be verified on future requests.
+    # In production the secret MUST come from the PULSE_SECRET env var — we
+    # never want a random one-shot secret on a hosted deploy (sessions would
+    # all invalidate on every restart) nor a secret persisted into pulse.yaml
+    # on a filesystem that might not be writable.
     if app.state.auth_required:
-        cfg = _read_config(config_path) or {}
-        had_secret = bool((cfg.get("auth") or {}).get("session_secret"))
-        secret = ensure_session_secret(cfg)
-        app.state.session_secret = secret
-        if not had_secret:
-            _write_config(config_path, cfg)
+        env_secret = os.environ.get("PULSE_SECRET", "").strip()
+        if env_secret:
+            app.state.session_secret = env_secret
+        elif _is_production:
+            raise RuntimeError(
+                "PULSE_ENV=production but PULSE_SECRET is not set. "
+                "Set PULSE_SECRET in the Render service env vars."
+            )
+        else:
+            cfg = _read_config(config_path) or {}
+            had_secret = bool((cfg.get("auth") or {}).get("session_secret"))
+            secret = ensure_session_secret(cfg)
+            app.state.session_secret = secret
+            if not had_secret:
+                _write_config(config_path, cfg)
     else:
         app.state.session_secret = "test-secret-not-used"
 
@@ -197,6 +223,24 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     @app.on_event("shutdown")
     async def _stop_scheduler():
         await app.state.scheduled_scan.stop()
+
+    # CORS — in production, lock to the Render domain set via
+    # PULSE_ALLOWED_ORIGIN (e.g. https://pulse.onrender.com). Locally we
+    # allow the dev host origins so `python main.py --api` still works
+    # from a browser opened to 127.0.0.1. No wildcard in production ever.
+    if _is_production:
+        allowed = os.environ.get("PULSE_ALLOWED_ORIGIN", "").strip()
+        allow_origins = [o.strip() for o in allowed.split(",") if o.strip()]
+    else:
+        allow_origins = ["http://127.0.0.1:8000", "http://localhost:8000"]
+    if allow_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allow_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     _register_routes(app)
 

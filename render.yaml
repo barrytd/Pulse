@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: pulse
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PULSE_SECRET
+        sync: false
+      - key: PULSE_ENV
+        value: production
+      - key: PULSE_ALLOWED_ORIGIN
+        sync: false

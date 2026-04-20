@@ -1122,5 +1122,18 @@ def main():
         run_interactive_mode(findings, CONFIG_PATH)
 
 
+# Lazy `app` surface for ASGI servers (uvicorn main:app ...). Hosted
+# deploys like Render run `uvicorn main:app`, which triggers
+# `from main import app` — and Python 3.7+ routes that through module
+# __getattr__ when the name isn't already bound. CLI invocations
+# (`python main.py ...`) never touch this attribute, so the FastAPI app
+# isn't built for plain scan runs.
+def __getattr__(name):
+    if name == "app":
+        from pulse.api import create_app
+        return create_app()
+    raise AttributeError(f"module 'main' has no attribute {name!r}")
+
+
 if __name__ == "__main__":
     main()
