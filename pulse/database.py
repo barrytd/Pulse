@@ -88,7 +88,9 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     email         TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
-    created_at    TEXT    NOT NULL
+    created_at    TEXT    NOT NULL,
+    role          TEXT    NOT NULL DEFAULT 'admin',
+    active        INTEGER NOT NULL DEFAULT 1
 );
 """
 
@@ -189,6 +191,17 @@ def init_db(db_path):
             conn.execute("ALTER TABLE findings ADD COLUMN raw_xml TEXT")
         except sqlite3.OperationalError:
             pass
+        # RBAC columns on users — existing DBs upgrade in place. The very
+        # first user (who was created before roles existed) stays admin so
+        # nobody gets locked out when upgrading.
+        for ddl in (
+            "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'",
+            "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         for col, ddl in (
             ("review_status",  "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'"),
             ("review_note",    "ALTER TABLE findings ADD COLUMN review_note TEXT"),
@@ -808,17 +821,42 @@ def count_users(db_path):
         return int(row[0]) if row else 0
 
 
-def create_user(db_path, email, password_hash):
+_USER_COLS = "id, email, password_hash, created_at, role, active"
+
+
+def _row_to_user(row):
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "email": row[1],
+        "password_hash": row[2],
+        "created_at": row[3],
+        "role": row[4] or "admin",
+        "active": bool(row[5]) if row[5] is not None else True,
+    }
+
+
+def create_user(db_path, email, password_hash, role="viewer"):
     """Insert a new user and return the row id. Email is lowercased and
-    stripped so lookups are consistent."""
+    stripped so lookups are consistent. `role` is 'admin' or 'viewer'; the
+    first user created (empty table) is always promoted to admin so there
+    is never a locked-out database."""
     email = (email or "").strip().lower()
     if not email:
         raise ValueError("email is required")
+    role = (role or "viewer").strip().lower()
+    if role not in ("admin", "viewer"):
+        raise ValueError("role must be 'admin' or 'viewer'")
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _connect(db_path) as conn:
+        first = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+        if first:
+            role = "admin"
         cursor = conn.execute(
-            "INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)",
-            (email, password_hash, created_at),
+            "INSERT INTO users (email, password_hash, created_at, role, active)"
+            " VALUES (?, ?, ?, ?, 1)",
+            (email, password_hash, created_at, role),
         )
         return cursor.lastrowid
 
@@ -829,23 +867,29 @@ def get_user_by_email(db_path, email):
         return None
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT id, email, password_hash, created_at FROM users WHERE email = ?",
+            f"SELECT {_USER_COLS} FROM users WHERE email = ?",
             (email,),
         ).fetchone()
-        if not row:
-            return None
-        return {"id": row[0], "email": row[1], "password_hash": row[2], "created_at": row[3]}
+        return _row_to_user(row)
 
 
 def get_user_by_id(db_path, user_id):
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT id, email, password_hash, created_at FROM users WHERE id = ?",
+            f"SELECT {_USER_COLS} FROM users WHERE id = ?",
             (int(user_id),),
         ).fetchone()
-        if not row:
-            return None
-        return {"id": row[0], "email": row[1], "password_hash": row[2], "created_at": row[3]}
+        return _row_to_user(row)
+
+
+def list_users(db_path):
+    """Return every user (active + deactivated), newest first. Used by the
+    admin user-management page."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT {_USER_COLS} FROM users ORDER BY id DESC"
+        ).fetchall()
+    return [_row_to_user(r) for r in rows]
 
 
 def update_user_email(db_path, user_id, new_email):
@@ -862,6 +906,40 @@ def update_user_password(db_path, user_id, password_hash):
             "UPDATE users SET password_hash = ? WHERE id = ?",
             (password_hash, int(user_id)),
         )
+
+
+def update_user_role(db_path, user_id, role):
+    """Set the role ('admin'|'viewer') on a user."""
+    role = (role or "").strip().lower()
+    if role not in ("admin", "viewer"):
+        raise ValueError("role must be 'admin' or 'viewer'")
+    with _connect(db_path) as conn:
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, int(user_id)))
+
+
+def update_user_active(db_path, user_id, active):
+    """Activate / deactivate a user. Deactivated users can't log in."""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET active = ? WHERE id = ?",
+            (1 if active else 0, int(user_id)),
+        )
+
+
+def delete_user(db_path, user_id):
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
+
+
+def count_admins(db_path, *, active_only=True):
+    """How many admin accounts exist. Used to guard against the last admin
+    being demoted or deactivated — which would lock everyone out."""
+    sql = "SELECT COUNT(*) FROM users WHERE role = 'admin'"
+    if active_only:
+        sql += " AND active = 1"
+    with _connect(db_path) as conn:
+        row = conn.execute(sql).fetchone()
+        return int(row[0]) if row else 0
 
 
 # ---------------------------------------------------------------------------

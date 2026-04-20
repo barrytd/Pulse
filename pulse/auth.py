@@ -142,11 +142,48 @@ def require_login(request: Request) -> int:
     """
     if getattr(request.app.state, "auth_required", True) is False:
         return 0
+    user_id = _resolve_user_id(request)
+    if user_id is None:
+        raise HTTPException(401, detail="Authentication required.")
+    return user_id
+
+
+def require_admin(request: Request) -> int:
+    """FastAPI dependency: like require_login, but 403s unless the session
+    belongs to a user whose role is 'admin'. In `disable_auth` mode we
+    return 0 so unit tests that exercise admin endpoints don't need to
+    stand up a real session."""
+    if getattr(request.app.state, "auth_required", True) is False:
+        return 0
+    user_id = _resolve_user_id(request)
+    if user_id is None:
+        raise HTTPException(401, detail="Authentication required.")
+    from pulse.database import get_user_by_id  # local import: avoid cycle
+    db_path = getattr(request.app.state, "db_path", None)
+    user = get_user_by_id(db_path, user_id) if db_path else None
+    if not user or not user.get("active"):
+        raise HTTPException(401, detail="Authentication required.")
+    if user.get("role") != "admin":
+        raise HTTPException(403, detail="Admin role required.")
+    return user_id
+
+
+def _resolve_user_id(request: Request):
+    """Shared helper: returns the signed-in user id, or None. Validates the
+    session cookie and also rejects sessions whose user is deactivated."""
     secret = getattr(request.app.state, "session_secret", None)
     if not secret:
         raise HTTPException(500, detail="Session secret not configured.")
     cookie = request.cookies.get(SESSION_COOKIE_NAME)
     user_id = verify_session_cookie(secret, cookie) if cookie else None
     if user_id is None:
-        raise HTTPException(401, detail="Authentication required.")
+        return None
+    # Belt and braces: if the row was deactivated after the cookie was
+    # issued, treat the session as invalid rather than trust the cookie.
+    from pulse.database import get_user_by_id
+    db_path = getattr(request.app.state, "db_path", None)
+    if db_path:
+        user = get_user_by_id(db_path, user_id)
+        if not user or not user.get("active"):
+            return None
     return user_id

@@ -15,7 +15,7 @@
 # bad uploads (wrong extension, empty body) are tested directly.
 #
 # RUN:
-#   python -m pytest test_api.py -v
+#   python -m pytest tests/test_api.py -v
 
 
 import io

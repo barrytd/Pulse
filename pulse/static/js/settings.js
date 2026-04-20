@@ -6,6 +6,12 @@ import {
   apiGetConfig,
   apiGetRules,
   apiGetAuthStatus,
+  apiGetMe,
+  apiListUsers,
+  apiCreateUser,
+  apiUpdateUserRole,
+  apiUpdateUserActive,
+  apiDeleteUser,
   apiChangeEmail,
   apiChangePassword,
   apiLogout,
@@ -36,6 +42,7 @@ const SETTINGS_TABS = [
   { id: 'notifications', label: 'Notifications',   icon: 'bell' },
   { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar' },
   { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
+  { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
 let _activeSettingsTab = 'profile';
@@ -59,6 +66,27 @@ export async function renderSettingsPage() {
   var config = await apiGetConfig();
   var rules  = await apiGetRules();
   var auth   = await apiGetAuthStatus();
+  var me     = await apiGetMe();
+  var isAdmin = (me && me.role === 'admin');
+
+  // Admin-only users fetch — skip the round-trip for non-admins. The
+  // server would 403 anyway, but avoiding it keeps the Network tab clean.
+  var usersList = [];
+  if (isAdmin) {
+    try {
+      var lu = await apiListUsers();
+      usersList = lu.users || [];
+    } catch (e) { usersList = []; }
+  }
+
+  // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
+  // a saved URL), fall back to Profile so we don't render an empty panel.
+  var visibleTabs = SETTINGS_TABS.filter(function (t) {
+    return !t.adminOnly || isAdmin;
+  });
+  if (!visibleTabs.some(function (t) { return t.id === _activeSettingsTab; })) {
+    _activeSettingsTab = 'profile';
+  }
 
   var em = config.email || {};
   var al = config.alerts || {};
@@ -384,12 +412,16 @@ export async function renderSettingsPage() {
       '<p><a href="/docs" target="_blank" data-default="allow" style="color:var(--accent); text-decoration:none;">\u2192 API Documentation (Swagger)</a></p>' +
     '</div>';
 
+  // --- Users tab (admins only) --------------------------------------
+  var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
+
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
     notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
+    users:         usersHtml,
     // SMTP is powerful but noisy — tucked behind a <details> so the
     // Advanced tab reads as a configuration inventory, not a form wall.
     advanced:
@@ -405,7 +437,7 @@ export async function renderSettingsPage() {
   };
 
   var tabNavHtml = '<nav class="settings-tab-nav">' +
-    SETTINGS_TABS.map(function (t) {
+    visibleTabs.map(function (t) {
       var active = (t.id === _activeSettingsTab) ? ' active' : '';
       return '<a class="settings-tab-link' + active + '" ' +
                'data-action="switchSettingsTab" data-arg="' + t.id + '">' +
@@ -415,7 +447,7 @@ export async function renderSettingsPage() {
     }).join('') +
   '</nav>';
 
-  var activeTab = SETTINGS_TABS.find(function (t) { return t.id === _activeSettingsTab; }) || SETTINGS_TABS[0];
+  var activeTab = visibleTabs.find(function (t) { return t.id === _activeSettingsTab; }) || visibleTabs[0];
 
   c.innerHTML =
     '<div class="page-head">' +
@@ -439,6 +471,161 @@ export async function renderSettingsPage() {
   // sync so it doesn't throw on Profile/Scheduled.
   if (document.getElementById('email-provider')) onEmailProviderChange();
 }
+
+// ------------------------------------------------------------------------
+// Users tab (admin-only)
+// ------------------------------------------------------------------------
+
+function _renderUsersPanel(me, users) {
+  var rowsHtml = (users || []).map(function (u) {
+    var isSelf = (u.id === me.id);
+    var roleBadge = u.role === 'admin'
+      ? '<span class="badge badge-high">admin</span>'
+      : '<span class="badge badge-medium">viewer</span>';
+    var activeBadge = u.active
+      ? '<span class="badge badge-low">active</span>'
+      : '<span class="badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);">disabled</span>';
+    // Self-rows get no action buttons — the backend rejects self-demotion
+    // and self-deactivation anyway, but dimming the controls keeps the
+    // UI honest.
+    var actions = isSelf
+      ? '<span style="color:var(--text-muted); font-size:12px;">(you)</span>'
+      : (
+        '<button class="btn btn-secondary btn-sm" data-action="toggleUserRole" data-arg="' +
+            u.id + '|' + (u.role === 'admin' ? 'viewer' : 'admin') +
+          '">Make ' + (u.role === 'admin' ? 'viewer' : 'admin') + '</button> ' +
+        '<button class="btn btn-secondary btn-sm" data-action="toggleUserActive" data-arg="' +
+            u.id + '|' + (u.active ? '0' : '1') +
+          '">' + (u.active ? 'Disable' : 'Enable') + '</button> ' +
+        '<button class="btn btn-danger btn-sm" data-action="deleteUserConfirm" data-arg="' +
+            u.id + '|' + encodeURIComponent(u.email) +
+          '">Delete</button>'
+      );
+    return (
+      '<tr>' +
+        '<td>' + escapeHtml(u.email) + '</td>' +
+        '<td>' + roleBadge + '</td>' +
+        '<td>' + activeBadge + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' + escapeHtml(u.created_at || '') + '</td>' +
+        '<td>' + actions + '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  var tableHtml = users && users.length
+    ? '<div class="table-wrap"><table class="table">' +
+        '<thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>'
+    : '<p style="color:var(--text-muted); font-size:13px;">No other users yet.</p>';
+
+  return (
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Invite a User</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Admins can create additional accounts. Viewers can see scans and findings but cannot ' +
+        'change settings, block IPs, or manage users.' +
+      '</p>' +
+      '<div class="form-row"><label>Email</label>' +
+        '<input type="email" id="new-user-email" placeholder="user@example.com" autocomplete="off"/></div>' +
+      '<div class="form-row"><label>Temporary password</label>' +
+        '<input type="password" id="new-user-password" placeholder="at least 8 characters" autocomplete="new-password"/></div>' +
+      '<div class="form-row"><label>Role</label>' +
+        '<select id="new-user-role">' +
+          '<option value="viewer" selected>Viewer (read-only)</option>' +
+          '<option value="admin">Admin (full access)</option>' +
+        '</select></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary" data-action="createUser">Create user</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="section-label">Accounts (' + (users || []).length + ')</div>' +
+      tableHtml +
+    '</div>'
+  );
+}
+
+export async function createUser() {
+  var email    = (document.getElementById('new-user-email').value || '').trim();
+  var password = document.getElementById('new-user-password').value || '';
+  var role     = document.getElementById('new-user-role').value || 'viewer';
+  if (!email || !password) {
+    toastError('Email and temporary password are both required.');
+    return;
+  }
+  try {
+    var r = await apiCreateUser({ email: email, password: password, role: role });
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Create failed.');
+      return;
+    }
+    showToast('Created ' + email);
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function toggleUserRole(arg) {
+  // arg format: "<id>|<newRole>" — encoded in the data-arg attribute so
+  // the central action registry can pass it through unchanged.
+  var parts = String(arg || '').split('|');
+  var id = Number(parts[0]), role = parts[1];
+  if (!id || !role) return;
+  try {
+    var r = await apiUpdateUserRole(id, role);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Role update failed.');
+      return;
+    }
+    showToast('Role updated');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function toggleUserActive(arg) {
+  var parts = String(arg || '').split('|');
+  var id = Number(parts[0]), active = parts[1] === '1';
+  if (!id) return;
+  try {
+    var r = await apiUpdateUserActive(id, active);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Status update failed.');
+      return;
+    }
+    showToast(active ? 'Account enabled' : 'Account disabled');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function deleteUserConfirm(arg) {
+  var parts = String(arg || '').split('|');
+  var id = Number(parts[0]);
+  var email = decodeURIComponent(parts[1] || '');
+  if (!id) return;
+  if (!window.confirm('Delete account ' + email + '? This cannot be undone.')) return;
+  try {
+    var r = await apiDeleteUser(id);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Delete failed.');
+      return;
+    }
+    showToast('Deleted ' + email);
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
 
 export async function saveAccount() {
   var newEmail = document.getElementById('account-email').value.trim();

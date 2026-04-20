@@ -10,7 +10,7 @@
 # we need to be confident our detections actually catch threats.
 #
 # HOW TO RUN TESTS:
-#   python -m pytest test_detections.py -v
+#   python -m pytest tests/test_detections.py -v
 #
 # The "-v" flag means "verbose" — it shows each test name and whether
 # it passed or failed, instead of just dots.
@@ -1473,7 +1473,7 @@ def test_json_only_with_empty_logs_emits_valid_json(tmp_path):
     import json as _json
     from pathlib import Path as _Path
 
-    project_root = _Path(__file__).resolve().parent
+    project_root = _Path(__file__).resolve().parents[1]
     empty_logs = tmp_path / "empty_logs"
     empty_logs.mkdir()
 
@@ -1755,7 +1755,7 @@ def test_quiet_with_empty_logs_produces_no_stdout(tmp_path):
     import sys
     from pathlib import Path as _Path
 
-    project_root = _Path(__file__).resolve().parent
+    project_root = _Path(__file__).resolve().parents[1]
     empty_logs = tmp_path / "empty_logs"
     empty_logs.mkdir()
 
@@ -3161,7 +3161,7 @@ def test_summary_cli_writes_report(tmp_path):
     from pulse.database import init_db
     from datetime import datetime, timedelta
 
-    project_root = _Path(__file__).resolve().parent
+    project_root = _Path(__file__).resolve().parents[1]
     db_path = tmp_path / "summary.db"
     init_db(str(db_path))
     ts = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")

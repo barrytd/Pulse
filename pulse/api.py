@@ -46,15 +46,16 @@ from pulse import __version__
 from pulse.auth import (
     SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS,
     ensure_session_secret, hash_password, issue_session_cookie,
-    require_login, verify_password,
+    require_admin, require_login, verify_password,
 )
 from pulse.database import (
-    count_users, create_user, delete_all_monitor_sessions,
-    delete_monitor_session, delete_scans, get_fleet_summary, get_history,
-    get_monitor_session_findings, get_scan_findings,
+    count_admins, count_users, create_user, delete_all_monitor_sessions,
+    delete_monitor_session, delete_scans, delete_user, get_fleet_summary,
+    get_history, get_monitor_session_findings, get_scan_findings,
     get_user_by_email, get_user_by_id, init_db,
-    list_monitor_sessions, save_scan,
-    set_finding_review, update_user_email, update_user_password,
+    list_monitor_sessions, list_users, save_scan,
+    set_finding_review, update_user_active, update_user_email,
+    update_user_password, update_user_role,
 )
 from pulse.detections import run_all_detections
 from pulse import firewall_config
@@ -226,6 +227,10 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
             if user_id is None:
                 return JSONResponse({"detail": "Authentication required."}, status_code=401)
+            # Reject cookies whose user was deactivated after sign-in.
+            user = get_user_by_id(app.state.db_path, user_id)
+            if not user or not user.get("active"):
+                return JSONResponse({"detail": "Authentication required."}, status_code=401)
         return await call_next(request)
 
     return app
@@ -319,16 +324,21 @@ def _register_routes(app: FastAPI) -> None:
         """Tell the login page whether to show login or first-user signup,
         and tell the dashboard whether the user is already signed in."""
         if not app.state.auth_required:
-            return {"logged_in": True, "email": "local", "needs_signup": False}
+            return {"logged_in": True, "email": "local", "role": "admin", "needs_signup": False}
         needs_signup = count_users(app.state.db_path) == 0
         cookie = request.cookies.get(SESSION_COOKIE_NAME)
         from pulse.auth import verify_session_cookie
         user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
         if user_id:
             user = get_user_by_id(app.state.db_path, user_id)
-            if user:
-                return {"logged_in": True, "email": user["email"], "needs_signup": False}
-        return {"logged_in": False, "email": None, "needs_signup": needs_signup}
+            if user and user.get("active"):
+                return {
+                    "logged_in": True,
+                    "email": user["email"],
+                    "role": user.get("role", "admin"),
+                    "needs_signup": False,
+                }
+        return {"logged_in": False, "email": None, "role": None, "needs_signup": needs_signup}
 
     @app.post("/api/auth/signup")
     async def auth_signup(request: Request):
@@ -360,6 +370,8 @@ def _register_routes(app: FastAPI) -> None:
         if not user or not verify_password(password, user["password_hash"]):
             # Deliberately vague — don't leak whether the email exists.
             raise HTTPException(401, detail="Invalid email or password.")
+        if not user.get("active"):
+            raise HTTPException(403, detail="Account is deactivated.")
         cookie = issue_session_cookie(app.state.session_secret, user["id"])
         resp = JSONResponse({"status": "ok", "email": user["email"]})
         resp.set_cookie(
@@ -373,6 +385,23 @@ def _register_routes(app: FastAPI) -> None:
         resp = JSONResponse({"status": "ok"})
         resp.delete_cookie(SESSION_COOKIE_NAME)
         return resp
+
+    @app.get("/api/me")
+    def api_me(user_id: int = Depends(require_login)):
+        """Return the signed-in user's profile including role. The dashboard
+        uses this to gate admin-only UI (Users card, etc.)."""
+        if not app.state.auth_required:
+            return {"id": 0, "email": "local", "role": "admin", "active": True}
+        user = get_user_by_id(app.state.db_path, user_id)
+        if not user:
+            raise HTTPException(401, detail="Authentication required.")
+        return {
+            "id": user["id"],
+            "email": user["email"],
+            "role": user.get("role", "admin"),
+            "active": user.get("active", True),
+            "created_at": user.get("created_at"),
+        }
 
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):
@@ -404,6 +433,107 @@ def _register_routes(app: FastAPI) -> None:
         if not user or not verify_password(current_password, user["password_hash"]):
             raise HTTPException(401, detail="Current password is incorrect.")
         update_user_password(app.state.db_path, user_id, hash_password(new_password))
+        return {"status": "ok"}
+
+    # -------------------------------------------------------------------
+    # Admin user management (/api/users)
+    # -------------------------------------------------------------------
+    # Every write here is audited so an admin can reconstruct who-invited-
+    # whom-and-when later. The "don't lock yourself out" guard lives on
+    # demote / deactivate / delete: if the request would leave zero active
+    # admins, reject it with 409.
+    def _public_user(u):
+        return {
+            "id":         u["id"],
+            "email":      u["email"],
+            "role":       u.get("role", "admin"),
+            "active":     bool(u.get("active", True)),
+            "created_at": u.get("created_at"),
+        }
+
+    def _audit_user_action(acting_user_id, action, *, target=None, detail=None):
+        from pulse import blocker
+        acting = get_user_by_id(app.state.db_path, acting_user_id) if acting_user_id else None
+        blocker.log_audit(
+            app.state.db_path,
+            action=action,
+            source="dashboard",
+            user=(acting or {}).get("email"),
+            detail=f"target={target}" + (f" {detail}" if detail else ""),
+        )
+
+    @app.get("/api/users")
+    def api_list_users(user_id: int = Depends(require_admin)):
+        return {"users": [_public_user(u) for u in list_users(app.state.db_path)]}
+
+    @app.post("/api/users")
+    async def api_create_user(request: Request, user_id: int = Depends(require_admin)):
+        body = await request.json()
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        role = (body.get("role") or "viewer").strip().lower()
+        if "@" not in email or "." not in email:
+            raise HTTPException(400, detail="Please enter a valid email address.")
+        if len(password) < 8:
+            raise HTTPException(400, detail="Password must be at least 8 characters.")
+        if role not in ("admin", "viewer"):
+            raise HTTPException(400, detail="Role must be 'admin' or 'viewer'.")
+        if get_user_by_email(app.state.db_path, email):
+            raise HTTPException(409, detail="A user with that email already exists.")
+        new_id = create_user(app.state.db_path, email, hash_password(password), role=role)
+        _audit_user_action(user_id, "create_user", target=email, detail=f"role={role}")
+        user = get_user_by_id(app.state.db_path, new_id)
+        return _public_user(user)
+
+    @app.put("/api/users/{target_id}/role")
+    async def api_update_user_role(target_id: int, request: Request,
+                                   user_id: int = Depends(require_admin)):
+        body = await request.json()
+        role = (body.get("role") or "").strip().lower()
+        if role not in ("admin", "viewer"):
+            raise HTTPException(400, detail="Role must be 'admin' or 'viewer'.")
+        target = get_user_by_id(app.state.db_path, target_id)
+        if not target:
+            raise HTTPException(404, detail="User not found.")
+        # Guard: demoting the last active admin would lock everyone out.
+        if target.get("role") == "admin" and role == "viewer":
+            if count_admins(app.state.db_path, active_only=True) <= 1:
+                raise HTTPException(409, detail="Cannot demote the last active admin.")
+        update_user_role(app.state.db_path, target_id, role)
+        _audit_user_action(user_id, "update_user_role",
+                           target=target["email"], detail=f"role={role}")
+        return _public_user(get_user_by_id(app.state.db_path, target_id))
+
+    @app.put("/api/users/{target_id}/active")
+    async def api_update_user_active(target_id: int, request: Request,
+                                     user_id: int = Depends(require_admin)):
+        body = await request.json()
+        active = bool(body.get("active"))
+        target = get_user_by_id(app.state.db_path, target_id)
+        if not target:
+            raise HTTPException(404, detail="User not found.")
+        if target_id == user_id and not active:
+            raise HTTPException(409, detail="You cannot deactivate your own account.")
+        if (not active and target.get("role") == "admin"
+                and count_admins(app.state.db_path, active_only=True) <= 1):
+            raise HTTPException(409, detail="Cannot deactivate the last active admin.")
+        update_user_active(app.state.db_path, target_id, active)
+        _audit_user_action(user_id, "update_user_active",
+                           target=target["email"], detail=f"active={int(active)}")
+        return _public_user(get_user_by_id(app.state.db_path, target_id))
+
+    @app.delete("/api/users/{target_id}")
+    def api_delete_user(target_id: int, user_id: int = Depends(require_admin)):
+        target = get_user_by_id(app.state.db_path, target_id)
+        if not target:
+            raise HTTPException(404, detail="User not found.")
+        if target_id == user_id:
+            raise HTTPException(409, detail="You cannot delete your own account.")
+        if (target.get("role") == "admin"
+                and count_admins(app.state.db_path, active_only=True) <= 1):
+            raise HTTPException(409, detail="Cannot delete the last active admin.")
+        delete_user(app.state.db_path, target_id)
+        _audit_user_action(user_id, "delete_user", target=target["email"])
         return {"status": "ok"}
 
     # -------------------------------------------------------------------

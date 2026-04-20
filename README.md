@@ -104,39 +104,55 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 
 ```
 Pulse/
-├── pulse/
+├── pulse/                  # Application package — see pulse/README.md for
+│   │                         a per-module index and one-liner for each file
+│   ├── README.md           # Module map (core, reporting, API, monitor, firewall, …)
 │   ├── parser.py           # Reads and parses .evtx log files
-│   ├── detections.py       # 24 detection rules + attack chain correlation
-│   ├── reporter.py         # Generates text, HTML, JSON, and CSV reports
+│   ├── detections.py       # Detection engine + attack chain correlation
+│   ├── rules_config.py     # Declarative list of every built-in detection rule
+│   ├── remediation.py      # Per-rule remediation steps + MITRE mitigation IDs
+│   ├── reporter.py         # HTML, JSON, CSV, and text reports
 │   ├── pdf_report.py       # ReportLab PDF report with grade-coloured score ring
-│   ├── emailer.py          # SMTP email delivery + CRITICAL/HIGH alert emails
+│   ├── emailer.py          # SMTP delivery — threshold alerts + full reports
 │   ├── webhook.py          # Slack / Discord webhook delivery
-│   ├── monitor.py          # CLI live monitoring via wevtutil
-│   ├── monitor_service.py  # Async in-process live monitor (SSE-backed, for the dashboard)
-│   ├── database.py         # SQLite scan history (with position-based display numbering)
-│   ├── firewall_parser.py  # Windows Firewall log parser + port-scan / sensitive-port detections
-│   ├── blocker.py          # IP block list — stage, push (netsh), unblock, lifecycle
-│   ├── interactive.py      # Interactive terminal mode
-│   ├── animations.py       # ECG heartbeat terminal animation
-│   ├── api.py              # FastAPI REST API + SSE stream for live monitor
-│   ├── auth.py             # Single-user auth: scrypt hashing + signed session cookies
-│   ├── whitelist.py        # Whitelist filtering shared by CLI and API
-│   ├── known_good.py       # Built-in known-good service whitelist
-│   ├── static/js/          # Native ES modules: api, dashboard, scans, findings, firewall, monitor, settings, etc.
+│   ├── monitor.py          # Live-monitor loop (CLI + dashboard SSE)
+│   ├── monitor_service.py  # Session bookkeeping for monitor runs
+│   ├── system_scan.py      # "Scan My System" — reads C:\Windows\…\winevt\Logs
+│   ├── scheduler.py        # Cron parser + next-run math
+│   ├── scheduled_scan.py   # Background thread that fires scheduled scans
+│   ├── database.py         # SQLite schema + every query helper
+│   ├── api.py              # FastAPI app, /api/* endpoints, SPA shell routing
+│   ├── auth.py             # scrypt password hashing, session cookies, RBAC
+│   ├── firewall_parser.py  # pfirewall.log parser + public-IP detections
+│   ├── firewall_config.py  # netsh advfirewall audit (profiles, any-any rules)
+│   ├── blocker.py          # Pulse-managed IP block list + netsh push/unblock
+│   ├── comparison.py       # Scan diff → {new, resolved, shared}
+│   ├── known_good.py       # Built-in 100+ service-account allowlist
+│   ├── whitelist.py        # User-configurable whitelist layer
+│   ├── interactive.py      # Interactive terminal browser
+│   ├── animations.py       # ECG heartbeat animation during parsing
+│   ├── static/js/          # Native ES modules: api, dashboard, scans, findings, …
 │   └── web/
 │       ├── index.html      # Single-page dashboard
 │       └── login.html      # Sign-in / first-user signup page
+├── tests/                  # Pytest suite (one test_<module>.py per pulse module)
+│   ├── test_detections.py        # Detection engine tests
+│   ├── test_api.py               # REST API tests
+│   ├── test_alerts.py            # Email alert tests
+│   ├── test_auth.py              # Auth, RBAC, multi-user management
+│   ├── test_webhook.py           # Slack / Discord webhook tests
+│   ├── test_firewall_parser.py   # Firewall log parser + detection tests
+│   ├── test_firewall_config.py   # netsh advfirewall audit tests
+│   ├── test_blocker.py           # IP block-list lifecycle + safety rails
+│   ├── test_monitor_service.py   # Live monitor session bookkeeping
+│   ├── test_system_scan.py       # System-scan plumbing
+│   └── test_hostname.py          # Hostname attribution
 ├── logs/                   # Drop .evtx files here for analysis
 ├── reports/                # Generated reports saved here
 ├── pulse.db                # SQLite scan history database
-├── test_detections.py        # Detection engine tests
-├── test_api.py               # REST API tests
-├── test_alerts.py            # Email alert tests
-├── test_auth.py              # Auth + session cookie tests
-├── test_webhook.py           # Slack / Discord webhook tests
-├── test_firewall_parser.py   # Firewall log parser + detection tests
-├── test_blocker.py           # IP block-list lifecycle + safety-rail tests
-├── main.py                 # Entry point - run this to analyse logs
+├── main.py                 # CLI entry point — run this to analyse logs
+├── seed_fleet_demo.py      # Demo seeding script (multi-host fleet)
+├── send_test_email.py      # SMTP sanity check
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
 ├── CHANGELOG.md            # Daily change log
@@ -238,7 +254,11 @@ The HTML report opens in any browser with colour-coded findings:
 ## Running Tests
 
 ```bash
-python -m pytest test_detections.py -v
+# Run the whole suite
+python -m pytest -q
+
+# Run a single module
+python -m pytest tests/test_detections.py -v
 ```
 
 All 271 tests run without needing real `.evtx` files — the test suite uses fake event data that mirrors real Windows log structure.

@@ -124,6 +124,10 @@ import {
   onScheduleKindChange,
   saveScheduleSettings,
   switchSettingsTab,
+  createUser,
+  toggleUserRole,
+  toggleUserActive,
+  deleteUserConfirm,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -275,6 +279,10 @@ const actions = {
   onScheduleKindChange,
   saveScheduleSettings,
   switchSettingsTab,
+  createUser,
+  toggleUserRole,
+  toggleUserActive,
+  deleteUserConfirm,
 
   // reports
   setReportsQueryFromInput,

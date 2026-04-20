@@ -207,6 +207,50 @@ export async function apiGetAuthStatus() {
   }
 }
 
+// --- Current user + admin user management --------------------------------
+
+export async function apiGetMe() {
+  try {
+    var resp = await fetch('/api/me');
+    if (!resp.ok) return { role: null };
+    return resp.json();
+  } catch (e) { return { role: null }; }
+}
+
+export async function apiListUsers() {
+  var resp = await fetch('/api/users');
+  if (!resp.ok) return { users: [] };
+  return resp.json();
+}
+
+export async function apiCreateUser(body) {
+  return fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiUpdateUserRole(userId, role) {
+  return fetch('/api/users/' + Number(userId) + '/role', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: role }),
+  });
+}
+
+export async function apiUpdateUserActive(userId, active) {
+  return fetch('/api/users/' + Number(userId) + '/active', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: !!active }),
+  });
+}
+
+export async function apiDeleteUser(userId) {
+  return fetch('/api/users/' + Number(userId), { method: 'DELETE' });
+}
+
 export async function apiWhitelistBuiltin() {
   try {
     var resp = await fetch('/api/whitelist/builtin');

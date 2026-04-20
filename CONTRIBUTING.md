@@ -24,17 +24,20 @@ python main.py --logs logs/
 
 ## Running the tests
 
-All tests live in `test_detections.py` and use `pytest`. There are no fixtures or external services to mock — the tests build fake event dictionaries that mirror the shape of real `.evtx` data.
+All tests live in [`tests/`](tests/) and use `pytest`. There are no fixtures or external services to mock — the tests build fake event dictionaries that mirror the shape of real `.evtx` data.
 
 ```bash
-# Run every test
-python -m pytest test_detections.py -v
+# Run every test in the suite
+python -m pytest -q
+
+# Run every detection test
+python -m pytest tests/test_detections.py -v
 
 # Run a single test
-python -m pytest test_detections.py::test_brute_force_flags_five_failures -v
+python -m pytest tests/test_detections.py::test_brute_force_flags_five_failures -v
 
 # Run tests matching a keyword
-python -m pytest test_detections.py -k "baseline"
+python -m pytest tests/test_detections.py -k "baseline"
 ```
 
 Every new detection rule must ship with tests. Every bug fix must include a test that fails before the fix and passes after.

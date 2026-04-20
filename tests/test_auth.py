@@ -263,3 +263,140 @@ def test_update_password_rejects_short(auth_client):
         "new_password": "short", "current_password": "old-password-ok",
     })
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# RBAC — roles, admin-only endpoints, multi-user management
+# ---------------------------------------------------------------------------
+
+def _signup_admin(client, email="admin@example.com", password="correct-horse-battery"):
+    r = client.post("/api/auth/signup", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+    return email, password
+
+
+def _login(client, email, password):
+    r = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+
+
+def test_first_signup_becomes_admin(auth_client):
+    _signup_admin(auth_client)
+    r = auth_client.get("/api/me")
+    assert r.status_code == 200
+    assert r.json()["role"] == "admin"
+    assert r.json()["active"] is True
+
+
+def test_status_includes_role(auth_client):
+    _signup_admin(auth_client)
+    data = auth_client.get("/api/auth/status").json()
+    assert data["role"] == "admin"
+
+
+def test_admin_can_create_viewer(auth_client):
+    _signup_admin(auth_client)
+    r = auth_client.post("/api/users", json={
+        "email": "viewer@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["role"] == "viewer"
+    assert body["email"] == "viewer@example.com"
+
+
+def test_viewer_cannot_list_users(auth_client):
+    _signup_admin(auth_client)
+    auth_client.post("/api/users", json={
+        "email": "viewer@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    })
+    auth_client.post("/api/auth/logout")
+    _login(auth_client, "viewer@example.com", "another-long-password")
+    r = auth_client.get("/api/users")
+    assert r.status_code == 403
+
+
+def test_viewer_blocked_from_admin_endpoints(auth_client):
+    _signup_admin(auth_client)
+    auth_client.post("/api/users", json={
+        "email": "viewer@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    })
+    auth_client.post("/api/auth/logout")
+    _login(auth_client, "viewer@example.com", "another-long-password")
+    # All three admin writes must be blocked.
+    assert auth_client.post("/api/users", json={
+        "email": "x@y.com", "password": "long-password-ok", "role": "viewer",
+    }).status_code == 403
+
+
+def test_admin_cannot_demote_last_admin(auth_client):
+    _signup_admin(auth_client)
+    me = auth_client.get("/api/me").json()
+    r = auth_client.put(f"/api/users/{me['id']}/role", json={"role": "viewer"})
+    assert r.status_code == 409
+
+
+def test_admin_cannot_deactivate_self(auth_client):
+    _signup_admin(auth_client)
+    me = auth_client.get("/api/me").json()
+    r = auth_client.put(f"/api/users/{me['id']}/active", json={"active": False})
+    assert r.status_code == 409
+
+
+def test_admin_cannot_delete_self(auth_client):
+    _signup_admin(auth_client)
+    me = auth_client.get("/api/me").json()
+    r = auth_client.delete(f"/api/users/{me['id']}")
+    assert r.status_code == 409
+
+
+def test_deactivated_user_cannot_log_in(auth_client):
+    _signup_admin(auth_client)
+    created = auth_client.post("/api/users", json={
+        "email": "viewer@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    }).json()
+    # Admin deactivates the viewer.
+    r = auth_client.put(f"/api/users/{created['id']}/active", json={"active": False})
+    assert r.status_code == 200
+    assert r.json()["active"] is False
+    # Now the viewer's login attempt is refused.
+    auth_client.post("/api/auth/logout")
+    r = auth_client.post("/api/auth/login", json={
+        "email": "viewer@example.com", "password": "another-long-password",
+    })
+    assert r.status_code == 403
+
+
+def test_admin_can_promote_viewer(auth_client):
+    _signup_admin(auth_client)
+    created = auth_client.post("/api/users", json={
+        "email": "promote@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    }).json()
+    r = auth_client.put(f"/api/users/{created['id']}/role", json={"role": "admin"})
+    assert r.status_code == 200
+    assert r.json()["role"] == "admin"
+
+
+def test_create_user_duplicate_email_conflict(auth_client):
+    _signup_admin(auth_client)
+    auth_client.post("/api/users", json={
+        "email": "dup@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    })
+    r = auth_client.post("/api/users", json={
+        "email": "dup@example.com",
+        "password": "another-long-password",
+        "role": "viewer",
+    })
+    assert r.status_code == 409
