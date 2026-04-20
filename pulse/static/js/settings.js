@@ -21,6 +21,7 @@ import {
   apiSaveWebhookConfig,
   apiSendTestWebhook,
   apiSaveSchedulerConfig,
+  apiUploadAvatar,
 } from './api.js';
 import { escapeHtml, showToast, toastError } from './dashboard.js';
 import { getTheme } from './theme.js';
@@ -46,6 +47,7 @@ const SETTINGS_TABS = [
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
 let _activeSettingsTab = 'profile';
+let _avatarCacheBuster = '';
 
 export function setActiveSettingsTab(name) {
   if (SETTINGS_TABS.some(function (t) { return t.id === name; })) {
@@ -232,7 +234,27 @@ export async function renderSettingsPage() {
   var currentTheme = getTheme();
 
   // --- Profile tab ----------------------------------------------------
+  // Avatar card — browser caches GET /api/me/avatar, so when the user
+  // uploads a replacement we append ?v=<mtime> to dodge the cache.
+  var avatarCacheBuster = (typeof _avatarCacheBuster !== 'undefined') ? _avatarCacheBuster : '';
+  var avatarImg = (me && me.has_avatar)
+    ? '<img id="profile-avatar-img" src="/api/me/avatar' + (avatarCacheBuster ? ('?v=' + avatarCacheBuster) : '') + '" alt="Avatar" style="width:72px; height:72px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);"/>'
+    : '<div id="profile-avatar-img" style="width:72px; height:72px; border-radius:50%; background:var(--bg); border:2px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:24px;">' + escapeHtml((auth.email || '?').charAt(0).toUpperCase()) + '</div>';
+  var avatarHtml =
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Profile Picture</div>' +
+      '<div style="display:flex; align-items:center; gap:18px;">' +
+        avatarImg +
+        '<div style="display:flex; flex-direction:column; gap:6px;">' +
+          '<button class="btn btn-secondary" data-action="uploadAvatarClick" type="button">Upload Avatar</button>' +
+          '<span style="color:var(--text-muted); font-size:12px;">Max size 2MB. Formats: JPG, PNG.</span>' +
+        '</div>' +
+        '<input type="file" id="profile-avatar-input" accept="image/png,image/jpeg" style="display:none;" data-action-change="onAvatarFileSelected"/>' +
+      '</div>' +
+    '</div>';
+
   var profileHtml =
+    avatarHtml +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">My Account</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -916,5 +938,35 @@ function _formatNextRun(iso) {
     return 'next run ' + d.toLocaleString();
   } catch (e) {
     return iso;
+  }
+}
+
+// ------------------------------------------------------------------------
+// Profile avatar
+// ------------------------------------------------------------------------
+
+export function uploadAvatarClick() {
+  var input = document.getElementById('profile-avatar-input');
+  if (input) input.click();
+}
+
+export async function onAvatarFileSelected(_arg, target) {
+  var input = target || document.getElementById('profile-avatar-input');
+  var file = input && input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    toastError('Avatar must be 2MB or smaller.');
+    input.value = '';
+    return;
+  }
+  try {
+    await apiUploadAvatar(file);
+    _avatarCacheBuster = String(Date.now());
+    showToast('Profile picture updated.');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Upload failed: ' + (e && e.message ? e.message : e));
+  } finally {
+    if (input) input.value = '';
   }
 }

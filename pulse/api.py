@@ -54,10 +54,10 @@ from pulse.database import (
     count_admins, count_users, create_user, delete_all_monitor_sessions,
     delete_monitor_session, delete_scans, delete_user, get_fleet_summary,
     get_history, get_monitor_session_findings, get_scan_findings,
-    get_user_by_email, get_user_by_id, init_db,
+    get_user_avatar, get_user_by_email, get_user_by_id, init_db,
     list_monitor_sessions, list_users, save_scan,
-    set_finding_review, update_user_active, update_user_email,
-    update_user_password, update_user_role,
+    set_finding_review, set_user_avatar, update_user_active,
+    update_user_email, update_user_password, update_user_role,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -518,7 +518,7 @@ def _register_routes(app: FastAPI) -> None:
         """Return the signed-in user's profile including role. The dashboard
         uses this to gate admin-only UI (Users card, etc.)."""
         if not app.state.auth_required:
-            return {"id": 0, "email": "local", "role": "admin", "active": True}
+            return {"id": 0, "email": "local", "role": "admin", "active": True, "has_avatar": False}
         user = get_user_by_id(app.state.db_path, user_id)
         if not user:
             raise HTTPException(401, detail="Authentication required.")
@@ -528,7 +528,44 @@ def _register_routes(app: FastAPI) -> None:
             "role": user.get("role", "admin"),
             "active": user.get("active", True),
             "created_at": user.get("created_at"),
+            "has_avatar": bool(user.get("avatar_mime")),
         }
+
+    # -------------------------------------------------------------------
+    # Profile avatar — store the image as a BLOB on the users row so it
+    # survives Render's ephemeral filesystem restarts. Cap the upload at
+    # 2MB and accept only PNG/JPEG so we're not streaming arbitrary blobs
+    # back to the browser.
+    # -------------------------------------------------------------------
+    _AVATAR_MAX_BYTES = 2 * 1024 * 1024
+    _AVATAR_MIMES = {"image/png", "image/jpeg"}
+
+    @app.post("/api/me/avatar")
+    async def api_me_avatar_upload(
+        file: UploadFile = File(...),
+        user_id: int = Depends(require_login),
+    ):
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Avatar upload requires auth.")
+        mime = (file.content_type or "").lower()
+        if mime not in _AVATAR_MIMES:
+            raise HTTPException(400, detail="Avatar must be a PNG or JPEG image.")
+        data = await file.read()
+        if not data:
+            raise HTTPException(400, detail="Uploaded file is empty.")
+        if len(data) > _AVATAR_MAX_BYTES:
+            raise HTTPException(400, detail="Avatar must be 2MB or smaller.")
+        set_user_avatar(app.state.db_path, user_id, data, mime)
+        return {"status": "ok", "has_avatar": True}
+
+    @app.get("/api/me/avatar")
+    def api_me_avatar_get(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            raise HTTPException(404, detail="No avatar.")
+        blob, mime = get_user_avatar(app.state.db_path, user_id)
+        if blob is None:
+            raise HTTPException(404, detail="No avatar.")
+        return Response(content=blob, media_type=mime or "image/png")
 
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):

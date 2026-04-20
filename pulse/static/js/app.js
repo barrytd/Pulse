@@ -129,6 +129,8 @@ import {
   toggleUserRole,
   toggleUserActive,
   deleteUserConfirm,
+  uploadAvatarClick,
+  onAvatarFileSelected,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -285,6 +287,8 @@ const actions = {
   toggleUserRole,
   toggleUserActive,
   deleteUserConfirm,
+  uploadAvatarClick,
+  onAvatarFileSelected,
 
   // reports
   setReportsQueryFromInput,

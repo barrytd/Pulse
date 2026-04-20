@@ -219,6 +219,22 @@ export async function apiGetMe() {
   } catch (e) { return { role: null }; }
 }
 
+// Upload an avatar image (File/Blob). Returns the parsed JSON body on
+// success, or throws with the server's error detail so callers can show
+// it in a toast.
+export async function apiUploadAvatar(file) {
+  var fd = new FormData();
+  fd.append('file', file);
+  var resp = await fetch('/api/me/avatar', { method: 'POST', body: fd });
+  var body = null;
+  try { body = await resp.json(); } catch (e) { /* non-JSON error page */ }
+  if (!resp.ok) {
+    var msg = (body && body.detail) ? body.detail : ('HTTP ' + resp.status);
+    throw new Error(msg);
+  }
+  return body || { status: 'ok' };
+}
+
 export async function apiListUsers() {
   var resp = await fetch('/api/users');
   if (!resp.ok) return { users: [] };

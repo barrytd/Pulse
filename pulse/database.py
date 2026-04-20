@@ -206,6 +206,8 @@ def init_db(db_path):
         for ddl in (
             "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'",
             "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN avatar_blob BLOB",
+            "ALTER TABLE users ADD COLUMN avatar_mime TEXT",
         ):
             try:
                 conn.execute(ddl)
@@ -884,7 +886,7 @@ def count_users(db_path):
         return int(row[0]) if row else 0
 
 
-_USER_COLS = "id, email, password_hash, created_at, role, active"
+_USER_COLS = "id, email, password_hash, created_at, role, active, avatar_mime"
 
 
 def _row_to_user(row):
@@ -897,7 +899,31 @@ def _row_to_user(row):
         "created_at": row[3],
         "role": row[4] or "admin",
         "active": bool(row[5]) if row[5] is not None else True,
+        "avatar_mime": row[6] if len(row) > 6 else None,
     }
+
+
+def set_user_avatar(db_path, user_id, blob, mime):
+    """Store an avatar image as a BLOB on the user row. The mime type is
+    tracked separately so GET /api/me/avatar can serve the file with the
+    right Content-Type."""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET avatar_blob = ?, avatar_mime = ? WHERE id = ?",
+            (blob, mime, int(user_id)),
+        )
+
+
+def get_user_avatar(db_path, user_id):
+    """Return (blob, mime) for a user's avatar, or (None, None) if unset."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT avatar_blob, avatar_mime FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+    if not row or row[0] is None:
+        return None, None
+    return row[0], row[1]
 
 
 def create_user(db_path, email, password_hash, role="viewer"):
