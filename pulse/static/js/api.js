@@ -183,11 +183,13 @@ export async function apiDeleteWhitelistEntries(entries) {
 // ---------------------------------------------------------------
 export async function apiGetConfig() {
   var resp = await fetch('/api/config');
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp.json();
 }
 
 export async function apiGetRules() {
   var resp = await fetch('/api/rules');
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp.json();
 }
 

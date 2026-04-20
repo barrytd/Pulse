@@ -128,6 +128,7 @@ export async function renderSettingsPage() {
   var em = config.email || {};
   var al = config.alerts || {};
   var wh = config.webhook || {};
+  var scanDefaults = config.settings || {};
   var whFlavor = wh.flavor || '';
   var flavorOpts = [
     { v: '',        label: 'Auto-detect from URL' },
@@ -409,11 +410,11 @@ export async function renderSettingsPage() {
         'inline editing arrives in a later release.' +
       '</p>' +
       '<div class="form-row"><label>Default log folder</label>' +
-        '<input type="text" value="' + escapeHtml(config.settings.logs || '') + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
+        '<input type="text" value="' + escapeHtml(scanDefaults.logs || '') + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
       '<div class="form-row"><label>Default format</label>' +
-        '<input type="text" value="' + escapeHtml((config.settings.format || '').toUpperCase()) + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
+        '<input type="text" value="' + escapeHtml((scanDefaults.format || '').toUpperCase()) + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
       '<div class="form-row"><label>Default severity</label>' +
-        '<input type="text" value="' + escapeHtml(config.settings.severity || '') + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
+        '<input type="text" value="' + escapeHtml(scanDefaults.severity || '') + '" readonly style="background:var(--bg); color:var(--text-muted);"/></div>' +
     '</div>';
 
   // --- Appearance tab ------------------------------------------------
