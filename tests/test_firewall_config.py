@@ -4,7 +4,7 @@
 # sample netsh output so the suite is safe to run on any OS — no live
 # Windows host required.
 
-from pulse import firewall_config as fc
+from pulse.firewall import firewall_config as fc
 
 
 # ---------------------------------------------------------------------------

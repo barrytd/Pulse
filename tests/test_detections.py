@@ -21,7 +21,7 @@
 # control the input precisely and test specific scenarios.
 
 
-from pulse.detections import (
+from pulse.core.detections import (
     detect_brute_force,
     detect_user_creation,
     detect_privilege_escalation,
@@ -1164,7 +1164,7 @@ def test_run_all_detections_combines_results():
 # output that other tools (Splunk, ELK, Python scripts) can consume.
 
 import json
-from pulse.reporter import generate_report, RULE_EVENT_IDS
+from pulse.reports.reporter import generate_report, RULE_EVENT_IDS
 
 
 def _make_test_findings():
@@ -1493,7 +1493,7 @@ def test_json_only_with_empty_logs_emits_valid_json(tmp_path):
 # SCHEDULER TESTS
 # ---------------------------------------------------------------------------
 
-from pulse.scheduler import find_new_stable_files, run_scheduler
+from pulse.alerts.scheduler import find_new_stable_files, run_scheduler
 
 
 def test_find_new_stable_files_requires_two_polls(tmp_path):
@@ -1647,9 +1647,9 @@ def test_attach_remediation_handles_empty_and_none():
 
 
 def test_reporter_reexports_remediation_from_canonical_module():
-    """pulse.reporter.REMEDIATION must be the exact same object as
+    """pulse.reports.reporter.REMEDIATION must be the exact same object as
     pulse.remediation.REMEDIATION — one source of truth."""
-    from pulse import reporter
+    from pulse.reports import reporter
     from pulse import remediation
     assert reporter.REMEDIATION is remediation.REMEDIATION
 
@@ -1693,7 +1693,7 @@ def test_attach_remediation_attaches_mitigations_field():
 
 def _render_html(findings, tmp_path):
     """Helper: render findings to HTML via generate_report and return the body."""
-    from pulse.reporter import generate_report
+    from pulse.reports.reporter import generate_report
     out = tmp_path / "report.html"
     generate_report(findings, output_path=str(out), fmt="html")
     return out.read_text(encoding="utf-8")
@@ -2093,7 +2093,7 @@ def test_compare_baseline_returns_all_original_findings():
 # that the emailer calls the right methods without actually sending anything.
 
 from unittest.mock import patch, MagicMock
-from pulse.emailer import (
+from pulse.alerts.emailer import (
     validate_email_config,
     send_report,
     _build_subject,
@@ -2335,7 +2335,7 @@ def test_send_report_calls_smtp(tmp_path):
 
     # patch replaces smtplib.SMTP with a fake object for this test only.
     # The fake object records what methods were called on it.
-    with patch("pulse.emailer.smtplib.SMTP") as mock_smtp:
+    with patch("pulse.alerts.emailer.smtplib.SMTP") as mock_smtp:
         mock_server = MagicMock()
         mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
         mock_smtp.return_value.__exit__ = MagicMock(return_value=False)
@@ -2356,7 +2356,7 @@ def test_send_report_fails_gracefully_on_auth_error(tmp_path):
     report.write_text("<html>test</html>")
     counts = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 0, "LOW": 0}
 
-    with patch("pulse.emailer.smtplib.SMTP") as mock_smtp:
+    with patch("pulse.alerts.emailer.smtplib.SMTP") as mock_smtp:
         mock_server = MagicMock()
         mock_server.login.side_effect = _smtplib.SMTPAuthenticationError(535, b"Bad credentials")
         mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
@@ -2408,7 +2408,7 @@ def test_html_body_no_file_url_link(tmp_path):
 # =============================================================================
 # DCSync detection tests
 # =============================================================================
-from pulse.detections import detect_dcsync, detect_suspicious_child_process
+from pulse.core.detections import detect_dcsync, detect_suspicious_child_process
 
 
 def _make_4662_event(subject_user, properties, subject_domain="CORP",
@@ -2838,7 +2838,7 @@ def test_legacy_review_status_backfills_to_flags(tmp_path):
 # Monitor tests
 # =============================================================================
 from unittest.mock import patch
-from pulse.monitor import poll_new_events, print_finding, _apply_whitelist
+from pulse.monitor.monitor import poll_new_events, print_finding, _apply_whitelist
 
 
 def _fake_event(record_num, event_id=4625):
@@ -2855,8 +2855,8 @@ def test_poll_new_events_returns_only_unseen(tmp_path):
     events = [_fake_event(1), _fake_event(2), _fake_event(3)]
     seen   = {("Security.evtx", 1), ("Security.evtx", 2)}
 
-    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx"]):
-        with patch("pulse.monitor.parse_evtx", return_value=events):
+    with patch("pulse.monitor.monitor._get_log_files", return_value=["Security.evtx"]):
+        with patch("pulse.monitor.monitor.parse_evtx", return_value=events):
             result = poll_new_events(str(tmp_path), seen)
 
     assert len(result) == 1
@@ -2868,8 +2868,8 @@ def test_poll_new_events_updates_seen_keys(tmp_path):
     events = [_fake_event(10), _fake_event(11)]
     seen   = set()
 
-    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx"]):
-        with patch("pulse.monitor.parse_evtx", return_value=events):
+    with patch("pulse.monitor.monitor._get_log_files", return_value=["Security.evtx"]):
+        with patch("pulse.monitor.monitor.parse_evtx", return_value=events):
             poll_new_events(str(tmp_path), seen)
 
     assert ("Security.evtx", 10) in seen
@@ -2879,7 +2879,7 @@ def test_poll_new_events_updates_seen_keys(tmp_path):
 def test_poll_new_events_empty_folder(tmp_path):
     """poll_new_events returns an empty list when there are no log files."""
     seen = set()
-    with patch("pulse.monitor._get_log_files", return_value=[]):
+    with patch("pulse.monitor.monitor._get_log_files", return_value=[]):
         result = poll_new_events(str(tmp_path), seen)
     assert result == []
 
@@ -2889,8 +2889,8 @@ def test_poll_new_events_all_already_seen(tmp_path):
     events = [_fake_event(1), _fake_event(2)]
     seen   = {("Security.evtx", 1), ("Security.evtx", 2)}
 
-    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx"]):
-        with patch("pulse.monitor.parse_evtx", return_value=events):
+    with patch("pulse.monitor.monitor._get_log_files", return_value=["Security.evtx"]):
+        with patch("pulse.monitor.monitor.parse_evtx", return_value=events):
             result = poll_new_events(str(tmp_path), seen)
 
     assert result == []
@@ -2908,8 +2908,8 @@ def test_poll_new_events_multiple_files(tmp_path):
             return events_a
         return events_b
 
-    with patch("pulse.monitor._get_log_files", return_value=["Security.evtx", "System.evtx"]):
-        with patch("pulse.monitor.parse_evtx", side_effect=fake_parse):
+    with patch("pulse.monitor.monitor._get_log_files", return_value=["Security.evtx", "System.evtx"]):
+        with patch("pulse.monitor.monitor.parse_evtx", side_effect=fake_parse):
             result = poll_new_events(str(tmp_path), seen)
 
     assert len(result) == 2
@@ -3049,7 +3049,7 @@ def test_get_findings_since_joins_scan_metadata(tmp_path):
 
 
 def test_build_summary_report_produces_html_with_aggregation(tmp_path):
-    from pulse.reporter import build_summary_report
+    from pulse.reports.reporter import build_summary_report
     scans = [
         {"id": 1, "scanned_at": "2026-04-16 09:00:00", "hostname": "HOST-A",
          "score": 85, "score_label": "LOW RISK", "filename": "a.evtx"},
@@ -3076,7 +3076,7 @@ def test_build_summary_report_produces_html_with_aggregation(tmp_path):
 
 
 def test_build_summary_report_empty_window(tmp_path):
-    from pulse.reporter import build_summary_report
+    from pulse.reports.reporter import build_summary_report
     out = tmp_path / "empty.html"
     build_summary_report([], [], period_days=7, output_path=str(out))
     html = out.read_text(encoding="utf-8")
@@ -3085,7 +3085,7 @@ def test_build_summary_report_empty_window(tmp_path):
 
 
 def test_diff_findings_bucketizes_by_rule_and_description():
-    from pulse.comparison import diff_findings
+    from pulse.reports.comparison import diff_findings
     a = [
         {"rule": "Brute Force Attempt", "severity": "HIGH", "description": "alice from 1.2.3.4"},
         {"rule": "RDP Logon Detected",  "severity": "LOW",  "description": "bob from 10.0.0.5"},
@@ -3103,14 +3103,14 @@ def test_diff_findings_bucketizes_by_rule_and_description():
 
 
 def test_diff_findings_empty_inputs():
-    from pulse.comparison import diff_findings
+    from pulse.reports.comparison import diff_findings
     d = diff_findings([], [])
     assert d == {"new": [], "resolved": [], "shared": []}
 
 
 def test_diff_findings_distinguishes_same_rule_different_descriptions():
     """Two brute-force hits from different IPs should not collapse as shared."""
-    from pulse.comparison import diff_findings
+    from pulse.reports.comparison import diff_findings
     a = [{"rule": "Brute Force Attempt", "severity": "HIGH", "description": "from 1.1.1.1"}]
     b = [{"rule": "Brute Force Attempt", "severity": "HIGH", "description": "from 2.2.2.2"}]
     d = diff_findings(a, b)
@@ -3121,7 +3121,7 @@ def test_diff_findings_distinguishes_same_rule_different_descriptions():
 
 def test_build_pdf_produces_pdf_bytes_with_findings():
     """The PDF builder returns a non-empty PDF with the %PDF- header."""
-    from pulse.pdf_report import build_pdf
+    from pulse.reports.pdf_report import build_pdf
     findings = [
         {
             "rule": "Brute Force Attempt", "severity": "HIGH",
@@ -3145,7 +3145,7 @@ def test_build_pdf_produces_pdf_bytes_with_findings():
 
 
 def test_build_pdf_with_no_findings_still_renders():
-    from pulse.pdf_report import build_pdf
+    from pulse.reports.pdf_report import build_pdf
     blob = build_pdf([])
     assert blob[:5] == b"%PDF-"
     assert len(blob) > 300

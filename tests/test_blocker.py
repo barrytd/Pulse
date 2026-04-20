@@ -11,7 +11,8 @@ import tempfile
 
 import pytest
 
-from pulse import blocker, database
+from pulse import database
+from pulse.firewall import blocker
 
 
 # ---------------------------------------------------------------------------

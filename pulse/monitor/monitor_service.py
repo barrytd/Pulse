@@ -23,14 +23,14 @@ import platform
 from collections import deque
 from datetime import datetime, timedelta
 
-from pulse.detections import run_all_detections
+from pulse.core.detections import run_all_detections
 from pulse.database import (
     close_monitor_session,
     create_monitor_session,
     save_scan,
 )
-from pulse.emailer import dispatch_alerts
-from pulse.monitor import (
+from pulse.alerts.emailer import dispatch_alerts
+from pulse.monitor.monitor import (
     _apply_whitelist,
     _collect_new_events,
     _get_last_record_id,

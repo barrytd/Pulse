@@ -44,11 +44,11 @@ def is_admin():
     return _IS_ADMIN
 
 from pulse.database import init_db, save_scan
-from pulse.detections import run_all_detections
-from pulse.emailer import dispatch_alerts
-from pulse.parser import parse_evtx
+from pulse.core.detections import run_all_detections
+from pulse.alerts.emailer import dispatch_alerts
+from pulse.core.parser import parse_evtx
 from pulse.remediation import attach_remediation
-from pulse.reporter import calculate_score_from_findings
+from pulse.reports.reporter import calculate_score_from_findings
 from pulse.whitelist import filter_whitelist
 
 

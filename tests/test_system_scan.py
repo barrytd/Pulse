@@ -21,13 +21,13 @@ import yaml
 from fastapi.testclient import TestClient
 
 from pulse.api import create_app
-from pulse.scheduled_scan import (
+from pulse.monitor.scheduled_scan import (
     ScheduledScanRunner,
     compute_next_run,
     describe_schedule,
     normalize_schedule_config,
 )
-from pulse.system_scan import is_admin, scan_system
+from pulse.monitor.system_scan import is_admin, scan_system
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ def logdir(tmp_path):
 
 def test_scan_system_blocks_on_non_windows(monkeypatch, tmp_path, logdir):
     """scan_system must refuse to run off Windows with a clear error."""
-    monkeypatch.setattr("pulse.system_scan.platform.system", lambda: "Linux")
+    monkeypatch.setattr("pulse.monitor.system_scan.platform.system", lambda: "Linux")
     with pytest.raises(RuntimeError, match="requires Windows"):
         scan_system(
             db_path=str(tmp_path / "db.sqlite"),
@@ -73,7 +73,7 @@ def test_scan_system_blocks_on_non_windows(monkeypatch, tmp_path, logdir):
 
 def test_scan_system_on_windows_empty_dir(monkeypatch, tmp_path, logdir):
     """Empty log dir produces a valid empty-result scan with score=100."""
-    monkeypatch.setattr("pulse.system_scan.platform.system", lambda: "Windows")
+    monkeypatch.setattr("pulse.monitor.system_scan.platform.system", lambda: "Windows")
     result = scan_system(
         db_path=str(tmp_path / "db.sqlite"),
         config={"whitelist": {}},
@@ -89,7 +89,7 @@ def test_scan_system_on_windows_empty_dir(monkeypatch, tmp_path, logdir):
 
 
 def test_scan_system_missing_dir_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr("pulse.system_scan.platform.system", lambda: "Windows")
+    monkeypatch.setattr("pulse.monitor.system_scan.platform.system", lambda: "Windows")
     with pytest.raises(FileNotFoundError):
         scan_system(
             db_path=str(tmp_path / "db.sqlite"),
@@ -101,7 +101,7 @@ def test_scan_system_missing_dir_raises(monkeypatch, tmp_path):
 def test_scan_system_tracks_default_logs(monkeypatch, tmp_path, logdir):
     """Files named Security.evtx / System.evtx / Application.evtx should be
     picked up. Anything else in the directory is ignored."""
-    monkeypatch.setattr("pulse.system_scan.platform.system", lambda: "Windows")
+    monkeypatch.setattr("pulse.monitor.system_scan.platform.system", lambda: "Windows")
     (logdir / "Security.evtx").write_bytes(b"")    # empty → parser returns []
     (logdir / "System.evtx").write_bytes(b"")
     (logdir / "Random.evtx").write_bytes(b"")      # not in DEFAULT_SYSTEM_LOGS
@@ -123,7 +123,7 @@ def test_scan_system_tracks_default_logs(monkeypatch, tmp_path, logdir):
 
 def test_is_admin_false_on_non_windows(monkeypatch):
     """Reset the memoized cache then force a non-Windows platform."""
-    import pulse.system_scan as mod
+    import pulse.monitor.system_scan as mod
     mod._IS_ADMIN = None
     monkeypatch.setattr(mod.platform, "system", lambda: "Linux")
     assert is_admin() is False
@@ -328,10 +328,10 @@ def test_scan_system_endpoint_runs(client, monkeypatch, tmp_path):
     """With platform gate forced True and the winevt folder redirected to a
     tmp dir, the endpoint should return a well-formed (empty) result."""
     monkeypatch.setattr("pulse.api._system_scan_supported", lambda: True)
-    monkeypatch.setattr("pulse.system_scan.platform.system", lambda: "Windows")
+    monkeypatch.setattr("pulse.monitor.system_scan.platform.system", lambda: "Windows")
     logdir = tmp_path / "winevt"
     logdir.mkdir()
-    monkeypatch.setattr("pulse.system_scan.SYSTEM_LOGS_DIR", str(logdir))
+    monkeypatch.setattr("pulse.monitor.system_scan.SYSTEM_LOGS_DIR", str(logdir))
 
     resp = client.post("/api/scan/system", json={"days": 1, "alert": False})
     assert resp.status_code == 200

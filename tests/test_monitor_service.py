@@ -6,7 +6,7 @@
 
 from datetime import datetime, timedelta
 
-from pulse.monitor_service import MonitorManager
+from pulse.monitor.monitor_service import MonitorManager
 
 
 def _mk_manager():

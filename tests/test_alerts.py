@@ -17,7 +17,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from pulse.emailer import filter_alert_findings, send_alert, dispatch_alerts
+from pulse.alerts.emailer import filter_alert_findings, send_alert, dispatch_alerts
 from pulse.database import init_db, record_alert, was_recently_alerted
 
 
@@ -158,7 +158,7 @@ def test_send_alert_calls_smtp_and_returns_true():
     fake_smtp_cls = MagicMock()
     fake_smtp_cls.return_value.__enter__.return_value = fake_server
 
-    with patch("pulse.emailer.smtplib.SMTP", fake_smtp_cls):
+    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp_cls):
         ok = send_alert(_email_config(), {"recipient": None}, findings)
 
     assert ok is True
@@ -182,7 +182,7 @@ def test_send_alert_uses_alert_recipient_override():
     fake_smtp_cls = MagicMock()
     fake_smtp_cls.return_value.__enter__.return_value = fake_server
 
-    with patch("pulse.emailer.smtplib.SMTP", fake_smtp_cls):
+    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp_cls):
         send_alert(_email_config(), alert_cfg, findings)
 
     # sendmail(sender, recipient, msg) — recipient should be the override.
@@ -206,7 +206,7 @@ def _patch_smtp_ok():
     fake_server = MagicMock()
     fake_smtp_cls = MagicMock()
     fake_smtp_cls.return_value.__enter__.return_value = fake_server
-    return patch("pulse.emailer.smtplib.SMTP", fake_smtp_cls), fake_server
+    return patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp_cls), fake_server
 
 
 def test_dispatch_noop_when_alerts_disabled(tmp_db):

@@ -556,7 +556,7 @@ def test_alerts_test_calls_send_alert_when_configured(client, monkeypatch):
         return True
 
     # Patch where api.py imports it (inside the endpoint, late import).
-    monkeypatch.setattr("pulse.emailer.send_alert", fake_send_alert)
+    monkeypatch.setattr("pulse.alerts.emailer.send_alert", fake_send_alert)
 
     r = client.post("/api/alerts/test")
     assert r.status_code == 200
@@ -572,7 +572,7 @@ def test_alerts_test_returns_502_when_smtp_fails(client, monkeypatch):
         "sender": "a@x.com", "recipient": "b@x.com",
         "password": "p",
     })
-    monkeypatch.setattr("pulse.emailer.send_alert", lambda *a, **kw: False)
+    monkeypatch.setattr("pulse.alerts.emailer.send_alert", lambda *a, **kw: False)
     r = client.post("/api/alerts/test")
     assert r.status_code == 502
 
@@ -647,7 +647,7 @@ def test_webhook_test_sends_when_configured(client, monkeypatch):
         captured["cfg"] = cfg
         captured["findings"] = findings
         return True
-    monkeypatch.setattr("pulse.webhook.send_webhook", fake_send_webhook)
+    monkeypatch.setattr("pulse.alerts.webhook.send_webhook", fake_send_webhook)
 
     r = client.post("/api/webhook/test")
     assert r.status_code == 200
@@ -662,7 +662,7 @@ def test_webhook_test_returns_502_when_post_fails(client, monkeypatch):
         "enabled": True, "flavor": "slack",
         "url":     "https://hooks.slack.com/services/T/B/abc",
     })
-    monkeypatch.setattr("pulse.webhook.send_webhook", lambda *a, **kw: False)
+    monkeypatch.setattr("pulse.alerts.webhook.send_webhook", lambda *a, **kw: False)
     r = client.post("/api/webhook/test")
     assert r.status_code == 502
 

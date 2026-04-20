@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from pulse.webhook import (
+from pulse.alerts.webhook import (
     detect_flavor,
     validate_webhook_config,
     send_webhook,
@@ -135,7 +135,7 @@ def _mock_urlopen(status=200):
     cm = MagicMock()
     cm.__enter__.return_value = resp
     cm.__exit__.return_value = False
-    return patch("pulse.webhook.urllib.request.urlopen", return_value=cm)
+    return patch("pulse.alerts.webhook.urllib.request.urlopen", return_value=cm)
 
 
 def test_send_webhook_returns_false_on_invalid_config():
@@ -156,7 +156,7 @@ def test_send_webhook_posts_slack_payload_to_slack_url():
         cm.__exit__.return_value = False
         return cm
 
-    with patch("pulse.webhook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("pulse.alerts.webhook.urllib.request.urlopen", side_effect=fake_urlopen):
         assert send_webhook(cfg, _findings()) is True
 
     assert captured["url"] == cfg["url"]
@@ -178,7 +178,7 @@ def test_send_webhook_uses_discord_format_when_url_matches():
         cm.__exit__.return_value = False
         return cm
 
-    with patch("pulse.webhook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("pulse.alerts.webhook.urllib.request.urlopen", side_effect=fake_urlopen):
         assert send_webhook(cfg, _findings()) is True
 
     body = json.loads(captured["body"].decode())
@@ -198,7 +198,7 @@ def test_send_webhook_explicit_flavor_overrides_url_detection():
         cm.__exit__.return_value = False
         return cm
 
-    with patch("pulse.webhook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("pulse.alerts.webhook.urllib.request.urlopen", side_effect=fake_urlopen):
         send_webhook(cfg, _findings())
 
     body = json.loads(captured["body"].decode())
@@ -207,7 +207,7 @@ def test_send_webhook_explicit_flavor_overrides_url_detection():
 
 def test_send_webhook_returns_false_on_network_error():
     cfg = {"enabled": True, "url": "https://hooks.slack.com/x/y/z"}
-    with patch("pulse.webhook.urllib.request.urlopen", side_effect=OSError("boom")):
+    with patch("pulse.alerts.webhook.urllib.request.urlopen", side_effect=OSError("boom")):
         assert send_webhook(cfg, _findings()) is False
 
 
@@ -215,7 +215,7 @@ def test_send_webhook_returns_false_on_http_error_4xx():
     import urllib.error
     cfg = {"enabled": True, "url": "https://hooks.slack.com/x/y/z"}
     err = urllib.error.HTTPError(cfg["url"], 400, "Bad Request", {}, None)
-    with patch("pulse.webhook.urllib.request.urlopen", side_effect=err):
+    with patch("pulse.alerts.webhook.urllib.request.urlopen", side_effect=err):
         assert send_webhook(cfg, _findings()) is False
 
 
@@ -235,7 +235,7 @@ def _email_ok_ctx():
     fake_server = MagicMock()
     fake_smtp_cls = MagicMock()
     fake_smtp_cls.return_value.__enter__.return_value = fake_server
-    return patch("pulse.emailer.smtplib.SMTP", fake_smtp_cls), fake_server
+    return patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp_cls), fake_server
 
 
 def _findings_high():
@@ -253,13 +253,13 @@ def _email_cfg():
 
 
 def test_dispatch_fires_webhook_when_enabled(tmp_db):
-    from pulse.emailer import dispatch_alerts
+    from pulse.alerts.emailer import dispatch_alerts
 
     alert_cfg   = {"enabled": True, "threshold": "HIGH", "cooldown_minutes": 60}
     webhook_cfg = {"enabled": True, "url": "https://hooks.slack.com/services/T/B/c"}
 
     email_ctx, _srv = _email_ok_ctx()
-    with email_ctx, patch("pulse.webhook.send_webhook", return_value=True) as fake_post:
+    with email_ctx, patch("pulse.alerts.webhook.send_webhook", return_value=True) as fake_post:
         result = dispatch_alerts(tmp_db, _findings_high(), _email_cfg(), alert_cfg, webhook_cfg)
 
     assert result["sent"] is True
@@ -268,13 +268,13 @@ def test_dispatch_fires_webhook_when_enabled(tmp_db):
 
 
 def test_dispatch_skips_webhook_when_disabled(tmp_db):
-    from pulse.emailer import dispatch_alerts
+    from pulse.alerts.emailer import dispatch_alerts
 
     alert_cfg   = {"enabled": True, "threshold": "HIGH", "cooldown_minutes": 60}
     webhook_cfg = {"enabled": False, "url": "https://hooks.slack.com/x/y/z"}
 
     email_ctx, _srv = _email_ok_ctx()
-    with email_ctx, patch("pulse.webhook.send_webhook", return_value=True) as fake_post:
+    with email_ctx, patch("pulse.alerts.webhook.send_webhook", return_value=True) as fake_post:
         result = dispatch_alerts(tmp_db, _findings_high(), _email_cfg(), alert_cfg, webhook_cfg)
 
     assert result["sent"] is True
@@ -285,15 +285,15 @@ def test_dispatch_skips_webhook_when_disabled(tmp_db):
 def test_dispatch_records_cooldown_if_webhook_alone_succeeds(tmp_db):
     """If email fails but webhook succeeds, the rule should still enter cooldown
     so we don't keep re-notifying forever."""
-    from pulse.emailer import dispatch_alerts
+    from pulse.alerts.emailer import dispatch_alerts
     from pulse.database import was_recently_alerted
 
     alert_cfg   = {"enabled": True, "threshold": "HIGH", "cooldown_minutes": 60}
     webhook_cfg = {"enabled": True, "url": "https://hooks.slack.com/x/y/z"}
 
     # send_alert patched to fail, send_webhook patched to succeed.
-    with patch("pulse.emailer.send_alert", return_value=False), \
-         patch("pulse.webhook.send_webhook", return_value=True):
+    with patch("pulse.alerts.emailer.send_alert", return_value=False), \
+         patch("pulse.alerts.webhook.send_webhook", return_value=True):
         dispatch_alerts(tmp_db, _findings_high(), _email_cfg(), alert_cfg, webhook_cfg)
 
     assert was_recently_alerted(tmp_db, "Brute Force Attempt", 60) is True

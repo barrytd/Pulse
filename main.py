@@ -22,18 +22,18 @@ import os
 import argparse                                      # Built-in: handles command-line arguments
 from collections import Counter                      # Built-in: counts how often each value appears
 import yaml                                          # Third-party: reads YAML config files
-from pulse.parser import parse_evtx
-from pulse.detections import run_all_detections
-from pulse import firewall_parser
-from pulse import firewall_config
-from pulse.rules_config import filter_by_enabled, get_disabled_rules
-from pulse.reporter import generate_report, SEVERITY_ORDER
-from pulse.emailer import (
+from pulse.core.parser import parse_evtx
+from pulse.core.detections import run_all_detections
+from pulse.firewall import firewall_parser
+from pulse.firewall import firewall_config
+from pulse.core.rules_config import filter_by_enabled, get_disabled_rules
+from pulse.reports.reporter import generate_report, SEVERITY_ORDER
+from pulse.alerts.emailer import (
     send_report, validate_email_config, dispatch_alerts,
 )
 from pulse.database import init_db, save_scan, get_history
-from pulse.reporter import _calculate_score
-from pulse.monitor import start_monitor
+from pulse.reports.reporter import _calculate_score
+from pulse.monitor.monitor import start_monitor
 from pulse.whitelist import filter_whitelist
 
 
@@ -554,7 +554,7 @@ def _run_block_command(args, db_path, log):
     All four short-circuit the normal scan flow — this runs, prints a
     human-readable summary via `log`, and main() returns immediately.
     """
-    from pulse import blocker
+    from pulse.firewall import blocker
 
     if args.block_list:
         rows = blocker.list_blocks(db_path)
@@ -616,7 +616,7 @@ def _run_summary(period, db_path, config, email_flag, log, quiet):
     email it. Used by --summary mode.
     """
     from pulse.database import get_findings_since, get_scans_since
-    from pulse.reporter import build_summary_report
+    from pulse.reports.reporter import build_summary_report
 
     period_days = {"daily": 1, "weekly": 7, "monthly": 30}[period]
     scans    = get_scans_since(db_path, period_days)
@@ -625,7 +625,7 @@ def _run_summary(period, db_path, config, email_flag, log, quiet):
     report_path = build_summary_report(scans, findings, period_days)
 
     if email_flag:
-        from pulse.emailer import send_report, validate_email_config
+        from pulse.alerts.emailer import send_report, validate_email_config
         email_cfg = config.get("email") or {}
         err = validate_email_config(email_cfg)
         if err:
@@ -777,7 +777,7 @@ def main():
     # file that appears in --logs gets auto-scanned, saved, and alerted on.
     # Blocks until Ctrl+C.
     if args.schedule:
-        from pulse.scheduler import run_scheduler
+        from pulse.alerts.scheduler import run_scheduler
 
         whitelist_cfg = config.get("whitelist", {})
         alert_config_sched   = config.get("alerts",  {}) or {}
@@ -1047,7 +1047,7 @@ def main():
     # interactive block too (no TTY in a pipeline).
     report_path = None
     if args.json_only:
-        from pulse.reporter import _build_json_report
+        from pulse.reports.reporter import _build_json_report
         severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
         for f in findings:
             sev = f.get("severity", "LOW")

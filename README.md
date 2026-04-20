@@ -96,7 +96,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **405 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, and IP block-list lifecycle tested
+- **470 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, IP block-list lifecycle, and per-user data isolation tested
 
 ---
 
@@ -106,29 +106,34 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 Pulse/
 ├── pulse/                  # Application package — see pulse/README.md for
 │   │                         a per-module index and one-liner for each file
-│   ├── README.md           # Module map (core, reporting, API, monitor, firewall, …)
-│   ├── parser.py           # Reads and parses .evtx log files
-│   ├── detections.py       # Detection engine + attack chain correlation
-│   ├── rules_config.py     # Declarative list of every built-in detection rule
-│   ├── remediation.py      # Per-rule remediation steps + MITRE mitigation IDs
-│   ├── reporter.py         # HTML, JSON, CSV, and text reports
-│   ├── pdf_report.py       # ReportLab PDF report with grade-coloured score ring
-│   ├── emailer.py          # SMTP delivery — threshold alerts + full reports
-│   ├── webhook.py          # Slack / Discord webhook delivery
-│   ├── monitor.py          # Live-monitor loop (CLI + dashboard SSE)
-│   ├── monitor_service.py  # Session bookkeeping for monitor runs
-│   ├── system_scan.py      # "Scan My System" — reads C:\Windows\…\winevt\Logs
-│   ├── scheduler.py        # Cron parser + next-run math
-│   ├── scheduled_scan.py   # Background thread that fires scheduled scans
-│   ├── database.py         # SQLite schema + every query helper
+│   ├── README.md           # Module map (core, reports, alerts, monitor, firewall, …)
+│   ├── core/               # Parsing, detection, scoring
+│   │   ├── parser.py           # Reads and parses .evtx log files
+│   │   ├── detections.py       # Detection engine + attack chain correlation
+│   │   ├── rules_config.py     # Declarative list of every built-in detection rule
+│   │   └── known_good.py       # Built-in 100+ service-account allowlist
+│   ├── reports/            # HTML, PDF, scan-diff rendering
+│   │   ├── reporter.py         # HTML, JSON, CSV, and text reports
+│   │   ├── pdf_report.py       # ReportLab PDF report with grade-coloured score ring
+│   │   └── comparison.py       # Scan diff → {new, resolved, shared}
+│   ├── alerts/             # Outbound notifications + schedule plumbing
+│   │   ├── emailer.py          # SMTP delivery — threshold alerts + full reports
+│   │   ├── webhook.py          # Slack / Discord webhook delivery
+│   │   └── scheduler.py        # Folder-watch scheduler for .evtx drops
+│   ├── monitor/            # Live, scheduled, and on-box scans
+│   │   ├── monitor.py          # Live-monitor loop (CLI + dashboard SSE)
+│   │   ├── monitor_service.py  # Session bookkeeping for monitor runs
+│   │   ├── system_scan.py      # "Scan My System" — reads C:\Windows\…\winevt\Logs
+│   │   └── scheduled_scan.py   # Background thread that fires scheduled scans
+│   ├── firewall/           # Windows Firewall audit + IP block list
+│   │   ├── firewall_parser.py  # pfirewall.log parser + public-IP detections
+│   │   ├── firewall_config.py  # netsh advfirewall audit (profiles, any-any rules)
+│   │   └── blocker.py          # Pulse-managed IP block list + netsh push/unblock
 │   ├── api.py              # FastAPI app, /api/* endpoints, SPA shell routing
 │   ├── auth.py             # scrypt password hashing, session cookies, RBAC
-│   ├── firewall_parser.py  # pfirewall.log parser + public-IP detections
-│   ├── firewall_config.py  # netsh advfirewall audit (profiles, any-any rules)
-│   ├── blocker.py          # Pulse-managed IP block list + netsh push/unblock
-│   ├── comparison.py       # Scan diff → {new, resolved, shared}
-│   ├── known_good.py       # Built-in 100+ service-account allowlist
+│   ├── database.py         # SQLite schema + every query helper
 │   ├── whitelist.py        # User-configurable whitelist layer
+│   ├── remediation.py      # Per-rule remediation steps + MITRE mitigation IDs
 │   ├── interactive.py      # Interactive terminal browser
 │   ├── animations.py       # ECG heartbeat animation during parsing
 │   ├── static/js/          # Native ES modules: api, dashboard, scans, findings, …
@@ -140,6 +145,7 @@ Pulse/
 │   ├── test_api.py               # REST API tests
 │   ├── test_alerts.py            # Email alert tests
 │   ├── test_auth.py              # Auth, RBAC, multi-user management
+│   ├── test_data_isolation.py    # Per-user scan ownership + API scoping
 │   ├── test_webhook.py           # Slack / Discord webhook tests
 │   ├── test_firewall_parser.py   # Firewall log parser + detection tests
 │   ├── test_firewall_config.py   # netsh advfirewall audit tests

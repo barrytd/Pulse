@@ -9,7 +9,7 @@ import tempfile
 
 import pytest
 
-from pulse import firewall_parser as fw
+from pulse.firewall import firewall_parser as fw
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ VALID_SCHEDULES = (SCHEDULE_DAILY, SCHEDULE_WEEKLY, SCHEDULE_CUSTOM)
 # Monday=0 … Sunday=6 — matches Python's datetime.weekday().
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
-log = logging.getLogger("pulse.scheduled_scan")
+log = logging.getLogger("pulse.monitor.scheduled_scan")
 
 
 # ---------------------------------------------------------------------------

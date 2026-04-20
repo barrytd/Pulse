@@ -94,7 +94,7 @@ RULE_EVENT_IDS = {
 }
 
 # Remediation steps live in pulse/remediation.py (single source of truth).
-# Re-exported here so any existing caller that does `from pulse.reporter
+# Re-exported here so any existing caller that does `from pulse.reports.reporter
 # import REMEDIATION` keeps working.
 from pulse.remediation import REMEDIATION, get_mitigations  # noqa: F401, E402
 

@@ -15,7 +15,7 @@ import os
 import tempfile
 
 from pulse import database
-from pulse.detections import (
+from pulse.core.detections import (
     run_all_detections,
     _extract_computer_from_xml,
 )

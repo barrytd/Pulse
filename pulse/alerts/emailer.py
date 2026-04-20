@@ -167,7 +167,7 @@ def _build_pdf_bytes(findings, scan_meta):
     We never let a PDF failure block the email — the caller is expected to
     drop a note into the body instead."""
     try:
-        from pulse.pdf_report import build_pdf
+        from pulse.reports.pdf_report import build_pdf
         return build_pdf(findings, scan_meta=scan_meta)
     except Exception:
         return None
@@ -454,7 +454,7 @@ def dispatch_alerts(db_path, findings, email_config, alert_config,
     slack_ok = False
     if not legacy_mode:
         if slack_cfg.get("enabled") and slack_fresh:
-            from pulse.webhook import send_slack
+            from pulse.alerts.webhook import send_slack
             slack_ok = send_slack(
                 slack_cfg.get("webhook_url"), slack_fresh,
                 hostname=hostname, score=score, grade=grade,
@@ -466,7 +466,7 @@ def dispatch_alerts(db_path, findings, email_config, alert_config,
     discord_ok = False
     if not legacy_mode:
         if disc_cfg.get("enabled") and disc_fresh:
-            from pulse.webhook import send_discord
+            from pulse.alerts.webhook import send_discord
             discord_ok = send_discord(
                 disc_cfg.get("webhook_url"), disc_fresh,
                 hostname=hostname, score=score, grade=grade,
@@ -477,7 +477,7 @@ def dispatch_alerts(db_path, findings, email_config, alert_config,
     # --- Legacy single-URL webhook fallback --------------------------
     legacy_ok = False
     if legacy_mode and webhook_config and webhook_config.get("enabled"):
-        from pulse.webhook import send_webhook
+        from pulse.alerts.webhook import send_webhook
         legacy_ok = send_webhook(
             webhook_config, fresh,
             hostname=hostname, score=score, grade=grade,
@@ -763,7 +763,7 @@ def _ensure_html_report(report_path, findings, scan_dt):
         html_out = os.path.join("reports", f"pulse_{stamp}.html")
 
     # Late import avoids any circular-import risk at module load time
-    from pulse.reporter import generate_report
+    from pulse.reports.reporter import generate_report
     generate_report(findings, output_path=html_out, fmt="html")
     return html_out
 

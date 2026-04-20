@@ -20,7 +20,7 @@
 # the API would have to import main.py, which triggers a fresh load of
 # the CLI entry point — bad news for tests and uvicorn startup.
 
-from pulse.known_good import KNOWN_GOOD_SERVICES
+from pulse.core.known_good import KNOWN_GOOD_SERVICES
 
 
 def filter_whitelist(findings, whitelist):

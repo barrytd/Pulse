@@ -8,8 +8,8 @@
 #   2. Run: python send_test_email.py
 
 import sys
-from pulse.emailer import send_report, validate_email_config
-from pulse.reporter import generate_report
+from pulse.alerts.emailer import send_report, validate_email_config
+from pulse.reports.reporter import generate_report
 from main import load_config
 
 # --- FAKE FINDINGS ---

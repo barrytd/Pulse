@@ -58,27 +58,27 @@ from pulse.database import (
     set_finding_review, update_user_active, update_user_email,
     update_user_password, update_user_role,
 )
-from pulse.detections import run_all_detections
-from pulse import firewall_config
-from pulse.rules_config import (
+from pulse.core.detections import run_all_detections
+from pulse.firewall import firewall_config
+from pulse.core.rules_config import (
     RULE_META, filter_by_enabled, get_disabled_rules,
     get_rule_names, set_rule_enabled,
 )
-from pulse.emailer import dispatch_alerts
+from pulse.alerts.emailer import dispatch_alerts
 from pulse.remediation import attach_remediation
-from pulse.monitor_service import MonitorManager
-from pulse.parser import parse_evtx
-from pulse.reporter import (
+from pulse.monitor.monitor_service import MonitorManager
+from pulse.core.parser import parse_evtx
+from pulse.reports.reporter import (
     _build_html_report, _build_json_report, _calculate_score,
     calculate_score_from_findings,
 )
-from pulse.scheduled_scan import (
+from pulse.monitor.scheduled_scan import (
     ScheduledScanRunner, compute_next_run, describe_schedule,
     normalize_schedule_config,
 )
-from pulse.system_scan import is_admin as _system_scan_is_admin
-from pulse.system_scan import is_supported_platform as _system_scan_supported
-from pulse.system_scan import scan_system
+from pulse.monitor.system_scan import is_admin as _system_scan_is_admin
+from pulse.monitor.system_scan import is_supported_platform as _system_scan_supported
+from pulse.monitor.system_scan import scan_system
 from pulse.whitelist import filter_whitelist
 
 
@@ -266,7 +266,7 @@ def _scan_scope_for(app, user_id):
 def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
     """Record a scan-deletion in the audit log. Wrapped in try/except via
     blocker.log_audit so a logging failure never breaks the delete."""
-    from pulse import blocker
+    from pulse.firewall import blocker
     user_row = get_user_by_id(db_path, user_id) if user_id else None
     email = (user_row or {}).get("email") if user_row else None
     ids_preview = ",".join(str(i) for i in ids_int[:10])
@@ -475,7 +475,7 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     def _audit_user_action(acting_user_id, action, *, target=None, detail=None):
-        from pulse import blocker
+        from pulse.firewall import blocker
         acting = get_user_by_id(app.state.db_path, acting_user_id) if acting_user_id else None
         blocker.log_audit(
             app.state.db_path,
@@ -668,7 +668,7 @@ def _register_routes(app: FastAPI) -> None:
             # Audit the scan so the Audit Log page shows who uploaded
             # what. Failure never blocks the response — log_audit
             # swallows its own errors.
-            from pulse import blocker as _blocker
+            from pulse.firewall import blocker as _blocker
             _user_row = get_user_by_id(app.state.db_path, user_id) if user_id else None
             _blocker.log_audit(
                 app.state.db_path,
@@ -750,7 +750,7 @@ def _register_routes(app: FastAPI) -> None:
         the complete 'who did what, when' picture."""
         if limit < 1 or limit > 1000:
             raise HTTPException(400, detail="limit must be between 1 and 1000.")
-        from pulse import blocker
+        from pulse.firewall import blocker
         return {"rows": blocker.get_audit_log(app.state.db_path, limit=limit)}
 
     # -------------------------------------------------------------------
@@ -799,7 +799,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/block-list")
     def block_list_get(user_id: int = Depends(require_login)):
         """Return every row in the Pulse IP block list."""
-        from pulse import blocker
+        from pulse.firewall import blocker
         return {
             "rows": blocker.list_blocks(app.state.db_path),
             "windows": blocker.is_windows(),
@@ -810,7 +810,7 @@ def _register_routes(app: FastAPI) -> None:
     async def block_ip_post(request: Request, user_id: int = Depends(require_login)):
         """Stage a source IP for blocking. Optional {confirm: true} pushes
         it to Windows Firewall immediately (Windows + admin required)."""
-        from pulse import blocker
+        from pulse.firewall import blocker
 
         body = await request.json() if await request.body() else {}
         ip = (body.get("ip") or "").strip()
@@ -854,7 +854,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/api/block-list/push")
     def block_list_push(user_id: int = Depends(require_login)):
-        from pulse import blocker
+        from pulse.firewall import blocker
         user = get_user_by_id(app.state.db_path, user_id) or {}
         return blocker.push_pending(app.state.db_path, source="dashboard", user=user.get("email"))
 
@@ -866,7 +866,7 @@ def _register_routes(app: FastAPI) -> None:
     # swallowed as an IP string.
     @app.delete("/api/block-ip/batch")
     def block_ip_delete_batch(payload: dict = Body(...), user_id: int = Depends(require_login)):
-        from pulse import blocker
+        from pulse.firewall import blocker
         ips = payload.get("ips") if isinstance(payload, dict) else None
         if not isinstance(ips, list) or not ips:
             raise HTTPException(400, detail="Body must be {\"ips\": [...]}")
@@ -889,7 +889,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.delete("/api/block-ip/{ip:path}")
     def block_ip_delete(ip: str, user_id: int = Depends(require_login)):
-        from pulse import blocker
+        from pulse.firewall import blocker
         user = get_user_by_id(app.state.db_path, user_id) or {}
         result = blocker.unblock_ip(
             app.state.db_path, ip, source="dashboard", user=user.get("email"),
@@ -960,7 +960,7 @@ def _register_routes(app: FastAPI) -> None:
         decorated = attach_remediation(findings)
 
         if format == "pdf":
-            from pulse.pdf_report import build_pdf
+            from pulse.reports.pdf_report import build_pdf
             pdf_bytes = build_pdf(decorated, scan_meta=scan_row)
             display_num = (scan_row or {}).get("number") or scan_id
             return Response(
@@ -1068,7 +1068,7 @@ def _register_routes(app: FastAPI) -> None:
         if scan_b is None:
             raise HTTPException(404, detail=f"Scan {b} not found.")
 
-        from pulse.comparison import diff_findings
+        from pulse.reports.comparison import diff_findings
         findings_a = get_scan_findings(app.state.db_path, a, user_id=scope)
         findings_b = get_scan_findings(app.state.db_path, b, user_id=scope)
         diff = diff_findings(findings_a, findings_b)
@@ -1121,7 +1121,7 @@ def _register_routes(app: FastAPI) -> None:
             )
 
         if format == "pdf":
-            from pulse.pdf_report import build_pdf
+            from pulse.reports.pdf_report import build_pdf
             pdf_bytes = build_pdf(attach_remediation(findings), scan_meta=scan_row)
             return Response(
                 content=pdf_bytes,
@@ -1407,7 +1407,7 @@ def _register_routes(app: FastAPI) -> None:
         settings on. Uses a fake CRITICAL finding so the email body
         clearly looks like a test.
         """
-        from pulse.emailer import send_alert
+        from pulse.alerts.emailer import send_alert
 
         config = _read_config(app.state.config_path)
         email_cfg  = config.get("email", {}) or {}
@@ -1482,7 +1482,7 @@ def _register_routes(app: FastAPI) -> None:
         turning alerts on. Uses a fake CRITICAL finding so the message body
         is clearly a test.
         """
-        from pulse.webhook import send_webhook
+        from pulse.alerts.webhook import send_webhook
 
         config = _read_config(app.state.config_path)
         webhook_cfg = config.get("webhook", {}) or {}
@@ -1910,7 +1910,7 @@ def _register_routes(app: FastAPI) -> None:
         These are always active and cannot be removed — the UI shows them
         as muted 'built-in' rows so users can see what's already covered.
         """
-        from pulse.known_good import KNOWN_GOOD_SERVICES
+        from pulse.core.known_good import KNOWN_GOOD_SERVICES
         return {"services": list(KNOWN_GOOD_SERVICES)}
 
 

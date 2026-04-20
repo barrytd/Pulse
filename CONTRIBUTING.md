@@ -56,11 +56,11 @@ Every new detection rule must ship with tests. Every bug fix must include a test
 
 ## Adding a detection rule
 
-1. Pick an event ID Pulse does not already cover. Add it to `RELEVANT_EVENT_IDS` in `pulse/parser.py` so the fast path picks it up.
-2. Write a `detect_*` function in `pulse/detections.py`. Follow the shape of the existing rules — each finding is a dict with `rule`, `severity`, and `details`.
-3. Add the MITRE ATT&CK technique ID to `MITRE_ATTACK_IDS` in `pulse/reporter.py`.
-4. Add remediation steps to the remediation tab in `pulse/reporter.py`.
-5. Call your new function from `run_all_detections` at the bottom of `pulse/detections.py`.
+1. Pick an event ID Pulse does not already cover. Add it to `RELEVANT_EVENT_IDS` in `pulse/core/parser.py` so the fast path picks it up.
+2. Write a `detect_*` function in `pulse/core/detections.py`. Follow the shape of the existing rules — each finding is a dict with `rule`, `severity`, and `details`.
+3. Add the MITRE ATT&CK technique ID to `MITRE_ATTACK_IDS` in `pulse/reports/reporter.py`.
+4. Add remediation steps to the remediation tab in `pulse/reports/reporter.py`.
+5. Call your new function from `run_all_detections` at the bottom of `pulse/core/detections.py`.
 6. Write at least three tests: one positive case (should fire), one negative (should not fire), and one edge case.
 7. Add a row to the detection rules table in `README.md`.
 

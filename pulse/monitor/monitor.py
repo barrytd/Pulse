@@ -29,8 +29,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 from Evtx import Evtx as EvtxLib
-from pulse.parser import parse_evtx
-from pulse.detections import run_all_detections
+from pulse.core.parser import parse_evtx
+from pulse.core.detections import run_all_detections
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +387,7 @@ def _collect_new_events(log_folder, seen_keys):
 
 def _apply_whitelist(findings, whitelist):
     """Filters out findings that match the whitelist (same logic as main.py)."""
-    from pulse.known_good import KNOWN_GOOD_SERVICES
+    from pulse.core.known_good import KNOWN_GOOD_SERVICES
     skip_rules    = [r.lower() for r in whitelist.get("rules",    []) or []]
     skip_accounts = [a.lower() for a in whitelist.get("accounts", []) or []]
     skip_services = (
