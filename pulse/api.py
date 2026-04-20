@@ -24,6 +24,7 @@
 #   parameters, example requests, and a "Try it out" button — all for free.
 
 import asyncio
+import functools
 import json
 import os
 import tempfile
@@ -239,6 +240,28 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+def _scan_scope_for(app, user_id):
+    """Resolve the `user_id` filter to pass into database scan-read helpers.
+
+    Admins see every scan (returns ``None``). Viewers see only the scans they
+    own (returns their integer id). When auth is disabled (test mode, CLI
+    app) the scope is also unrestricted.
+
+    Why we look up the role here rather than baking it into the dependency:
+    `require_login` intentionally stays lightweight (cookie + active check)
+    so routes can reuse it cheaply. Only the routes that actually need the
+    per-user data-isolation scope pay for the extra DB hit.
+    """
+    if not getattr(app.state, "auth_required", True):
+        return None
+    if user_id is None:
+        return None
+    user = get_user_by_id(app.state.db_path, user_id)
+    if not user:
+        return int(user_id)
+    return None if user.get("role") == "admin" else int(user_id)
+
 
 def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
     """Record a scan-deletion in the audit log. Wrapped in try/except via
@@ -639,6 +662,7 @@ def _register_routes(app: FastAPI) -> None:
                 filename=file.filename,
                 scope="Manual upload",
                 duration_sec=duration_sec,
+                user_id=user_id,
             )
 
             # Audit the scan so the Audit Log page shows who uploaded
@@ -695,23 +719,25 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/history
     # -------------------------------------------------------------------
     @app.get("/api/history")
-    def history(limit: int = 20):
+    def history(limit: int = 20, user_id: int = Depends(require_login)):
         """Return the most recent scans stored in the local database."""
         if limit < 1 or limit > 200:
             raise HTTPException(
                 status_code=400,
                 detail="limit must be between 1 and 200.",
             )
-        return {"scans": get_history(app.state.db_path, limit=limit)}
+        scope = _scan_scope_for(app, user_id)
+        return {"scans": get_history(app.state.db_path, limit=limit, user_id=scope)}
 
     # -------------------------------------------------------------------
     # GET /api/fleet — per-host rollup (Sprint 4 Thread A)
     # -------------------------------------------------------------------
     @app.get("/api/fleet")
-    def fleet():
+    def fleet(user_id: int = Depends(require_login)):
         """Return one row per tracked hostname with score, last scan, and
         finding totals. Powers the Fleet overview page."""
-        return {"hosts": get_fleet_summary(app.state.db_path)}
+        scope = _scan_scope_for(app, user_id)
+        return {"hosts": get_fleet_summary(app.state.db_path, user_id=scope)}
 
     # -------------------------------------------------------------------
     # GET /api/audit — dashboard view into the audit_log table
@@ -738,7 +764,7 @@ def _register_routes(app: FastAPI) -> None:
         import csv
         import io
 
-        rows = get_fleet_summary(app.state.db_path)
+        rows = get_fleet_summary(app.state.db_path, user_id=_scan_scope_for(app, user_id))
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
@@ -886,7 +912,7 @@ def _register_routes(app: FastAPI) -> None:
             ids_int = [int(i) for i in ids]
         except (TypeError, ValueError):
             raise HTTPException(400, detail="All ids must be integers.")
-        deleted = delete_scans(app.state.db_path, ids_int)
+        deleted = delete_scans(app.state.db_path, ids_int, user_id=_scan_scope_for(app, user_id))
         _audit_scan_delete(app.state.db_path, user_id, ids_int, deleted, source_page="scans")
         return {"deleted": deleted}
 
@@ -905,7 +931,7 @@ def _register_routes(app: FastAPI) -> None:
             ids_int = [int(i) for i in ids]
         except (TypeError, ValueError):
             raise HTTPException(400, detail="All ids must be integers.")
-        deleted = delete_scans(app.state.db_path, ids_int)
+        deleted = delete_scans(app.state.db_path, ids_int, user_id=_scan_scope_for(app, user_id))
         _audit_scan_delete(app.state.db_path, user_id, ids_int, deleted, source_page="history")
         return {"deleted": deleted}
 
@@ -913,16 +939,17 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/report/{scan_id}
     # -------------------------------------------------------------------
     @app.get("/api/report/{scan_id}")
-    def report(scan_id: int, format: str = "json"):
+    def report(scan_id: int, format: str = "json", user_id: int = Depends(require_login)):
         """Return every finding recorded for a specific past scan.
 
         When ?format=pdf, a binary PDF is returned as an attachment so the
         dashboard can offer a one-click PDF download.
         """
-        findings = get_scan_findings(app.state.db_path, scan_id)
+        scope = _scan_scope_for(app, user_id)
+        findings = get_scan_findings(app.state.db_path, scan_id, user_id=scope)
         # Distinguish "scan exists but zero findings" from "scan not found"
         # by checking the scans table.
-        history_rows = get_history(app.state.db_path, limit=200)
+        history_rows = get_history(app.state.db_path, limit=200, user_id=scope)
         scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
         if not findings and scan_row is None:
             raise HTTPException(
@@ -975,12 +1002,13 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/score/daily — aggregated daily scores
     # -------------------------------------------------------------------
     @app.get("/api/score/daily")
-    def daily_scores(days: int = 30):
+    def daily_scores(days: int = 30, user_id: int = Depends(require_login)):
         """Return deduplicated daily scores combining all scans per day."""
         if days < 1 or days > 365:
             raise HTTPException(400, detail="days must be between 1 and 365.")
 
-        all_scans = get_history(app.state.db_path, limit=200)
+        scope = _scan_scope_for(app, user_id)
+        all_scans = get_history(app.state.db_path, limit=200, user_id=scope)
 
         date_groups = {}
         for scan in all_scans:
@@ -998,7 +1026,7 @@ def _register_routes(app: FastAPI) -> None:
             total_events = 0
             filenames = []
             for scan in group:
-                findings = get_scan_findings(app.state.db_path, scan["id"])
+                findings = get_scan_findings(app.state.db_path, scan["id"], user_id=scope)
                 all_findings.extend(findings)
                 total_events += scan.get("total_events", 0)
                 if scan.get("filename"):
@@ -1026,12 +1054,13 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/compare?a=<id>&b=<id> — diff two scans
     # -------------------------------------------------------------------
     @app.get("/api/compare")
-    def compare_scans(a: int, b: int):
+    def compare_scans(a: int, b: int, user_id: int = Depends(require_login)):
         """Return the new / resolved / shared findings between two scans."""
         if a == b:
             raise HTTPException(400, detail="a and b must be different scans.")
 
-        history_rows = get_history(app.state.db_path, limit=200)
+        scope = _scan_scope_for(app, user_id)
+        history_rows = get_history(app.state.db_path, limit=200, user_id=scope)
         scan_a = next((s for s in history_rows if s["id"] == a), None)
         scan_b = next((s for s in history_rows if s["id"] == b), None)
         if scan_a is None:
@@ -1040,8 +1069,8 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(404, detail=f"Scan {b} not found.")
 
         from pulse.comparison import diff_findings
-        findings_a = get_scan_findings(app.state.db_path, a)
-        findings_b = get_scan_findings(app.state.db_path, b)
+        findings_a = get_scan_findings(app.state.db_path, a, user_id=scope)
+        findings_b = get_scan_findings(app.state.db_path, b, user_id=scope)
         diff = diff_findings(findings_a, findings_b)
 
         return {
@@ -1056,13 +1085,14 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/export/{scan_id} — download report as HTML or JSON
     # -------------------------------------------------------------------
     @app.get("/api/export/{scan_id}")
-    def export_report(scan_id: int, format: str = "html"):
+    def export_report(scan_id: int, format: str = "html", user_id: int = Depends(require_login)):
         """Download a formatted report for a past scan (html | json | pdf)."""
         if format not in ("html", "json", "pdf"):
             raise HTTPException(400, detail="format must be 'html', 'json', or 'pdf'.")
 
-        findings = get_scan_findings(app.state.db_path, scan_id)
-        history_rows = get_history(app.state.db_path, limit=200)
+        scope = _scan_scope_for(app, user_id)
+        findings = get_scan_findings(app.state.db_path, scan_id, user_id=scope)
+        history_rows = get_history(app.state.db_path, limit=200, user_id=scope)
         scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
         if scan_row is None:
             raise HTTPException(404, detail=f"Scan {scan_id} not found.")
@@ -1480,7 +1510,7 @@ def _register_routes(app: FastAPI) -> None:
     # POST /api/scan/system — one-shot scan of the local Windows event logs
     # -------------------------------------------------------------------
     @app.post("/api/scan/system")
-    async def scan_system_endpoint(request: Request):
+    async def scan_system_endpoint(request: Request, user_id: int = Depends(require_login)):
         """Scan the local machine's C:\\Windows\\System32\\winevt\\Logs\\ directly.
         Body (all optional):
           days:   int 1-365, default 1
@@ -1506,11 +1536,14 @@ def _register_routes(app: FastAPI) -> None:
         config = _read_config(app.state.config_path) or {}
         try:
             result = await asyncio.to_thread(
-                scan_system,
-                app.state.db_path,
-                config,
-                days,
-                send_alerts,
+                functools.partial(
+                    scan_system,
+                    app.state.db_path,
+                    config,
+                    days=days,
+                    send_alerts=send_alerts,
+                    user_id=user_id,
+                )
             )
         except RuntimeError as exc:
             # Platform guard from inside scan_system (belt-and-braces).

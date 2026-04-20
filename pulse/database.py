@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS scans (
     score          INTEGER,
     score_label    TEXT,
     filename       TEXT,
-    scope          TEXT
+    scope          TEXT,
+    user_id        INTEGER
 );
 """
 
@@ -187,6 +188,14 @@ def init_db(db_path):
             conn.execute("ALTER TABLE scans ADD COLUMN duration_sec INTEGER")
         except sqlite3.OperationalError:
             pass
+        # Scan ownership — which dashboard user kicked off this scan.
+        # NULL means the scan was created outside the auth layer (CLI, legacy
+        # pre-RBAC rows, scheduled jobs). Admins see NULL-owned scans; viewers
+        # only see scans they personally ran.
+        try:
+            conn.execute("ALTER TABLE scans ADD COLUMN user_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
         try:
             conn.execute("ALTER TABLE findings ADD COLUMN raw_xml TEXT")
         except sqlite3.OperationalError:
@@ -234,7 +243,7 @@ def init_db(db_path):
             pass
 
 
-def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None):
+def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None):
     """
     Saves a completed scan and all its findings to the database.
 
@@ -266,11 +275,12 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
                 total_findings, score, score_label, filename, scope,
-                session_id, duration_sec)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                session_id, duration_sec, user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
              total_findings, score, score_label, filename, scope,
-             session_id, duration_sec)
+             session_id, duration_sec,
+             int(user_id) if user_id else None)
         )
         scan_id = cursor.lastrowid
 
@@ -301,7 +311,7 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
     return scan_id
 
 
-def get_history(db_path, limit=20):
+def get_history(db_path, limit=20, user_id=None):
     """
     Returns a list of past scans, newest first.
 
@@ -310,26 +320,33 @@ def get_history(db_path, limit=20):
         total_findings, score, score_label
 
     Parameters:
-        db_path (str): Path to the .db file.
-        limit (int):   Maximum number of scans to return (default 20).
+        db_path (str):   Path to the .db file.
+        limit (int):     Maximum number of scans to return (default 20).
+        user_id (int|None): If set, only scans owned by this user are
+                            returned. ``None`` returns every scan (the
+                            admin / CLI view).
 
     Returns:
         list[dict]: Past scans, or an empty list if the DB doesn't exist yet.
     """
     try:
         with _connect(db_path) as conn:
-            # `number` = position in current scan history, oldest = 1. Uses
-            # a correlated subquery so it survives deletions (unlike the raw
-            # auto-increment `id`, which skips values when rows are dropped).
+            if user_id is None:
+                where_outer, where_inner, params = "", "", ()
+            else:
+                where_outer = " WHERE s.user_id = ?"
+                where_inner = " AND s2.user_id = ?"
+                params = (int(user_id), int(user_id))
             cursor = conn.execute(
-                """SELECT s.id, s.scanned_at, s.hostname, s.files_scanned,
+                f"""SELECT s.id, s.scanned_at, s.hostname, s.files_scanned,
                           s.total_events, s.total_findings, s.score, s.score_label,
                           s.filename, s.scope, s.duration_sec,
-                          (SELECT COUNT(*) FROM scans s2 WHERE s2.id <= s.id) AS number
-                   FROM scans s
+                          (SELECT COUNT(*) FROM scans s2
+                           WHERE s2.id <= s.id{where_inner}) AS number
+                   FROM scans s{where_outer}
                    ORDER BY s.id DESC
                    LIMIT ?""",
-                (limit,)
+                params + (limit,)
             )
             cols = [d[0] for d in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
@@ -337,24 +354,32 @@ def get_history(db_path, limit=20):
         return []
 
 
-def get_scan_number(db_path, scan_id):
+def get_scan_number(db_path, scan_id, user_id=None):
     """
     Return the display number (position in current scan history, oldest = 1)
-    for a given DB id. Returns None if the scan doesn't exist.
+    for a given DB id. Returns None if the scan doesn't exist (or isn't
+    visible to the supplied ``user_id``).
     """
     try:
         with _connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM scans WHERE id <= ? "
-                "AND EXISTS (SELECT 1 FROM scans WHERE id = ?)",
-                (scan_id, scan_id),
-            ).fetchone()
+            if user_id is None:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM scans WHERE id <= ? "
+                    "AND EXISTS (SELECT 1 FROM scans WHERE id = ?)",
+                    (scan_id, scan_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM scans WHERE id <= ? AND user_id = ? "
+                    "AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND user_id = ?)",
+                    (scan_id, int(user_id), scan_id, int(user_id)),
+                ).fetchone()
             return int(row[0]) if row and row[0] else None
     except Exception:
         return None
 
 
-def get_findings_since(db_path, days):
+def get_findings_since(db_path, days, user_id=None):
     """
     Return every finding whose parent scan ran within the last `days` days,
     annotated with the parent scan's id, timestamp, hostname, score, and
@@ -371,15 +396,19 @@ def get_findings_since(db_path, days):
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         with _connect(db_path) as conn:
+            extra_where, extra_params = "", ()
+            if user_id is not None:
+                extra_where = " AND s.user_id = ?"
+                extra_params = (int(user_id),)
             cursor = conn.execute(
-                """SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
+                f"""SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
                           f.rule, f.mitre, f.description, f.details,
                           f.reviewed, f.false_positive,
                           s.scanned_at, s.hostname, s.score, s.score_label,
                           s.filename
                    FROM findings f
                    JOIN scans s ON s.id = f.scan_id
-                   WHERE s.scanned_at >= ?
+                   WHERE s.scanned_at >= ?{extra_where}
                    ORDER BY s.id DESC,
                        CASE f.severity
                            WHEN 'CRITICAL' THEN 1
@@ -388,7 +417,7 @@ def get_findings_since(db_path, days):
                            WHEN 'LOW'      THEN 4
                            ELSE 5
                        END""",
-                (cutoff,)
+                (cutoff,) + extra_params
             )
             cols = [d[0] for d in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
@@ -396,19 +425,27 @@ def get_findings_since(db_path, days):
         return []
 
 
-def get_scans_since(db_path, days):
-    """Return every scan row whose scanned_at falls within the last `days` days."""
+def get_scans_since(db_path, days, user_id=None):
+    """Return every scan row whose scanned_at falls within the last `days` days.
+
+    Pass ``user_id`` to restrict the result to one user's scans; ``None``
+    returns every row (admin / CLI view).
+    """
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         with _connect(db_path) as conn:
+            extra_where, extra_params = "", ()
+            if user_id is not None:
+                extra_where = " AND user_id = ?"
+                extra_params = (int(user_id),)
             cursor = conn.execute(
-                """SELECT id, scanned_at, hostname, files_scanned,
+                f"""SELECT id, scanned_at, hostname, files_scanned,
                           total_events, total_findings, score, score_label,
                           filename
                    FROM scans
-                   WHERE scanned_at >= ?
+                   WHERE scanned_at >= ?{extra_where}
                    ORDER BY id DESC""",
-                (cutoff,)
+                (cutoff,) + extra_params
             )
             cols = [d[0] for d in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
@@ -416,18 +453,27 @@ def get_scans_since(db_path, days):
         return []
 
 
-def get_scan_findings(db_path, scan_id):
+def get_scan_findings(db_path, scan_id, user_id=None):
     """
     Returns all findings for a specific scan.
 
     Parameters:
-        db_path (str): Path to the .db file.
-        scan_id (int): The scan ID to look up.
+        db_path (str):   Path to the .db file.
+        scan_id (int):   The scan ID to look up.
+        user_id (int|None): If set, an empty list is returned when the scan
+                            belongs to another user. ``None`` bypasses the
+                            ownership check (admin / CLI view).
 
     Returns:
         list[dict]: Findings for that scan.
     """
     with _connect(db_path) as conn:
+        if user_id is not None:
+            owner = conn.execute(
+                "SELECT user_id FROM scans WHERE id = ?", (int(scan_id),)
+            ).fetchone()
+            if not owner or owner[0] != int(user_id):
+                return []
         cursor = conn.execute(
             """SELECT id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
@@ -509,7 +555,7 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None)
         return d
 
 
-def get_fleet_summary(db_path):
+def get_fleet_summary(db_path, user_id=None):
     """Roll up scan + finding counts per hostname for the Fleet overview.
 
     Returns one row per distinct ``scans.hostname`` with:
@@ -534,15 +580,20 @@ def get_fleet_summary(db_path):
             # SQLite's min/max-over-group gymnastics. First query: per-host
             # aggregates. Second: newest scan row per host so we can read
             # its score + grade without relying on GROUP BY argmax tricks.
+            scope_where, scope_params = "", ()
+            if user_id is not None:
+                scope_where = " AND user_id = ?"
+                scope_params = (int(user_id),)
             cursor = conn.execute(
-                """SELECT hostname,
+                f"""SELECT hostname,
                           COUNT(*)                    AS scan_count,
                           MAX(scanned_at)             AS last_scan_at,
                           COALESCE(SUM(total_findings), 0) AS total_findings
                    FROM scans
-                   WHERE hostname IS NOT NULL AND hostname != ''
+                   WHERE hostname IS NOT NULL AND hostname != ''{scope_where}
                    GROUP BY hostname
-                   ORDER BY last_scan_at DESC"""
+                   ORDER BY last_scan_at DESC""",
+                scope_params
             )
             rows = cursor.fetchall()
             if not rows:
@@ -551,18 +602,18 @@ def get_fleet_summary(db_path):
             out = []
             for host, scans, last_at, total_findings in rows:
                 latest = conn.execute(
-                    """SELECT score, score_label
+                    f"""SELECT score, score_label
                        FROM scans
-                       WHERE hostname = ?
+                       WHERE hostname = ?{scope_where}
                        ORDER BY id DESC
                        LIMIT 1""",
-                    (host,),
+                    (host,) + scope_params,
                 ).fetchone()
                 latest_score = latest[0] if latest else None
                 latest_grade = latest[1] if latest else None
 
                 worst_row = conn.execute(
-                    """SELECT MIN(CASE f.severity
+                    f"""SELECT MIN(CASE f.severity
                                       WHEN 'CRITICAL' THEN 1
                                       WHEN 'HIGH'     THEN 2
                                       WHEN 'MEDIUM'   THEN 3
@@ -571,8 +622,8 @@ def get_fleet_summary(db_path):
                               f.severity
                        FROM findings f
                        JOIN scans s ON s.id = f.scan_id
-                       WHERE s.hostname = ?""",
-                    (host,),
+                       WHERE s.hostname = ?{(" AND s.user_id = ?" if user_id is not None else "")}""",
+                    (host,) + scope_params,
                 ).fetchone()
                 worst = None
                 if worst_row and worst_row[0] is not None and worst_row[0] < 5:
@@ -596,17 +647,29 @@ def get_fleet_summary(db_path):
         return []
 
 
-def delete_scans(db_path, scan_ids):
+def delete_scans(db_path, scan_ids, user_id=None):
     """Delete one or more scans (and their findings via ON DELETE CASCADE).
-    Returns the number of scan rows actually deleted."""
+
+    Pass ``user_id`` to restrict the delete to rows owned by that user —
+    a viewer can only wipe their own scans. ``None`` deletes unconditionally
+    (admin / CLI tool path).
+
+    Returns the number of scan rows actually deleted.
+    """
     ids = [int(i) for i in (scan_ids or []) if str(i).strip()]
     if not ids:
         return 0
     placeholders = ",".join("?" for _ in ids)
     with _connect(db_path) as conn:
-        cursor = conn.execute(
-            f"DELETE FROM scans WHERE id IN ({placeholders})", ids
-        )
+        if user_id is None:
+            cursor = conn.execute(
+                f"DELETE FROM scans WHERE id IN ({placeholders})", ids
+            )
+        else:
+            cursor = conn.execute(
+                f"DELETE FROM scans WHERE id IN ({placeholders}) AND user_id = ?",
+                ids + [int(user_id)]
+            )
         return cursor.rowcount or 0
 
 

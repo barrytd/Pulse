@@ -100,6 +100,7 @@ def scan_system(
     send_alerts=True,
     log_dir=None,
     progress=None,
+    user_id=None,
 ):
     """Run a full system scan and persist the results.
 
@@ -193,6 +194,7 @@ def scan_system(
         filename="System Scan",
         scope=_scope_label(days),
         duration_sec=duration_sec,
+        user_id=user_id,
     )
 
     alert_summary = {"enabled": False, "sent": False}
