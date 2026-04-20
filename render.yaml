@@ -11,3 +11,16 @@ services:
         value: production
       - key: PULSE_ALLOWED_ORIGIN
         sync: false
+      # Optional alert channels. Leave unset to disable that channel.
+      - key: PULSE_SMTP_HOST
+        sync: false
+      - key: PULSE_SMTP_PORT
+        sync: false
+      - key: PULSE_SMTP_USER
+        sync: false
+      - key: PULSE_SMTP_PASS
+        sync: false
+      - key: PULSE_SLACK_WEBHOOK
+        sync: false
+      - key: PULSE_DISCORD_WEBHOOK
+        sync: false

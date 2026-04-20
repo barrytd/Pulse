@@ -110,11 +110,11 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     _is_production = os.environ.get("PULSE_ENV", "").strip().lower() == "production"
 
     if db_path is None:
-        # Use an absolute path rooted at the current working directory so
-        # relative paths don't resolve differently once a background thread
-        # or subprocess changes cwd. Matters on Render, where the service
-        # runs from a specific working dir but spawned tasks may not.
-        db_path = os.path.abspath("pulse.db")
+        # Anchor on getcwd() so Render (Linux) and Windows behave the same
+        # regardless of where the process was launched from. Once resolved
+        # here, background threads/subprocesses can safely cd without
+        # losing the DB file.
+        db_path = os.path.join(os.getcwd(), "pulse.db")
 
     if config_path is None:
         config_path = os.path.join(
@@ -122,8 +122,25 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             "pulse.yaml",
         )
 
+    # Ensure runtime folders exist. On a fresh Render instance neither of
+    # these is in the build artifact, and the first scan or report write
+    # would crash if we didn't create them here.
+    for _d in ("reports", "logs"):
+        try:
+            os.makedirs(_d, exist_ok=True)
+        except OSError:
+            # Read-only FS (unlikely) — don't block startup; the
+            # individual code paths that need these dirs will surface
+            # the error with a clearer message.
+            pass
+
     # Make sure the database has its tables before any request comes in.
-    init_db(db_path)
+    _db_ok = True
+    try:
+        init_db(db_path)
+    except Exception as exc:
+        _db_ok = False
+        print(f"  [!] Database init failed at {db_path}: {exc}")
 
     # Swagger / ReDoc / OpenAPI endpoints are disabled in production by
     # default so a hosted deploy doesn't leak the full endpoint surface.
@@ -278,7 +295,50 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
                 return JSONResponse({"detail": "Authentication required."}, status_code=401)
         return await call_next(request)
 
+    _log_startup_summary(
+        is_production=_is_production,
+        yaml_found=os.path.exists(config_path),
+        db_ok=_db_ok,
+        db_path=db_path,
+        config_path=config_path,
+    )
     return app
+
+
+def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_path):
+    """One-shot startup banner — appears once in Render's log stream so
+    the operator can tell at a glance which env Pulse thinks it's in,
+    whether pulse.yaml loaded, and which optional channels are wired."""
+    cfg = _read_config(config_path) or {}
+    delivery   = cfg.get("delivery") or {}
+    email_cfg  = cfg.get("email") or {}
+    slack_cfg  = delivery.get("slack")   or {}
+    discord_cfg = delivery.get("discord") or {}
+
+    # For the email channel, "configured" means the SMTP credentials
+    # Pulse needs to actually send mail are present — not just that a
+    # delivery.email block exists.
+    email_ready = bool(
+        email_cfg.get("smtp_host") and email_cfg.get("password")
+        and (email_cfg.get("sender") or email_cfg.get("recipient"))
+    )
+    slack_ready   = bool(slack_cfg.get("webhook_url"))
+    discord_ready = bool(discord_cfg.get("webhook_url"))
+
+    def _mark(flag):
+        return "ok" if flag else "off"
+
+    env_label = "production" if is_production else "development"
+    yaml_label = "found" if yaml_found else "missing (env-var fallback)"
+    db_label = "ok" if db_ok else "FAILED"
+
+    print("  [*] Pulse startup:")
+    print(f"      env         : {env_label}")
+    print(f"      pulse.yaml  : {yaml_label}")
+    print(f"      database    : {db_label} ({db_path})")
+    print(f"      email       : {_mark(email_ready)}")
+    print(f"      slack       : {_mark(slack_ready)}")
+    print(f"      discord     : {_mark(discord_ready)}")
 
 
 # ---------------------------------------------------------------------------
@@ -1973,14 +2033,71 @@ def _sse_format(event_type, payload):
 
 
 def _read_config(config_path):
-    """Read pulse.yaml and return the config dict."""
+    """Read pulse.yaml and return the config dict.
+
+    When pulse.yaml is missing (typical on hosted deploys like Render —
+    the file is gitignored) we fall back to an env-var shaped config so
+    SMTP/Slack/Discord still work if the operator sets PULSE_* vars.
+    Missing env vars just leave the corresponding channel unconfigured,
+    which disables it gracefully at the delivery layer.
+    """
     if not os.path.exists(config_path):
-        return {}
+        return _config_from_env()
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except (OSError, yaml.YAMLError):
         return {}
+
+
+def _config_from_env():
+    """Build a config dict from PULSE_* env vars.
+
+    Only the channels whose required vars are set end up enabled, so a
+    fresh deploy with no optional vars behaves like a config file with
+    every alert channel disabled — the rest of the app still runs.
+    """
+    smtp_host = os.environ.get("PULSE_SMTP_HOST", "").strip()
+    smtp_port_raw = os.environ.get("PULSE_SMTP_PORT", "").strip()
+    smtp_user = os.environ.get("PULSE_SMTP_USER", "").strip()
+    smtp_pass = os.environ.get("PULSE_SMTP_PASS", "").strip()
+    slack_url = os.environ.get("PULSE_SLACK_WEBHOOK", "").strip()
+    discord_url = os.environ.get("PULSE_DISCORD_WEBHOOK", "").strip()
+
+    try:
+        smtp_port = int(smtp_port_raw) if smtp_port_raw else 587
+    except ValueError:
+        smtp_port = 587
+
+    email_complete = bool(smtp_host and smtp_user and smtp_pass)
+    has_slack = bool(slack_url)
+    has_discord = bool(discord_url)
+
+    return {
+        "email": {
+            "smtp_host": smtp_host or None,
+            "smtp_port": smtp_port,
+            # SMTP user doubles as From + alert recipient so ops get a copy
+            # of their own alerts. Operators can override by adding a real
+            # pulse.yaml once they need distinct sender/recipient addresses.
+            "sender":    smtp_user or None,
+            "recipient": smtp_user or None,
+            "password":  smtp_pass or None,
+        },
+        "alerts": {
+            "enabled":          email_complete or has_slack or has_discord,
+            "threshold":        "HIGH",
+            "recipient":        None,
+            "cooldown_minutes": 60,
+        },
+        "delivery": {
+            "email":   {"enabled": email_complete, "attach_pdf": True,  "critical_only": False},
+            "slack":   {"enabled": has_slack,      "webhook_url": slack_url,   "critical_only": False},
+            "discord": {"enabled": has_discord,    "webhook_url": discord_url, "critical_only": False},
+        },
+        "monitor":  {"interval": 30},
+        "whitelist": {"accounts": [], "rules": [], "services": [], "ips": []},
+    }
 
 
 def _write_config(config_path, config):
