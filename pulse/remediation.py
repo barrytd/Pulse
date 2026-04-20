@@ -166,6 +166,24 @@ REMEDIATION = {
         "Review Event 5140 (Network Share accessed) logs for the account across the fleet.",
         "Restrict administrative shares (C$, ADMIN$) via Group Policy where possible, or require a jump host.",
     ],
+    "Firewall Profile Disabled": [
+        "Re-enable the profile: Windows Security → Firewall & network protection → turn the relevant network profile back on.",
+        "Or from an elevated prompt: `netsh advfirewall set <domain|private|public>profile state on`.",
+        "Lock the setting via Group Policy (Computer Configuration → Windows Settings → Security Settings → Windows Defender Firewall) so end users cannot disable it again.",
+        "Audit what changed while the firewall was off — connection logs, new services, new scheduled tasks.",
+    ],
+    "Firewall Any-Any Allow Rule": [
+        "Open Windows Defender Firewall with Advanced Security (wf.msc) and locate the named rule.",
+        "If the rule is no longer needed, disable or delete it.",
+        "If still needed, narrow the scope: pick a specific protocol, local port, and restrict RemoteIP to the minimum subnet that must reach the service.",
+        "Consider recreating the rule with a descriptive name and a `Grouping` tag so future audits can tell which app owns it.",
+    ],
+    "Firewall Overly Broad Scope": [
+        "Open the rule in wf.msc → Scope tab and replace 'Any' RemoteIP with an explicit subnet list or named set.",
+        "For remote administration (RDP, SMB, WinRM, SSH) prefer a jump host or VPN instead of internet-wide exposure.",
+        "If the service truly must be public, put it behind an authenticating reverse proxy and rate-limit source IPs.",
+        "Schedule a quarterly review of allow rules whose RemoteIP is Any.",
+    ],
 }
 
 
@@ -231,6 +249,9 @@ MITIGATIONS = {
     "New Account (Baseline)":    ["M1018", "M1026"],
     "New Service (Baseline)":    ["M1047", "M1038"],
     "New Task (Baseline)":       ["M1047", "M1038"],
+    "Firewall Profile Disabled":    ["M1031", "M1028", "M1047"],
+    "Firewall Any-Any Allow Rule":  ["M1037", "M1030", "M1047"],
+    "Firewall Overly Broad Scope":  ["M1037", "M1035", "M1030"],
 }
 
 

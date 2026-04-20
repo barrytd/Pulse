@@ -49,7 +49,6 @@ from pulse.auth import (
     require_login, verify_password,
 )
 from pulse.database import (
-    REVIEW_STATUSES,
     count_users, create_user, delete_all_monitor_sessions,
     delete_monitor_session, delete_scans, get_fleet_summary, get_history,
     get_monitor_session_findings, get_scan_findings,
@@ -58,6 +57,7 @@ from pulse.database import (
     set_finding_review, update_user_email, update_user_password,
 )
 from pulse.detections import run_all_detections
+from pulse import firewall_config
 from pulse.rules_config import (
     RULE_META, filter_by_enabled, get_disabled_rules,
     get_rule_names, set_rule_enabled,
@@ -235,6 +235,24 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
 # Routes
 # ---------------------------------------------------------------------------
 
+def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
+    """Record a scan-deletion in the audit log. Wrapped in try/except via
+    blocker.log_audit so a logging failure never breaks the delete."""
+    from pulse import blocker
+    user_row = get_user_by_id(db_path, user_id) if user_id else None
+    email = (user_row or {}).get("email") if user_row else None
+    ids_preview = ",".join(str(i) for i in ids_int[:10])
+    if len(ids_int) > 10:
+        ids_preview += f",+{len(ids_int) - 10} more"
+    blocker.log_audit(
+        db_path,
+        action="delete_scan",
+        source="dashboard",
+        user=email,
+        detail=f"page={source_page} requested={len(ids_int)} deleted={deleted} ids={ids_preview}",
+    )
+
+
 def _register_routes(app: FastAPI) -> None:
     """Wire every endpoint onto the app."""
 
@@ -406,7 +424,7 @@ def _register_routes(app: FastAPI) -> None:
     # POST /api/scan
     # -------------------------------------------------------------------
     @app.post("/api/scan")
-    async def scan(file: UploadFile = File(...)):
+    async def scan(file: UploadFile = File(...), user_id: int = Depends(require_login)):
         """
         Parse an uploaded .evtx file, run detections, and return findings.
 
@@ -456,6 +474,11 @@ def _register_routes(app: FastAPI) -> None:
             events = parse_evtx(tmp.name)
             findings = run_all_detections(events)
 
+            # Audit the live Windows Firewall policy on every API scan.
+            # Findings are skipped silently on non-Windows or when netsh
+            # is unavailable — the caller doesn't have to gate on OS.
+            findings += firewall_config.scan_firewall_config()
+
             # Apply whitelist so the API gives the same answers as the CLI.
             findings = _filter_with_whitelist(findings, app.state.config_path)
 
@@ -486,6 +509,19 @@ def _register_routes(app: FastAPI) -> None:
                 filename=file.filename,
                 scope="Manual upload",
                 duration_sec=duration_sec,
+            )
+
+            # Audit the scan so the Audit Log page shows who uploaded
+            # what. Failure never blocks the response — log_audit
+            # swallows its own errors.
+            from pulse import blocker as _blocker
+            _user_row = get_user_by_id(app.state.db_path, user_id) if user_id else None
+            _blocker.log_audit(
+                app.state.db_path,
+                action="scan",
+                source="dashboard",
+                user=(_user_row or {}).get("email") if _user_row else None,
+                detail=f"scan_id={scan_id} filename={file.filename} findings={len(findings)}",
             )
 
             # Fire threshold-based alerts if configured. SMTP can be slow,
@@ -546,6 +582,60 @@ def _register_routes(app: FastAPI) -> None:
         """Return one row per tracked hostname with score, last scan, and
         finding totals. Powers the Fleet overview page."""
         return {"hosts": get_fleet_summary(app.state.db_path)}
+
+    # -------------------------------------------------------------------
+    # GET /api/audit — dashboard view into the audit_log table
+    # -------------------------------------------------------------------
+    @app.get("/api/audit")
+    def audit_get(limit: int = 200, user_id: int = Depends(require_login)):
+        """Return the most recent audit entries newest-first. Powers the
+        Audit Log page — every block / unblock / push / scan / delete
+        passes through `blocker.log_audit` so one query gives the reviewer
+        the complete 'who did what, when' picture."""
+        if limit < 1 or limit > 1000:
+            raise HTTPException(400, detail="limit must be between 1 and 1000.")
+        from pulse import blocker
+        return {"rows": blocker.get_audit_log(app.state.db_path, limit=limit)}
+
+    # -------------------------------------------------------------------
+    # GET /api/fleet/export.csv — downloadable one-row-per-host summary
+    # -------------------------------------------------------------------
+    @app.get("/api/fleet/export.csv")
+    def fleet_export_csv(user_id: int = Depends(require_login)):
+        """Stream the fleet summary as CSV so analysts can hand the list
+        to a spreadsheet or ticketing system without scraping the UI.
+        Columns mirror `get_fleet_summary` keys one-for-one."""
+        import csv
+        import io
+
+        rows = get_fleet_summary(app.state.db_path)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "hostname",
+            "scan_count",
+            "last_scan_at",
+            "total_findings",
+            "latest_score",
+            "latest_grade",
+            "worst_severity",
+        ])
+        for r in rows:
+            writer.writerow([
+                r.get("hostname", ""),
+                r.get("scan_count", 0),
+                r.get("last_scan_at", "") or "",
+                r.get("total_findings", 0),
+                r.get("latest_score", "") if r.get("latest_score") is not None else "",
+                r.get("latest_grade", "") or "",
+                r.get("worst_severity", "") or "",
+            ])
+        filename = f"pulse-fleet-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     # -------------------------------------------------------------------
     # Block list — stage / list / push / unblock
@@ -655,7 +745,10 @@ def _register_routes(app: FastAPI) -> None:
     # DELETE /api/scans — delete one or many scans (+ cascading findings)
     # -------------------------------------------------------------------
     @app.delete("/api/scans")
-    def delete_scans_endpoint(payload: dict = Body(...)):
+    def delete_scans_endpoint(
+        payload: dict = Body(...),
+        user_id: int = Depends(require_login),
+    ):
         ids = payload.get("ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not ids:
             raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
@@ -664,13 +757,17 @@ def _register_routes(app: FastAPI) -> None:
         except (TypeError, ValueError):
             raise HTTPException(400, detail="All ids must be integers.")
         deleted = delete_scans(app.state.db_path, ids_int)
+        _audit_scan_delete(app.state.db_path, user_id, ids_int, deleted, source_page="scans")
         return {"deleted": deleted}
 
     # History page deletes the same underlying rows — expose a matching
     # /batch route so the frontend module can speak in terms of its own
     # resource name without the scans module leaking across pages.
     @app.delete("/api/history/batch")
-    def delete_history_batch(payload: dict = Body(...)):
+    def delete_history_batch(
+        payload: dict = Body(...),
+        user_id: int = Depends(require_login),
+    ):
         ids = payload.get("ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not ids:
             raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
@@ -679,6 +776,7 @@ def _register_routes(app: FastAPI) -> None:
         except (TypeError, ValueError):
             raise HTTPException(400, detail="All ids must be integers.")
         deleted = delete_scans(app.state.db_path, ids_int)
+        _audit_scan_delete(app.state.db_path, user_id, ids_int, deleted, source_page="history")
         return {"deleted": deleted}
 
     # -------------------------------------------------------------------
@@ -719,20 +817,26 @@ def _register_routes(app: FastAPI) -> None:
         return {"scan_id": scan_id, "findings": decorated}
 
     # -------------------------------------------------------------------
-    # PUT /api/finding/{id}/review — mark a finding reviewed / FP / new
+    # PUT /api/finding/{id}/review — toggle reviewed / false_positive
     # -------------------------------------------------------------------
     @app.put("/api/finding/{finding_id}/review")
     def review_finding(finding_id: int, payload: dict = Body(...)):
-        """Update the review status of a single finding. Body:
-           {"status": "reviewed"|"false_positive"|"new", "note": "..."}"""
-        status = (payload or {}).get("status")
-        if status not in REVIEW_STATUSES:
+        """Update a finding's review flags. The two flags are independent —
+        an analyst can mark something reviewed, false-positive, both, or
+        neither. Body: {"reviewed": bool, "false_positive": bool,
+        "note": "..."}."""
+        p = payload or {}
+        if "reviewed" not in p or "false_positive" not in p:
             raise HTTPException(
                 400,
-                detail=f"status must be one of {list(REVIEW_STATUSES)}",
+                detail="body must include 'reviewed' and 'false_positive' booleans",
             )
-        note = (payload or {}).get("note")
-        updated = set_finding_review(app.state.db_path, finding_id, status, note)
+        reviewed = bool(p.get("reviewed"))
+        false_positive = bool(p.get("false_positive"))
+        note = p.get("note")
+        updated = set_finding_review(
+            app.state.db_path, finding_id, reviewed, false_positive, note,
+        )
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
         return updated

@@ -25,6 +25,7 @@ import yaml                                          # Third-party: reads YAML c
 from pulse.parser import parse_evtx
 from pulse.detections import run_all_detections
 from pulse import firewall_parser
+from pulse import firewall_config
 from pulse.rules_config import filter_by_enabled, get_disabled_rules
 from pulse.reporter import generate_report, SEVERITY_ORDER
 from pulse.emailer import (
@@ -333,6 +334,13 @@ def build_arg_parser(config=None):
              "%%WINDIR%%\\System32\\LogFiles\\Firewall\\pfirewall.log.",
         nargs="?",
         const="__default__",
+    )
+    parser.add_argument(
+        "--firewall-config",
+        action="store_true",
+        help="Audit the live Windows Firewall configuration (profile state + "
+             "rule shape) via netsh, adding findings for disabled profiles, "
+             "any-any allow rules, and inbound allow rules scoped to any IP.",
     )
 
     return parser
@@ -975,6 +983,20 @@ def main():
             findings += fw_findings
         else:
             log("  [*] Firewall log produced no findings (or file missing).")
+
+    # Live firewall configuration audit. Opt-in via --firewall-config so
+    # the default scan path stays unchanged; silently no-ops on non-Windows
+    # hosts even when the flag is passed.
+    if getattr(args, "firewall_config", False):
+        if firewall_config.is_available():
+            cfg_findings = firewall_config.scan_firewall_config()
+            if cfg_findings:
+                log(f"  [*] Firewall config audit added {len(cfg_findings)} finding(s)")
+                findings += cfg_findings
+            else:
+                log("  [*] Firewall config audit found no misconfigurations.")
+        else:
+            log("  [*] Firewall config audit skipped (netsh unavailable).")
 
     # --- FILTER BY SEVERITY ---
     # SEVERITY_ORDER is a list where position = rank.

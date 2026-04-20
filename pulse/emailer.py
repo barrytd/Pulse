@@ -192,8 +192,15 @@ def _wrap_with_pdf(inner, pdf_bytes, filename):
     email clients keep rendering the rich body."""
     outer = MIMEMultipart("mixed")
     # Copy headers (From/To/Subject etc.) from the inner payload so the
-    # caller can keep setting them on the original MIMEMultipart.
-    for key, value in inner.items():
+    # caller can keep setting them on the original MIMEMultipart. Skip
+    # Content-Type / MIME-Version — those belong to each part and
+    # duplicating them on the outer breaks Python 3.14's generator
+    # (it follows the second Content-Type and tries to flatten the
+    # multipart list payload as text).
+    _skip = {"content-type", "mime-version"}
+    for key, value in list(inner.items()):
+        if key.lower() in _skip:
+            continue
         outer[key] = value
         del inner[key]
     outer.attach(inner)

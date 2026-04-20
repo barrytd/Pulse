@@ -46,6 +46,12 @@ RULE_META = {
     "After-Hours Logon":                {"event_id": 4624,          "severity": "MEDIUM",   "mitre": "T1078"},
     "Suspicious Registry Modification": {"event_id": 4657,          "severity": "HIGH",     "mitre": "T1547.001"},
     "Lateral Movement via Network Share": {"event_id": [5140, 5145], "severity": "HIGH",    "mitre": "T1021.002"},
+    # Live Windows Firewall configuration audit (pulse/firewall_config.py).
+    # event_id=None because these rules inspect the firewall's current
+    # policy state via netsh, not a Windows event.
+    "Firewall Profile Disabled":          {"event_id": None,          "severity": "HIGH",    "mitre": "T1562.004"},
+    "Firewall Any-Any Allow Rule":        {"event_id": None,          "severity": "MEDIUM",  "mitre": "T1562.004"},
+    "Firewall Overly Broad Scope":        {"event_id": None,          "severity": "MEDIUM",  "mitre": "T1562.004"},
 }
 
 

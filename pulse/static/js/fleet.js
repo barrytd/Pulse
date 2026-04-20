@@ -28,6 +28,9 @@ export async function renderFleetPage() {
     '<div class="page-head">' +
       '<div class="page-head-title"><strong>' + hosts.length + '</strong> host' +
         (hosts.length === 1 ? '' : 's') + ' tracked</div>' +
+      '<div class="page-head-actions">' +
+        '<button class="btn btn-secondary" data-action="exportFleetCsv">Export CSV</button>' +
+      '</div>' +
     '</div>' +
 
     '<div class="card" style="padding:0; overflow:hidden;">' +
@@ -57,6 +60,14 @@ function _buildFleetTable(hosts) {
     '<th>Host</th><th>Latest Score</th><th>Worst Severity</th>' +
     '<th>Scans</th><th>Findings</th><th>Last Scan</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// Action target — triggers a browser download of the per-host rollup
+// as CSV. Hitting the endpoint directly (rather than fetch + blob) lets
+// the browser handle the `Content-Disposition` filename cleanly and
+// avoids keeping the whole table in memory twice.
+export function exportFleetCsv() {
+  window.location.href = '/api/fleet/export.csv';
 }
 
 // Action target — registered in app.js. Drills from Fleet into the

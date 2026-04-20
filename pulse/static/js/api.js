@@ -46,6 +46,14 @@ export async function fetchFleet() {
   } catch (e) { return []; }
 }
 
+export async function fetchAudit(limit) {
+  try {
+    var resp = await fetch('/api/audit?limit=' + (limit || 200));
+    var data = await resp.json();
+    return data.rows || [];
+  } catch (e) { return []; }
+}
+
 export async function fetchRuleNames() {
   if (cachedRules) return cachedRules;
   try {
@@ -257,11 +265,19 @@ export async function apiSendTestWebhook() {
 // ---------------------------------------------------------------
 // Finding review status (mark reviewed / false positive)
 // ---------------------------------------------------------------
-export async function apiSetFindingReview(findingId, status, note) {
+export async function apiSetFindingReview(findingId, flags) {
+  // flags: { reviewed: bool, falsePositive: bool, note: string }. The two
+  // flags go over the wire independently so each button can toggle on its
+  // own without clobbering the other.
+  var body = {
+    reviewed: !!(flags && flags.reviewed),
+    false_positive: !!(flags && flags.falsePositive),
+    note: (flags && flags.note) || '',
+  };
   var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/review', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: status, note: note || '' }),
+    body: JSON.stringify(body),
   });
   var data = await resp.json().catch(function () { return {}; });
   return { ok: resp.ok, status: resp.status, data: data };

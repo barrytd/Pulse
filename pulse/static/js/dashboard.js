@@ -12,7 +12,13 @@ import {
   apiExportUrl,
   invalidateScansCache,
 } from './api.js';
-import { openFindingDrawer, _statusDotHtml } from './findings.js';
+import {
+  openFindingDrawer,
+  _statusDotHtml,
+  isTouched,
+  isReviewed,
+  isFalsePositive,
+} from './findings.js';
 
 // ---------------------------------------------------------------
 // Shared state
@@ -596,9 +602,8 @@ export function _dashFindingsHtml(findings) {
       var rule = f.rule || 'Unknown';
       var details = f.details || f.description || '';
       var time = f.timestamp || _extractTime(f) || '-';
-      var status = f.review_status || 'new';
       var rowCls = 'dash-finding-row sev-' + sev.toLowerCase() +
-                   (status !== 'new' ? ' row-reviewed' : '');
+                   (isTouched(f) ? ' row-reviewed' : '');
       var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
       return '<div class="' + rowCls + '"' + fidAttr + ' ' +
              'data-action="openFindingDrawerByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
@@ -610,7 +615,7 @@ export function _dashFindingsHtml(findings) {
           '<div class="desc">' + escapeHtml(details) + '</div>' +
         '</div>' +
         '<div class="sev ' + sev.toLowerCase() + '">' + sev + '</div>' +
-        '<div class="finding-status-col" data-status-slot="dot">' + _statusDotHtml(status) + '</div>' +
+        '<div class="finding-status-col" data-status-slot="dot">' + _statusDotHtml(f) + '</div>' +
       '</div>';
     }).join('') +
   '</div>';
@@ -665,12 +670,12 @@ async function _fetchAttentionFindings(allScans) {
   var all = [];
   batches.forEach(function (b) { all = all.concat(b); });
 
-  // Unreviewed CRITICAL/HIGH only. Explicitly exclude false_positive.
+  // Unreviewed CRITICAL/HIGH only. "Touched" (reviewed or marked FP)
+  // findings drop out of the attention list entirely.
   all = all.filter(function (f) {
     var sv = (f.severity || '').toUpperCase();
     if (sv !== 'CRITICAL' && sv !== 'HIGH') return false;
-    var st = f.review_status || 'new';
-    return st === 'new';
+    return !isTouched(f);
   });
 
   // Most recent first, CRITICAL before HIGH as a stable tie-breaker so
@@ -746,12 +751,12 @@ export function openAttentionFinding(idx) {
 
 // In-place widget refresh. Called after a review toggle so the list
 // stays accurate without rebuilding the whole dashboard. Mutates the
-// cached finding's review_status then re-renders just our container.
+// cached finding's flags then re-renders just our container.
 function _refreshNeedsAttentionFromCache() {
   var mount = document.getElementById('dash-needs-attention');
   if (!mount) return;
   var live = _attentionFindings.filter(function (f) {
-    return (f.review_status || 'new') === 'new';
+    return !isTouched(f);
   });
   _attentionFindings = live;
   mount.innerHTML = _needsAttentionHtml(live);
@@ -760,11 +765,11 @@ function _refreshNeedsAttentionFromCache() {
 function _onReviewToggled(ev) {
   if (!ev || !ev.detail) return;
   var id = ev.detail.id;
-  var status = ev.detail.status;
   var changed = false;
   _attentionFindings.forEach(function (f) {
     if (f.id != null && String(f.id) === String(id)) {
-      f.review_status = status;
+      f.reviewed = !!ev.detail.reviewed;
+      f.false_positive = !!ev.detail.false_positive;
       changed = true;
     }
   });

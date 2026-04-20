@@ -48,26 +48,23 @@ CREATE TABLE IF NOT EXISTS scans (
 
 _CREATE_FINDINGS = """
 CREATE TABLE IF NOT EXISTS findings (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_id       INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
-    timestamp     TEXT,
-    event_id      TEXT,
-    severity      TEXT,
-    rule          TEXT,
-    mitre         TEXT,
-    description   TEXT,
-    details       TEXT,
-    raw_xml       TEXT,
-    hostname      TEXT,
-    review_status TEXT DEFAULT 'new',
-    review_note   TEXT,
-    reviewed_at   TEXT
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id        INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    timestamp      TEXT,
+    event_id       TEXT,
+    severity       TEXT,
+    rule           TEXT,
+    mitre          TEXT,
+    description    TEXT,
+    details        TEXT,
+    raw_xml        TEXT,
+    hostname       TEXT,
+    reviewed       INTEGER DEFAULT 0,
+    false_positive INTEGER DEFAULT 0,
+    review_note    TEXT,
+    reviewed_at    TEXT
 );
 """
-
-# Valid values for findings.review_status. Kept as a module constant so the
-# API layer and dashboard can reference the same source of truth.
-REVIEW_STATUSES = ("new", "reviewed", "false_positive")
 
 # Records every email alert sent so we can enforce a cooldown window.
 # Without this, a --watch loop that re-detects the same brute force every
@@ -193,15 +190,35 @@ def init_db(db_path):
         except sqlite3.OperationalError:
             pass
         for col, ddl in (
-            ("review_status", "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'"),
-            ("review_note",   "ALTER TABLE findings ADD COLUMN review_note TEXT"),
-            ("reviewed_at",   "ALTER TABLE findings ADD COLUMN reviewed_at TEXT"),
-            ("hostname",      "ALTER TABLE findings ADD COLUMN hostname TEXT"),
+            ("review_status",  "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'"),
+            ("review_note",    "ALTER TABLE findings ADD COLUMN review_note TEXT"),
+            ("reviewed_at",    "ALTER TABLE findings ADD COLUMN reviewed_at TEXT"),
+            ("hostname",       "ALTER TABLE findings ADD COLUMN hostname TEXT"),
+            ("reviewed",       "ALTER TABLE findings ADD COLUMN reviewed INTEGER DEFAULT 0"),
+            ("false_positive", "ALTER TABLE findings ADD COLUMN false_positive INTEGER DEFAULT 0"),
         ):
             try:
                 conn.execute(ddl)
             except sqlite3.OperationalError:
                 pass
+
+        # One-shot backfill from the legacy single-status column: rows that
+        # were already marked 'reviewed' get reviewed=1; rows marked
+        # 'false_positive' get false_positive=1. Idempotent — re-running
+        # writes the same values. We only touch rows still at default 0/0
+        # so a user who later clears `reviewed` doesn't get it re-set from
+        # stale review_status on the next startup.
+        try:
+            conn.execute(
+                "UPDATE findings SET reviewed = 1 "
+                "WHERE review_status = 'reviewed' AND reviewed = 0 AND false_positive = 0"
+            )
+            conn.execute(
+                "UPDATE findings SET false_positive = 1 "
+                "WHERE review_status = 'false_positive' AND reviewed = 0 AND false_positive = 0"
+            )
+        except sqlite3.OperationalError:
+            pass
 
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None):
@@ -344,7 +361,7 @@ def get_findings_since(db_path, days):
             cursor = conn.execute(
                 """SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
                           f.rule, f.mitre, f.description, f.details,
-                          f.review_status,
+                          f.reviewed, f.false_positive,
                           s.scanned_at, s.hostname, s.score, s.score_label,
                           s.filename
                    FROM findings f
@@ -401,7 +418,7 @@ def get_scan_findings(db_path, scan_id):
         cursor = conn.execute(
             """SELECT id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
-                      review_status, review_note, reviewed_at
+                      reviewed, false_positive, review_note, reviewed_at
                FROM findings
                WHERE scan_id = ?
                ORDER BY
@@ -415,45 +432,56 @@ def get_scan_findings(db_path, scan_id):
             (scan_id,)
         )
         cols = [d[0] for d in cursor.description]
-        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        rows = []
+        for row in cursor.fetchall():
+            d = dict(zip(cols, row))
+            d["reviewed"] = bool(d.get("reviewed"))
+            d["false_positive"] = bool(d.get("false_positive"))
+            rows.append(d)
+        return rows
 
 
-def set_finding_review(db_path, finding_id, status, note=None):
+def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None):
     """
-    Update the review status (and optional note) for a single finding.
+    Update the review flags (and optional note) for a single finding.
+
+    reviewed and false_positive are INDEPENDENT booleans — a finding can
+    be reviewed, a false positive, both, or neither. 'Reviewed' means
+    an analyst looked at it; 'false_positive' means it's not a real
+    threat. Those are different judgements, so they toggle separately.
 
     Parameters:
-        db_path (str):      Path to the .db file.
-        finding_id (int):   Row id from the findings table.
-        status (str):       One of REVIEW_STATUSES.
-        note (str | None):  Free-text analyst note. Pass None to clear.
+        db_path (str):         Path to the .db file.
+        finding_id (int):      Row id from the findings table.
+        reviewed (bool):       Whether the finding has been reviewed.
+        false_positive (bool): Whether the finding is a false positive.
+        note (str | None):     Free-text analyst note. Pass None to clear.
 
     Returns:
         dict | None: The updated finding row (same shape as get_scan_findings
                      items) or None if no such finding id exists.
-
-    Raises:
-        ValueError: if status is not in REVIEW_STATUSES.
     """
-    if status not in REVIEW_STATUSES:
-        raise ValueError(f"status must be one of {REVIEW_STATUSES}")
-
-    # 'new' is the default / reset state — clear the reviewed_at timestamp
-    # so the UI can tell "never reviewed" apart from "was reviewed then reset".
-    reviewed_at = None if status == "new" else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    r = 1 if reviewed else 0
+    fp = 1 if false_positive else 0
+    # reviewed_at is the timestamp of the most recent touch — set it if
+    # either flag is on, clear it if the user flipped both off so the UI
+    # can tell "never touched" apart from "touched then reset".
+    reviewed_at = (datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                   if (r or fp) else None)
     clean_note = (note or "").strip() or None
 
     with _connect(db_path) as conn:
         conn.execute(
             """UPDATE findings
-               SET review_status = ?, review_note = ?, reviewed_at = ?
+               SET reviewed = ?, false_positive = ?,
+                   review_note = ?, reviewed_at = ?
                WHERE id = ?""",
-            (status, clean_note, reviewed_at, int(finding_id)),
+            (r, fp, clean_note, reviewed_at, int(finding_id)),
         )
         row = conn.execute(
             """SELECT id, scan_id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
-                      review_status, review_note, reviewed_at
+                      reviewed, false_positive, review_note, reviewed_at
                FROM findings WHERE id = ?""",
             (int(finding_id),),
         ).fetchone()
@@ -461,8 +489,11 @@ def set_finding_review(db_path, finding_id, status, note=None):
             return None
         cols = ("id", "scan_id", "timestamp", "event_id", "severity", "rule",
                 "mitre", "description", "details", "raw_xml", "hostname",
-                "review_status", "review_note", "reviewed_at")
-        return dict(zip(cols, row))
+                "reviewed", "false_positive", "review_note", "reviewed_at")
+        d = dict(zip(cols, row))
+        d["reviewed"] = bool(d["reviewed"])
+        d["false_positive"] = bool(d["false_positive"])
+        return d
 
 
 def get_fleet_summary(db_path):
@@ -649,7 +680,7 @@ def get_monitor_session_findings(db_path, session_id):
             cursor = conn.execute(
                 """SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
                           f.rule, f.mitre, f.description, f.details, f.raw_xml,
-                          f.review_status, f.review_note, f.reviewed_at,
+                          f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                           s.scanned_at
                    FROM findings f
                    JOIN scans s ON s.id = f.scan_id

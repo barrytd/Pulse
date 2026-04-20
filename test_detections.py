@@ -2731,9 +2731,9 @@ def test_get_scan_findings_sorted_by_severity(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Finding review status
+# Finding review flags — reviewed and false_positive are independent
 # ---------------------------------------------------------------------------
-from pulse.database import set_finding_review, REVIEW_STATUSES
+from pulse.database import set_finding_review
 
 
 def _seed_one_finding(tmp_path):
@@ -2748,57 +2748,90 @@ def _seed_one_finding(tmp_path):
     return db, row["id"]
 
 
-def test_findings_default_review_status_is_new(tmp_path):
-    """A freshly saved finding should start with review_status='new'."""
+def test_findings_default_to_untouched(tmp_path):
+    """A freshly saved finding should have neither flag set."""
     db, fid = _seed_one_finding(tmp_path)
     row = get_scan_findings(db, 1)[0]
-    assert row["review_status"] == "new"
+    assert row["reviewed"] is False
+    assert row["false_positive"] is False
     assert row["review_note"] is None
     assert row["reviewed_at"] is None
 
 
 def test_set_finding_review_marks_reviewed(tmp_path):
     db, fid = _seed_one_finding(tmp_path)
-    updated = set_finding_review(db, fid, "reviewed", note="looked at it, benign")
-    assert updated["review_status"] == "reviewed"
+    updated = set_finding_review(db, fid, True, False, note="looked at it, benign")
+    assert updated["reviewed"] is True
+    assert updated["false_positive"] is False
     assert updated["review_note"]   == "looked at it, benign"
     assert updated["reviewed_at"]   is not None
 
 
 def test_set_finding_review_false_positive_persists(tmp_path):
     db, fid = _seed_one_finding(tmp_path)
-    set_finding_review(db, fid, "false_positive", note="known scanner")
+    set_finding_review(db, fid, False, True, note="known scanner")
     row = get_scan_findings(db, 1)[0]
-    assert row["review_status"] == "false_positive"
+    assert row["reviewed"] is False
+    assert row["false_positive"] is True
     assert row["review_note"]   == "known scanner"
+
+
+def test_flags_can_be_set_independently(tmp_path):
+    """reviewed and false_positive are not mutually exclusive — a finding
+    can be both at once. Setting one does not clear the other."""
+    db, fid = _seed_one_finding(tmp_path)
+
+    # Reviewed only.
+    set_finding_review(db, fid, True, False)
+    row = get_scan_findings(db, 1)[0]
+    assert row["reviewed"] is True and row["false_positive"] is False
+
+    # Toggle false_positive on while keeping reviewed on.
+    set_finding_review(db, fid, True, True)
+    row = get_scan_findings(db, 1)[0]
+    assert row["reviewed"] is True
+    assert row["false_positive"] is True
+
+    # Turn reviewed off while keeping false_positive on.
+    set_finding_review(db, fid, False, True)
+    row = get_scan_findings(db, 1)[0]
+    assert row["reviewed"] is False
+    assert row["false_positive"] is True
 
 
 def test_set_finding_review_resets_clears_timestamp(tmp_path):
     db, fid = _seed_one_finding(tmp_path)
-    set_finding_review(db, fid, "reviewed", note="x")
-    reset = set_finding_review(db, fid, "new", note="")
-    assert reset["review_status"] == "new"
+    set_finding_review(db, fid, True, False, note="x")
+    reset = set_finding_review(db, fid, False, False, note="")
+    assert reset["reviewed"] is False
+    assert reset["false_positive"] is False
     assert reset["reviewed_at"]   is None
     assert reset["review_note"]   is None  # blank note is normalised to None
-
-
-def test_set_finding_review_unknown_status_raises(tmp_path):
-    import pytest
-    db, fid = _seed_one_finding(tmp_path)
-    with pytest.raises(ValueError):
-        set_finding_review(db, fid, "bogus")
 
 
 def test_set_finding_review_unknown_id_returns_none(tmp_path):
     db = str(tmp_path / "pulse.db")
     init_db(db)
-    assert set_finding_review(db, 999, "reviewed") is None
+    assert set_finding_review(db, 999, True, False) is None
 
 
-def test_review_statuses_tuple_shape():
-    """REVIEW_STATUSES is the single source of truth consumed by the API.
-    Freeze the shape so the dashboard and API stay in sync."""
-    assert set(REVIEW_STATUSES) == {"new", "reviewed", "false_positive"}
+def test_legacy_review_status_backfills_to_flags(tmp_path):
+    """init_db must migrate any existing rows written against the legacy
+    single-status column so nothing silently loses its review state on
+    upgrade."""
+    import sqlite3
+    db, fid = _seed_one_finding(tmp_path)
+    # Simulate an old-build row: legacy review_status set, new flags off.
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE findings SET reviewed = 0, false_positive = 0, "
+            "review_status = 'reviewed' WHERE id = ?",
+            (fid,),
+        )
+    init_db(db)  # migration runs here
+    row = get_scan_findings(db, 1)[0]
+    assert row["reviewed"] is True
+    assert row["false_positive"] is False
 
 
 # =============================================================================

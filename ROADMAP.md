@@ -46,7 +46,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - **Position-based scan numbering** — displayed "Scan #" tracks position in current history, so deleting all scans resets back to #1 (internal DB id preserved for lookups)
 - **Real SPA URL routing** — every page has its own path (`/dashboard`, `/monitor`, `/scans/{id}`, etc.); browser Back / Forward / Refresh / deep-linking all work
 - **Bulk-select + batch-delete on every list page** — Scans, Reports, Whitelist, Firewall Block List, Monitor Sessions, History all share the same checkbox + sticky action bar pattern with matching `DELETE /api/<resource>/batch` endpoints
-- 405 unit tests, all passing
+- 447 unit tests, all passing
 
 ---
 
@@ -78,7 +78,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 4 — Apr 17–24, 2026 (Multi-host & firewall)
+## Sprint 4 — Apr 17–24, 2026 (Multi-host & firewall) — shipped v1.4.0
 
 - [x] Multi-machine support — track scores per hostname, compare security posture across endpoints
 - [x] Hostname auto-detection — parse `Computer` field from each `.evtx` event, tag findings
@@ -86,11 +86,11 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Fleet overview page — sortable table of all machines with score, last scan, top severity
 - [x] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
 - [x] Suspicious outbound detection — flag DROPs from public IPs to high-value ports (3389, 22, 445, 3306, 5985), plus port-scan aggregation across many dst-ports
-- [ ] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
+- [x] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
 - [x] **IP block list** — Pulse-owned list of blocked source IPs pushed into Windows Firewall via `netsh advfirewall` as inbound deny rules. Every rule is prefixed `Pulse-managed:` so user-authored rules are never touched; optional comment per entry; add / push / unblock from the Firewall page and CLI
 - [x] One-click "block source IP" action — any finding with a source IP shows a Block button in the detail drawer that stages the IP with a comment linking back to the finding
-- [ ] Audit log — track who scanned what and when within the dashboard
-- [ ] Export fleet CSV — one-row-per-host summary for spreadsheets
+- [x] Audit log — track who scanned what and when within the dashboard
+- [x] Export fleet CSV — one-row-per-host summary for spreadsheets
 
 ---
 

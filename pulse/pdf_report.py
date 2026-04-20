@@ -164,12 +164,17 @@ class GradeCircle(Flowable):
 
 class ScoreRing(Flowable):
     """
-    Circular score badge: grade-colored ring + two stacked labels inside
-    — the numeric score on top (large) and the letter grade below (small)
-    — both in the same grade color. 60pt square occupying its own cell
-    in the header row.
+    Progress-arc score ring matching the dashboard exactly: muted gray
+    full-circle track underneath, grade-colored arc on top filling
+    `score / 100` of the circumference, starting at 12 o'clock and
+    sweeping clockwise. The score number sits large in the center with
+    a small muted "/ 100" beneath it.
     """
-    def __init__(self, score, score_label, size=60, border=4):
+    # Light gray that reads as muted on the white PDF background — same
+    # visual weight as dashboard.css .score-ring .track.
+    TRACK_COLOR = colors.HexColor("#e5e7eb")
+
+    def __init__(self, score, score_label, size=80, border=6):
         super().__init__()
         self.score = score
         self.size = size
@@ -181,18 +186,56 @@ class ScoreRing(Flowable):
 
     def draw(self):
         c = self.canv
-        r = self.size / 2.0
-        c.saveState()
-        c.setStrokeColor(self.color)
-        c.setLineWidth(self.border)
-        c.circle(r, r, r - self.border / 2.0, stroke=1, fill=0)
+        cx = cy = self.size / 2.0
+        r = cx - self.border / 2.0  # stroke centerline radius
 
-        number = "—" if self.score is None else str(int(self.score))
+        c.saveState()
+        c.setLineCap(1)  # round caps so the arc tip matches the dashboard
+
+        # Gray track — full circle behind the progress arc.
+        c.setStrokeColor(self.TRACK_COLOR)
+        c.setLineWidth(self.border)
+        c.circle(cx, cy, r, stroke=1, fill=0)
+
+        # Colored progress arc — proportional to score, starting at top.
+        try:
+            pct = max(0.0, min(1.0, int(self.score) / 100.0))
+        except (TypeError, ValueError):
+            pct = 0.0
+
+        if pct > 0:
+            c.setStrokeColor(self.color)
+            c.setLineWidth(self.border)
+            # ReportLab's arc measures startAng CCW from east (3 o'clock).
+            # 90° starts at 12 o'clock; negative extent sweeps clockwise
+            # so higher scores fill more of the ring.
+            c.arc(
+                cx - r, cy - r, cx + r, cy + r,
+                startAng=90, extent=-360 * pct,
+            )
+
+        # Score number — large, centered at the exact geometric center of
+        # the circle. ReportLab's drawCentredString places the baseline
+        # at y, so to centre a 22pt Helvetica-Bold glyph on cy we offset
+        # the baseline down by cap-height/2 (≈ 7pt). This is the
+        # ReportLab analogue of SVG `dominant-baseline="central"`.
+        number_size = 22
+        label_size = 8
+        cap_half = number_size * 0.35  # ~half the cap-height for Helv-Bold
         c.setFillColor(self.color)
-        c.setFont("Helvetica-Bold", 20)
-        # Optical vertical center — the digit caps sit a hair above the
-        # geometric center, so offset by -6.
-        c.drawCentredString(r, r - 6, number)
+        c.setFont("Helvetica-Bold", number_size)
+        c.drawCentredString(cx, cy - cap_half, "--" if self.score is None
+                            else str(int(self.score)))
+
+        # "/ 100" — small, muted, sitting 14pt below the circle centre
+        # in visual (screen) terms. ReportLab's y axis grows upward, so
+        # that's `cy - 14` in its coordinates. Subtract another half
+        # cap-height so the label's optical middle lands there instead
+        # of its baseline.
+        c.setFillColor(COLOR_MUTED)
+        c.setFont("Helvetica", label_size)
+        c.drawCentredString(cx, cy - 14 - label_size * 0.35, "/ 100")
+
         c.restoreState()
 
 
@@ -340,7 +383,7 @@ def _build_header(findings, scan_meta, *, title_style, meta_style):
     right.append(Spacer(1, 6))
     right.append(_build_pill_row(findings))
 
-    ring_w = 60
+    ring_w = 80
     right_w = CONTENT_WIDTH - ring_w - 14
     tbl = Table(
         [[ring, right]],

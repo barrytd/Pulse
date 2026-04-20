@@ -40,7 +40,7 @@ def diff_findings(findings_a, findings_b):
     # Keep original iteration order rather than set order so output is stable.
     new_list      = [b_by_key[k] for k in (_key(f) for f in findings_b) if k in new_keys]
     resolved_list = [a_by_key[k] for k in (_key(f) for f in findings_a) if k in resolved_keys]
-    # For shared we prefer the B side (newer metadata like review_status).
+    # For shared we prefer the B side (newer metadata like review flags).
     shared_list   = [b_by_key[k] for k in (_key(f) for f in findings_b) if k in shared_keys]
 
     return {

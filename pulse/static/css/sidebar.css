@@ -109,6 +109,13 @@
 /* ------------------------------------------------------------------ */
 .main {
   flex: 1;
+  /* Without `min-width: 0` a flex item defaults to `min-width: auto`
+     (min-content), so any wide descendant — the Chart.js canvas, a long
+     table row, a full-width filter bar — pushes `.main` past the
+     viewport and produces page-level horizontal scroll on narrower
+     monitors. This line lets the grids inside (`minmax(0, 1fr)`)
+     actually shrink. */
+  min-width: 0;
   margin-left: 220px;
   min-height: 100vh;
 }

@@ -5,9 +5,12 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
-## 2026-04-19 — unreleased
+## 2026-04-20 — v1.4.0
 
 ### Added
+- **Windows Firewall configuration audit** (`pulse/firewall_config.py`) — three new rules powered by live `netsh advfirewall` output: **Firewall Profile Disabled** (HIGH; any of Domain / Private / Public in State OFF), **Firewall Any-Any Allow Rule** (MEDIUM; enabled inbound allow with any protocol, any local port, any remote IP — skips Pulse-managed rules), **Firewall Overly Broad Scope** (MEDIUM; inbound allow on a sensitive port 22 / 23 / 135 / 139 / 445 / 1433 / 3306 / 3389 / 5432 / 5900 / 5985 / 5986 with RemoteIP = Any). Pure-data parsers (`parse_profiles`, `parse_rules`) keep the module OS-agnostic for testing; `scan_firewall_config()` returns `[]` silently on non-Windows. Runs automatically on every `/api/scan` and via the new `--firewall-config` CLI flag
+- **Audit Log page** (`pulse/static/js/audit.js`, `GET /api/audit`) — sidebar entry renders the `audit_log` table newest-first with action badges, user/source column, IP, and detail. Every `/api/scan`, scan-delete (Scans and History pages), block / unblock / push now writes an audit row via `blocker.log_audit`, so a reviewer has one place to see the who-did-what-and-when story for sensitive actions
+- **Fleet CSV export** (`GET /api/fleet/export.csv`, Export CSV button on the Fleet page) — one-row-per-host summary with `hostname,scan_count,last_scan_at,total_findings,latest_score,latest_grade,worst_severity`; browser-native download with a timestamped filename so analysts can hand the list straight to a spreadsheet or ticket
 - **Windows Firewall log parser** (`pulse/firewall_parser.py`) — reads `pfirewall.log` (default `%windir%\System32\LogFiles\Firewall\pfirewall.log`), skips private / loopback / link-local sources, and surfaces two detection classes: **port scan** (one public IP, many DROPs across many dst-ports in a short window) and **sensitive-port probe** (single DROP on 3389 / 22 / 445 / 3306 / 5985 from a public IP)
 - **IP block list** (`pulse/blocker.py`, `ip_block_list` table, `/api/block-list`, `/api/block-ip`, `/api/block-ip/{ip}/push`, `/api/unblock-ip/{ip}`) — manage a Pulse-owned list of blocked source IPs. Each row has status `pending` / `active`, optional comment (e.g. "brute force on 2026-04-15"), and a rule name prefixed `Pulse-managed:` so user-authored firewall rules are never touched. Safety rails reject RFC1918, loopback, link-local, multicast, and the local machine's own IPs
 - **One-click "Block source IP" action** — every finding with a discoverable source IP (Brute Force, RDP, Pass-the-Hash, etc.) now shows a Block button in the detail drawer. Stages the IP with a pre-filled comment linking back to the finding; a second click (or `--confirm`) pushes it to Windows Firewall via `netsh advfirewall`
@@ -24,7 +27,7 @@ Format: newest entries at the top, grouped by date.
 - Finding metadata attached on the dashboard + findings page now carries `_scan_number` alongside `_scan_id` so the display can use the position while navigation still hits the stable DB id
 
 ### Tests
-- 258 passing (`test_detections.py` + `test_api.py`), including two `build_pdf` cases. New coverage in `test_blocker.py` (470 LOC / 428 test LOC, staging safety rails, push / unblock lifecycle, non-Windows no-op path) and `test_firewall_parser.py` (port-scan aggregation, sensitive-port detection, private-IP skipping)
+- 407 passing (core suite), covering `test_detections.py`, `test_api.py`, `test_blocker.py`, `test_firewall_parser.py`, and the new `test_firewall_config.py` (14 cases: profile / rule parsers, each detection, pure-data entry point). New `/api/fleet/export.csv` and `/api/audit` cases in `test_api.py`
 
 ---
 

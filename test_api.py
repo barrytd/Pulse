@@ -257,6 +257,70 @@ def test_fleet_rolls_up_by_hostname(client):
     assert hosts["HOST-B"]["worst_severity"] == "CRITICAL"
 
 
+def test_fleet_export_csv_has_header_and_row_per_host(client):
+    """The CSV export returns one header row and one row per host, in the
+    same column order the Fleet UI consumes."""
+    from pulse import database
+    db_path = client.app.state.db_path
+    database.save_scan(db_path, [
+        {"rule": "RDP Logon Detected", "severity": "HIGH", "hostname": "HOST-A"},
+    ], filename="a.evtx")
+
+    resp = client.get("/api/fleet/export.csv")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert 'attachment; filename="pulse-fleet-' in resp.headers["content-disposition"]
+
+    lines = resp.text.strip().splitlines()
+    assert lines[0] == (
+        "hostname,scan_count,last_scan_at,total_findings,"
+        "latest_score,latest_grade,worst_severity"
+    )
+    assert len(lines) == 2
+    assert lines[1].startswith("HOST-A,1,")
+
+
+def test_audit_endpoint_empty_when_no_activity(client):
+    """/api/audit should succeed and return an empty list on a fresh DB."""
+    resp = client.get("/api/audit")
+    assert resp.status_code == 200
+    assert resp.json() == {"rows": []}
+
+
+def test_audit_records_scan_action(client):
+    """Uploading a scan should leave a 'scan' row in the audit log."""
+    client.post(
+        "/api/scan",
+        files={"file": ("x.evtx", _EVTX_HEADER, "application/octet-stream")},
+    )
+    rows = client.get("/api/audit").json()["rows"]
+    actions = [r["action"] for r in rows]
+    assert "scan" in actions
+
+
+def test_audit_records_delete_scan_action(client):
+    """Deleting a scan should leave a 'delete_scan' row in the audit log."""
+    scan = client.post(
+        "/api/scan",
+        files={"file": ("x.evtx", _EVTX_HEADER, "application/octet-stream")},
+    ).json()
+    scan_id = scan["scan_id"]
+    client.request("DELETE", "/api/scans", json={"ids": [scan_id]})
+    rows = client.get("/api/audit").json()["rows"]
+    actions = [r["action"] for r in rows]
+    assert "delete_scan" in actions
+
+
+def test_fleet_export_csv_empty_database_returns_just_header(client):
+    """With no scans the export should still succeed and include the header row."""
+    resp = client.get("/api/fleet/export.csv")
+    assert resp.status_code == 200
+    assert resp.text.strip().splitlines() == [
+        "hostname,scan_count,last_scan_at,total_findings,"
+        "latest_score,latest_grade,worst_severity"
+    ]
+
+
 # ---------------------------------------------------------------------------
 # /api/report/{scan_id}
 # ---------------------------------------------------------------------------
@@ -622,52 +686,74 @@ def _seed_finding(client):
 def test_review_marks_finding_reviewed(client):
     fid = _seed_finding(client)
     r = client.put(f"/api/finding/{fid}/review",
-                   json={"status": "reviewed", "note": "benign scanner"})
+                   json={"reviewed": True, "false_positive": False, "note": "benign scanner"})
     assert r.status_code == 200
     body = r.json()
-    assert body["review_status"] == "reviewed"
+    assert body["reviewed"] is True
+    assert body["false_positive"] is False
     assert body["review_note"]   == "benign scanner"
     assert body["reviewed_at"] is not None
 
 
 def test_review_marks_false_positive(client):
     fid = _seed_finding(client)
-    r = client.put(f"/api/finding/{fid}/review", json={"status": "false_positive"})
+    r = client.put(f"/api/finding/{fid}/review",
+                   json={"reviewed": False, "false_positive": True})
     assert r.status_code == 200
-    assert r.json()["review_status"] == "false_positive"
+    assert r.json()["false_positive"] is True
+    assert r.json()["reviewed"] is False
+
+
+def test_review_allows_both_flags_simultaneously(client):
+    """Reviewed and false_positive are independent — an analyst can mark
+    both on at once. 'I looked at it' and 'it's not a real threat' are
+    different statements that commonly go together."""
+    fid = _seed_finding(client)
+    r = client.put(f"/api/finding/{fid}/review",
+                   json={"reviewed": True, "false_positive": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reviewed"] is True
+    assert body["false_positive"] is True
 
 
 def test_review_reset_clears_note_and_timestamp(client):
     fid = _seed_finding(client)
-    client.put(f"/api/finding/{fid}/review", json={"status": "reviewed", "note": "x"})
-    r = client.put(f"/api/finding/{fid}/review", json={"status": "new"})
+    client.put(f"/api/finding/{fid}/review",
+               json={"reviewed": True, "false_positive": False, "note": "x"})
+    r = client.put(f"/api/finding/{fid}/review",
+                   json={"reviewed": False, "false_positive": False})
     assert r.status_code == 200
     body = r.json()
-    assert body["review_status"] == "new"
+    assert body["reviewed"] is False
+    assert body["false_positive"] is False
     assert body["reviewed_at"]   is None
     assert body["review_note"]   is None
 
 
-def test_review_rejects_unknown_status(client):
+def test_review_rejects_missing_flags(client):
     fid = _seed_finding(client)
-    r = client.put(f"/api/finding/{fid}/review", json={"status": "wrong"})
+    r = client.put(f"/api/finding/{fid}/review", json={"note": "x"})
     assert r.status_code == 400
 
 
 def test_review_returns_404_for_missing_finding(client):
-    r = client.put("/api/finding/9999/review", json={"status": "reviewed"})
+    r = client.put("/api/finding/9999/review",
+                   json={"reviewed": True, "false_positive": False})
     assert r.status_code == 404
 
 
 def test_report_endpoint_includes_review_fields(client):
     """The report endpoint is what the dashboard reads; the drawer needs
-    review_status / review_note / reviewed_at / id on each finding."""
+    reviewed / false_positive / review_note / reviewed_at / id on each
+    finding."""
     _seed_finding(client)
     r = client.get("/api/report/1")
     assert r.status_code == 200
     findings = r.json()["findings"]
     assert findings[0]["id"] is not None
-    assert findings[0]["review_status"] == "new"
+    assert findings[0]["reviewed"] is False
+    assert findings[0]["false_positive"] is False
     assert "review_note" in findings[0]
     assert "reviewed_at" in findings[0]
 

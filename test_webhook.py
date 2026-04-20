@@ -18,8 +18,8 @@ from pulse.webhook import (
     detect_flavor,
     validate_webhook_config,
     send_webhook,
-    _build_slack_payload,
-    _build_discord_payload,
+    build_slack_payload,
+    build_discord_payload,
 )
 
 
@@ -75,29 +75,41 @@ def _findings():
     ]
 
 
-def test_slack_payload_contains_text_and_attachments():
-    payload = _build_slack_payload(_findings(), "HOST-A")
+def test_slack_payload_contains_text_and_blocks():
+    payload = build_slack_payload(_findings(), hostname="HOST-A")
+    # Fallback text is what mobile push shows.
     assert "text" in payload
     assert "HOST-A" in payload["text"]
-    assert len(payload["attachments"]) == 2
-    # Colour stripe should reflect severity.
-    colours = [a["color"] for a in payload["attachments"]]
-    assert "#e74c3c" in colours  # HIGH
-    assert "#8e44ad" in colours  # CRITICAL
+    # Block Kit structure: header + info section + divider + context blocks.
+    assert "blocks" in payload
+    assert any(b.get("type") == "header" for b in payload["blocks"])
+    assert any(b.get("type") == "divider" for b in payload["blocks"])
+    # Host name should surface inside the info section.
+    section_text = next(
+        b["text"]["text"] for b in payload["blocks"]
+        if b.get("type") == "section"
+    )
+    assert "HOST-A" in section_text
 
 
-def test_slack_payload_caps_at_ten_attachments_plus_overflow():
+def test_slack_payload_summarises_overflow():
     many = [{"rule": f"Rule {i}", "severity": "HIGH", "details": "x"} for i in range(15)]
-    payload = _build_slack_payload(many, None)
-    # 10 real + 1 overflow notice
-    assert len(payload["attachments"]) == 11
-    assert "+5 more" in payload["attachments"][-1]["text"]
+    payload = build_slack_payload(many, hostname=None, top_n=3)
+    # Top-N shown as one context block; anything beyond gets an "...and N more" block.
+    overflow_blocks = [
+        b for b in payload["blocks"]
+        if b.get("type") == "context"
+        and "more findings" in b["elements"][0]["text"]
+    ]
+    assert len(overflow_blocks) == 1
+    assert "12" in overflow_blocks[0]["elements"][0]["text"]  # 15 - 3
 
 
 def test_discord_payload_contains_content_and_embeds():
-    payload = _build_discord_payload(_findings(), "HOST-A")
+    payload = build_discord_payload(_findings(), hostname="HOST-A")
     assert "content" in payload
     assert "HOST-A" in payload["content"]
+    # One summary embed + one top-findings embed.
     assert len(payload["embeds"]) == 2
     # Discord uses integer colours.
     assert all(isinstance(e["color"], int) for e in payload["embeds"])
@@ -105,9 +117,10 @@ def test_discord_payload_contains_content_and_embeds():
 
 def test_discord_payload_truncates_long_details():
     big = [{"rule": "R", "severity": "HIGH", "details": "x" * 5000}]
-    payload = _build_discord_payload(big, None)
-    # Discord caps embed description at 4096 chars; we stay well under 1500.
-    assert len(payload["embeds"][0]["description"]) <= 1500
+    payload = build_discord_payload(big, hostname=None)
+    # Second embed (top findings) description is capped well under Discord's 4096 limit.
+    top_embed = payload["embeds"][1]
+    assert len(top_embed["description"]) <= 3800
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +161,9 @@ def test_send_webhook_posts_slack_payload_to_slack_url():
 
     assert captured["url"] == cfg["url"]
     body = json.loads(captured["body"].decode())
-    # Slack shape: has "attachments", not "embeds".
-    assert "attachments" in body
+    # Slack shape: block kit with "blocks" + fallback "text"; no Discord "embeds".
+    assert "blocks" in body
+    assert "text" in body
     assert "embeds" not in body
 
 

@@ -3,9 +3,14 @@
 /* ------------------------------------------------------------------ */
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* `minmax(0, 1fr)` (not plain `1fr`) keeps each column from expanding
+     past its 1fr share when a child's min-content is wide — without it
+     a long unbreakable value can push the row past the viewport and
+     force horizontal page scroll. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .stat-card {
@@ -120,7 +125,12 @@
 
 .dash-finding-row {
   display: grid;
-  grid-template-columns: 130px 1fr 80px 18px;
+  /* `minmax(0, 1fr)` (not plain `1fr`) lets the middle column shrink
+     below its min-content — the description line uses nowrap+ellipsis,
+     which only kicks in when the cell is actually constrained. With a
+     plain `1fr` the cell grows to the longest unbreakable word and
+     pushes the whole row past the viewport. */
+  grid-template-columns: 130px minmax(0, 1fr) 80px 18px;
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
@@ -130,6 +140,7 @@
   border-radius: 4px;
   font-size: 12px;
   position: relative;
+  min-width: 0;
 }
 
 
@@ -864,7 +875,7 @@
 /* ------------------------------------------------------------------ */
 .middle-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   margin-bottom: 20px;
   align-items: stretch;
@@ -1158,7 +1169,13 @@
 .dash-filter-bar {
   display: flex;
   align-items: flex-end;
+  /* Wrap when the viewport is too narrow to fit all the dropdowns
+     on one line — without this the filter groups' `min-width: 140px`
+     floors force the bar wider than the viewport and trigger page-level
+     horizontal scroll. */
+  flex-wrap: wrap;
   gap: 18px;
+  row-gap: 12px;
   padding: 10px 16px;
   margin: 0 0 16px 0;
   background: var(--card-bg);
@@ -1288,9 +1305,10 @@
 /* Summary-card row used by History */
 .summary-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 /* -----------------------------------------------------------------
@@ -1573,7 +1591,7 @@
   font-weight: 500;
   font-size: 13px;
   display: inline-block;
-  min-width: 58px;
+  min-width: 64px;
   text-align: left;
 }
 
