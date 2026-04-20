@@ -25,6 +25,9 @@ let _historyChartInstance = null;
 let _historyHighlightIdx  = -1;
 // scan id -> true. Matches the Scans page selection model.
 let _selectedHistory = {};
+// Cached last diff so tab switches don't re-hit /api/compare.
+let _lastDiff    = null;
+let _lastDiffTab = 'new';
 
 export async function renderHistoryPage() {
   var c = document.getElementById('content');
@@ -148,35 +151,73 @@ export async function runHistoryCompare() {
 }
 
 function _renderDiff(diff) {
+  _lastDiff = diff;
+  // Default to the first non-empty bucket in priority order, so the user
+  // doesn't land on an empty tab when there's clearly data elsewhere.
+  var newCt      = (diff['new']      || []).length;
+  var sharedCt   = (diff.shared      || []).length;
+  var resolvedCt = (diff.resolved    || []).length;
+  if (newCt === 0 && sharedCt === 0 && resolvedCt > 0) _lastDiffTab = 'resolved';
+  else if (newCt === 0 && resolvedCt === 0 && sharedCt > 0) _lastDiffTab = 'shared';
+  else _lastDiffTab = 'new';
+  return _buildDiffView();
+}
+
+function _buildDiffView() {
+  if (!_lastDiff) return '';
+  var diff = _lastDiff;
   var a = diff.scan_a || {};
   var b = diff.scan_b || {};
+  var counts = {
+    'new':      (diff['new']   || []).length,
+    shared:     (diff.shared   || []).length,
+    resolved:   (diff.resolved || []).length,
+  };
+  var hints = {
+    'new':    'Present in After, absent from Before.',
+    shared:   'Present in both scans.',
+    resolved: 'Present in Before, absent from After.',
+  };
+  var active = _lastDiffTab in counts ? _lastDiffTab : 'new';
+  var activeList = diff[active] || [];
+
   var meta =
     '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:12px; color:var(--text-muted);">' +
       '<span><strong>Before:</strong> #' + (a.number != null ? a.number : a.id) + ' \u00b7 ' + escapeHtml(a.scanned_at || '') + ' \u00b7 ' + (a.total_findings || 0) + ' finding(s)</span>' +
       '<span><strong>After:</strong> #' + (b.number != null ? b.number : b.id) + ' \u00b7 ' + escapeHtml(b.scanned_at || '') + ' \u00b7 ' + (b.total_findings || 0) + ' finding(s)</span>' +
     '</div>';
+
+  function tab(key, label) {
+    var on = key === active;
+    return '<button class="cmp-tab' + (on ? ' active' : '') + '" ' +
+      'data-action="setCompareTab" data-arg="' + key + '">' +
+      label + ' \u00b7 ' + counts[key] +
+    '</button>';
+  }
+
+  var header =
+    '<div class="cmp-tabs">' +
+      tab('new',      'New')      +
+      tab('shared',   'Shared')   +
+      tab('resolved', 'Resolved') +
+      '<span class="cmp-hint">' + escapeHtml(hints[active]) + '</span>' +
+    '</div>';
+
+  var body = activeList.length
+    ? buildFindingsTable(activeList)
+    : '<div style="padding:24px; text-align:center; color:var(--text-muted);">None</div>';
+
   return meta +
-    '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">' +
-      _diffColumn('New', diff.new || [], '#e74c3c', 'Present in After, absent from Before.') +
-      _diffColumn('Shared', diff.shared || [], 'var(--text-muted)', 'Present in both scans.') +
-      _diffColumn('Resolved', diff.resolved || [], '#3fb950', 'Present in Before, absent from After.') +
+    '<div class="card" style="padding:0; overflow:hidden; margin:0;">' +
+      header + body +
     '</div>';
 }
 
-function _diffColumn(label, findings, accent, hint) {
-  var body = findings.length
-    ? buildFindingsTable(findings)
-    : '<div style="padding:14px; text-align:center; color:var(--text-muted);">None</div>';
-  return '<div class="card" style="padding:0; overflow:hidden; margin:0;">' +
-    '<div style="padding:10px 14px; border-bottom:1px solid var(--border); ' +
-    'display:flex; align-items:center; justify-content:space-between;">' +
-      '<span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; color:' + accent + ';">' +
-        label + ' \u00b7 ' + findings.length +
-      '</span>' +
-      '<span style="font-size:11px; color:var(--text-muted);">' + escapeHtml(hint) + '</span>' +
-    '</div>' +
-    body +
-  '</div>';
+export function setCompareTab(tab) {
+  if (tab !== 'new' && tab !== 'shared' && tab !== 'resolved') return;
+  _lastDiffTab = tab;
+  var out = document.getElementById('cmp-results');
+  if (out) out.innerHTML = _buildDiffView();
 }
 
 function _buildHistoryTable(scans) {

@@ -1670,3 +1670,36 @@
   cursor: pointer;
   user-select: none;
 }
+
+/* Scan-comparison diff tabs (History page). */
+.cmp-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1, transparent);
+}
+.cmp-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cmp-tab:hover { color: var(--text); background: var(--surface-2, rgba(255,255,255,0.04)); }
+.cmp-tab.active {
+  color: var(--text);
+  background: var(--surface-2, rgba(88,166,255,0.1));
+  border-color: var(--border);
+}
+.cmp-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}

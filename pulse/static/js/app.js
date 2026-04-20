@@ -59,6 +59,7 @@ import {
 import {
   highlightHistoryScan,
   runHistoryCompare,
+  setCompareTab,
   toggleHistorySelect,
   toggleHistorySelectAll,
   deleteSelectedHistory,
@@ -213,6 +214,7 @@ const actions = {
   // history
   highlightHistoryScan,
   runHistoryCompare,
+  setCompareTab,
   toggleHistorySelect,
   toggleHistorySelectAll,
   deleteSelectedHistory,
