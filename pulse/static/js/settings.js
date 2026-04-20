@@ -63,10 +63,47 @@ export async function renderSettingsPage() {
   var c = document.getElementById('content');
   c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading...</div>';
 
-  var config = await apiGetConfig();
-  var rules  = await apiGetRules();
-  var auth   = await apiGetAuthStatus();
-  var me     = await apiGetMe();
+  // Fetch every endpoint in parallel with its own catch so one slow /
+  // failing endpoint can't leave the whole page stuck on "Loading...".
+  // Each result falls back to a safe default shape the renderer accepts.
+  // Per-call timeout: Render free tier cold-starts can be slow, but a
+  // request that hasn't returned in 15s is almost certainly wedged.
+  function _withTimeout(p, label) {
+    return Promise.race([
+      p,
+      new Promise(function (_, reject) {
+        setTimeout(function () {
+          reject(new Error('timed out after 15s'));
+        }, 15000);
+      }),
+    ]).catch(function (err) {
+      throw new Error(label + ' ' + (err && err.message ? err.message : err));
+    });
+  }
+  var settled = await Promise.allSettled([
+    _withTimeout(apiGetConfig(),     '/api/config'),
+    _withTimeout(apiGetRules(),      '/api/rules'),
+    _withTimeout(apiGetAuthStatus(), '/api/auth/status'),
+    _withTimeout(apiGetMe(),         '/api/me'),
+  ]);
+  function _val(i, fallback) {
+    var r = settled[i];
+    return (r && r.status === 'fulfilled' && r.value) ? r.value : fallback;
+  }
+  var failures = settled
+    .map(function (r, i) {
+      if (r.status !== 'rejected') return null;
+      var name = ['/api/config', '/api/rules', '/api/auth/status', '/api/me'][i];
+      var msg = (r.reason && r.reason.message) ? r.reason.message : String(r.reason);
+      return name + ': ' + msg;
+    })
+    .filter(Boolean);
+
+  var config = _val(0, {});
+  var rules  = _val(1, { rules: [] });
+  var auth   = _val(2, { email: '' });
+  var me     = _val(3, { role: null });
+  if (!rules || !Array.isArray(rules.rules)) rules = { rules: [] };
   var isAdmin = (me && me.role === 'admin');
 
   // Admin-only users fetch — skip the round-trip for non-admins. The
@@ -449,10 +486,27 @@ export async function renderSettingsPage() {
 
   var activeTab = visibleTabs.find(function (t) { return t.id === _activeSettingsTab; }) || visibleTabs[0];
 
+  // Visible failure banner so Render/production issues are obvious
+  // instead of silently degrading into empty fields + hang-looking UX.
+  var failureBanner = failures.length
+    ? '<div class="card" style="margin-bottom:16px; border-color:var(--severity-high, #e67e22);">' +
+        '<div class="section-label" style="color:var(--severity-high, #e67e22);">' +
+          'Some settings could not load' +
+        '</div>' +
+        '<p style="color:var(--text-muted); font-size:13px; margin:0 0 8px;">' +
+          'Pulse reached the page, but the following endpoints failed. Check Render\u2019s logs for details.' +
+        '</p>' +
+        '<ul style="margin:0; padding-left:18px; color:var(--text-muted); font-size:12px;">' +
+          failures.map(function (f) { return '<li>' + escapeHtml(f) + '</li>'; }).join('') +
+        '</ul>' +
+      '</div>'
+    : '';
+
   c.innerHTML =
     '<div class="page-head">' +
       '<div class="page-head-title">' + escapeHtml(activeTab.label) + '</div>' +
     '</div>' +
+    failureBanner +
     '<div class="settings-layout">' +
       tabNavHtml +
       '<div class="settings-tab-content">' + (panels[_activeSettingsTab] || panels.profile) + '</div>' +
