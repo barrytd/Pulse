@@ -25,6 +25,7 @@ import {
 } from './api.js';
 import { escapeHtml, showToast, toastError } from './dashboard.js';
 import { getTheme } from './theme.js';
+import { refreshUserMenuAvatar } from './user-menu.js';
 
 // Map the "Email provider" dropdown back to host+port so users never
 // have to know those exist for Gmail/Outlook/Yahoo.
@@ -962,6 +963,7 @@ export async function onAvatarFileSelected(_arg, target) {
   try {
     await apiUploadAvatar(file);
     _avatarCacheBuster = String(Date.now());
+    refreshUserMenuAvatar(_avatarCacheBuster);
     showToast('Profile picture updated.');
     renderSettingsPage();
   } catch (e) {

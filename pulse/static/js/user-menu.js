@@ -4,7 +4,7 @@
 // Session actions. Outside click + Escape close it.
 'use strict';
 
-import { apiGetAuthStatus } from './api.js';
+import { apiGetAuthStatus, apiGetMe } from './api.js';
 import { navigate } from './navigation.js';
 import { toggleTheme } from './theme.js';
 import { signOut, setActiveSettingsTab } from './settings.js';
@@ -37,6 +37,25 @@ export async function mountUserMenu() {
     var greet = document.getElementById('user-dropdown-name');
     if (greet) greet.textContent = name;
   } catch (e) { /* offline or auth disabled — keep defaults */ }
+
+  // Swap the initial for an <img> when the user has uploaded an avatar.
+  // Done separately from the greeting so a /api/me 401 doesn't take the
+  // initial fallback down with it.
+  try {
+    var me = await apiGetMe();
+    if (me && me.has_avatar) refreshUserMenuAvatar();
+  } catch (e) { /* no-op — corner keeps the initial */ }
+}
+
+// Called after a fresh avatar upload so the corner picks up the new
+// image without a page reload. `bust` cache-busts the <img> src.
+export function refreshUserMenuAvatar(bust) {
+  var btn = document.querySelector('#user-menu .user-avatar');
+  if (!btn) return;
+  var url = '/api/me/avatar' + (bust ? ('?v=' + bust) : '');
+  btn.innerHTML =
+    '<img src="' + url + '" alt="Avatar" ' +
+         'style="width:100%; height:100%; border-radius:50%; object-fit:cover;"/>';
 }
 
 export function toggleUserMenu(arg, target, event) {
