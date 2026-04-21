@@ -437,6 +437,7 @@ def _register_routes(app: FastAPI) -> None:
     _SPA_PAGES = (
         "dashboard", "monitor", "scans", "reports", "history",
         "fleet", "firewall", "whitelist", "rules", "settings", "findings",
+        "compliance", "trends", "audit",
     )
     for _page in _SPA_PAGES:
         app.add_api_route(
