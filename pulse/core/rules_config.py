@@ -79,6 +79,19 @@ ISO_27001_CLAUSES = {
 }
 
 
+# Sort key so callers can order rules worst-first (CRITICAL → HIGH →
+# MEDIUM → LOW, then alphabetical within a severity). Security dashboards
+# surface higher-impact detections above noise — the Rules and Compliance
+# pages both rely on this ordering.
+SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+
+
+def rule_sort_key(name):
+    """``key=`` argument for sorting rule names by severity-then-alpha."""
+    meta = RULE_META.get(name) or {}
+    return (SEVERITY_RANK.get((meta.get("severity") or "").upper(), 99), name)
+
+
 def get_rule_names() -> List[str]:
     """Return a sorted list of every known detection rule name."""
     return sorted(RULE_META.keys())
@@ -148,7 +161,10 @@ def build_compliance_summary(disabled: Iterable[str] = ()) -> dict:
     iso_summary: dict = {}
 
     rules_view = []
-    for name in sorted(RULE_META.keys()):
+    # Iterate CRITICAL -> LOW so every nested list (bucket["rules"],
+    # subcategories[...], controls[...]) lands in severity order without
+    # needing a post-sort pass per bucket.
+    for name in sorted(RULE_META.keys(), key=rule_sort_key):
         meta = RULE_META[name]
         is_enabled = name not in disabled_set
         nist_tag = meta.get("nist_csf") or ""

@@ -16,10 +16,11 @@ import { renderReportsPage } from './reports.js';
 import { renderRulesPage } from './rules.js';
 import { renderAuditPage } from './audit.js';
 import { renderCompliancePage } from './compliance.js';
+import { renderTrendsPage } from './trends.js';
 
 // "findings" is no longer a top-level page — it's a tab on Scans. Still
 // in validPages so old /findings bookmarks and back-entries land right.
-export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','settings'];
+export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings'];
 
 // Current page — mutable module state. Exposed via getter so other
 // modules can peek (see theme.js).
@@ -99,6 +100,7 @@ export function navigate(page, opts) {
     rules:     renderRulesPage,
     audit:     renderAuditPage,
     compliance: renderCompliancePage,
+    trends:     renderTrendsPage,
   };
   (renderers[page] || renderDashboardPage)();
 }

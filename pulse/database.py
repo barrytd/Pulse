@@ -676,6 +676,163 @@ def delete_scans(db_path, scan_ids, user_id=None):
 
 
 # ---------------------------------------------------------------------------
+# Analytics — aggregates for the Trends dashboard page
+# ---------------------------------------------------------------------------
+
+
+def get_trend_analytics(db_path, days=30, user_id=None):
+    """Aggregate finding counts over a rolling window for the Trends page.
+
+    Returns a dict with:
+      - window_days (int)        the requested window length
+      - totals (dict)            {this_window, prev_window, delta_pct}
+      - top_rules  (list[dict])  top 10 rules by count in this window
+                                 (rule, count, severity)
+      - top_hosts  (list[dict])  top 10 hostnames by finding count
+                                 (hostname, count)
+      - severity_breakdown (dict)  {CRITICAL, HIGH, MEDIUM, LOW}
+      - daily_counts (list[dict])  [{date: 'YYYY-MM-DD', count: N}] for
+                                   every day in the window (dense — zero-
+                                   fill so the line chart doesn't gap)
+
+    When ``user_id`` is provided, every aggregate is scoped to scans owned
+    by that user (data-isolation for non-admins). ``None`` returns every
+    scan (the admin view).
+    """
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 30
+    if days <= 0:
+        days = 30
+
+    # Cutoff anchors — we look back two full windows so we can compare
+    # "this window" against the one just before it for a WoW/MoM delta.
+    now = datetime.now()
+    this_start = (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    prev_start = (now - timedelta(days=days * 2)).strftime("%Y-%m-%d %H:%M:%S")
+
+    empty = {
+        "window_days": days,
+        "totals": {"this_window": 0, "prev_window": 0, "delta_pct": None},
+        "top_rules": [],
+        "top_hosts": [],
+        "severity_breakdown": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0},
+        "daily_counts": _dense_daily(now, days, {}),
+    }
+
+    try:
+        with _connect(db_path) as conn:
+            scope_filter = ""
+            scope_params = ()
+            if user_id is not None:
+                scope_filter = " AND s.user_id = ?"
+                scope_params = (int(user_id),)
+
+            def _count_in(start_iso, end_iso=None):
+                sql = (
+                    "SELECT COUNT(*) FROM findings f "
+                    "JOIN scans s ON s.id = f.scan_id "
+                    "WHERE s.scanned_at >= ?"
+                )
+                params = [start_iso]
+                if end_iso is not None:
+                    sql += " AND s.scanned_at < ?"
+                    params.append(end_iso)
+                sql += scope_filter
+                params.extend(scope_params)
+                row = conn.execute(sql, params).fetchone()
+                return int(row[0]) if row else 0
+
+            this_total = _count_in(this_start)
+            prev_total = _count_in(prev_start, this_start)
+
+            # WoW / MoM delta as a percentage. A zero previous window can't
+            # produce a meaningful percentage, so we report None (UI shows
+            # "n/a") rather than pretend the change was "infinite".
+            delta_pct = None
+            if prev_total:
+                delta_pct = round(((this_total - prev_total) / prev_total) * 100.0, 1)
+
+            top_rules_rows = conn.execute(
+                "SELECT f.rule, f.severity, COUNT(*) AS n FROM findings f "
+                "JOIN scans s ON s.id = f.scan_id "
+                "WHERE s.scanned_at >= ?" + scope_filter +
+                " AND f.rule IS NOT NULL AND f.rule != '' "
+                "GROUP BY f.rule ORDER BY n DESC LIMIT 10",
+                (this_start,) + scope_params,
+            ).fetchall()
+
+            top_hosts_rows = conn.execute(
+                "SELECT COALESCE(NULLIF(f.hostname, ''), NULLIF(s.hostname, '')) AS host, "
+                "       COUNT(*) AS n FROM findings f "
+                "JOIN scans s ON s.id = f.scan_id "
+                "WHERE s.scanned_at >= ?" + scope_filter +
+                " GROUP BY host HAVING host IS NOT NULL "
+                "ORDER BY n DESC LIMIT 10",
+                (this_start,) + scope_params,
+            ).fetchall()
+
+            sev_rows = conn.execute(
+                "SELECT UPPER(f.severity) AS sev, COUNT(*) AS n FROM findings f "
+                "JOIN scans s ON s.id = f.scan_id "
+                "WHERE s.scanned_at >= ?" + scope_filter +
+                " AND f.severity IS NOT NULL GROUP BY sev",
+                (this_start,) + scope_params,
+            ).fetchall()
+
+            # SQLite stores scanned_at as 'YYYY-MM-DD HH:MM:SS' — substr the
+            # first 10 chars for the date bucket. This stays in local time
+            # because that's what save_scan writes, so the dashboard line
+            # chart lines up with what the user sees on History.
+            daily_rows = conn.execute(
+                "SELECT substr(s.scanned_at, 1, 10) AS d, COUNT(*) AS n "
+                "FROM findings f JOIN scans s ON s.id = f.scan_id "
+                "WHERE s.scanned_at >= ?" + scope_filter +
+                " GROUP BY d ORDER BY d ASC",
+                (this_start,) + scope_params,
+            ).fetchall()
+
+    except sqlite3.OperationalError:
+        return empty
+
+    sev_breakdown = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for sev, n in sev_rows:
+        key = (sev or "").upper()
+        if key in sev_breakdown:
+            sev_breakdown[key] = int(n)
+
+    daily_map = {row[0]: int(row[1]) for row in daily_rows if row[0]}
+
+    return {
+        "window_days": days,
+        "totals": {
+            "this_window": this_total,
+            "prev_window": prev_total,
+            "delta_pct":   delta_pct,
+        },
+        "top_rules": [
+            {"rule": r[0], "severity": (r[1] or "").upper() or None, "count": int(r[2])}
+            for r in top_rules_rows
+        ],
+        "top_hosts": [{"hostname": r[0], "count": int(r[1])} for r in top_hosts_rows],
+        "severity_breakdown": sev_breakdown,
+        "daily_counts": _dense_daily(now, days, daily_map),
+    }
+
+
+def _dense_daily(now, days, by_date):
+    """Return a list of {date, count} covering every day from `now - days`
+    to `now`, zero-filling days that had no findings."""
+    out = []
+    start = now - timedelta(days=days - 1)
+    for i in range(days):
+        d = (start + timedelta(days=i)).strftime("%Y-%m-%d")
+        out.append({"date": d, "count": int(by_date.get(d, 0))})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Monitor sessions — one row per Start/Stop span on the live monitor
 # ---------------------------------------------------------------------------
 

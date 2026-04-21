@@ -200,6 +200,16 @@ export async function apiGetCompliance() {
   return resp.json();
 }
 
+// Trend analytics — rolling-window aggregates for the Trends page.
+// ``days`` sets the window length (7 / 30 / 90 on the UI; backend
+// accepts any positive int).
+export async function apiGetTrends(days) {
+  var q = (days && Number(days) > 0) ? ('?days=' + Number(days)) : '';
+  var resp = await fetch('/api/analytics/trends' + q);
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+
 // Diff two past scans: returns { scan_a, scan_b, new, resolved, shared }.
 export async function apiCompareScans(idA, idB) {
   var resp = await fetch('/api/compare?a=' + idA + '&b=' + idB);

@@ -105,11 +105,11 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Admin activity history — Audit page shows every block/unblock/scan/review action, filterable by user and action type, CSV export
 - [x] Hosted deployment — Pulse runs on Render with env-var config fallback, production CORS lock, disabled `/docs`, startup health log
 - [x] Profile picture upload — stored as a BLOB on the users row so it survives Render restarts; auto-syncs to top-right avatar
+- [x] NIST CSF mapping — every rule tagged against Identify / Protect / Detect / Respond / Recover subcategories
+- [x] ISO 27001 mapping — every rule linked to an Annex A control (A.9 access, A.12 ops, etc.)
+- [x] Compliance report view — Compliance page shows per-CSF-function + per-clause coverage and a per-rule lookup table
+- [x] Trend analytics page — Trends page with window-over-window delta, daily finding line chart, severity breakdown, top rules + top hosts bars
 - [ ] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan`
-- [ ] NIST CSF mapping — tag each rule against Identify / Protect / Detect / Respond / Recover
-- [ ] ISO 27001 mapping — link rules to Annex A controls (A.9 access, A.12 ops, etc.)
-- [ ] Compliance report view — dashboard page showing coverage per framework
-- [ ] Trend analytics page — rule frequency heatmap, top offenders, week-over-week delta
 - [ ] PostgreSQL migration — replace SQLite with PostgreSQL, include a migration script that moves existing pulse.db data automatically, keep SQLite as fallback for local single-user installs
 
 ---

@@ -54,8 +54,8 @@ from pulse.database import (
     count_admins, count_users, create_user, delete_all_monitor_sessions,
     delete_monitor_session, delete_scans, delete_user, get_fleet_summary,
     get_history, get_monitor_session_findings, get_scan_findings,
-    get_user_avatar, get_user_by_email, get_user_by_id, init_db,
-    list_monitor_sessions, list_users, save_scan,
+    get_trend_analytics, get_user_avatar, get_user_by_email, get_user_by_id,
+    init_db, list_monitor_sessions, list_users, save_scan,
     set_finding_review, set_user_avatar, update_user_active,
     update_user_email, update_user_password, update_user_role,
 )
@@ -63,7 +63,7 @@ from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
 from pulse.core.rules_config import (
     RULE_META, build_compliance_summary, filter_by_enabled,
-    get_disabled_rules, get_rule_names, set_rule_enabled,
+    get_disabled_rules, get_rule_names, rule_sort_key, set_rule_enabled,
 )
 from pulse.alerts.emailer import dispatch_alerts
 from pulse.remediation import attach_remediation
@@ -1823,8 +1823,12 @@ def _register_routes(app: FastAPI) -> None:
     def list_rules_details():
         config = _read_config(app.state.config_path)
         disabled = set(get_disabled_rules(config))
+        # Severity-first ordering (CRITICAL -> LOW) so the most important
+        # rules surface at the top of the Rules page. Alphabetical within
+        # a severity keeps the list stable between releases.
+        ordered = sorted(_get_rule_names(), key=rule_sort_key)
         rows = []
-        for name in _get_rule_names():
+        for name in ordered:
             meta = RULE_META.get(name, {})
             rows.append({
                 "name":      name,
@@ -1849,6 +1853,18 @@ def _register_routes(app: FastAPI) -> None:
         config = _read_config(app.state.config_path)
         disabled = get_disabled_rules(config)
         return build_compliance_summary(disabled)
+
+    # -------------------------------------------------------------------
+    # GET /api/analytics/trends — aggregates for the Trends page.
+    # ?days=30 sets the rolling-window length (7 / 30 / 90 are the
+    # dropdown presets on the UI, but any positive integer is accepted).
+    # Viewers see only their own scans; admins see everything (same
+    # scope rule as /api/history).
+    # -------------------------------------------------------------------
+    @app.get("/api/analytics/trends")
+    def analytics_trends(days: int = 30, user_id: int = Depends(require_login)):
+        scope = _scan_scope_for(app, user_id)
+        return get_trend_analytics(app.state.db_path, days=days, user_id=scope)
 
     # -------------------------------------------------------------------
     # PUT /api/rules/{name}/enabled — toggle a rule on/off in pulse.yaml
