@@ -770,6 +770,9 @@ export function _statusDotHtml(f) {
   if (isFalsePositive(f)) {
     out += '<span class="finding-status-dot status-fp" title="False positive" aria-label="False positive"></span>';
   }
+  if (!out) {
+    out = '<span class="finding-status-dot status-unreviewed" title="Unreviewed" aria-label="Unreviewed"></span>';
+  }
   return out;
 }
 
@@ -782,12 +785,15 @@ export function _statusPillHtml(f) {
   var pills = '';
   if (isReviewed(f))      pills += '<span class="status-pill status-reviewed">Reviewed</span>';
   if (isFalsePositive(f)) pills += (pills ? ' ' : '') + '<span class="status-pill status-fp">False positive</span>';
+  if (!pills) {
+    pills = '<span class="finding-status-dot status-unreviewed" title="Unreviewed" aria-label="Unreviewed"></span>';
+  }
   return '<span class="status-pill-slot">' +
            '<span class="status-pill-placeholder" aria-hidden="true">' +
              '<span class="status-pill status-reviewed">Reviewed</span> ' +
              '<span class="status-pill status-fp">False positive</span>' +
            '</span>' +
-           (pills ? '<span class="status-pill-live">' + pills + '</span>' : '') +
+           '<span class="status-pill-live">' + pills + '</span>' +
          '</span>';
 }
 

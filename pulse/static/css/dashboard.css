@@ -306,6 +306,75 @@
   border: 0;
 }
 
+/* Monitor idle panel — replaces the "Waiting for events…" line when
+   the monitor hasn't been started. Stat cards + recent sessions + tip. */
+.live-unified-body .mon-idle-panel {
+  padding: 24px 20px;
+  text-align: left;
+}
+.mon-idle-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.mon-idle-stat {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.mon-idle-stat-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.mon-idle-stat-label {
+  margin-top: 4px;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mon-idle-recent {
+  margin-bottom: 16px;
+}
+.mon-idle-recent-title {
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.mon-idle-recent-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card-bg);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.mon-idle-recent-row:last-child { margin-bottom: 0; }
+.mon-idle-recent-when { color: var(--text); font-family: var(--mono, monospace); }
+.mon-idle-recent-meta { color: var(--text-muted); }
+.mon-idle-recent-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
+}
+.mon-idle-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
 .live-header {
   display: flex;
   align-items: center;
@@ -1163,6 +1232,21 @@
 .scans-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+/* "Last updated Xm ago" line above the filter bar — right-aligned,
+   muted, 12px, no card chrome. Refreshed every 60s by dashboard.js. */
+.dash-meta-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: 0 0 8px 0;
+}
+
+.dash-updated {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
 }
 
 /* Splunk-style dashboard filter toolbar — dropdowns + Apply + Reset */

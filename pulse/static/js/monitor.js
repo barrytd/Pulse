@@ -558,10 +558,83 @@ function _feedRowHtml(item, key) {
   '</div>';
 }
 
-function _liveFeedHtml(feed) {
+// Friendly zero-state for the Monitor page when no live session has been
+// started and no feed has been accumulated. Three-card stats line + a
+// short list of recent sessions + a tip.
+function _monitorIdlePanelHtml(sessions) {
+  sessions = sessions || [];
+  var today = new Date();
+  var ymd = today.getFullYear() + '-' +
+            String(today.getMonth() + 1).padStart(2, '0') + '-' +
+            String(today.getDate()).padStart(2, '0');
+  var todays = sessions.filter(function (s) {
+    return (s.started_at || '').slice(0, 10) === ymd;
+  });
+  var findingsToday = todays.reduce(function (n, s) {
+    return n + (parseInt(s.findings_count, 10) || 0);
+  }, 0);
+
+  var channelTotals = {};
+  sessions.forEach(function (s) {
+    var chans = (s.channels || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+    var weight = (parseInt(s.poll_count, 10) || 1);
+    chans.forEach(function (c) {
+      channelTotals[c] = (channelTotals[c] || 0) + weight;
+    });
+  });
+  var mostActiveRaw = null;
+  var best = 0;
+  Object.keys(channelTotals).forEach(function (c) {
+    if (channelTotals[c] > best) { best = channelTotals[c]; mostActiveRaw = c; }
+  });
+  var mostActive = mostActiveRaw ? _channelLabel(mostActiveRaw) : '\u2014';
+
+  var statCard = function (label, value) {
+    return '<div class="mon-idle-stat">' +
+      '<div class="mon-idle-stat-val">' + escapeHtml(String(value)) + '</div>' +
+      '<div class="mon-idle-stat-label">' + escapeHtml(label) + '</div>' +
+    '</div>';
+  };
+
+  var recent = sessions.slice(0, 3);
+  var recentHtml = recent.length === 0
+    ? '<div class="mon-idle-recent-empty">No sessions recorded yet.</div>'
+    : recent.map(function (s) {
+        var started = s.started_at || '';
+        var findings = parseInt(s.findings_count, 10) || 0;
+        var dur = _humanDuration(s.duration_sec);
+        var isActive = !s.ended_at;
+        return '<div class="mon-idle-recent-row">' +
+          '<span class="mon-idle-recent-when">' + escapeHtml(started) + '</span>' +
+          '<span class="mon-idle-recent-meta">' +
+            (isActive ? 'active' : escapeHtml(dur)) + ' \u00b7 ' +
+            findings + ' finding' + (findings === 1 ? '' : 's') +
+          '</span>' +
+        '</div>';
+      }).join('');
+
+  return '<div class="live-feed empty mon-idle-panel" id="mon-live-feed">' +
+    '<div class="mon-idle-stats">' +
+      statCard('Sessions today', todays.length) +
+      statCard('Findings today', findingsToday) +
+      statCard('Most active channel', mostActive) +
+    '</div>' +
+    '<div class="mon-idle-recent">' +
+      '<div class="mon-idle-recent-title">Recent Sessions</div>' +
+      recentHtml +
+    '</div>' +
+    '<div class="mon-idle-tip">Start monitoring to watch your Windows event channels in real time.</div>' +
+  '</div>';
+}
+
+function _liveFeedHtml(feed, opts) {
+  opts = opts || {};
   _liveFeedSnapshot = new Map();
   var items = (feed || []).slice(0, 20);
   if (items.length === 0) {
+    if (opts.idleMode) {
+      return _monitorIdlePanelHtml(_monitorSessions || []);
+    }
     return '<div class="live-feed empty" id="mon-live-feed">Waiting for events \u2014 alerts will appear here as they\u2019re detected.</div>';
   }
   var rows = items.map(function (item) {
@@ -771,7 +844,7 @@ export async function renderMonitorPage() {
       '<div class="live-panel live-unified ' + (active ? '' : 'idle') + '" style="margin-bottom:16px;">' +
         _liveUnifiedHeaderHtml(s) +
         '<div class="live-unified-body">' +
-          _liveFeedHtml(monitorClient.feed) +
+          _liveFeedHtml(monitorClient.feed, { idleMode: !active }) +
         '</div>' +
       '</div>' +
 
@@ -871,6 +944,16 @@ let _selectedSessions        = {};
 async function _loadMonitorSessions() {
   _monitorSessions = await apiMonitorSessions(200);
   _renderSessionsSection();
+  _refreshIdlePanelIfVisible();
+}
+
+// If the Monitor page is showing its idle panel (feed card in idle mode),
+// re-render just that card in place using the freshly loaded sessions.
+// Leaves the sessions card, poll history card, and header untouched.
+function _refreshIdlePanelIfVisible() {
+  var feedEl = document.getElementById('mon-live-feed');
+  if (!feedEl || !feedEl.classList.contains('mon-idle-panel')) return;
+  feedEl.outerHTML = _monitorIdlePanelHtml(_monitorSessions || []);
 }
 
 function _sessionFindingKey(f) { return 'sess-' + (f.id || Math.random()); }

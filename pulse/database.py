@@ -26,6 +26,8 @@ import sqlite3
 import socket
 from datetime import datetime, timedelta
 
+from . import db_backend
+
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -181,70 +183,44 @@ def init_db(db_path):
     so it won't overwrite or reset an existing database.
 
     Parameters:
-        db_path (str): Path to the .db file (e.g. "pulse.db").
+        db_path (str): Path to the SQLite file, or a `postgres(ql)://` DSN.
     """
+    create_statements = (
+        _CREATE_SCANS,
+        _CREATE_FINDINGS,
+        _CREATE_ALERT_LOG,
+        _CREATE_USERS,
+        _CREATE_API_TOKENS,
+        _CREATE_IP_BLOCK_LIST,
+        _CREATE_AUDIT_LOG,
+        _CREATE_MONITOR_SESSIONS,
+    )
+    # ALTER TABLE ... ADD COLUMN for every column that was added after the
+    # initial schema shipped. SQLite raises when the column already exists;
+    # Postgres uses ADD COLUMN IF NOT EXISTS (db_backend.init_ddl rewrites
+    # for us). The first user created before RBAC existed stays admin so
+    # nobody gets locked out of an upgraded database.
+    alter_statements = (
+        "ALTER TABLE scans ADD COLUMN filename TEXT",
+        "ALTER TABLE scans ADD COLUMN scope TEXT",
+        "ALTER TABLE scans ADD COLUMN session_id INTEGER",
+        "ALTER TABLE scans ADD COLUMN duration_sec INTEGER",
+        "ALTER TABLE scans ADD COLUMN user_id INTEGER",
+        "ALTER TABLE findings ADD COLUMN raw_xml TEXT",
+        "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'",
+        "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN avatar_blob BLOB",
+        "ALTER TABLE users ADD COLUMN avatar_mime TEXT",
+        "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'",
+        "ALTER TABLE findings ADD COLUMN review_note TEXT",
+        "ALTER TABLE findings ADD COLUMN reviewed_at TEXT",
+        "ALTER TABLE findings ADD COLUMN hostname TEXT",
+        "ALTER TABLE findings ADD COLUMN reviewed INTEGER DEFAULT 0",
+        "ALTER TABLE findings ADD COLUMN false_positive INTEGER DEFAULT 0",
+    )
+
     with _connect(db_path) as conn:
-        conn.execute(_CREATE_SCANS)
-        conn.execute(_CREATE_FINDINGS)
-        conn.execute(_CREATE_ALERT_LOG)
-        conn.execute(_CREATE_USERS)
-        conn.execute(_CREATE_API_TOKENS)
-        conn.execute(_CREATE_IP_BLOCK_LIST)
-        conn.execute(_CREATE_AUDIT_LOG)
-        conn.execute(_CREATE_MONITOR_SESSIONS)
-        try:
-            conn.execute("ALTER TABLE scans ADD COLUMN filename TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE scans ADD COLUMN scope TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE scans ADD COLUMN session_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE scans ADD COLUMN duration_sec INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        # Scan ownership — which dashboard user kicked off this scan.
-        # NULL means the scan was created outside the auth layer (CLI, legacy
-        # pre-RBAC rows, scheduled jobs). Admins see NULL-owned scans; viewers
-        # only see scans they personally ran.
-        try:
-            conn.execute("ALTER TABLE scans ADD COLUMN user_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE findings ADD COLUMN raw_xml TEXT")
-        except sqlite3.OperationalError:
-            pass
-        # RBAC columns on users — existing DBs upgrade in place. The very
-        # first user (who was created before roles existed) stays admin so
-        # nobody gets locked out when upgrading.
-        for ddl in (
-            "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'",
-            "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN avatar_blob BLOB",
-            "ALTER TABLE users ADD COLUMN avatar_mime TEXT",
-        ):
-            try:
-                conn.execute(ddl)
-            except sqlite3.OperationalError:
-                pass
-        for col, ddl in (
-            ("review_status",  "ALTER TABLE findings ADD COLUMN review_status TEXT DEFAULT 'new'"),
-            ("review_note",    "ALTER TABLE findings ADD COLUMN review_note TEXT"),
-            ("reviewed_at",    "ALTER TABLE findings ADD COLUMN reviewed_at TEXT"),
-            ("hostname",       "ALTER TABLE findings ADD COLUMN hostname TEXT"),
-            ("reviewed",       "ALTER TABLE findings ADD COLUMN reviewed INTEGER DEFAULT 0"),
-            ("false_positive", "ALTER TABLE findings ADD COLUMN false_positive INTEGER DEFAULT 0"),
-        ):
-            try:
-                conn.execute(ddl)
-            except sqlite3.OperationalError:
-                pass
+        db_backend.init_ddl(conn, create_statements, alter_statements)
 
         # One-shot backfill from the legacy single-status column: rows that
         # were already marked 'reviewed' get reviewed=1; rows marked
@@ -261,7 +237,7 @@ def init_db(db_path):
                 "UPDATE findings SET false_positive = 1 "
                 "WHERE review_status = 'false_positive' AND reviewed = 0 AND false_positive = 0"
             )
-        except sqlite3.OperationalError:
+        except db_backend.OperationalError:
             pass
 
 
@@ -813,7 +789,7 @@ def get_trend_analytics(db_path, days=30, user_id=None):
                 (this_start,) + scope_params,
             ).fetchall()
 
-    except sqlite3.OperationalError:
+    except db_backend.OperationalError:
         return empty
 
     sev_breakdown = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
@@ -1030,21 +1006,19 @@ def was_recently_alerted(db_path, rule, cooldown_minutes=60):
     if not db_path:
         return False   # no DB -> can't track cooldown -> always allow
 
+    # Compute the cutoff in Python so the SQL stays portable across SQLite
+    # and Postgres — SQLite's `datetime('now', 'localtime', '-N minutes')`
+    # modifier syntax isn't valid Postgres. record_alert writes sent_at as
+    # a local-time string via datetime.now(), so we do the same here.
+    cutoff = (datetime.now() - timedelta(minutes=int(cooldown_minutes))).strftime("%Y-%m-%d %H:%M:%S")
     try:
         with _connect(db_path) as conn:
-            # SQLite's datetime() + modifier does the time math for us.
-            # "now" - "60 minutes" gives the cutoff; any row sent_at after
-            # that cutoff counts as "recent".
-            # record_alert writes sent_at in local time via Python's
-            # datetime.now(), but SQLite's bare datetime('now') returns UTC.
-            # Passing 'localtime' as a modifier makes the comparison
-            # timezone-consistent on any machine.
             cursor = conn.execute(
                 """SELECT 1 FROM alert_log
                    WHERE rule = ?
-                     AND sent_at > datetime('now', 'localtime', ?)
+                     AND sent_at > ?
                    LIMIT 1""",
-                (rule, f"-{int(cooldown_minutes)} minutes")
+                (rule, cutoff)
             )
             return cursor.fetchone() is not None
     except Exception:
@@ -1291,10 +1265,13 @@ def touch_api_token(db_path, token_sha256):
 # ---------------------------------------------------------------------------
 
 def _connect(db_path):
-    """Opens a SQLite connection with foreign key enforcement enabled."""
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    """Opens a connection to the configured database.
+
+    Accepts either a SQLite file path or a `postgres(ql)://` DSN; the
+    returned object behaves like a sqlite3 Connection either way (see
+    pulse.db_backend).
+    """
+    return db_backend.connect(db_path)
 
 
 def _get_hostname():

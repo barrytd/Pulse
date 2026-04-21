@@ -129,6 +129,43 @@ export function _gradeRank(score) {
   return { A: 5, B: 4, C: 3, D: 2, F: 1 }[g] || 0;
 }
 
+// Short relative time — "just now" / "3m ago" / "2h ago" / "5d ago".
+// Accepts ISO strings (DB stores local time as "YYYY-MM-DD HH:MM:SS").
+export function formatRelativeTime(iso) {
+  if (!iso) return '—';
+  var d = new Date(String(iso).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return String(iso);
+  var sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (sec < 45)    return 'just now';
+  if (sec < 3600)  return Math.floor(sec / 60)  + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+
+// Refresh ticker for the Dashboard "Last updated" timestamp. Recreated
+// every render; cleared on nav teardown so we don't leak intervals.
+let _dashUpdatedTimer = null;
+let _dashUpdatedIso = null;
+
+export function _stopDashUpdatedTimer() {
+  if (_dashUpdatedTimer) {
+    clearInterval(_dashUpdatedTimer);
+    _dashUpdatedTimer = null;
+  }
+  _dashUpdatedIso = null;
+}
+
+function _startDashUpdatedTimer(iso) {
+  _stopDashUpdatedTimer();
+  _dashUpdatedIso = iso;
+  if (!iso) return;
+  _dashUpdatedTimer = setInterval(function () {
+    var el = document.getElementById('dash-updated-ts');
+    if (!el) { _stopDashUpdatedTimer(); return; }
+    el.textContent = 'Last updated ' + formatRelativeTime(_dashUpdatedIso);
+  }, 60000);
+}
+
 export function showToast(msg, kind) {
   var toast = document.getElementById('toast');
   if (!toast) return;
@@ -991,6 +1028,19 @@ export async function renderDashboardPage() {
 
   var filterBarHtml = _dashFilterBarHtml(rules, sourceList);
 
+  // "Last updated" reference is the newest scan we've seen — not the
+  // newest scan in the filtered slice, so the timestamp reflects how
+  // fresh the data is, not how old the filter window is.
+  var newestScan = allScans[0];
+  var updatedIso = newestScan ? (newestScan.scanned_at || '') : '';
+  var updatedLabel = updatedIso
+    ? ('Last updated ' + formatRelativeTime(updatedIso))
+    : 'No scans yet';
+  var dashMetaHtml =
+    '<div class="dash-meta-row">' +
+      '<span class="dash-updated" id="dash-updated-ts">' + escapeHtml(updatedLabel) + '</span>' +
+    '</div>';
+
   // Needs Attention always uses a fixed 7-day window on the full scan
   // list, independent of the dashboard filter bar. Runs after the other
   // fetches since it reuses allScans and issues its own per-scan fetches.
@@ -1030,6 +1080,7 @@ export async function renderDashboardPage() {
   }
 
   c.innerHTML =
+    dashMetaHtml +
     filterBarHtml +
     emptyBannerHtml +
     attentionHtml +
@@ -1122,4 +1173,5 @@ export async function renderDashboardPage() {
     );
 
   _initScoreLineChart(dailyScores);
+  _startDashUpdatedTimer(updatedIso);
 }

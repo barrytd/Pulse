@@ -19,6 +19,7 @@ Format: newest entries at the top, grouped by date.
 - **Trend analytics page** (`pulse/static/js/trends.js`, `GET /api/analytics/trends?days=N`) — rolling-window view with 7 / 30 / 90-day selector, window-over-window delta (red ↑ = findings climbing, green ↓ = falling), daily finding volume line chart, severity breakdown bars, top rules (bar chart, colored by severity), top hosts
 - **Score-over-time chart** on the Dashboard — line chart of daily security scores, grade-tinted
 - **API token auth** (`pulse/auth.py` — `generate_api_token`, `hash_api_token`; `api_tokens` table; Settings > API Tokens) — long-lived bearer tokens for CI pipelines. Format is `pulse_` + 32 hex chars; sha256 + last4 stored, raw shown once. Auth middleware accepts either a session cookie or `Authorization: Bearer <token>`. Tokens inherit their owner's role; deactivated users' tokens are rejected; `last_used_at` bumps on every call so the UI can show "last used 5 min ago"
+- **PostgreSQL backend** (`pulse/db_backend.py`, `scripts/migrate_to_postgres.py`) — Pulse now runs against either SQLite (default, zero setup) or PostgreSQL. Set `DATABASE_URL=postgresql://…` and Pulse auto-detects and switches drivers on next start. The adapter translates `?` → `%s` placeholders, appends `RETURNING id` to INSERTs so `cursor.lastrowid` keeps working, rewrites `INTEGER PRIMARY KEY AUTOINCREMENT` → `BIGSERIAL` and `BLOB` → `BYTEA` in DDL, and swallows `ADD COLUMN IF NOT EXISTS` idempotently on both backends. One non-portable SQL query (`was_recently_alerted`) now computes its cutoff in Python instead of SQLite's `datetime('now', 'localtime', …)` modifier. The startup banner redacts Postgres passwords before logging the DSN. `scripts/migrate_to_postgres.py` copies every table out of a local `pulse.db` into a target Postgres, using `ON CONFLICT (id) DO NOTHING` for idempotency and bumping each table's `*_id_seq` to `MAX(id)` so the live app doesn't collide on the next insert
 
 ### Changed
 - `/api/me` now returns `has_avatar: bool` alongside `role` and `active` so the frontend can decide whether to render the avatar `<img>` or the fallback initial
@@ -26,7 +27,7 @@ Format: newest entries at the top, grouped by date.
 - `pulse/api.py` imports now pull `generate_api_token` from `pulse.auth` and `create_api_token / list_api_tokens / revoke_api_token / find_api_token_user / touch_api_token` from `pulse.database`
 
 ### Tests
-- 447 → 478 passing. New cases in `test_auth.py` cover the full token lifecycle (mint / list / bearer auth against `/api/history` / revoke / cross-user isolation / deactivated-user rejection / malformed token). Existing auth / data-isolation / API / alerts / webhook suites unchanged and green
+- 447 → 499 passing. New cases in `test_auth.py` cover the full token lifecycle (mint / list / bearer auth against `/api/history` / revoke / cross-user isolation / deactivated-user rejection / malformed token). New `test_db_backend.py` covers SQL-translation (`?` → `%s`, RETURNING-id injection), DDL rewrites (AUTOINCREMENT / BLOB), resolve_target precedence, SQLite-connect PRAGMA, the missing-driver error path, and the `_PgConnection` context-manager commit / rollback behaviour against a fake psycopg connection. Existing auth / data-isolation / API / alerts / webhook suites unchanged and green
 
 ---
 

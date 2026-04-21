@@ -110,7 +110,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Compliance report view — Compliance page shows per-CSF-function + per-clause coverage and a per-rule lookup table
 - [x] Trend analytics page — Trends page with window-over-window delta, daily finding line chart, severity breakdown, top rules + top hosts bars
 - [x] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan` (Settings > API Tokens; Bearer header, per-user, sha256-at-rest, raw shown once, `last_used_at` bumps on every call)
-- [ ] PostgreSQL migration — replace SQLite with PostgreSQL, include a migration script that moves existing pulse.db data automatically, keep SQLite as fallback for local single-user installs
+- [x] PostgreSQL migration — new `pulse/db_backend.py` adapter lets Pulse run against SQLite (default) or PostgreSQL (`DATABASE_URL=postgresql://…`); `scripts/migrate_to_postgres.py` copies an existing `pulse.db` into a target Postgres database and bumps per-table id sequences; SQLite stays the fallback for local single-user installs
 
 ---
 

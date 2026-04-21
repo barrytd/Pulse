@@ -112,11 +112,17 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     _is_production = os.environ.get("PULSE_ENV", "").strip().lower() == "production"
 
     if db_path is None:
-        # Anchor on getcwd() so Render (Linux) and Windows behave the same
-        # regardless of where the process was launched from. Once resolved
-        # here, background threads/subprocesses can safely cd without
-        # losing the DB file.
-        db_path = os.path.join(os.getcwd(), "pulse.db")
+        # DATABASE_URL wins if set (hosted deploys on Render / Railway /
+        # Fly supply it automatically when you attach a Postgres addon).
+        # Otherwise anchor on getcwd() so Render (Linux) and Windows behave
+        # the same regardless of where the process was launched from. Once
+        # resolved here, background threads/subprocesses can safely cd
+        # without losing the DB file.
+        env_url = os.environ.get("DATABASE_URL", "").strip()
+        if env_url:
+            db_path = env_url
+        else:
+            db_path = os.path.join(os.getcwd(), "pulse.db")
 
     if config_path is None:
         config_path = os.path.join(
@@ -321,6 +327,30 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     return app
 
 
+def _redact_db_target(target):
+    """Strip the password from a Postgres DSN before logging it, so the
+    Render log stream never contains credentials. SQLite paths pass through
+    untouched."""
+    if not isinstance(target, str):
+        return target
+    low = target.strip().lower()
+    if not (low.startswith("postgres://") or low.startswith("postgresql://")):
+        return target
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+        parts = urlsplit(target)
+        if parts.password:
+            netloc = parts.hostname or ""
+            if parts.port:
+                netloc = f"{netloc}:{parts.port}"
+            if parts.username:
+                netloc = f"{parts.username}:***@{netloc}"
+            return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        pass
+    return target
+
+
 def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_path):
     """One-shot startup banner — appears once in Render's log stream so
     the operator can tell at a glance which env Pulse thinks it's in,
@@ -351,7 +381,7 @@ def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_pa
     print("  [*] Pulse startup:")
     print(f"      env         : {env_label}")
     print(f"      pulse.yaml  : {yaml_label}")
-    print(f"      database    : {db_label} ({db_path})")
+    print(f"      database    : {db_label} ({_redact_db_target(db_path)})")
     print(f"      email       : {_mark(email_ready)}")
     print(f"      slack       : {_mark(slack_ready)}")
     print(f"      discord     : {_mark(discord_ready)}")

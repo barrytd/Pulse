@@ -68,7 +68,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - Auto-resumes monitoring across page reloads and server restarts via `localStorage`
 
 ### Scan History
-- **SQLite database** - every scan saved to `pulse.db` automatically, including wall-clock duration
+- **Pluggable database** - SQLite by default (`pulse.db`, zero setup); flip to PostgreSQL for shared deployments by setting `DATABASE_URL=postgresql://…`. `scripts/migrate_to_postgres.py` copies an existing SQLite history into Postgres in one shot
 - **`--history` flag** - view past scans with security scores and trend arrows (↑/↓)
 - **Position-based scan numbers** - "Scan #N" is the row's position in current history (oldest = #1); delete everything and the next scan shows as #1 again. Internal DB id stays stable for lookups
 
@@ -105,7 +105,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **478 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, IP block-list lifecycle, per-user data isolation, and API token lifecycle tested
+- **499 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, IP block-list lifecycle, per-user data isolation, and API token lifecycle tested
 
 ---
 

@@ -13,3 +13,8 @@ python-multipart>=0.0.6
 httpx>=0.25.0
 # reportlab: Pure-Python PDF generator used for dashboard PDF export
 reportlab>=4.0.0
+# psycopg (v3): PostgreSQL driver. Optional — only imported when DATABASE_URL
+# points at a postgres(ql):// DSN. Local SQLite installs don't need it, but
+# it's in requirements.txt so hosted deploys (Render, Railway, Fly) get the
+# driver automatically when they spin up a Postgres addon.
+psycopg[binary]>=3.1

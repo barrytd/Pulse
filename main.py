@@ -711,9 +711,19 @@ def main():
         if days_limit else None
     )
 
-    # DB path comes from config, defaulting to pulse.db in the project root.
-    db_config = config.get("database", {})
-    db_path   = (db_config or {}).get("path", "pulse.db") if db_config is not None else "pulse.db"
+    # DB target resolution (in order of precedence):
+    #   1. DATABASE_URL env var — overrides everything (Render/Railway/Fly
+    #      supply this when you attach a Postgres addon)
+    #   2. `database.path` from pulse.yaml
+    #   3. "pulse.db" in the project root
+    # The value is either a SQLite file path or a postgres(ql):// DSN;
+    # pulse.db_backend figures out which driver to use.
+    env_db_url = os.environ.get("DATABASE_URL", "").strip()
+    if env_db_url:
+        db_path = env_db_url
+    else:
+        db_config = config.get("database", {})
+        db_path   = (db_config or {}).get("path", "pulse.db") if db_config is not None else "pulse.db"
 
     # Always initialise the DB (creates tables if they don't exist yet).
     if db_path:
