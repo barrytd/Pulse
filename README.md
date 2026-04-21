@@ -81,8 +81,17 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 - **`--api` flag** - starts a local FastAPI server so other tools can send `.evtx` files over HTTP and get findings back as JSON
 - **Endpoints**: `POST /api/scan` (file upload), `GET /api/history`, `GET /api/report/{id}`, `GET /api/health`
 - **Interactive docs** auto-generated at `http://127.0.0.1:8000/docs` (Swagger UI)
+- **API token auth** - mint long-lived bearer tokens from Settings > API Tokens, then call any endpoint with `Authorization: Bearer pulse_…`. Tokens inherit the owner's role and can be revoked from the same page
 - Uploaded files are parsed in-memory and deleted immediately — nothing is kept on disk
 - Same whitelist, baseline, and scoring logic as the CLI
+
+### Accounts, Compliance, & Analytics
+- **Multi-user accounts** - admin vs viewer roles; admins manage users from Settings > Users, viewers see only the scans they personally ran
+- **Profile picture upload** - avatars stored as BLOBs on the users row so they survive Render's ephemeral filesystem; top-right corner syncs immediately
+- **Audit log** - every block / unblock / push / scan / review / user-management action is recorded; filter by user or action type and export as CSV
+- **Compliance page** - per-CSF-function and per-Annex-A-clause coverage cards plus a per-rule lookup. Every detection rule is tagged with a NIST CSF subcategory (e.g. `DE.CM-1`) and an ISO 27001 control (e.g. `A.9.4.2`)
+- **Trend analytics** - 7 / 30 / 90-day rolling window with window-over-window delta, daily finding line chart, severity breakdown, top rules, and top hosts
+- **Score-over-time chart** on the Dashboard — daily security scores plotted, grade-tinted
 
 ### Noise Reduction
 - **Built-in known-good whitelist** - 100+ entries covering anti-cheat, gaming platforms, hardware peripherals, Google, Microsoft, security software, VPNs, and common apps — suppressed by default with no configuration
@@ -96,7 +105,7 @@ Windows event logs hold a goldmine of forensic data, but digging through them ma
 ### Performance
 - **Parallel parsing** - `.evtx` files parsed across all CPU cores using `multiprocessing`
 - **ECG heartbeat animation** - scrolling terminal animation with live file counter during parsing
-- **470 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, IP block-list lifecycle, and per-user data isolation tested
+- **478 unit tests** - every detection rule, report format, config, whitelist, database, API endpoint, alert pathway, webhook delivery, firewall-log parser, IP block-list lifecycle, per-user data isolation, and API token lifecycle tested
 
 ---
 

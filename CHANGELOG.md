@@ -5,6 +5,31 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-21 — v1.5.0 (Sprint 5: Auth, compliance, analytics)
+
+### Added
+- **Role-based access control** (`users.role` column, `require_admin` dependency) — admin vs viewer roles enforced in the API. Viewers can read scans / findings / reports but can't change settings, block IPs, or manage users. `_scan_scope_for(app, user_id)` gives admins the full picture while viewers are scoped to the scans they personally ran
+- **Multi-user account management** (`/api/users`, Settings > Users tab) — admins can create, disable, and delete additional accounts. Guardrails reject demoting / deactivating / deleting the last active admin so nobody gets locked out. Every write is audited via `blocker.log_audit`
+- **Data isolation** (`scans.user_id` column + per-query scope filter) — viewers see only scans they kicked off; admins see everything. Covers `/api/history`, `/api/findings`, `/api/scan/{id}`, trend analytics, and fleet summaries. Legacy `user_id = NULL` rows (CLI / pre-RBAC) are visible to admins
+- **Admin activity history** (`/api/audit`, Audit page) — every block / unblock / push / scan / review / user-management action writes a row. Filter by user, action type, or date; one-click CSV export
+- **Hosted deployment** — production-ready on Render free tier. `PULSE_ENV=production` switch enables env-var config fallback (`PULSE_SECRET`, SMTP creds), locks `/docs` and CORS, anchors `pulse.db` to `os.getcwd()` so threads can't drift, and emits a startup health banner summarizing which channels (email / Slack / Discord) are wired
+- **Profile picture upload** (`users.avatar_blob BLOB`, `POST/GET /api/me/avatar`, Settings > Profile) — avatars stored as BLOBs on the users row so they survive Render's ephemeral filesystem. 2 MB cap, PNG / JPEG only. Top-right corner avatar syncs immediately via `refreshUserMenuAvatar(cacheBuster)`
+- **NIST CSF + ISO 27001 rule mappings** (`pulse/core/rules_config.py`) — every detection rule tagged against a NIST CSF subcategory (e.g. `DE.CM-1`) and an ISO 27001 Annex A control (e.g. `A.9.4.2`). Shared `SEVERITY_RANK` + `rule_sort_key()` ordering (CRITICAL → HIGH → MEDIUM → LOW, then alphabetical) used by both the Rules page and the Compliance page
+- **Compliance page** (`pulse/static/js/compliance.js`, `GET /api/compliance`) — per-CSF-function and per-Annex-A-clause coverage cards plus a flat per-rule lookup table. `build_compliance_summary(disabled)` aggregates enabled / disabled counts by control, so disabling a rule immediately shows up as a coverage gap
+- **Trend analytics page** (`pulse/static/js/trends.js`, `GET /api/analytics/trends?days=N`) — rolling-window view with 7 / 30 / 90-day selector, window-over-window delta (red ↑ = findings climbing, green ↓ = falling), daily finding volume line chart, severity breakdown bars, top rules (bar chart, colored by severity), top hosts
+- **Score-over-time chart** on the Dashboard — line chart of daily security scores, grade-tinted
+- **API token auth** (`pulse/auth.py` — `generate_api_token`, `hash_api_token`; `api_tokens` table; Settings > API Tokens) — long-lived bearer tokens for CI pipelines. Format is `pulse_` + 32 hex chars; sha256 + last4 stored, raw shown once. Auth middleware accepts either a session cookie or `Authorization: Bearer <token>`. Tokens inherit their owner's role; deactivated users' tokens are rejected; `last_used_at` bumps on every call so the UI can show "last used 5 min ago"
+
+### Changed
+- `/api/me` now returns `has_avatar: bool` alongside `role` and `active` so the frontend can decide whether to render the avatar `<img>` or the fallback initial
+- `/api/rules/details` returns rules sorted by severity-then-alpha (was alphabetical); the Rules page and Compliance page share the ordering via `rule_sort_key`
+- `pulse/api.py` imports now pull `generate_api_token` from `pulse.auth` and `create_api_token / list_api_tokens / revoke_api_token / find_api_token_user / touch_api_token` from `pulse.database`
+
+### Tests
+- 447 → 478 passing. New cases in `test_auth.py` cover the full token lifecycle (mint / list / bearer auth against `/api/history` / revoke / cross-user isolation / deactivated-user rejection / malformed token). Existing auth / data-isolation / API / alerts / webhook suites unchanged and green
+
+---
+
 ## 2026-04-20 — v1.4.0
 
 ### Added
