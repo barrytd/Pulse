@@ -98,17 +98,19 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 - [x] User authentication — login page backed by SQLite users table with scrypt hashes (shipped early, single-user)
 - [x] Session management — signed cookies, logout, 30-day expiry (shipped early)
-- [ ] Role-based access — admin (full) vs viewer (read-only) roles enforced in API
+- [x] Role-based access — admin (full) vs viewer (read-only) roles enforced in API
+- [x] Score-over-time chart — line chart of daily scores on the Dashboard
+- [x] Multi-user account management — admin can create, edit, and deactivate user accounts from the dashboard (Settings > Users)
+- [x] Data isolation — viewers see only their own scans / findings / reports; admins see all (scan_scope_for)
+- [x] Admin activity history — Audit page shows every block/unblock/scan/review action, filterable by user and action type, CSV export
+- [x] Hosted deployment — Pulse runs on Render with env-var config fallback, production CORS lock, disabled `/docs`, startup health log
+- [x] Profile picture upload — stored as a BLOB on the users row so it survives Render restarts; auto-syncs to top-right avatar
 - [ ] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan`
 - [ ] NIST CSF mapping — tag each rule against Identify / Protect / Detect / Respond / Recover
 - [ ] ISO 27001 mapping — link rules to Annex A controls (A.9 access, A.12 ops, etc.)
 - [ ] Compliance report view — dashboard page showing coverage per framework
-- [ ] Score-over-time chart — line chart of daily scores, 30 / 90 day windows
 - [ ] Trend analytics page — rule frequency heatmap, top offenders, week-over-week delta
 - [ ] PostgreSQL migration — replace SQLite with PostgreSQL, include a migration script that moves existing pulse.db data automatically, keep SQLite as fallback for local single-user installs
-- [ ] Multi-user account management — admin can create, edit, and deactivate user accounts from the dashboard
-- [ ] Data isolation — each user only sees their own scans, findings, and reports, admins can see all
-- [ ] Admin activity history — dashboard page where admins can see every user action (blocks, unblocks, scans run, reports deleted, findings reviewed) with who/what/when/why, filterable by user and action type, exportable as CSV
 
 ---
 

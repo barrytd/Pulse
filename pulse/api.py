@@ -62,8 +62,8 @@ from pulse.database import (
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
 from pulse.core.rules_config import (
-    RULE_META, filter_by_enabled, get_disabled_rules,
-    get_rule_names, set_rule_enabled,
+    RULE_META, build_compliance_summary, filter_by_enabled,
+    get_disabled_rules, get_rule_names, set_rule_enabled,
 )
 from pulse.alerts.emailer import dispatch_alerts
 from pulse.remediation import attach_remediation
@@ -1827,13 +1827,28 @@ def _register_routes(app: FastAPI) -> None:
         for name in _get_rule_names():
             meta = RULE_META.get(name, {})
             rows.append({
-                "name":     name,
-                "event_id": meta.get("event_id"),
-                "severity": meta.get("severity", "LOW"),
-                "mitre":    meta.get("mitre"),
-                "enabled":  name not in disabled,
+                "name":      name,
+                "event_id":  meta.get("event_id"),
+                "severity":  meta.get("severity", "LOW"),
+                "mitre":     meta.get("mitre"),
+                "nist_csf":  meta.get("nist_csf"),
+                "iso_27001": meta.get("iso_27001"),
+                "enabled":   name not in disabled,
             })
         return {"rules": rows}
+
+    # -------------------------------------------------------------------
+    # GET /api/compliance — per-framework coverage summary, used by the
+    # Compliance page on the dashboard. Groups rules by NIST CSF function
+    # (Identify / Protect / Detect / Respond / Recover) and ISO 27001
+    # Annex A clause so the analyst can see at a glance what Pulse
+    # actually covers and which rules back each control.
+    # -------------------------------------------------------------------
+    @app.get("/api/compliance")
+    def get_compliance():
+        config = _read_config(app.state.config_path)
+        disabled = get_disabled_rules(config)
+        return build_compliance_summary(disabled)
 
     # -------------------------------------------------------------------
     # PUT /api/rules/{name}/enabled — toggle a rule on/off in pulse.yaml

@@ -193,6 +193,13 @@ export async function apiGetRules() {
   return resp.json();
 }
 
+// Per-framework compliance coverage summary. Returns { nist_csf, iso_27001, rules }.
+export async function apiGetCompliance() {
+  var resp = await fetch('/api/compliance');
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+
 // Diff two past scans: returns { scan_a, scan_b, new, resolved, shared }.
 export async function apiCompareScans(idA, idB) {
   var resp = await fetch('/api/compare?a=' + idA + '&b=' + idB);
