@@ -22,6 +22,9 @@ import {
   apiSendTestWebhook,
   apiSaveSchedulerConfig,
   apiUploadAvatar,
+  apiListTokens,
+  apiCreateToken,
+  apiRevokeToken,
 } from './api.js';
 import { escapeHtml, showToast, toastError } from './dashboard.js';
 import { getTheme } from './theme.js';
@@ -44,6 +47,7 @@ const SETTINGS_TABS = [
   { id: 'notifications', label: 'Notifications',   icon: 'bell' },
   { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar' },
   { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
+  { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
   { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
@@ -118,6 +122,15 @@ export async function renderSettingsPage() {
       usersList = lu.users || [];
     } catch (e) { usersList = []; }
   }
+
+  // API tokens for the current user — always fetched (every signed-in
+  // user can manage their own CI tokens). A failure here renders the
+  // tab as empty rather than blocking the rest of the page.
+  var tokensList = [];
+  try {
+    var tl = await apiListTokens();
+    tokensList = tl.tokens || [];
+  } catch (e) { tokensList = []; }
 
   // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
   // a saved URL), fall back to Profile so we don't render an empty panel.
@@ -476,12 +489,16 @@ export async function renderSettingsPage() {
   // --- Users tab (admins only) --------------------------------------
   var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
 
+  // --- API tokens tab -----------------------------------------------
+  var tokensHtml = _renderTokensPanel(tokensList);
+
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
     notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
+    tokens:        tokensHtml,
     users:         usersHtml,
     // SMTP is powerful but noisy — tucked behind a <details> so the
     // Advanced tab reads as a configuration inventory, not a form wall.
@@ -622,6 +639,99 @@ function _renderUsersPanel(me, users) {
       tableHtml +
     '</div>'
   );
+}
+
+// Render the API Tokens tab. Every signed-in user sees their own tokens
+// here — there's no admin view that lists other users' tokens. The tab
+// has two parts: a create form (name only, token is minted server-side),
+// and a table of existing tokens with name, last4, created_at, last_used,
+// and a Revoke button.
+function _renderTokensPanel(tokens) {
+  var rowsHtml = (tokens || []).map(function (t) {
+    var lastUsed = t.last_used_at
+      ? escapeHtml(t.last_used_at)
+      : '<span style="color:var(--text-muted);">never</span>';
+    return (
+      '<tr>' +
+        '<td>' + escapeHtml(t.name || '') + '</td>' +
+        '<td style="font-family:monospace; color:var(--text-muted);">\u2026' + escapeHtml(t.last4 || '') + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' + escapeHtml(t.created_at || '') + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' + lastUsed + '</td>' +
+        '<td>' +
+          '<button class="btn btn-danger btn-sm" data-action="revokeTokenConfirm" data-arg="' +
+            t.id + '|' + encodeURIComponent(t.name || '') +
+          '">Revoke</button>' +
+        '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  var tableHtml = tokens && tokens.length
+    ? '<div class="table-wrap"><table class="table">' +
+        '<thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th></th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>'
+    : '<p style="color:var(--text-muted); font-size:13px;">No API tokens yet.</p>';
+
+  return (
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Create a Token</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'API tokens let CI pipelines and scripts hit Pulse endpoints without a browser login. ' +
+        'Send the token as an <code>Authorization: Bearer &lt;token&gt;</code> header. ' +
+        'Tokens inherit your role \u2014 treat them like a password.' +
+      '</p>' +
+      '<div class="form-row"><label>Name</label>' +
+        '<input type="text" id="new-token-name" placeholder="e.g. Jenkins prod" autocomplete="off" maxlength="64"/></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary" data-action="createToken">Create Token</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="section-label">Active Tokens (' + (tokens || []).length + ')</div>' +
+      tableHtml +
+    '</div>'
+  );
+}
+
+export async function createToken() {
+  var input = document.getElementById('new-token-name');
+  var name = (input && input.value ? input.value : '').trim();
+  if (!name) {
+    toastError('Token name is required.');
+    return;
+  }
+  try {
+    var r = await apiCreateToken(name);
+    // Raw token is only available here — once this modal closes the user
+    // can never see it again. The prompt is deliberately blocking so the
+    // user has to consciously copy it.
+    window.prompt(
+      'Copy this token now \u2014 it will not be shown again:',
+      r.token
+    );
+    if (input) input.value = '';
+    showToast('Token "' + name + '" created.');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Could not create token: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+export async function revokeTokenConfirm(arg) {
+  // arg = "<id>|<url-encoded-name>"
+  var parts = String(arg || '').split('|');
+  var id   = parts[0];
+  var name = decodeURIComponent(parts[1] || '');
+  if (!id) return;
+  if (!window.confirm('Revoke token "' + name + '"? Any script using it will start getting 401s.')) return;
+  try {
+    await apiRevokeToken(id);
+    showToast('Token revoked.');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Could not revoke token: ' + (e && e.message ? e.message : String(e)));
+  }
 }
 
 export async function createUser() {

@@ -47,17 +47,19 @@ from fastapi.staticfiles import StaticFiles
 from pulse import __version__
 from pulse.auth import (
     SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS,
-    ensure_session_secret, hash_password, issue_session_cookie,
-    require_admin, require_login, verify_password,
+    ensure_session_secret, generate_api_token, hash_password,
+    issue_session_cookie, require_admin, require_login, verify_password,
 )
 from pulse.database import (
-    count_admins, count_users, create_user, delete_all_monitor_sessions,
-    delete_monitor_session, delete_scans, delete_user, get_fleet_summary,
-    get_history, get_monitor_session_findings, get_scan_findings,
-    get_trend_analytics, get_user_avatar, get_user_by_email, get_user_by_id,
-    init_db, list_monitor_sessions, list_users, save_scan,
-    set_finding_review, set_user_avatar, update_user_active,
-    update_user_email, update_user_password, update_user_role,
+    count_admins, count_users, create_api_token, create_user,
+    delete_all_monitor_sessions, delete_monitor_session, delete_scans,
+    delete_user, get_fleet_summary, get_history,
+    get_monitor_session_findings, get_scan_findings, get_trend_analytics,
+    get_user_avatar, get_user_by_email, get_user_by_id, init_db,
+    list_api_tokens, list_monitor_sessions, list_users,
+    revoke_api_token, save_scan, set_finding_review, set_user_avatar,
+    update_user_active, update_user_email, update_user_password,
+    update_user_role,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -284,9 +286,23 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             and not any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIX)
         )
         if needs_auth:
-            from pulse.auth import verify_session_cookie
+            from pulse.auth import (
+                verify_session_cookie,
+                _extract_bearer_token,
+                hash_api_token,
+            )
+            from pulse.database import find_api_token_user, touch_api_token
             cookie = request.cookies.get(SESSION_COOKIE_NAME)
             user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
+            # Fall back to `Authorization: Bearer <token>` so CI pipelines
+            # can hit /api/scan without a browser session.
+            if user_id is None:
+                token = _extract_bearer_token(request)
+                if token:
+                    digest = hash_api_token(token)
+                    user_id = find_api_token_user(app.state.db_path, digest)
+                    if user_id is not None:
+                        touch_api_token(app.state.db_path, digest)
             if user_id is None:
                 return JSONResponse({"detail": "Authentication required."}, status_code=401)
             # Reject cookies whose user was deactivated after sign-in.
@@ -566,6 +582,51 @@ def _register_routes(app: FastAPI) -> None:
         if blob is None:
             raise HTTPException(404, detail="No avatar.")
         return Response(content=blob, media_type=mime or "image/png")
+
+    # -------------------------------------------------------------------
+    # API tokens (/api/tokens)
+    # -------------------------------------------------------------------
+    # Long-lived bearer tokens a user can paste into CI pipelines.
+    # Created tokens are returned in the raw exactly once — after that
+    # only the sha256 is stored and the UI shows "ends in ...xxxx" for
+    # identification. Tokens inherit the owning user's role, so a viewer
+    # token can't escalate past /api/scan + read endpoints.
+    _TOKEN_NAME_MAX = 64
+
+    @app.get("/api/tokens")
+    def api_list_tokens(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"tokens": []}
+        return {"tokens": list_api_tokens(app.state.db_path, user_id)}
+
+    @app.post("/api/tokens")
+    async def api_create_token(request: Request, user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Tokens require authentication to be enabled.")
+        body = await request.json()
+        name = (body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(400, detail="Token name is required.")
+        if len(name) > _TOKEN_NAME_MAX:
+            raise HTTPException(400, detail=f"Token name must be {_TOKEN_NAME_MAX} chars or fewer.")
+        raw, digest, last4 = generate_api_token()
+        token_id = create_api_token(app.state.db_path, user_id, name, digest, last4)
+        # Raw token is returned exactly once. The UI is responsible for
+        # surfacing the "copy it now, you won't see it again" warning.
+        return {
+            "id": token_id,
+            "name": name,
+            "last4": last4,
+            "token": raw,
+        }
+
+    @app.delete("/api/tokens/{token_id}")
+    def api_delete_token(token_id: int, user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            raise HTTPException(404, detail="Token not found.")
+        if not revoke_api_token(app.state.db_path, token_id, user_id):
+            raise HTTPException(404, detail="Token not found.")
+        return {"status": "ok"}
 
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):

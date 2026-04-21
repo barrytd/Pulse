@@ -131,6 +131,8 @@ import {
   deleteUserConfirm,
   uploadAvatarClick,
   onAvatarFileSelected,
+  createToken,
+  revokeTokenConfirm,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -289,6 +291,8 @@ const actions = {
   deleteUserConfirm,
   uploadAvatarClick,
   onAvatarFileSelected,
+  createToken,
+  revokeTokenConfirm,
 
   // reports
   setReportsQueryFromInput,

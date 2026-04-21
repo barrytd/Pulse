@@ -169,21 +169,77 @@ def require_admin(request: Request) -> int:
 
 
 def _resolve_user_id(request: Request):
-    """Shared helper: returns the signed-in user id, or None. Validates the
-    session cookie and also rejects sessions whose user is deactivated."""
+    """Shared helper: returns the signed-in user id, or None. Checks the
+    session cookie first, then falls back to an `Authorization: Bearer`
+    API token. Deactivated users are rejected even if their cookie or
+    token is otherwise valid."""
     secret = getattr(request.app.state, "session_secret", None)
     if not secret:
         raise HTTPException(500, detail="Session secret not configured.")
+    db_path = getattr(request.app.state, "db_path", None)
+
+    # Session cookie path (browser users).
     cookie = request.cookies.get(SESSION_COOKIE_NAME)
     user_id = verify_session_cookie(secret, cookie) if cookie else None
+
+    # Bearer-token path (CI pipelines). Only consulted if there's no valid
+    # cookie so browser sessions keep their fast path.
+    if user_id is None:
+        token = _extract_bearer_token(request)
+        if token and db_path:
+            from pulse.database import find_api_token_user, touch_api_token
+            digest = hash_api_token(token)
+            user_id = find_api_token_user(db_path, digest)
+            if user_id is not None:
+                touch_api_token(db_path, digest)
+
     if user_id is None:
         return None
     # Belt and braces: if the row was deactivated after the cookie was
     # issued, treat the session as invalid rather than trust the cookie.
     from pulse.database import get_user_by_id
-    db_path = getattr(request.app.state, "db_path", None)
     if db_path:
         user = get_user_by_id(db_path, user_id)
         if not user or not user.get("active"):
             return None
     return user_id
+
+
+# ---------------------------------------------------------------------------
+# API tokens (Bearer auth for CI / scripts)
+# ---------------------------------------------------------------------------
+#
+# Token format is ``pulse_<32 hex chars>``. The ``pulse_`` prefix makes
+# leaked tokens easy to grep for in logs / source, and the 128 bits of
+# entropy afterwards makes them safe against brute force. We store only
+# sha256(raw) plus the last 4 chars (for UI identification); the raw
+# token is shown to the user exactly once on creation.
+
+_TOKEN_PREFIX = "pulse_"
+
+
+def generate_api_token() -> tuple[str, str, str]:
+    """Mint a new API token. Returns ``(raw, sha256_hex, last4)`` — the
+    caller should show ``raw`` to the user once and persist only the hash
+    and last4 to the DB."""
+    body = secrets.token_hex(16)  # 32 hex chars = 128 bits
+    raw = _TOKEN_PREFIX + body
+    return raw, hash_api_token(raw), raw[-4:]
+
+
+def hash_api_token(raw: str) -> str:
+    """sha256 hex digest of a raw token, used for DB lookup and storage."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _extract_bearer_token(request: Request) -> Optional[str]:
+    """Pull the token out of an ``Authorization: Bearer ...`` header.
+    Returns None if the header is missing or malformed."""
+    header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not header:
+        return None
+    parts = header.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token or None

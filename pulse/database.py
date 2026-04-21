@@ -95,6 +95,25 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
+# Long-lived API tokens scoped to a user, used for CI pipelines hitting
+# /api/scan and friends. Only the sha256 of the raw token is stored —
+# the plaintext is shown to the user exactly once on creation and is
+# unrecoverable afterwards. `last4` is the last 4 chars of the raw
+# token, kept unhashed so the UI can let the user identify "which token
+# did I paste into Jenkins" without exposing the full secret.
+_CREATE_API_TOKENS = """
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT    NOT NULL,
+    token_sha256   TEXT    NOT NULL UNIQUE,
+    last4          TEXT    NOT NULL,
+    created_at     TEXT    NOT NULL,
+    last_used_at   TEXT,
+    revoked        INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 # IP block list — Pulse-managed inbound deny rules that get pushed into
 # Windows Firewall via `netsh advfirewall`. Each row represents one IP we
 # want (or have pushed) a firewall rule for. `status` tracks the lifecycle:
@@ -169,6 +188,7 @@ def init_db(db_path):
         conn.execute(_CREATE_FINDINGS)
         conn.execute(_CREATE_ALERT_LOG)
         conn.execute(_CREATE_USERS)
+        conn.execute(_CREATE_API_TOKENS)
         conn.execute(_CREATE_IP_BLOCK_LIST)
         conn.execute(_CREATE_AUDIT_LOG)
         conn.execute(_CREATE_MONITOR_SESSIONS)
@@ -1186,6 +1206,84 @@ def count_admins(db_path, *, active_only=True):
     with _connect(db_path) as conn:
         row = conn.execute(sql).fetchone()
         return int(row[0]) if row else 0
+
+
+# ---------------------------------------------------------------------------
+# API tokens (CI-pipeline bearer auth)
+# ---------------------------------------------------------------------------
+
+def create_api_token(db_path, user_id, name, token_sha256, last4):
+    """Insert a new token row and return the new row id. The raw token is
+    never stored — only its sha256 plus the last 4 chars so the UI can
+    identify the entry ("ends in a1b2")."""
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO api_tokens (user_id, name, token_sha256, last4, created_at, revoked)"
+            " VALUES (?, ?, ?, ?, ?, 0)",
+            (int(user_id), name, token_sha256, last4, created_at),
+        )
+        return cursor.lastrowid
+
+
+def list_api_tokens(db_path, user_id):
+    """Return non-revoked tokens for a user, newest first. Each row is a
+    dict: id, name, last4, created_at, last_used_at."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, name, last4, created_at, last_used_at"
+            "  FROM api_tokens"
+            " WHERE user_id = ? AND revoked = 0"
+            " ORDER BY id DESC",
+            (int(user_id),),
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "name": r[1],
+            "last4": r[2],
+            "created_at": r[3],
+            "last_used_at": r[4],
+        }
+        for r in rows
+    ]
+
+
+def revoke_api_token(db_path, token_id, user_id):
+    """Soft-delete: mark the token revoked if it belongs to this user.
+    Returns True if a row was updated, False if the id didn't match."""
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE api_tokens SET revoked = 1"
+            " WHERE id = ? AND user_id = ? AND revoked = 0",
+            (int(token_id), int(user_id)),
+        )
+        return cursor.rowcount > 0
+
+
+def find_api_token_user(db_path, token_sha256):
+    """Look up the user_id that owns a given token hash, or None if no
+    live token matches. Used by the API auth middleware to authenticate
+    Bearer-token requests."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT user_id FROM api_tokens"
+            " WHERE token_sha256 = ? AND revoked = 0",
+            (token_sha256,),
+        ).fetchone()
+    return int(row[0]) if row else None
+
+
+def touch_api_token(db_path, token_sha256):
+    """Bump last_used_at to now so the UI can show 'last used 5 min ago'.
+    Silently no-ops if the token doesn't exist or is revoked."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE api_tokens SET last_used_at = ?"
+            " WHERE token_sha256 = ? AND revoked = 0",
+            (now, token_sha256),
+        )
 
 
 # ---------------------------------------------------------------------------

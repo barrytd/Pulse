@@ -400,3 +400,137 @@ def test_create_user_duplicate_email_conflict(auth_client):
         "role": "viewer",
     })
     assert r.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# API tokens (Bearer auth for CI)
+# ---------------------------------------------------------------------------
+#
+# These cover the full lifecycle: create (raw token is shown once), list
+# (raw token is gone — only last4 survives), use the token against a
+# protected endpoint via the Authorization header, and revoke (subsequent
+# bearer requests 401).
+
+def test_api_token_unit_helpers_shape():
+    from pulse.auth import generate_api_token, hash_api_token
+    raw, digest, last4 = generate_api_token()
+    assert raw.startswith("pulse_")
+    assert len(raw) == len("pulse_") + 32   # 32 hex chars = 128 bits
+    assert digest == hash_api_token(raw)
+    assert len(digest) == 64                 # sha256 hex
+    assert last4 == raw[-4:]
+
+
+def test_api_token_create_returns_raw_exactly_once(auth_client):
+    _signup_admin(auth_client)
+    r = auth_client.post("/api/tokens", json={"name": "jenkins"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "jenkins"
+    assert body["token"].startswith("pulse_")
+    assert body["last4"] == body["token"][-4:]
+
+    # The list endpoint must never expose the raw token, only last4.
+    r2 = auth_client.get("/api/tokens")
+    assert r2.status_code == 200
+    tokens = r2.json()["tokens"]
+    assert len(tokens) == 1
+    assert "token" not in tokens[0]
+    assert tokens[0]["last4"] == body["last4"]
+
+
+def test_api_token_requires_name(auth_client):
+    _signup_admin(auth_client)
+    r = auth_client.post("/api/tokens", json={"name": "   "})
+    assert r.status_code == 400
+
+
+def test_api_token_authenticates_bearer_request(auth_client):
+    _signup_admin(auth_client)
+    raw = auth_client.post("/api/tokens", json={"name": "ci"}).json()["token"]
+
+    # Fresh client — no cookies, so only the Bearer header can authenticate.
+    fresh = TestClient(auth_client.app)
+    r = fresh.get("/api/history", headers={"Authorization": "Bearer " + raw})
+    assert r.status_code == 200
+
+
+def test_api_token_revoke_blocks_future_calls(auth_client):
+    _signup_admin(auth_client)
+    created = auth_client.post("/api/tokens", json={"name": "jenkins"}).json()
+    raw, token_id = created["token"], created["id"]
+
+    # Pre-revoke: token works.
+    fresh = TestClient(auth_client.app)
+    assert fresh.get("/api/history", headers={"Authorization": "Bearer " + raw}).status_code == 200
+
+    # Revoke.
+    r = auth_client.delete("/api/tokens/" + str(token_id))
+    assert r.status_code == 200
+
+    # Post-revoke: 401.
+    fresh2 = TestClient(auth_client.app)
+    r2 = fresh2.get("/api/history", headers={"Authorization": "Bearer " + raw})
+    assert r2.status_code == 401
+
+
+def test_api_token_user_cannot_revoke_someone_elses_token(auth_client):
+    # User A signs up (admin, auto) and creates a token.
+    _signup_admin(auth_client, email="a@example.com")
+    a_token = auth_client.post("/api/tokens", json={"name": "mine"}).json()
+    a_token_id = a_token["id"]
+
+    # A (admin) creates user B, then B logs in via a new client.
+    r = auth_client.post("/api/users", json={
+        "email": "b@example.com", "password": "long-enough-password", "role": "viewer",
+    })
+    assert r.status_code == 200, r.text
+    b_client = TestClient(auth_client.app)
+    _login(b_client, "b@example.com", "long-enough-password")
+
+    # B tries to revoke A's token → 404 (token isn't theirs).
+    r2 = b_client.delete("/api/tokens/" + str(a_token_id))
+    assert r2.status_code == 404
+
+    # A's token still works.
+    fresh = TestClient(auth_client.app)
+    assert fresh.get(
+        "/api/history",
+        headers={"Authorization": "Bearer " + a_token["token"]},
+    ).status_code == 200
+
+
+def test_api_token_bad_bearer_is_401(auth_client):
+    _signup_admin(auth_client)
+    fresh = TestClient(auth_client.app)
+    r = fresh.get("/api/history", headers={"Authorization": "Bearer pulse_deadbeef"})
+    assert r.status_code == 401
+
+
+def test_api_token_deactivated_user_bearer_rejected(auth_client):
+    # Admin A creates viewer B and mints a token for B.
+    _signup_admin(auth_client)
+    auth_client.post("/api/users", json={
+        "email": "b@example.com", "password": "long-enough-password", "role": "viewer",
+    })
+    b_client = TestClient(auth_client.app)
+    _login(b_client, "b@example.com", "long-enough-password")
+    b_raw = b_client.post("/api/tokens", json={"name": "b"}).json()["token"]
+
+    # Sanity: token works while B is active.
+    fresh = TestClient(auth_client.app)
+    assert fresh.get(
+        "/api/history",
+        headers={"Authorization": "Bearer " + b_raw},
+    ).status_code == 200
+
+    # Admin deactivates B.
+    b_id = [u for u in auth_client.get("/api/users").json()["users"]
+            if u["email"] == "b@example.com"][0]["id"]
+    r = auth_client.put(f"/api/users/{b_id}/active", json={"active": False})
+    assert r.status_code == 200
+
+    # Deactivated user's bearer token is now rejected.
+    fresh2 = TestClient(auth_client.app)
+    r2 = fresh2.get("/api/history", headers={"Authorization": "Bearer " + b_raw})
+    assert r2.status_code == 401

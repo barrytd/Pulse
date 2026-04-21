@@ -252,6 +252,41 @@ export async function apiUploadAvatar(file) {
   return body || { status: 'ok' };
 }
 
+// --- API tokens (CI bearer auth) -----------------------------------------
+
+export async function apiListTokens() {
+  var resp = await fetch('/api/tokens');
+  if (!resp.ok) return { tokens: [] };
+  return resp.json();
+}
+
+// Returns { id, name, last4, token } — the raw token string is only
+// present in the creation response; list/GET never includes it.
+export async function apiCreateToken(name) {
+  var resp = await fetch('/api/tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name }),
+  });
+  var body = null;
+  try { body = await resp.json(); } catch (e) { /* non-JSON error page */ }
+  if (!resp.ok) {
+    var msg = (body && body.detail) ? body.detail : ('HTTP ' + resp.status);
+    throw new Error(msg);
+  }
+  return body;
+}
+
+export async function apiRevokeToken(id) {
+  var resp = await fetch('/api/tokens/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (!resp.ok) {
+    var msg = ('HTTP ' + resp.status);
+    try { var body = await resp.json(); if (body && body.detail) msg = body.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return true;
+}
+
 export async function apiListUsers() {
   var resp = await fetch('/api/users');
   if (!resp.ok) return { users: [] };

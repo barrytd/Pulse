@@ -109,7 +109,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] ISO 27001 mapping — every rule linked to an Annex A control (A.9 access, A.12 ops, etc.)
 - [x] Compliance report view — Compliance page shows per-CSF-function + per-clause coverage and a per-rule lookup table
 - [x] Trend analytics page — Trends page with window-over-window delta, daily finding line chart, severity breakdown, top rules + top hosts bars
-- [ ] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan`
+- [x] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan` (Settings > API Tokens; Bearer header, per-user, sha256-at-rest, raw shown once, `last_used_at` bumps on every call)
 - [ ] PostgreSQL migration — replace SQLite with PostgreSQL, include a migration script that moves existing pulse.db data automatically, keep SQLite as fallback for local single-user installs
 
 ---
