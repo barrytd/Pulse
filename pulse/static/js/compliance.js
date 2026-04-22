@@ -28,11 +28,13 @@ export async function renderCompliancePage() {
   var nistCards = _renderNistCards(data.nist_csf || {});
   var isoCards  = _renderIsoCards(data.iso_27001 || {});
   var rulesTable = _renderRulesTable(data.rules || []);
+  var hero = _renderHero(data.rules || []);
 
   c.innerHTML =
     '<div class="page-head">' +
       '<div class="page-head-title">Coverage across compliance frameworks</div>' +
     '</div>' +
+    hero +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">NIST Cybersecurity Framework</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
@@ -58,6 +60,63 @@ export async function renderCompliancePage() {
       '<div class="section-label" style="padding:16px 20px 8px;">Per-rule mappings</div>' +
       rulesTable +
     '</div>';
+}
+
+function _renderHero(rules) {
+  var total    = rules.length;
+  var enabled  = 0;
+  var disabled = 0;
+  for (var i = 0; i < rules.length; i++) {
+    if (rules[i].enabled) { enabled++; } else { disabled++; }
+  }
+  // Pulse does not currently model Waived / N/A control states, so those
+  // segments ship as zero-width placeholders with a small note below the bar.
+  var waived = 0;
+  var na     = 0;
+  var pct = total ? Math.round((enabled / total) * 100) : 0;
+  var circumference = 2 * Math.PI * 56; // r = 56
+  var dash = (pct / 100) * circumference;
+  var ringColor =
+    pct >= 80 ? 'var(--severity-low, #10b981)' :
+    pct >= 50 ? 'var(--severity-medium, #d29922)' :
+                'var(--severity-high, #f85149)';
+  var enabledPct  = total ? (enabled  / total) * 100 : 0;
+  var disabledPct = total ? (disabled / total) * 100 : 0;
+
+  return '<div class="card compliance-hero" style="margin-bottom:16px;">' +
+    '<div class="compliance-gauge">' +
+      '<svg viewBox="0 0 140 140" width="140" height="140">' +
+        '<circle cx="70" cy="70" r="56" fill="none" stroke="var(--bg-3, #30363d)" stroke-width="12"></circle>' +
+        '<circle cx="70" cy="70" r="56" fill="none" stroke="' + ringColor + '" stroke-width="12" ' +
+          'stroke-linecap="round" ' +
+          'stroke-dasharray="' + dash.toFixed(2) + ' ' + circumference.toFixed(2) + '" ' +
+          'transform="rotate(-90 70 70)"></circle>' +
+        '<text x="70" y="68" text-anchor="middle" font-size="28" font-weight="700" fill="var(--text-high, #f0f6fc)">' +
+          pct + '%</text>' +
+        '<text x="70" y="90" text-anchor="middle" font-size="10" letter-spacing="1" fill="var(--text-dim, #8b949e)">COVERAGE</text>' +
+      '</svg>' +
+    '</div>' +
+    '<div class="compliance-hero-body">' +
+      '<div class="section-label">Overall rule coverage</div>' +
+      '<div style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">' +
+        '<strong style="color:var(--text-high);">' + enabled + '</strong> of ' +
+        '<strong style="color:var(--text-high);">' + total + '</strong> detection rules are enabled across all frameworks.' +
+      '</div>' +
+      '<div class="compliance-stack-bar">' +
+        '<div class="stack-seg stack-enabled"  style="width:' + enabledPct.toFixed(2)  + '%;" title="Enabled: ' + enabled + '"></div>' +
+        '<div class="stack-seg stack-disabled" style="width:' + disabledPct.toFixed(2) + '%;" title="Disabled: ' + disabled + '"></div>' +
+      '</div>' +
+      '<div class="compliance-stack-legend">' +
+        '<span><i class="dot dot-enabled"></i> Enabled <strong>' + enabled + '</strong></span>' +
+        '<span><i class="dot dot-disabled"></i> Disabled <strong>' + disabled + '</strong></span>' +
+        '<span class="muted"><i class="dot dot-waived"></i> Waived <strong>' + waived + '</strong></span>' +
+        '<span class="muted"><i class="dot dot-na"></i> N/A <strong>' + na + '</strong></span>' +
+      '</div>' +
+      '<div style="font-size:11px; color:var(--text-dim); margin-top:6px;">' +
+        'Waived and N/A are placeholders — Pulse does not yet track formally waived controls.' +
+      '</div>' +
+    '</div>' +
+  '</div>';
 }
 
 function _renderNistCards(nist) {

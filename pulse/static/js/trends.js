@@ -182,6 +182,25 @@ function _renderHostsTable(hosts) {
   return '<table style="width:100%; border-collapse:collapse;">' + rows + '</table>';
 }
 
+function _anomalyStats(daily) {
+  // Mean + stddev across the daily_counts series so we can render a ±2σ band.
+  // Skip computing if we have too few points to be meaningful.
+  if (!daily || daily.length < 3) return null;
+  var n = daily.length;
+  var sum = 0;
+  for (var i = 0; i < n; i++) { sum += (daily[i].count || 0); }
+  var mean = sum / n;
+  var sqSum = 0;
+  for (var j = 0; j < n; j++) {
+    var d = (daily[j].count || 0) - mean;
+    sqSum += d * d;
+  }
+  var sd = Math.sqrt(sqSum / n);
+  var upper = mean + 2 * sd;
+  var lower = Math.max(0, mean - 2 * sd);
+  return { mean: mean, sd: sd, upper: upper, lower: lower };
+}
+
 function _drawDailyChart(daily) {
   if (typeof Chart === 'undefined') return;
   var canvas = document.getElementById('trends-daily-chart');
@@ -191,26 +210,72 @@ function _drawDailyChart(daily) {
   var textMuted = (styles.getPropertyValue('--text-muted')|| '#8b949e').trim();
   var border    = (styles.getPropertyValue('--border')    || '#30363d').trim();
 
+  var stats = _anomalyStats(daily);
+  var labels = daily.map(function (d) { return d.date; });
+
+  var datasets = [];
+  if (stats) {
+    // Render band as two line datasets with fill between them. Chart.js
+    // fill:'-1' refers to the previous dataset, so the "upper" dataset is
+    // drawn on top of "lower" with the yellow translucent area between them.
+    datasets.push({
+      label: 'lower 2σ',
+      data: labels.map(function () { return stats.lower; }),
+      borderColor: 'transparent',
+      pointRadius: 0,
+      fill: false,
+      order: 3,
+    });
+    datasets.push({
+      label: 'upper 2σ',
+      data: labels.map(function () { return stats.upper; }),
+      borderColor: 'transparent',
+      backgroundColor: 'rgba(210, 153, 34, 0.14)', // translucent yellow band
+      pointRadius: 0,
+      fill: '-1',
+      order: 3,
+    });
+    datasets.push({
+      label: 'mean',
+      data: labels.map(function () { return stats.mean; }),
+      borderColor: 'rgba(210, 153, 34, 0.7)',
+      borderDash: [4, 4],
+      borderWidth: 1,
+      pointRadius: 0,
+      fill: false,
+      order: 2,
+    });
+  }
+  datasets.push({
+    label: 'findings',
+    data: daily.map(function (d) { return d.count; }),
+    borderColor: accent,
+    backgroundColor: accent + '22',
+    borderWidth: 2,
+    fill: true,
+    tension: 0.3,
+    pointRadius: 2,
+    pointHoverRadius: 5,
+    order: 1,
+  });
+
   if (_dailyChart) { _dailyChart.destroy(); }
   _dailyChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels: daily.map(function (d) { return d.date; }),
-      datasets: [{
-        data: daily.map(function (d) { return d.count; }),
-        borderColor: accent,
-        backgroundColor: accent + '22',
-        borderWidth: 2,
-        fill: true,
-        tension: 0.3,
-        pointRadius: 2,
-        pointHoverRadius: 5,
-      }]
-    },
+    data: { labels: labels, datasets: datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: true } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          filter: function (item) {
+            // Only tooltip the findings line; the band guides are decorative.
+            return item.dataset && item.dataset.label === 'findings';
+          },
+        },
+      },
       scales: {
         x: { ticks: { color: textMuted, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
              grid: { color: border + '55' } },
