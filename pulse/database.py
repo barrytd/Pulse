@@ -22,11 +22,42 @@
 #   scans    — one row per scan run
 #   findings — one row per finding, linked to a scan via scan_id
 
+import re
 import sqlite3
 import socket
 from datetime import datetime, timedelta
 
 from . import db_backend
+
+
+def compute_ref_prefix(rule):
+    """Return a 3-letter uppercase prefix derived from a rule name.
+
+    Examples:
+        "Pass-the-Hash Attempt"   -> "PTH"  (one initial per word)
+        "Brute Force Attempt"     -> "BRF"  (2 words: first initial + 2nd
+                                             char of first word + 2nd word
+                                             initial)
+        "Kerberoasting"           -> "KER"  (single word: first 3 chars)
+    Non-letter characters (hyphens, digits, punctuation) are treated as word
+    separators so "Pass-the-Hash" splits into three words.
+    """
+    words = [w for w in re.split(r"[^A-Za-z]+", rule or "") if w]
+    if len(words) >= 3:
+        prefix = words[0][0] + words[1][0] + words[2][0]
+    elif len(words) == 2:
+        first = words[0]
+        prefix = first[0] + (first[1] if len(first) > 1 else "X") + words[1][0]
+    elif len(words) == 1:
+        prefix = (words[0] + "XX")[:3]
+    else:
+        prefix = "RUL"
+    return prefix.upper()
+
+
+def compute_ref_id(rule, finding_id):
+    """'<3-letter prefix>-<zero-padded id>', e.g. 'PTH-0142'."""
+    return "{}-{:04d}".format(compute_ref_prefix(rule), int(finding_id))
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +96,8 @@ CREATE TABLE IF NOT EXISTS findings (
     reviewed       INTEGER DEFAULT 0,
     false_positive INTEGER DEFAULT 0,
     review_note    TEXT,
-    reviewed_at    TEXT
+    reviewed_at    TEXT,
+    ref_id         TEXT
 );
 """
 
@@ -217,6 +249,7 @@ def init_db(db_path):
         "ALTER TABLE findings ADD COLUMN hostname TEXT",
         "ALTER TABLE findings ADD COLUMN reviewed INTEGER DEFAULT 0",
         "ALTER TABLE findings ADD COLUMN false_positive INTEGER DEFAULT 0",
+        "ALTER TABLE findings ADD COLUMN ref_id TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -237,6 +270,22 @@ def init_db(db_path):
                 "UPDATE findings SET false_positive = 1 "
                 "WHERE review_status = 'false_positive' AND reviewed = 0 AND false_positive = 0"
             )
+        except db_backend.OperationalError:
+            pass
+
+        # Backfill short reference IDs (e.g. "PTH-0142") for any finding
+        # that existed before the ref_id column was added. Idempotent — only
+        # rows with ref_id IS NULL are touched, so a user can rename a rule
+        # after the fact without this clobbering a custom ref.
+        try:
+            rows = conn.execute(
+                "SELECT id, rule FROM findings WHERE ref_id IS NULL"
+            ).fetchall()
+            for fid, rule in rows:
+                conn.execute(
+                    "UPDATE findings SET ref_id = ? WHERE id = ?",
+                    (compute_ref_id(rule, fid), int(fid)),
+                )
         except db_backend.OperationalError:
             pass
 
@@ -305,6 +354,19 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             rows
         )
+
+        # Stamp short reference IDs on the rows we just wrote. We select
+        # back by scan_id instead of relying on batch lastrowid because
+        # executemany() doesn't return a per-row id range on Postgres.
+        fresh = conn.execute(
+            "SELECT id, rule FROM findings WHERE scan_id = ? AND ref_id IS NULL",
+            (scan_id,),
+        ).fetchall()
+        for fid, rule in fresh:
+            conn.execute(
+                "UPDATE findings SET ref_id = ? WHERE id = ?",
+                (compute_ref_id(rule, fid), int(fid)),
+            )
 
     return scan_id
 
@@ -399,7 +461,7 @@ def get_findings_since(db_path, days, user_id=None):
                 extra_where = " AND s.user_id = ?"
                 extra_params = (int(user_id),)
             cursor = conn.execute(
-                f"""SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
+                f"""SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity,
                           f.rule, f.mitre, f.description, f.details,
                           f.reviewed, f.false_positive,
                           s.scanned_at, s.hostname, s.score, s.score_label,
@@ -473,7 +535,7 @@ def get_scan_findings(db_path, scan_id, user_id=None):
             if not owner or owner[0] != int(user_id):
                 return []
         cursor = conn.execute(
-            """SELECT id, timestamp, event_id, severity, rule,
+            """SELECT id, ref_id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
                       reviewed, false_positive, review_note, reviewed_at
                FROM findings
@@ -536,7 +598,7 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None)
             (r, fp, clean_note, reviewed_at, int(finding_id)),
         )
         row = conn.execute(
-            """SELECT id, scan_id, timestamp, event_id, severity, rule,
+            """SELECT id, ref_id, scan_id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
                       reviewed, false_positive, review_note, reviewed_at
                FROM findings WHERE id = ?""",
@@ -544,7 +606,7 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None)
         ).fetchone()
         if not row:
             return None
-        cols = ("id", "scan_id", "timestamp", "event_id", "severity", "rule",
+        cols = ("id", "ref_id", "scan_id", "timestamp", "event_id", "severity", "rule",
                 "mitre", "description", "details", "raw_xml", "hostname",
                 "reviewed", "false_positive", "review_note", "reviewed_at")
         d = dict(zip(cols, row))
@@ -909,7 +971,7 @@ def get_monitor_session_findings(db_path, session_id):
     try:
         with _connect(db_path) as conn:
             cursor = conn.execute(
-                """SELECT f.id, f.scan_id, f.timestamp, f.event_id, f.severity,
+                """SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity,
                           f.rule, f.mitre, f.description, f.details, f.raw_xml,
                           f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                           s.scanned_at

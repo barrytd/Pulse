@@ -563,31 +563,21 @@ function _feedRowHtml(item, key) {
 // short list of recent sessions + a tip.
 function _monitorIdlePanelHtml(sessions) {
   sessions = sessions || [];
-  var today = new Date();
-  var ymd = today.getFullYear() + '-' +
-            String(today.getMonth() + 1).padStart(2, '0') + '-' +
-            String(today.getDate()).padStart(2, '0');
-  var todays = sessions.filter(function (s) {
-    return (s.started_at || '').slice(0, 10) === ymd;
+  // Sessions this week — last 7 days rolling, inclusive of today. Uses a
+  // numeric cutoff so we don't have to parse every started_at string twice.
+  var now = Date.now();
+  var weekCutoff = now - 7 * 24 * 60 * 60 * 1000;
+  var weekSessions = sessions.filter(function (s) {
+    var t = Date.parse(s.started_at || '');
+    return !isNaN(t) && t >= weekCutoff;
   });
-  var findingsToday = todays.reduce(function (n, s) {
+  // All-time findings across every recorded session.
+  var findingsAllTime = sessions.reduce(function (n, s) {
     return n + (parseInt(s.findings_count, 10) || 0);
   }, 0);
-
-  var channelTotals = {};
-  sessions.forEach(function (s) {
-    var chans = (s.channels || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
-    var weight = (parseInt(s.poll_count, 10) || 1);
-    chans.forEach(function (c) {
-      channelTotals[c] = (channelTotals[c] || 0) + weight;
-    });
-  });
-  var mostActiveRaw = null;
-  var best = 0;
-  Object.keys(channelTotals).forEach(function (c) {
-    if (channelTotals[c] > best) { best = channelTotals[c]; mostActiveRaw = c; }
-  });
-  var mostActive = mostActiveRaw ? _channelLabel(mostActiveRaw) : '\u2014';
+  // Channels the user currently has configured for the monitor. Reads
+  // from the same persisted list the Start button will use.
+  var configuredChannels = getSelectedChannels().length;
 
   var statCard = function (label, value) {
     return '<div class="mon-idle-stat">' +
@@ -615,9 +605,9 @@ function _monitorIdlePanelHtml(sessions) {
 
   return '<div class="live-feed empty mon-idle-panel" id="mon-live-feed">' +
     '<div class="mon-idle-stats">' +
-      statCard('Sessions today', todays.length) +
-      statCard('Findings today', findingsToday) +
-      statCard('Most active channel', mostActive) +
+      statCard('Sessions this week', weekSessions.length) +
+      statCard('Findings all time', findingsAllTime) +
+      statCard('Channels configured', configuredChannels) +
     '</div>' +
     '<div class="mon-idle-recent">' +
       '<div class="mon-idle-recent-title">Recent Sessions</div>' +
@@ -817,6 +807,560 @@ export function savePopoverInterval(arg, target) {
 
 
 // ---------------------------------------------------------------
+// Monitor v1.6 — three-band layout helpers (KPI + histogram + rail)
+// ---------------------------------------------------------------
+
+// Connection state for the SSE stream. 'idle' is the default before any
+// connect attempt. 'live' means at least one event has arrived. 'reconnecting'
+// is set after an error; 'disconnected' is set after the retry-limit has
+// been exhausted. The initial state is recomputed inside renderMonitorPage
+// from monitorClient._source.
+let _monConnState = 'idle';
+
+function _readConnState() {
+  var status = monitorClient.status;
+  if (!status || !status.active) return 'idle';
+  var src = monitorClient._source;
+  if (!src) return 'reconnecting';
+  // EventSource.readyState: 0 CONNECTING, 1 OPEN, 2 CLOSED
+  if (src.readyState === 1) return 'live';
+  if (src.readyState === 0) return 'reconnecting';
+  return 'disconnected';
+}
+
+// Parse a check/finding's timestamp into a JS millisecond value. The
+// backend stores "YYYY-MM-DD HH:MM:SS" in local time, so we normalize
+// to ISO first. NaN -> 0 so downstream arithmetic stays finite.
+function _tsMs(s) {
+  if (!s) return 0;
+  var t = Date.parse(String(s).replace(' ', 'T'));
+  return isNaN(t) ? 0 : t;
+}
+
+// Test-alert counter — bucketed by local YYYY-MM-DD so it resets each day.
+const LS_TESTS_TODAY = 'pulse.monitor.testsToday';
+function _todayKey() {
+  var d = new Date();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var day = String(d.getDate()).padStart(2, '0');
+  return d.getFullYear() + '-' + m + '-' + day;
+}
+export function getTestAlertsToday() {
+  try {
+    var raw = localStorage.getItem(LS_TESTS_TODAY);
+    if (!raw) return 0;
+    var obj = JSON.parse(raw);
+    return (obj && obj.date === _todayKey()) ? (parseInt(obj.count, 10) || 0) : 0;
+  } catch (e) { return 0; }
+}
+function _incTestAlertsToday() {
+  try {
+    var next = getTestAlertsToday() + 1;
+    localStorage.setItem(LS_TESTS_TODAY, JSON.stringify({ date: _todayKey(), count: next }));
+  } catch (e) {}
+}
+
+// Compute per-severity totals for the most recent 1h of the feed.
+function _severityCountsLastHour(feed) {
+  var cutoff = Date.now() - 60 * 60 * 1000;
+  var counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  (feed || []).forEach(function (item) {
+    if (_tsMs(item.at) < cutoff) return;
+    var sev = ((item.finding && item.finding.severity) || 'low').toLowerCase();
+    if (counts[sev] != null) counts[sev]++;
+  });
+  return counts;
+}
+
+// Roll the poll checks up into an events-per-minute rate and a 10-minute
+// sparkline. Checks are stored newest-first, and each `events` value is the
+// total inspected during that poll.
+function _eventRateStats(checks) {
+  var now = Date.now();
+  var windowMs = 10 * 60 * 1000;
+  var cutoff = now - windowMs;
+  var bucketCount = 10;
+  var spark = new Array(bucketCount).fill(0);
+  var totalEvents = 0;
+  var oldestMs = now;
+  (checks || []).forEach(function (c) {
+    var t = _tsMs(c.at);
+    if (!t || t < cutoff) return;
+    totalEvents += (c.events || 0);
+    oldestMs = Math.min(oldestMs, t);
+    var idx = bucketCount - 1 - Math.floor((now - t) / (windowMs / bucketCount));
+    if (idx >= 0 && idx < bucketCount) spark[idx] += (c.events || 0);
+  });
+  var minsCovered = Math.max(1, (now - oldestMs) / 60000);
+  return { rate: totalEvents / minsCovered, spark: spark, totalEvents: totalEvents };
+}
+
+// Poll success = % of recent polls that returned without an implicit error.
+// Proxy until the backend exposes a success flag: any poll row present in
+// `checks` is considered successful. We still want the ratio shown in the
+// KPI tile so the user can sanity-check streaming health, so compute
+// polls-with-events / total-polls as a hit-rate fallback.
+function _pollSuccessStats(checks) {
+  var recent = (checks || []).slice(0, 20);
+  if (recent.length === 0) return { pct: null, hits: 0, total: 0 };
+  var hits = recent.filter(function (c) { return (c.events || 0) > 0; }).length;
+  return { pct: Math.round((hits / recent.length) * 100), hits: hits, total: recent.length };
+}
+
+function _computeKpiStats() {
+  var feed    = monitorClient.feed;
+  var checks  = monitorClient.checks;
+  var status  = monitorClient.status || {};
+  var rate    = _eventRateStats(checks);
+  var sev1h   = _severityCountsLastHour(feed);
+  var worst   = sev1h.critical ? 'critical'
+              : sev1h.high     ? 'high'
+              : sev1h.medium   ? 'medium'
+              : sev1h.low      ? 'low' : '';
+  var alerts1h = sev1h.critical + sev1h.high + sev1h.medium + sev1h.low;
+  var poll    = _pollSuccessStats(checks);
+  var active  = !!status.active;
+  return {
+    eventsPerMin: Math.round(rate.rate * 10) / 10,
+    eventsSpark:  rate.spark,
+    eventsTotal:  rate.totalEvents,
+    activeSessions: active ? 1 : 0,
+    alerts1h: alerts1h,
+    alertsWorst: worst,
+    pollPct: poll.pct,
+    pollHits: poll.hits,
+    pollTotal: poll.total,
+    testsToday: getTestAlertsToday(),
+    connState: _monConnState,
+  };
+}
+
+// Tiny SVG sparkline — N points, max-normalised, single stroke.
+function _sparklineSvg(values, w, h, color) {
+  w = w || 60;
+  h = h || 18;
+  color = color || 'var(--accent)';
+  var vals = values && values.length ? values : [0];
+  var max  = Math.max.apply(null, vals);
+  if (max === 0) max = 1;
+  var stepX = w / Math.max(1, vals.length - 1);
+  var pts = vals.map(function (v, i) {
+    var x = i * stepX;
+    var y = h - (v / max) * (h - 2) - 1;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  return '<svg class="mon-kpi-spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
+    '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round"/>' +
+  '</svg>';
+}
+
+function _kpiTile(label, valueHtml, subHtml, sparkHtml) {
+  return '<div class="mon-kpi-tile">' +
+    '<div class="mon-kpi-label">' + label + '</div>' +
+    '<div class="mon-kpi-value">' + valueHtml + '</div>' +
+    (subHtml ? '<div class="mon-kpi-sub">' + subHtml + '</div>' : '') +
+    (sparkHtml || '') +
+  '</div>';
+}
+
+function _connTile(state) {
+  var dotCls = state;
+  var label = ({
+    live: 'LIVE',
+    reconnecting: 'RECONNECTING',
+    disconnected: 'DISCONNECTED',
+    idle: 'IDLE',
+  })[state] || 'IDLE';
+  var valCls = ({
+    live: 'ok', reconnecting: 'medium', disconnected: 'crit', idle: 'off',
+  })[state] || 'off';
+  return '<div class="mon-kpi-tile">' +
+    '<div class="mon-kpi-label"><span class="mon-conn-dot ' + dotCls + '"></span>Stream</div>' +
+    '<div class="mon-kpi-value small ' + valCls + '">' + label + '</div>' +
+    '<div class="mon-kpi-sub">SSE /api/monitor/stream</div>' +
+  '</div>';
+}
+
+function _kpiStripHtml() {
+  var k = _computeKpiStats();
+  var worstCls = k.alertsWorst || 'off';
+  var rateLabel = (k.eventsPerMin || 0).toFixed(k.eventsPerMin >= 10 ? 0 : 1);
+  var rateSub   = k.eventsTotal + ' events in last 10 min';
+  var alertsSub = k.alerts1h === 0
+    ? 'last hour'
+    : 'worst: ' + (k.alertsWorst || 'low').toUpperCase();
+  var pollVal   = k.pollPct == null ? '—' : (k.pollPct + '%');
+  var pollSub   = k.pollTotal
+    ? k.pollHits + ' of ' + k.pollTotal + ' polls hit'
+    : 'no polls yet';
+  var tiles = [
+    _kpiTile('Events / min', '<span>' + rateLabel + '</span>', rateSub,
+             _sparklineSvg(k.eventsSpark, 56, 18, 'var(--accent)')),
+    _kpiTile('Active sessions',
+             '<span class="' + (k.activeSessions ? 'ok' : 'off') + '">' + k.activeSessions + '</span>',
+             k.activeSessions ? 'SSE connected' : 'not monitoring'),
+    _kpiTile('Alerts (1h)',
+             '<span class="' + worstCls + '">' + k.alerts1h + '</span>',
+             alertsSub),
+    _kpiTile('Poll success', '<span class="' + (k.pollPct == null ? 'off' : (k.pollPct >= 50 ? 'ok' : 'medium')) + '">' + pollVal + '</span>', pollSub),
+    _kpiTile('Test alerts today',
+             '<span class="' + (k.testsToday ? '' : 'off') + '">' + k.testsToday + '</span>',
+             'resets at midnight'),
+    _connTile(k.connState),
+  ].join('');
+  return '<div class="mon-kpi-strip">' + tiles + '</div>';
+}
+
+// ---------- Histogram ----------
+// 24 buckets of 5 minutes = last 2 hours. Stacked per-severity.
+function _histogramHtml() {
+  var feed = monitorClient.feed || [];
+  var now = Date.now();
+  var totalMs = 2 * 60 * 60 * 1000;
+  var bucketCount = 24;
+  var bucketMs = totalMs / bucketCount;
+  var buckets = [];
+  for (var i = 0; i < bucketCount; i++) {
+    buckets.push({ critical: 0, high: 0, medium: 0, low: 0 });
+  }
+  var anyHit = false;
+  feed.forEach(function (item) {
+    var t = _tsMs(item.at);
+    if (!t) return;
+    var delta = now - t;
+    if (delta < 0 || delta >= totalMs) return;
+    var idx = bucketCount - 1 - Math.floor(delta / bucketMs);
+    if (idx < 0 || idx >= bucketCount) return;
+    var sev = ((item.finding && item.finding.severity) || 'low').toLowerCase();
+    if (buckets[idx][sev] != null) { buckets[idx][sev]++; anyHit = true; }
+  });
+  var maxStack = 1;
+  buckets.forEach(function (b) {
+    var s = b.critical + b.high + b.medium + b.low;
+    if (s > maxStack) maxStack = s;
+  });
+
+  var w = 1000; // virtual viewBox width; scales to container
+  var h = 72;
+  var gap = 2;
+  var bw = (w - gap * (bucketCount - 1)) / bucketCount;
+  var sevColors = {
+    critical: 'var(--severity-critical, #f87171)',
+    high:     'var(--severity-high, #fb923c)',
+    medium:   'var(--severity-medium, #fbbf24)',
+    low:      'var(--severity-low, #60a5fa)',
+  };
+  var sevOrder = ['critical', 'high', 'medium', 'low'];
+
+  var bars = buckets.map(function (b, i) {
+    var x = i * (bw + gap);
+    var y = h;
+    var segs = '';
+    sevOrder.forEach(function (sev) {
+      var n = b[sev];
+      if (!n) return;
+      var sh = (n / maxStack) * (h - 2);
+      y -= sh;
+      segs += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+              '" width="' + bw.toFixed(1) + '" height="' + sh.toFixed(1) +
+              '" fill="' + sevColors[sev] + '" rx="1"/>';
+    });
+    return segs || ('<rect x="' + x.toFixed(1) + '" y="' + (h - 1) +
+            '" width="' + bw.toFixed(1) + '" height="1" fill="var(--border)"/>');
+  }).join('');
+
+  var body = anyHit
+    ? '<svg class="mon-histogram-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' + bars + '</svg>'
+    : '<div class="mon-histogram-empty">No alerts in the last 2 hours.</div>';
+
+  return '<div class="mon-histogram-card" id="mon-histogram">' +
+    '<div class="mon-histogram-header">' +
+      '<div class="mon-histogram-title">Last 2 hours — alerts by severity</div>' +
+      '<div class="mon-histogram-meta">' + feed.length + ' event' + (feed.length === 1 ? '' : 's') + ' in buffer</div>' +
+    '</div>' +
+    body +
+  '</div>';
+}
+
+// ---------- Right rail cards ----------
+function _throughputCard() {
+  var k = _computeKpiStats();
+  var delta = null;
+  // crude baseline: compare last 5 min to previous 5 min
+  var spark = k.eventsSpark || [];
+  if (spark.length >= 10) {
+    var recent = spark.slice(5).reduce(function (a, b) { return a + b; }, 0);
+    var prior  = spark.slice(0, 5).reduce(function (a, b) { return a + b; }, 0);
+    if (prior > 0) delta = (recent / prior).toFixed(1) + 'x baseline';
+    else if (recent > 0) delta = 'no prior baseline';
+  }
+  return '<div class="mon-rail-card">' +
+    '<div class="mon-rail-title">Throughput' +
+      '<span class="mon-rail-hint">' + (k.eventsPerMin || 0) + '/min</span>' +
+    '</div>' +
+    _sparklineSvg(spark, 280, 36, 'var(--accent)').replace('mon-kpi-spark', 'mon-rail-spark').replace('width="280"', 'width="100%"') +
+    (delta ? '<div class="mon-rail-empty" style="margin-top:6px;">' + escapeHtml(delta) + '</div>' : '') +
+  '</div>';
+}
+
+function _topSourcesCard() {
+  var feed = monitorClient.feed || [];
+  var cutoff = Date.now() - 60 * 60 * 1000;
+  var counts = {};
+  feed.forEach(function (item) {
+    if (_tsMs(item.at) < cutoff) return;
+    var f = item.finding || {};
+    var src = f.hostname || f.source || f.host || 'unknown';
+    counts[src] = (counts[src] || 0) + 1;
+  });
+  var rows = Object.keys(counts).map(function (k) {
+    return { name: k, count: counts[k] };
+  }).sort(function (a, b) { return b.count - a.count; }).slice(0, 5);
+
+  var max = rows.length ? rows[0].count : 1;
+  var body = rows.length === 0
+    ? '<div class="mon-rail-empty">No events in the last hour.</div>'
+    : '<div class="mon-top-list">' +
+        rows.map(function (r) {
+          var pct = Math.max(6, Math.round((r.count / max) * 100));
+          return '<div class="mon-top-row">' +
+            '<div class="mon-top-name">' + escapeHtml(r.name) + '</div>' +
+            '<div class="mon-top-count">' + r.count + '</div>' +
+            '<div class="mon-top-bar"><span style="width:' + pct + '%"></span></div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+  return '<div class="mon-rail-card">' +
+    '<div class="mon-rail-title">Top Sources<span class="mon-rail-hint">last hour</span></div>' +
+    body +
+  '</div>';
+}
+
+function _severityDonutCard() {
+  var feed = monitorClient.feed || [];
+  var cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  var counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  feed.forEach(function (item) {
+    if (_tsMs(item.at) < cutoff) return;
+    var sev = ((item.finding && item.finding.severity) || 'low').toLowerCase();
+    if (counts[sev] != null) counts[sev]++;
+  });
+  var total = counts.critical + counts.high + counts.medium + counts.low;
+  var colors = {
+    critical: 'var(--severity-critical, #f87171)',
+    high:     'var(--severity-high, #fb923c)',
+    medium:   'var(--severity-medium, #fbbf24)',
+    low:      'var(--severity-low, #60a5fa)',
+  };
+  var order = ['critical', 'high', 'medium', 'low'];
+  var cx = 36, cy = 36, r = 28, stroke = 10;
+  var circ = 2 * Math.PI * r;
+  var svg = '<svg class="mon-donut" viewBox="0 0 72 72">' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--border)" stroke-width="' + stroke + '"/>';
+  if (total > 0) {
+    var offset = 0;
+    order.forEach(function (sev) {
+      var n = counts[sev];
+      if (!n) return;
+      var len = (n / total) * circ;
+      svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '"' +
+             ' fill="none" stroke="' + colors[sev] + '" stroke-width="' + stroke + '"' +
+             ' stroke-dasharray="' + len.toFixed(2) + ' ' + circ.toFixed(2) + '"' +
+             ' stroke-dashoffset="' + (-offset).toFixed(2) + '"' +
+             ' transform="rotate(-90 ' + cx + ' ' + cy + ')"/>';
+      offset += len;
+    });
+  }
+  svg += '</svg>';
+  var legend = order.map(function (sev) {
+    return '<div class="row">' +
+      '<span class="dot" style="background:' + colors[sev] + '"></span>' +
+      '<span>' + sev.charAt(0).toUpperCase() + sev.slice(1) + '</span>' +
+      '<span class="count">' + counts[sev] + '</span>' +
+    '</div>';
+  }).join('');
+  return '<div class="mon-rail-card">' +
+    '<div class="mon-rail-title">Severity<span class="mon-rail-hint">last 2h</span></div>' +
+    '<div class="mon-donut-wrap">' + svg + '<div class="mon-donut-legend">' + legend + '</div></div>' +
+  '</div>';
+}
+
+function _patternsCard() {
+  var feed = monitorClient.feed || [];
+  var cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  var counts = {};
+  var total = 0;
+  feed.forEach(function (item) {
+    if (_tsMs(item.at) < cutoff) return;
+    var f = item.finding || {};
+    var rule = f.rule || 'Unknown';
+    counts[rule] = (counts[rule] || 0) + 1;
+    total++;
+  });
+  var rows = Object.keys(counts).map(function (k) {
+    return { name: k, count: counts[k] };
+  }).sort(function (a, b) { return b.count - a.count; }).slice(0, 3);
+  var topSum = rows.reduce(function (n, r) { return n + r.count; }, 0);
+  var hint = total > 0
+    ? rows.length + ' pattern' + (rows.length === 1 ? '' : 's') + ' = ' + Math.round((topSum / total) * 100) + '%'
+    : '';
+  var body = rows.length === 0
+    ? '<div class="mon-rail-empty">No alerts to cluster yet.</div>'
+    : rows.map(function (r) {
+        return '<div class="mon-pattern-row">' +
+          '<div class="mon-pattern-name">' + escapeHtml(r.name) + '</div>' +
+          '<div class="mon-pattern-count">' + r.count + '</div>' +
+        '</div>';
+      }).join('');
+  return '<div class="mon-rail-card">' +
+    '<div class="mon-rail-title">Patterns<span class="mon-rail-hint">' + escapeHtml(hint) + '</span></div>' +
+    body +
+  '</div>';
+}
+
+function _sessionsMiniCard() {
+  var active = !!(monitorClient.status && monitorClient.status.active);
+  var last = (_monitorSessions && _monitorSessions[0]) || null;
+  var lastHtml;
+  if (active) {
+    lastHtml = '<div class="mon-rail-empty" style="color:var(--text);">Session in progress</div>';
+  } else if (last) {
+    var started = last.started_at || '—';
+    var findings = parseInt(last.findings_count, 10) || 0;
+    lastHtml = '<div class="mon-rail-empty">Last: ' + escapeHtml(started) + ' · ' +
+               findings + ' finding' + (findings === 1 ? '' : 's') + '</div>';
+  } else {
+    lastHtml = '<div class="mon-rail-empty">No sessions recorded yet.</div>';
+  }
+  var testBtn = '<button class="live-btn" data-action="sendMonitorTestAlertFromRail" ' +
+                (active ? '' : 'disabled title="Start monitor to send a test alert"') +
+                '>Send test alert</button>';
+  return '<div class="mon-rail-card">' +
+    '<div class="mon-rail-title">Sessions<span class="mon-rail-hint">' +
+      (_monitorSessions ? _monitorSessions.length : 0) + ' total</span></div>' +
+    lastHtml +
+    '<div style="margin-top:10px;">' + testBtn + '</div>' +
+  '</div>';
+}
+
+// Wrapper used by the rail's "Send test alert" button so we can bump the
+// per-day counter before handing off to the existing backend call. The
+// sidebar/header button also increments through this wrapper.
+export async function sendMonitorTestAlertFromRail() {
+  _incTestAlertsToday();
+  await monitorClient.sendTestAlert();
+  _scheduleMonRerender();
+}
+
+function _rightRailHtml() {
+  return '<div class="mon-right-rail" id="mon-right-rail">' +
+    _throughputCard() +
+    _topSourcesCard() +
+    _severityDonutCard() +
+    _patternsCard() +
+    _sessionsMiniCard() +
+  '</div>';
+}
+
+// ---------- New feed renderer (3-band layout) ----------
+function _monFeedRowHtml2(item, key) {
+  var f   = item.finding || {};
+  var sev = (f.severity || 'LOW').toUpperCase();
+  var src = f.hostname || f.source || f.host || 'unknown';
+  var at  = item.at || '';
+  var time = at.length >= 19 ? at.slice(11, 19) : at;
+  var desc = f.details || f.description || '';
+  if (desc.length > 100) desc = desc.substring(0, 100) + '…';
+  return '<div class="mon-feed-row sev-' + sev.toLowerCase() + '" ' +
+         'data-action="openLiveFeedFinding" data-arg="' + escapeHtml(key) + '" ' +
+         'data-feed-key="' + escapeHtml(key) + '">' +
+    '<div class="ts">' + escapeHtml(time) + '</div>' +
+    '<div><span class="src-chip">' + escapeHtml(src) + '</span></div>' +
+    '<div class="msg"><span class="rule">' + escapeHtml(f.rule || 'Unknown') + '</span>' +
+      '<span class="detail">' + escapeHtml(desc) + '</span></div>' +
+    '<div><span class="sev-pill">' + sev + '</span></div>' +
+  '</div>';
+}
+
+function _monFeedCardHtml(feed, active) {
+  _liveFeedSnapshot = new Map();
+  var items = (feed || []).slice(0, 50);
+  var rows = items.map(function (item) {
+    var key = _feedKey(item);
+    _liveFeedSnapshot.set(key, item);
+    return _monFeedRowHtml2(item, key);
+  }).join('');
+
+  var body;
+  if (items.length === 0) {
+    if (!active) {
+      body = '<div class="mon-feed-body empty" id="mon-live-feed">' +
+        'Monitor is idle. Start monitoring to stream live events from your Windows channels.' +
+      '</div>';
+    } else {
+      body = '<div class="mon-feed-body empty" id="mon-live-feed">' +
+        'All quiet — waiting for events. The feed will update as alerts stream in.' +
+      '</div>';
+    }
+  } else {
+    body = '<div class="mon-feed-body" id="mon-live-feed">' + rows + '</div>';
+  }
+
+  var controls = active
+    ? '<button class="live-btn stop" data-action="stopMonitor">Stop</button>'
+    : '<button class="live-btn start" data-action="startMonitor">Start Monitoring</button>';
+  var gear =
+    '<div class="mon-gear-wrap" data-mon-gear>' +
+      '<button class="live-btn gear" data-action="toggleMonGearDropdown" ' +
+        'aria-label="Monitor settings" title="Monitor settings" type="button">⚙</button>' +
+      '<div class="pulse-dropdown mon-gear-dropdown" id="mon-gear-dropdown" hidden>' +
+        '<div class="pulse-dropdown-section">' +
+          '<div class="pulse-dropdown-header">Poll Interval</div>' +
+          '<div class="gear-slider-row">' +
+            '<input type="range" id="mon-interval" min="5" max="300" step="5" ' +
+              'value="' + ((monitorClient.status && monitorClient.status.poll_interval) || getStoredInterval() || 30) + '"' +
+              (active ? ' disabled' : '') +
+              ' data-action-input="updateMonIntervalLabel"' +
+              ' data-action-change="savePopoverInterval" />' +
+            '<span class="gear-slider-value" id="mon-interval-label">' +
+              ((monitorClient.status && monitorClient.status.poll_interval) || getStoredInterval() || 30) + 's</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pulse-dropdown-divider"></div>' +
+        '<div class="pulse-dropdown-section">' +
+          '<div class="pulse-dropdown-header">Channels</div>' +
+          channelPillGridHtml({ disabled: active }) +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  return '<div class="mon-feed-card">' +
+    '<div class="mon-feed-head">' +
+      '<div class="mon-feed-head-left">' +
+        '<div class="live-dot ' + (active ? '' : 'idle') + '"></div>' +
+        '<div class="live-badge ' + (active ? '' : 'idle') + '">' + (active ? 'LIVE' : 'IDLE') + '</div>' +
+        '<div class="mon-feed-title">Event feed</div>' +
+      '</div>' +
+      '<div class="mon-feed-controls">' + controls + gear + '</div>' +
+    '</div>' +
+    body +
+  '</div>';
+}
+
+// Coalesced render — many SSE events in quick succession collapse into a
+// single paint. Also used by the rail's test-alert button.
+let _monRenderScheduled = false;
+let _monRenderFn = null;
+function _scheduleMonRerender() {
+  if (!_monRenderFn || _monRenderScheduled) return;
+  _monRenderScheduled = true;
+  requestAnimationFrame(function () {
+    _monRenderScheduled = false;
+    if (document.getElementById('monitor-page-root')) _monRenderFn();
+  });
+}
+
+// ---------------------------------------------------------------
 // PAGE: Monitor
 // ---------------------------------------------------------------
 export async function renderMonitorPage() {
@@ -841,13 +1385,20 @@ export async function renderMonitorPage() {
 
       platformWarning +
 
-      '<div class="live-panel live-unified ' + (active ? '' : 'idle') + '" style="margin-bottom:16px;">' +
-        _liveUnifiedHeaderHtml(s) +
-        '<div class="live-unified-body">' +
-          _liveFeedHtml(monitorClient.feed, { idleMode: !active }) +
-        '</div>' +
+      // Band 1: 6-tile KPI strip
+      _kpiStripHtml() +
+
+      // Band 2: 2-hour stacked histogram
+      _histogramHtml() +
+
+      // Band 3: feed (left) + right rail
+      '<div class="mon-band3">' +
+        _monFeedCardHtml(monitorClient.feed, active) +
+        _rightRailHtml() +
       '</div>' +
 
+      // Supporting cards below the hero bands — detail history
+      // (Poll History, Sessions) stays out of the top-of-page bands.
       '<div class="card mon-settings-card" style="margin-bottom:16px;">' +
         '<div class="mon-settings-row ' + (_pollHistoryExpanded ? 'open' : '') + '" ' +
              'data-action="togglePollHistoryExpand" role="button" tabindex="0" ' +
@@ -867,6 +1418,8 @@ export async function renderMonitorPage() {
       '</div>';
   }
 
+  _monRenderFn = render;
+
   // Kick off an initial sessions load so the section populates when the
   // page first mounts. Fire-and-forget — the section re-renders itself.
   _loadMonitorSessions();
@@ -874,50 +1427,28 @@ export async function renderMonitorPage() {
   render();
 
   if (_monPageUnsub) _monPageUnsub();
-  // Track previous active state so we can refresh the sessions list exactly
-  // when the monitor transitions from running to stopped — that's when a
-  // new session row is closed out in the DB and should show up in the list.
   var prevActive = !!(monitorClient.status && monitorClient.status.active);
   function onUpdate(type, data) {
     if (!document.getElementById('monitor-page-root')) {
       if (_monPageUnsub) _monPageUnsub();
+      _monRenderFn = null;
       return;
     }
     if (type === 'tick') {
-      var metaEl = document.getElementById('mon-last-check');
-      if (metaEl) metaEl.textContent = _timeSince(monitorClient.status && monitorClient.status.last_check_at);
+      // Cheap heartbeat: only repaint when the connection tile would change.
+      var desired = _readConnState();
+      if (desired !== _monConnState) {
+        _monConnState = desired;
+        _scheduleMonRerender();
+      }
       return;
     }
     var nowActive = !!(monitorClient.status && monitorClient.status.active);
 
-    // Active-state transitions (start/stop) change the whole layout —
-    // buttons swap, stats row appears/disappears — so fall through to a
-    // full render. Otherwise update incrementally to avoid the flash
-    // the old code produced on every poll.
-    if (type === 'finding' && prevActive === nowActive) {
-      var newItem = data && data.finding
-        ? { finding: data.finding, at: data.at }
-        : (monitorClient.feed && monitorClient.feed[0]);
-      if (newItem) _prependFeedRow(newItem);
-      _updateHeaderStats(monitorClient.status);
-      prevActive = nowActive;
-      return;
-    }
-    if (type === 'check' && prevActive === nowActive) {
-      _updateHeaderStats(monitorClient.status);
-      var sumEl = document.getElementById('mon-poll-summary');
-      if (sumEl) sumEl.textContent = _pollHistorySummary(monitorClient.checks);
-      // If the Poll History card is currently expanded, refresh just
-      // its table body — the header row and card chrome stay put.
-      if (_pollHistoryExpanded) {
-        var body = document.querySelector('#monitor-page-root .mon-settings-card:nth-of-type(3) .mon-settings-body');
-        if (body) body.innerHTML = _monitorChecksHtml(monitorClient.checks);
-      }
-      prevActive = nowActive;
-      return;
-    }
+    // Any SSE event affects KPIs, histogram, and rail — re-render
+    // via the raf-coalesced helper so bursts collapse into one paint.
+    _scheduleMonRerender();
 
-    render();
     if (prevActive && !nowActive) {
       // Monitor just stopped — pull the refreshed session list.
       _loadMonitorSessions();
@@ -925,7 +1456,7 @@ export async function renderMonitorPage() {
     prevActive = nowActive;
   }
   monitorClient.subscribe(onUpdate);
-  _monPageUnsub = function () { monitorClient.unsubscribe(onUpdate); };
+  _monPageUnsub = function () { monitorClient.unsubscribe(onUpdate); _monRenderFn = null; };
 }
 
 // ---------------------------------------------------------------
@@ -1243,5 +1774,11 @@ export function updateMonIntervalLabel(arg, target) {
 }
 // Settings page also has a "sendTestAlert" for the threshold-alert flow
 // (different endpoint), so expose the monitor-side alert under a name
-// that doesn't collide.
-export function sendMonitorTestAlert() { return monitorClient.sendTestAlert(); }
+// that doesn't collide. Every path goes through _incTestAlertsToday so the
+// Monitor page's "Test alerts today" KPI tile stays in sync regardless of
+// which button the user pressed.
+export async function sendMonitorTestAlert() {
+  _incTestAlertsToday();
+  await monitorClient.sendTestAlert();
+  _scheduleMonRerender();
+}

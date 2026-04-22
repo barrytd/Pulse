@@ -564,31 +564,49 @@ export function applyFindingsView() {
     if (isReviewed(f))       reviewCounts.REVIEWED++;
     if (isFalsePositive(f))  reviewCounts.FP++;
   });
-  var reviewPills = [
-    { k: 'ALL',      label: 'All'       },
-    { k: 'OPEN',     label: 'Open'      },
-    { k: 'REVIEWED', label: 'Reviewed'  },
-    { k: 'FP',       label: 'False pos.'},
+  // Status filter is a dropdown now — one compact control that surfaces the
+  // per-state count next to each label, Defense.com-style.
+  var reviewOptions = [
+    { k: 'ALL',      label: 'All'            },
+    { k: 'OPEN',     label: 'Unreviewed'     },
+    { k: 'REVIEWED', label: 'Reviewed'       },
+    { k: 'FP',       label: 'False Positive' },
   ].map(function (p) {
-    var isActive = s.reviewFilter === p.k;
-    var cls = 'filter-pill' + (isActive ? ' active' : '');
-    return '<div class="' + cls + '" data-action="setFindingsReviewFilter" data-arg="' + p.k + '">' +
-      escapeHtml(p.label) + ' <span style="opacity:0.7;">(' + reviewCounts[p.k] + ')</span></div>';
+    var sel = s.reviewFilter === p.k ? ' selected' : '';
+    return '<option value="' + p.k + '"' + sel + '>' +
+      escapeHtml(p.label) + ' (' + reviewCounts[p.k] + ')' +
+    '</option>';
   }).join('');
+  var reviewDropdown =
+    '<div class="status-filter">' +
+      '<label class="status-filter-label" for="findings-status-filter">STATUS</label>' +
+      '<select id="findings-status-filter" class="status-filter-select" data-action-change="setFindingsReviewFilterFromSelect">' +
+        reviewOptions +
+      '</select>' +
+    '</div>';
+
+  // Page title + header count — "Findings (32)" when unfiltered,
+  // "Findings (12 of 32)" when filters narrow the view.
+  var total = s.raw.length;
+  var visible = rows.length;
+  var filtered = (s.sevFilter !== 'ALL') ||
+                 (s.reviewFilter && s.reviewFilter !== 'ALL') ||
+                 !!q;
+  var countLabel = filtered ? (visible + ' of ' + total) : String(total);
+  var titleEl = document.getElementById('page-title');
+  if (titleEl) titleEl.textContent = 'Findings (' + countLabel + ')';
 
   var c = document.getElementById('content');
   c.innerHTML =
     _scansTabsBarHtml() +
     '<div class="page-head">' +
-      '<div class="page-head-title"><strong>' + rows.length + '</strong> of ' + s.raw.length + ' findings</div>' +
+      '<div class="page-head-title"><strong>' + visible + '</strong> of ' + total + ' findings</div>' +
     '</div>' +
     '<div class="filter-bar">' +
       '<div class="filter-pills">' + pills + '</div>' +
+      reviewDropdown +
       '<input type="search" id="findings-search-box" class="search-box" placeholder="Search rule, description, or MITRE..." ' +
         'value="' + escapeHtml(s.query) + '" data-action-input="setFindingsQueryFromInput" />' +
-    '</div>' +
-    '<div class="filter-bar" style="padding-top:0;">' +
-      '<div class="filter-pills">' + reviewPills + '</div>' +
     '</div>' +
     '<div class="card" style="padding:0; overflow:hidden;">' +
       (rows.length === 0
@@ -598,11 +616,89 @@ export function applyFindingsView() {
   _restoreSearchFocus('findings-search-box');
 }
 
+// Delegator wrapper for the status <select> — pulls the live value.
+export function setFindingsReviewFilterFromSelect(arg, target) {
+  setFindingsReviewFilter(target && target.value);
+}
+
 function _sortArrow(col) {
   var s = findingsState;
   var active = (s.sortCol === col);
   if (!active) return '<span class="sort-arrow inactive">\u21C5</span>';
   return '<span class="sort-arrow">' + (s.sortDir === 'desc' ? '\u25BC' : '\u25B2') + '</span>';
+}
+
+// Client-side fallback for the short reference ID. Newly saved findings
+// arrive with `ref_id` set by the backend; for legacy rows that predate
+// the backfill we synthesize the same format here so the pill is never
+// blank.
+function _refIdFor(f) {
+  if (f && f.ref_id) return f.ref_id;
+  var rule = (f && f.rule) || '';
+  var id = (f && f.id) != null ? f.id : null;
+  var words = [];
+  rule.split(/[^A-Za-z]+/).forEach(function (w) { if (w) words.push(w); });
+  var prefix;
+  if (words.length >= 3)       prefix = words[0][0] + words[1][0] + words[2][0];
+  else if (words.length === 2) prefix = words[0][0] + (words[0][1] || 'X') + words[1][0];
+  else if (words.length === 1) prefix = (words[0] + 'XX').slice(0, 3);
+  else                         prefix = 'RUL';
+  prefix = prefix.toUpperCase();
+  if (id == null) return prefix + '-\u2014';
+  var padded = ('0000' + id).slice(-4);
+  return prefix + '-' + padded;
+}
+
+function _refIdPill(f) {
+  return '<span class="ref-id-pill mono" title="Finding reference ID">' +
+    escapeHtml(_refIdFor(f)) +
+  '</span>';
+}
+
+// Eye / check / flag quick-actions in each row. Inline SVGs so re-renders
+// don't need a Lucide rescan pass.
+function _rowActionsHtml(f) {
+  var hasId = f && f.id != null;
+  var idAttr = hasId ? (' data-arg="' + escapeHtml(String(f.id)) + '"') : '';
+  var uidAttr = ' data-arg="' + escapeHtml(f._uid || '') + '"';
+  var reviewedCls = 'row-action' + (isReviewed(f) ? ' active review-check' : '');
+  var fpCls       = 'row-action' + (isFalsePositive(f) ? ' active review-flag' : '');
+  var reviewedPressed = isReviewed(f) ? ' aria-pressed="true"' : '';
+  var fpPressed       = isFalsePositive(f) ? ' aria-pressed="true"' : '';
+
+  var eyeSvg =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/>' +
+      '<circle cx="12" cy="12" r="3"/>' +
+    '</svg>';
+  var checkSvg =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<polyline points="20 6 9 17 4 12"/>' +
+    '</svg>';
+  var flagSvg =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M4 22V4a1 1 0 0 1 1-1h11l-2 4 2 4H5"/>' +
+      '<line x1="4" y1="15" x2="4" y2="22"/>' +
+    '</svg>';
+
+  var reviewedBtn = hasId
+    ? '<button type="button" class="' + reviewedCls + '" title="Mark reviewed" aria-label="Mark reviewed"' + reviewedPressed + ' ' +
+      'data-action="toggleReviewedFromRow"' + idAttr + '>' + checkSvg + '</button>'
+    : '<button type="button" class="row-action" title="Save a scan to enable review" disabled>' + checkSvg + '</button>';
+  var fpBtn = hasId
+    ? '<button type="button" class="' + fpCls + '" title="Mark false positive" aria-label="Mark false positive"' + fpPressed + ' ' +
+      'data-action="toggleFpFromRow"' + idAttr + '>' + flagSvg + '</button>'
+    : '<button type="button" class="row-action" title="Save a scan to enable review" disabled>' + flagSvg + '</button>';
+
+  return '<div class="row-actions" data-action="stopClickPropagation">' +
+    '<button type="button" class="row-action" title="Open details" aria-label="Open details" ' +
+      'data-action="openFindingsPageDrawerByUid"' + uidAttr + '>' + eyeSvg + '</button>' +
+    reviewedBtn +
+    fpBtn +
+  '</div>';
 }
 
 function _buildFindingsTable(findings) {
@@ -614,14 +710,15 @@ function _buildFindingsTable(findings) {
   return '<table class="data-table">' +
     '<thead><tr>' +
       th('time', 'Timestamp') +
-      '<th>Event ID</th>' +
       th('severity', 'Severity') +
       th('rule', 'Rule') +
       '<th>MITRE ATT&amp;CK</th>' +
       '<th>Description</th>' +
       th('host', 'Host') +
       th('scan', 'Scan') +
+      '<th>Assigned To</th>' +
       '<th>Status</th>' +
+      '<th class="col-actions" aria-label="Quick actions"></th>' +
     '</tr></thead>' +
     '<tbody>' +
     findings.map(function (f) {
@@ -644,22 +741,82 @@ function _buildFindingsTable(findings) {
       var main = '<tr class="' + rowCls + '"' + fidAttr + ' ' +
                  'data-action="toggleFindingExpand" data-arg="' + f._uid + '">' +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
-        '<td class="mono">' + escapeHtml(f.event_id || '-') + '</td>' +
         '<td>' + sevPillHtml(sev) + '</td>' +
-        '<td style="font-weight:500;">' + escapeHtml(rule) + '</td>' +
+        '<td class="col-rule">' +
+          '<div class="rule-cell">' +
+            '<span class="rule-name">' + escapeHtml(rule) + '</span>' +
+            _refIdPill(f) +
+          '</div>' +
+        '</td>' +
         '<td>' + mitreTag + '</td>' +
         '<td style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
         '<td class="col-host">' + escapeHtml(f._scan_host || '-') + '</td>' +
         '<td><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
           'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
+        '<td class="col-assigned">Unassigned</td>' +
         '<td class="col-status" data-status-slot="pill">' + _statusPillHtml(f) + '</td>' +
+        '<td class="col-actions">' + _rowActionsHtml(f) + '</td>' +
       '</tr>';
 
       if (!isOpen) return main;
-      return main + _expandRow(f, 9);
+      return main + _expandRow(f, 10);
     }).join('') +
     '</tbody></table>';
+}
+
+// Quick-action handlers fired from the eye/check/flag buttons. They hit
+// the same review endpoint the drawer uses, then re-render so the status
+// dropdown counts stay in sync. `id` arrives as a string via data-arg.
+export async function toggleReviewedFromRow(id, target, e) {
+  if (e) e.stopPropagation();
+  var f = _findFindingById(id);
+  if (!f) return;
+  await _applyRowReview(f, !isReviewed(f), isFalsePositive(f), target);
+}
+
+export async function toggleFpFromRow(id, target, e) {
+  if (e) e.stopPropagation();
+  var f = _findFindingById(id);
+  if (!f) return;
+  await _applyRowReview(f, isReviewed(f), !isFalsePositive(f), target);
+}
+
+function _findFindingById(id) {
+  var numeric = Number(id);
+  return (findingsState.raw || []).find(function (x) {
+    return x && x.id != null && Number(x.id) === numeric;
+  });
+}
+
+async function _applyRowReview(f, nextReviewed, nextFp, target) {
+  if (target) target.disabled = true;
+  var r = await apiSetFindingReview(f.id, {
+    reviewed: nextReviewed,
+    falsePositive: nextFp,
+    note: f.review_note || '',
+  });
+  if (target) target.disabled = false;
+  if (!r.ok) {
+    toastError((r.data && r.data.detail) || 'Review update failed.');
+    return;
+  }
+  f.reviewed       = !!r.data.reviewed;
+  f.false_positive = !!r.data.false_positive;
+  f.review_note    = r.data.review_note;
+  f.reviewed_at    = r.data.reviewed_at;
+  invalidateFindingsCache();
+  _notifyFindingStatusChanged(f.id, {
+    reviewed: f.reviewed,
+    false_positive: f.false_positive,
+  });
+  applyFindingsView();
+  showToast(
+    f.reviewed && f.false_positive ? 'Marked reviewed and false positive' :
+    f.reviewed                     ? 'Marked reviewed' :
+    f.false_positive               ? 'Marked false positive' :
+                                     'Review cleared'
+  );
 }
 
 export function _expandRow(f, colspan) {
@@ -1133,7 +1290,8 @@ export function openFindingDrawer(f) {
       escapeHtml(mitre) + '</a>'
     : '<span style="color:var(--text-muted); font-size:12px;">\u2014</span>';
 
-  document.getElementById('drawer-rule').textContent = rule;
+  var ruleEl = document.getElementById('drawer-rule');
+  ruleEl.innerHTML = escapeHtml(rule) + _refIdPill(f);
   document.getElementById('drawer-sev-line').innerHTML =
     '<span class="sev-pill sev-' + sev.toLowerCase() + '">' + sev + '</span>' +
     mitreLink +
