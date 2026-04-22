@@ -54,7 +54,8 @@ from pulse.database import (
     count_admins, count_users, create_api_token, create_user,
     delete_all_monitor_sessions, delete_monitor_session, delete_scans,
     delete_user, get_fleet_summary, get_history,
-    get_monitor_session_findings, get_scan_findings, get_trend_analytics,
+    get_monitor_session_findings, get_rule_stats, get_scan_findings,
+    get_trend_analytics,
     get_user_avatar, get_user_by_email, get_user_by_id, init_db,
     list_api_tokens, list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_user_avatar,
@@ -1912,24 +1913,35 @@ def _register_routes(app: FastAPI) -> None:
     # the dashboard filter dropdowns already depend on.
     # -------------------------------------------------------------------
     @app.get("/api/rules/details")
-    def list_rules_details():
+    def list_rules_details(user_id: int = Depends(require_login)):
         config = _read_config(app.state.config_path)
         disabled = set(get_disabled_rules(config))
         # Severity-first ordering (CRITICAL -> LOW) so the most important
         # rules surface at the top of the Rules page. Alphabetical within
         # a severity keeps the list stable between releases.
         ordered = sorted(_get_rule_names(), key=rule_sort_key)
+        # Per-user stats — admins see fleet-wide aggregates, viewers see
+        # only their own scans. Matches the scoping used by /api/history.
+        scope = _scan_scope_for(app, user_id)
+        stats = get_rule_stats(app.state.db_path, user_id=scope)
         rows = []
         for name in ordered:
             meta = RULE_META.get(name, {})
+            st = stats.get(name, {})
             rows.append({
-                "name":      name,
-                "event_id":  meta.get("event_id"),
-                "severity":  meta.get("severity", "LOW"),
-                "mitre":     meta.get("mitre"),
-                "nist_csf":  meta.get("nist_csf"),
-                "iso_27001": meta.get("iso_27001"),
-                "enabled":   name not in disabled,
+                "name":       name,
+                "event_id":   meta.get("event_id"),
+                "severity":   meta.get("severity", "LOW"),
+                "mitre":      meta.get("mitre"),
+                "nist_csf":   meta.get("nist_csf"),
+                "iso_27001":  meta.get("iso_27001"),
+                "enabled":    name not in disabled,
+                "hits_total": st.get("hits_total", 0),
+                "hits_24h":   st.get("hits_24h", 0),
+                "last_fired": st.get("last_fired"),
+                "fp_count":   st.get("fp_count", 0),
+                "tp_count":   st.get("tp_count", 0),
+                "spark_24h":  st.get("spark_24h", [0] * 24),
             })
         return {"rules": rows}
 

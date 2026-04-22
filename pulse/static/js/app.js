@@ -147,6 +147,9 @@ import {
 } from './reports.js';
 import {
   toggleRuleEnabled,
+  rulesShowTab,
+  rulesClearFilter,
+  filterByTechnique,
 } from './rules.js';
 import {
   mountUserMenu,
@@ -312,6 +315,9 @@ const actions = {
 
   // rules
   toggleRuleEnabled,
+  rulesShowTab,
+  rulesClearFilter,
+  filterByTechnique,
 
   // user menu
   toggleUserMenu,

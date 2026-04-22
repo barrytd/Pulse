@@ -485,6 +485,95 @@ def get_findings_since(db_path, days, user_id=None):
         return []
 
 
+def get_rule_stats(db_path, user_id=None):
+    """
+    Return per-rule aggregate statistics computed from the findings table.
+
+    For every rule that has fired at least once, returns total hits, hits
+    in the last 24h, a 24-bucket hourly histogram for the sparkline, the
+    most recent timestamp, and false-positive / true-positive counts.
+
+    Parameters:
+        db_path (str):      Path to the .db file.
+        user_id (int|None): If set, only counts findings from scans owned
+                            by this user; None gives the admin / CLI view.
+
+    Returns:
+        dict[str, dict]: Keyed by rule name. Each value has the shape::
+
+            {
+                "hits_total":  int,
+                "hits_24h":    int,
+                "last_fired":  str | None,   # ISO-ish timestamp from scans
+                "fp_count":    int,
+                "tp_count":    int,
+                "spark_24h":   list[int],    # 24 ints, oldest -> newest
+            }
+    """
+    from collections import defaultdict
+    now = datetime.now()
+    cutoff_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    extra_where, extra_params = "", ()
+    if user_id is not None:
+        extra_where = " AND s.user_id = ?"
+        extra_params = (int(user_id),)
+    stats = {}
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                f"""SELECT f.rule,
+                          COUNT(*)                                  AS hits_total,
+                          SUM(CASE WHEN s.scanned_at >= ? THEN 1 ELSE 0 END)
+                                                                    AS hits_24h,
+                          SUM(CASE WHEN f.false_positive = 1 THEN 1 ELSE 0 END)
+                                                                    AS fp_count,
+                          SUM(CASE WHEN f.reviewed = 1 AND f.false_positive = 0 THEN 1 ELSE 0 END)
+                                                                    AS tp_count,
+                          MAX(s.scanned_at)                         AS last_fired
+                   FROM findings f
+                   JOIN scans s ON s.id = f.scan_id
+                   WHERE f.rule IS NOT NULL{extra_where}
+                   GROUP BY f.rule""",
+                (cutoff_24h,) + extra_params
+            )
+            for row in cursor.fetchall():
+                rule, hits_total, hits_24h, fp_count, tp_count, last_fired = row
+                stats[rule] = {
+                    "hits_total":  int(hits_total or 0),
+                    "hits_24h":    int(hits_24h or 0),
+                    "fp_count":    int(fp_count or 0),
+                    "tp_count":    int(tp_count or 0),
+                    "last_fired":  last_fired,
+                    "spark_24h":   [0] * 24,
+                }
+            # Second pass — hour-bucket histogram for the sparkline. Running
+            # this separately keeps the main aggregate GROUP BY simple and
+            # still only touches the last-24h slice.
+            cursor2 = conn.execute(
+                f"""SELECT f.rule, s.scanned_at
+                   FROM findings f
+                   JOIN scans s ON s.id = f.scan_id
+                   WHERE f.rule IS NOT NULL AND s.scanned_at >= ?{extra_where}""",
+                (cutoff_24h,) + extra_params
+            )
+            buckets = defaultdict(lambda: [0] * 24)
+            for rule, scanned_at in cursor2.fetchall():
+                try:
+                    ts = datetime.strptime(str(scanned_at), "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    continue
+                hours_ago = int((now - ts).total_seconds() // 3600)
+                if 0 <= hours_ago < 24:
+                    # bucket 0 = oldest, bucket 23 = most recent full hour
+                    buckets[rule][23 - hours_ago] += 1
+            for rule, bkt in buckets.items():
+                if rule in stats:
+                    stats[rule]["spark_24h"] = bkt
+    except Exception:
+        return {}
+    return stats
+
+
 def get_scans_since(db_path, days, user_id=None):
     """Return every scan row whose scanned_at falls within the last `days` days.
 
