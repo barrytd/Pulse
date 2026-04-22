@@ -2631,9 +2631,33 @@ tr.pending-flash {
 }
 .compliance-gauge {
   flex: 0 0 140px;
+  width: 140px;
+  height: 140px;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.compliance-gauge-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  line-height: 1;
+}
+.compliance-gauge-pct {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-high, #f0f6fc);
+}
+.compliance-gauge-sub {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text-dim, #8b949e);
+  margin-top: 6px;
 }
 .compliance-hero-body {
   flex: 1;

@@ -91,10 +91,11 @@ function _renderHero(rules) {
           'stroke-linecap="round" ' +
           'stroke-dasharray="' + dash.toFixed(2) + ' ' + circumference.toFixed(2) + '" ' +
           'transform="rotate(-90 70 70)"></circle>' +
-        '<text x="70" y="68" text-anchor="middle" font-size="28" font-weight="700" fill="var(--text-high, #f0f6fc)">' +
-          pct + '%</text>' +
-        '<text x="70" y="90" text-anchor="middle" font-size="10" letter-spacing="1" fill="var(--text-dim, #8b949e)">COVERAGE</text>' +
       '</svg>' +
+      '<div class="compliance-gauge-label">' +
+        '<div class="compliance-gauge-pct">' + pct + '%</div>' +
+        '<div class="compliance-gauge-sub">COVERAGE</div>' +
+      '</div>' +
     '</div>' +
     '<div class="compliance-hero-body">' +
       '<div class="section-label">Overall rule coverage</div>' +
