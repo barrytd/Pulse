@@ -815,6 +815,80 @@ function _onReviewToggled(ev) {
 document.addEventListener('pulse:review-toggled', _onReviewToggled);
 
 // ---------------------------------------------------------------
+// Standup polish — data-reduction funnel + top-hosts repeat offenders
+// ---------------------------------------------------------------
+// Shows how raw telemetry narrows down into triage-worthy alerts.
+// Events come from scans.total_events; findings / crit+high / crit are
+// aggregated across the filter window. Non-numeric / missing fields
+// degrade to zero so a brand-new install still renders the row.
+export function _dashFunnelHtml(scans, findings) {
+  var events = 0;
+  scans.forEach(function (s) { events += (s.total_events || 0); });
+  var findingsTotal = findings.length;
+  var critHigh = 0, critOnly = 0;
+  findings.forEach(function (f) {
+    var sv = (f.severity || '').toUpperCase();
+    if (sv === 'CRITICAL' || sv === 'HIGH') critHigh++;
+    if (sv === 'CRITICAL') critOnly++;
+  });
+  function fmt(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(n);
+  }
+  var stages = [
+    { label: 'Events',      value: events,         tone: 'neutral' },
+    { label: 'Findings',    value: findingsTotal,  tone: 'info' },
+    { label: 'Crit + High', value: critHigh,       tone: 'warn' },
+    { label: 'Critical',    value: critOnly,       tone: 'error' },
+  ];
+  return '<div class="dash-funnel">' +
+    stages.map(function (s, i) {
+      var arrow = (i < stages.length - 1)
+        ? '<span class="funnel-arrow" aria-hidden="true">&rarr;</span>'
+        : '';
+      return '<div class="funnel-stage tone-' + s.tone + '">' +
+               '<div class="funnel-value">' + fmt(s.value) + '</div>' +
+               '<div class="funnel-label">' + escapeHtml(s.label) + '</div>' +
+             '</div>' + arrow;
+    }).join('') +
+  '</div>';
+}
+
+// Top 5 hosts by finding count in the filtered scan window. Last-seen
+// uses the most recent scanned_at for that host so stale hosts surface.
+export function _dashTopHostsHtml(scans) {
+  var agg = {};
+  scans.forEach(function (s) {
+    var host = s.hostname || s.filename || 'unknown';
+    if (!agg[host]) agg[host] = { count: 0, last: '' };
+    agg[host].count += (s.total_findings || 0);
+    var ts = s.scanned_at || '';
+    if (ts > agg[host].last) agg[host].last = ts;
+  });
+  var rows = Object.keys(agg).map(function (h) {
+    return { host: h, count: agg[h].count, last: agg[h].last };
+  }).filter(function (r) { return r.count > 0; })
+    .sort(function (a, b) { return b.count - a.count; })
+    .slice(0, 5);
+  if (rows.length === 0) {
+    return '<div class="dash-empty-note" style="font-size:12px; margin:4px 0 0 0;">No host activity in this window.</div>';
+  }
+  var max = rows[0].count || 1;
+  return '<div class="repeat-offenders">' +
+    rows.map(function (r) {
+      var pct = Math.round((r.count / max) * 100);
+      return '<div class="offender-row">' +
+               '<div class="offender-host mono">' + escapeHtml(r.host) + '</div>' +
+               '<div class="offender-bar-wrap"><div class="offender-bar" style="width:' + pct + '%"></div></div>' +
+               '<div class="offender-count">' + r.count + '</div>' +
+               '<div class="offender-last">' + escapeHtml(formatRelativeTime(r.last) || '') + '</div>' +
+             '</div>';
+    }).join('') +
+  '</div>';
+}
+
+// ---------------------------------------------------------------
 // Score-over-time chart (shared by dashboard + history)
 // ---------------------------------------------------------------
 let _scoreChartInstance = null;
@@ -1100,6 +1174,17 @@ export async function renderDashboardPage() {
       _trendStatCard('Scans Run', scans.length,
                      filtersOn ? 'In filtered window' : 'Since first install', null, 'accent-neutral',
                      null, 'scans') +
+    '</div>' +
+
+    '<div class="standup-row">' +
+      '<div class="card standup-card">' +
+        '<div class="section-label">Data reduction — events through to critical</div>' +
+        _dashFunnelHtml(scans, filteredDeductions) +
+      '</div>' +
+      '<div class="card standup-card">' +
+        '<div class="section-label">Repeat offenders — top hosts</div>' +
+        _dashTopHostsHtml(scans) +
+      '</div>' +
     '</div>' +
 
     '<div class="middle-row">' +
