@@ -2412,3 +2412,71 @@
 .status-dot.status-online  { background: var(--status-ok); box-shadow: 0 0 4px var(--status-ok); }
 .status-dot.status-offline { background: var(--status-off); }
 
+/* ------------------------------------------------------------------ */
+/* Firewall page — pending-changes banner + KPI strip                  */
+/* ------------------------------------------------------------------ */
+.pending-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 10px 14px;
+  margin: 0 0 var(--space-3) 0;
+  background: var(--severity-medium-bg);
+  border-left: 4px solid var(--severity-medium);
+  border-radius: 4px;
+  color: var(--text-body);
+  font-size: 13px;
+}
+.pending-banner-text { flex: 1; min-width: 0; }
+.pending-banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Brief highlight when "Review pending" scrolls a row into view. */
+tr.pending-flash {
+  animation: pending-flash-kf 1.1s ease;
+}
+@keyframes pending-flash-kf {
+  0%   { background: var(--severity-medium-bg); }
+  60%  { background: var(--severity-medium-bg); }
+  100% { background: transparent; }
+}
+
+.firewall-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.firewall-kpi-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.firewall-kpi-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.firewall-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-high);
+  font-variant-numeric: tabular-nums;
+}
+.firewall-kpi-tile.tone-ok   .firewall-kpi-value { color: var(--status-ok); }
+.firewall-kpi-tile.tone-warn .firewall-kpi-value { color: var(--severity-medium); }
+@media (max-width: 640px) {
+  .firewall-kpi-strip { grid-template-columns: 1fr; }
+  .pending-banner { flex-direction: column; align-items: flex-start; }
+}
+

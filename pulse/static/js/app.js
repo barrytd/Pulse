@@ -80,6 +80,8 @@ import {
   toggleBlockSelect,
   toggleBlockSelectAll,
   deleteSelectedBlocks,
+  firewallReviewPending,
+  firewallDiscardPending,
 } from './firewall.js';
 import {
   monitorClient,
@@ -251,6 +253,8 @@ const actions = {
   toggleBlockSelect,
   toggleBlockSelectAll,
   deleteSelectedBlocks,
+  firewallReviewPending,
+  firewallDiscardPending,
 
   // monitor
   startMonitor,

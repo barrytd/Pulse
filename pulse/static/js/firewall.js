@@ -78,18 +78,49 @@ function _renderBlockListTab() {
     if (!known[k]) delete _selectedIps[k];
   });
 
-  var summary = '<strong>' + active + '</strong> active, ' +
-                '<strong>' + pending + '</strong> pending';
+  var pendingBanner = '';
+  if (pending > 0) {
+    pendingBanner =
+      '<div class="pending-banner">' +
+        '<div class="pending-banner-text">' +
+          '<strong>' + pending + '</strong> pending change' + (pending === 1 ? '' : 's') +
+          ' — IPs staged but not yet pushed to Windows Firewall.' +
+        '</div>' +
+        '<div class="pending-banner-actions">' +
+          '<button class="btn btn-sm" data-action="firewallReviewPending">Review</button>' +
+          '<button class="btn btn-sm btn-primary" data-action="firewallPushAll">Push now</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="firewallDiscardPending">Discard</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  var kpiStrip =
+    '<div class="firewall-kpi-strip">' +
+      '<div class="firewall-kpi-tile tone-ok">' +
+        '<div class="firewall-kpi-label">Active</div>' +
+        '<div class="firewall-kpi-value">' + active + '</div>' +
+      '</div>' +
+      '<div class="firewall-kpi-tile tone-warn">' +
+        '<div class="firewall-kpi-label">Pending push</div>' +
+        '<div class="firewall-kpi-value">' + pending + '</div>' +
+      '</div>' +
+      '<div class="firewall-kpi-tile tone-neutral">' +
+        '<div class="firewall-kpi-label">Total entries</div>' +
+        '<div class="firewall-kpi-value">' + total + '</div>' +
+      '</div>' +
+    '</div>';
 
   var head =
     '<div class="page-head">' +
-      '<div class="page-head-title">' + summary + '</div>' +
+      '<div class="page-head-title">Block list</div>' +
       '<div class="page-head-actions">' +
         '<button class="btn" data-action="firewallPushAll"' +
           (pending === 0 ? ' disabled' : '') + '>Push all pending</button>' +
         '<button class="btn btn-primary" data-action="openAddBlockModal">Add IP manually</button>' +
       '</div>' +
-    '</div>';
+    '</div>' +
+    pendingBanner +
+    kpiStrip;
 
   if (total === 0) return head + _renderBlockListEmpty();
 
@@ -201,12 +232,33 @@ export function toggleBlockSelectAll(arg, target) {
   renderFirewallPage();
 }
 
+// Tiered confirmation.
+//   <= 10 rows  -> a normal confirm dialog
+//   11 to 50    -> confirm dialog with explicit consequence text
+//   > 50        -> typed confirmation: user must type "DELETE N ENTRIES"
+// Keeps the cheap path cheap while making catastrophic ops explicit.
+function _confirmBulkUnblock(count) {
+  if (count <= 10) {
+    return window.confirm('Unblock ' + count + ' IP' + (count === 1 ? '' : 's') +
+      '? The Windows Firewall rules will be removed.');
+  }
+  if (count <= 50) {
+    return window.confirm('Unblock ' + count + ' IPs?\n\n' +
+      'This removes ' + count + ' deny rules from Windows Firewall. The rules are ' +
+      'not recoverable from Pulse — you would need to re-add each IP manually.');
+  }
+  var expected = 'DELETE ' + count + ' ENTRIES';
+  var entered = window.prompt(
+    'You are about to unblock ' + count + ' IPs. This cannot be undone.\n\n' +
+    'Type "' + expected + '" exactly to confirm.'
+  );
+  return entered === expected;
+}
+
 export async function deleteSelectedBlocks() {
   var ips = Object.keys(_selectedIps);
   if (ips.length === 0) return;
-  var msg = 'Unblock ' + ips.length + ' IP' + (ips.length === 1 ? '' : 's') +
-            '? The Windows Firewall rules will be removed.';
-  if (!window.confirm(msg)) return;
+  if (!_confirmBulkUnblock(ips.length)) return;
   var result = await apiUnblockBatch(ips);
   if (!result.ok) {
     toastError('Unblock failed: ' + ((result.data && result.data.detail) || 'network error'));
@@ -352,6 +404,44 @@ export async function firewallPushAll() {
   if (!window.confirm(msg)) return;
   await _pushPending('Pushing ' + pending.length + ' rule' +
     (pending.length === 1 ? '' : 's') + '\u2026');
+}
+
+// "Review" from the pending-changes banner — scrolls to the first
+// pending row so the user can scan the staged IPs before committing.
+export function firewallReviewPending() {
+  var rows = (_blockListCache.rows || []);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].status === 'pending') {
+      var target = document.querySelectorAll('.data-table tbody tr')[i];
+      if (target && target.scrollIntoView) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('pending-flash');
+        setTimeout(function () { target.classList.remove('pending-flash'); }, 1200);
+      }
+      return;
+    }
+  }
+}
+
+// "Discard" from the pending-changes banner — drops every staged row
+// via the same batch endpoint the bulk-unblock bar uses, so pending
+// IPs never reach Windows Firewall. Tiered confirm keeps large discards
+// from being single-click mistakes.
+export async function firewallDiscardPending() {
+  var pendingIps = (_blockListCache.rows || [])
+    .filter(function (r) { return r.status === 'pending'; })
+    .map(function (r) { return r.ip_address; });
+  if (pendingIps.length === 0) return;
+  if (!_confirmBulkUnblock(pendingIps.length)) return;
+  var result = await apiUnblockBatch(pendingIps);
+  if (!result.ok) {
+    toastError('Discard failed: ' + ((result.data && result.data.detail) || 'network error'));
+    return;
+  }
+  var deleted = result.data && typeof result.data.deleted === 'number' ? result.data.deleted : pendingIps.length;
+  showToast('Discarded ' + deleted + ' pending change' + (deleted === 1 ? '' : 's'), 'success');
+  _selectedIps = {};
+  renderFirewallPage();
 }
 
 async function _pushPending(progressToast) {
