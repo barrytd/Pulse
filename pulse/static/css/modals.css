@@ -214,3 +214,138 @@
 
 .upload-status.success { color: #10b981; }
 .upload-status.error   { color: #ef4444; }
+
+/* ------------------------------------------------------------------ */
+/* Command palette (Cmd+K / Ctrl+K)                                    */
+/* Blueprint: 520-640px modal, blurred backdrop, max 8 rows, keyboard  */
+/* navigation. Opens with a fade + slight rise so it feels launched.   */
+/* ------------------------------------------------------------------ */
+.cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(8, 12, 20, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.cmdk-overlay.open { opacity: 1; }
+.cmdk-overlay[hidden] { display: none; }
+
+.cmdk-modal {
+  width: min(600px, calc(100vw - 32px));
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  transform: translateY(-6px);
+  transition: transform 140ms ease;
+}
+.cmdk-overlay.open .cmdk-modal { transform: translateY(0); }
+
+.cmdk-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.cmdk-search-icon {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.cmdk-input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-high);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.4;
+  padding: 2px 0;
+}
+.cmdk-input::placeholder { color: var(--text-dim); }
+
+.cmdk-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-body);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+
+.cmdk-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.cmdk-group {
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.cmdk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 8px var(--space-4);
+  cursor: pointer;
+  color: var(--text-body);
+  border-left: 2px solid transparent;
+}
+.cmdk-row:hover { background: var(--hover-bg); }
+.cmdk-row.selected {
+  background: var(--bg-3);
+  color: var(--text-high);
+  border-left-color: var(--accent);
+}
+
+.cmdk-label {
+  font-size: 14px;
+  line-height: 1.2;
+}
+.cmdk-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.cmdk-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.cmdk-foot {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.cmdk-foot span { display: inline-flex; align-items: center; gap: 6px; }

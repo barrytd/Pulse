@@ -158,6 +158,7 @@ import {
   logOutFromMenu,
   toggleDarkModeFromMenu,
 } from './user-menu.js';
+import { mountCommandPalette, openCommandPalette } from './command-palette.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -323,6 +324,9 @@ const actions = {
 
   // admin privilege banner
   dismissAdminBanner,
+
+  // command palette
+  openCommandPalette,
 };
 
 // Hide the banner for the rest of the session and persist the choice.
@@ -425,6 +429,10 @@ function _boot() {
 
   // Populate the topbar avatar with the signed-in user's initials.
   mountUserMenu();
+
+  // Cmd+K / Ctrl+K command palette — cross-cutting launcher available
+  // on every page once mounted.
+  mountCommandPalette();
 
   // Privilege banner — only fires on Windows hosts when the process
   // doesn't hold admin rights and the user hasn't already dismissed it.
