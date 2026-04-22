@@ -1,7 +1,27 @@
 /* ------------------------------------------------------------------ */
 /* CSS Variables — light theme default, dark overrides below           */
+/*                                                                     */
+/* Token system follows pulse-ux-blueprint.md: elevation-based          */
+/* surfaces, text by contrast tier, semantic severity/status colors,   */
+/* and an 8-pt spacing grid. Pre-existing aliases (--bg, --card-bg,    */
+/* --text, --text-muted, --border, etc.) are kept so every existing   */
+/* stylesheet continues to resolve — new rules should prefer the       */
+/* --bg-0…--bg-4 / --text-high…--text-dim tiers.                       */
 /* ------------------------------------------------------------------ */
 :root {
+  /* Surface elevation (light theme) */
+  --bg-0:        #f0f2f5;
+  --bg-1:        #ffffff;
+  --bg-2:        #ffffff;
+  --bg-3:        #f6f8fa;
+  --bg-4:        #eaeef2;
+
+  /* Text tiers (contrast vs bg-1) */
+  --text-high:   #1f2328;
+  --text-body:   #3b4149;
+  --text-dim:    #8b949e;
+
+  /* Legacy aliases */
   --bg:          #f0f2f5;
   --card-bg:     #ffffff;
   --border:      #d0d7de;
@@ -14,9 +34,57 @@
   --shadow:      0 1px 3px rgba(0,0,0,0.08);
   --accent:      #3b82f6;
   --accent-glow: rgba(59,130,246,0.15);
+
+  /* Severity palette — desaturated for both themes */
+  --severity-critical:    #ef4444;
+  --severity-high:        #f97316;
+  --severity-medium:      #f59e0b;
+  --severity-low:         #3b82f6;
+  --severity-info:        #64748b;
+  --severity-critical-bg: rgba(239, 68, 68, 0.10);
+  --severity-high-bg:     rgba(249, 115, 22, 0.10);
+  --severity-medium-bg:   rgba(245, 158, 11, 0.10);
+  --severity-low-bg:      rgba(59, 130, 246, 0.10);
+  --severity-info-bg:     rgba(100, 116, 139, 0.10);
+
+  /* Status palette — distinct from severity (ops health vs triage) */
+  --status-ok:    #10b981;
+  --status-warn:  #f59e0b;
+  --status-error: #ef4444;
+  --status-off:   #6b7280;
+
+  /* Typography */
+  --font-body:          'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:          'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  --mono:               var(--font-mono); /* legacy alias used by older rules */
+  --font-size-body:     13px;
+  --font-size-kpi:      28px;
+  --font-size-kpi-lg:   36px;
+
+  /* Spacing (8-pt grid) */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-12: 48px;
 }
 
 [data-theme="dark"] {
+  /* Surface elevation — never pure black, step up on each tier */
+  --bg-0:        #0B0F17;
+  --bg-1:        #111827;
+  --bg-2:        #161E2E;
+  --bg-3:        #1C2536;
+  --bg-4:        #232D42;
+
+  /* Text tiers */
+  --text-high:   #F3F4F6;
+  --text-body:   #D1D5DB;
+  --text-dim:    #6B7280;
+
+  /* Legacy aliases */
   --bg:          #0d1117;
   --card-bg:     #161b22;
   --border:      #21262d;
@@ -29,6 +97,23 @@
   --shadow:      0 1px 3px rgba(0,0,0,0.3);
   --accent:      #58a6ff;
   --accent-glow: rgba(88,166,255,0.12);
+
+  /* Severity — brighter for dark background contrast */
+  --severity-critical:    #f87171;
+  --severity-high:        #fb923c;
+  --severity-medium:      #fbbf24;
+  --severity-low:         #60a5fa;
+  --severity-info:        #94a3b8;
+  --severity-critical-bg: rgba(248, 113, 113, 0.10);
+  --severity-high-bg:     rgba(251, 146, 60, 0.10);
+  --severity-medium-bg:   rgba(251, 191, 36, 0.10);
+  --severity-low-bg:      rgba(96, 165, 250, 0.10);
+  --severity-info-bg:     rgba(148, 163, 184, 0.10);
+
+  --status-ok:    #34D399;
+  --status-warn:  #FBBF24;
+  --status-error: #F87171;
+  --status-off:   #64748B;
 }
 
 /* ------------------------------------------------------------------ */
@@ -37,11 +122,32 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  font-size: var(--font-size-body);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Global tabular-nums + slashed zero on numeric / monospace content.
+   IPs, hashes, timestamps, counts, and KPI digits align perfectly in
+   tables without each page having to opt in. Applies wherever the
+   blueprint calls out numeric content as load-bearing. */
+code, pre, kbd, samp,
+.mono, .num,
+[class*="-count"], [class*="-num"],
+[class*="mono"],
+.data-table td,
+table.data-table td,
+.monitor-checks-table td,
+.session-findings-table td,
+.mon-kpi-value, .mon-kpi-sub,
+.sev, .sev-pill {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+code, pre, kbd, samp, .mono, [class*="mono"] {
+  font-family: var(--font-mono);
 }
 
 /* ------------------------------------------------------------------ */
