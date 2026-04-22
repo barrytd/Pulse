@@ -86,10 +86,47 @@ export async function renderWhitelistPage() {
   var nSelected = _selectedEntries().length;
   var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
+  // Per-type counts for the KPI strip. The blueprint calls for an
+  // anti-sprawl row here — total / expiring / never-expire / etc — but
+  // until the whitelist schema grows expiration metadata, the type
+  // breakdown is the highest-signal view we can render.
+  var counts = {
+    accounts: (wl.accounts || []).length,
+    services: (wl.services || []).length,
+    ips:      (wl.ips || []).length,
+    rules:    (wl.rules || []).length,
+  };
+  var kpiStripHtml =
+    '<div class="whitelist-kpi-strip">' +
+      '<div class="whitelist-kpi-tile tone-neutral">' +
+        '<div class="whitelist-kpi-label">Custom entries</div>' +
+        '<div class="whitelist-kpi-value">' + customRows.length + '</div>' +
+      '</div>' +
+      '<div class="whitelist-kpi-tile tone-info">' +
+        '<div class="whitelist-kpi-label">Accounts</div>' +
+        '<div class="whitelist-kpi-value">' + counts.accounts + '</div>' +
+      '</div>' +
+      '<div class="whitelist-kpi-tile tone-info">' +
+        '<div class="whitelist-kpi-label">Services</div>' +
+        '<div class="whitelist-kpi-value">' + counts.services + '</div>' +
+      '</div>' +
+      '<div class="whitelist-kpi-tile tone-info">' +
+        '<div class="whitelist-kpi-label">IPs</div>' +
+        '<div class="whitelist-kpi-value">' + counts.ips + '</div>' +
+      '</div>' +
+      '<div class="whitelist-kpi-tile tone-info">' +
+        '<div class="whitelist-kpi-label">Rules</div>' +
+        '<div class="whitelist-kpi-value">' + counts.rules + '</div>' +
+      '</div>' +
+      '<div class="whitelist-kpi-tile tone-off">' +
+        '<div class="whitelist-kpi-label">Built-in</div>' +
+        '<div class="whitelist-kpi-value">' + builtin.length + '</div>' +
+      '</div>' +
+    '</div>';
+
   c.innerHTML =
     '<div class="page-head">' +
-      '<div class="page-head-title"><strong>' + customRows.length + '</strong> custom, ' +
-        builtin.length + ' built-in</div>' +
+      '<div class="page-head-title">Whitelist</div>' +
       '<div class="page-head-actions">' +
         '<label class="form-checkbox" style="font-size:12px;">' +
           '<input type="checkbox"' + (whitelistState.showBuiltin ? ' checked' : '') +
@@ -97,6 +134,7 @@ export async function renderWhitelistPage() {
         '</label>' +
       '</div>' +
     '</div>' +
+    kpiStripHtml +
 
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Add Entry</div>' +
@@ -210,13 +248,31 @@ export async function toggleWhitelistSelectAll(arg, target) {
   renderWhitelistPage();
 }
 
+// Tiered confirmation matching the Firewall page — cheap path stays
+// cheap; catastrophic bulk deletes require a typed confirmation so a
+// stray click can't wipe the whole whitelist.
+function _confirmBulkWhitelistDelete(count) {
+  if (count <= 10) {
+    return window.confirm('Delete ' + count + ' whitelist entr' +
+      (count === 1 ? 'y' : 'ies') + '? This cannot be undone.');
+  }
+  if (count <= 50) {
+    return window.confirm('Delete ' + count + ' whitelist entries?\n\n' +
+      'Findings previously suppressed by these entries will start alerting again ' +
+      'on the next scan. This cannot be undone.');
+  }
+  var expected = 'DELETE ' + count + ' ENTRIES';
+  var entered = window.prompt(
+    'You are about to delete ' + count + ' whitelist entries. This cannot be undone.\n\n' +
+    'Type "' + expected + '" exactly to confirm.'
+  );
+  return entered === expected;
+}
+
 export async function deleteSelectedWhitelist() {
   var entries = _selectedEntries();
   if (entries.length === 0) return;
-  var msg = 'Delete ' + entries.length + ' whitelist entr' +
-            (entries.length === 1 ? 'y' : 'ies') +
-            '? This cannot be undone.';
-  if (!window.confirm(msg)) return;
+  if (!_confirmBulkWhitelistDelete(entries.length)) return;
   var result = await apiDeleteWhitelistEntries(entries);
   if (!result.ok) {
     toastError('Delete failed: ' + ((result.data && result.data.detail) || 'network error'));
