@@ -153,6 +153,7 @@ import {
   rulesClearFilter,
   filterByTechnique,
 } from './rules.js';
+import { openAuditDrawer } from './audit.js';
 import {
   mountUserMenu,
   toggleUserMenu,
@@ -323,6 +324,9 @@ const actions = {
   rulesShowTab,
   rulesClearFilter,
   filterByTechnique,
+
+  // audit log
+  openAuditDrawer,
 
   // user menu
   toggleUserMenu,
