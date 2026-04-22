@@ -111,6 +111,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Trend analytics page — Trends page with window-over-window delta, daily finding line chart, severity breakdown, top rules + top hosts bars
 - [x] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan` (Settings > API Tokens; Bearer header, per-user, sha256-at-rest, raw shown once, `last_used_at` bumps on every call)
 - [x] PostgreSQL migration — new `pulse/db_backend.py` adapter lets Pulse run against SQLite (default) or PostgreSQL (`DATABASE_URL=postgresql://…`); `scripts/migrate_to_postgres.py` copies an existing `pulse.db` into a target Postgres database and bumps per-table id sequences; SQLite stays the fallback for local single-user installs
+- [x] **UX blueprint pass** — full dashboard UX rebuild against `.claude/skills/pulse-ux-blueprint.md`: design-token rollout (semantic colors, spacing, type scale), Ctrl+K command palette with fuzzy scoring + recents, universal right-side drawer primitive, Monitor three-band rebuild, Rules page with per-rule hit counts + 24h sparkline + MITRE coverage matrix, Fleet KPI strip + host-detail drawer, Firewall pending-changes banner + tiered bulk-confirm, Whitelist KPI strip + tiered bulk-confirm, Dashboard standup row (reduction funnel + top offenders), Compliance hero coverage gauge + stacked bar, Trends mean-±2σ anomaly bands
 
 ---
 
@@ -129,3 +130,30 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Public landing page — a clean page explaining what Pulse does with a download link for the CLI and an email signup for updates
 - [ ] Email waitlist — store signups in the database, exportable as CSV
 - [ ] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
+
+---
+
+## Sprint 7 — TBD (Agent / server split — the Splunk distribution model)
+
+The hosted dashboard on Render can't scan a Windows machine itself — the OS can't read `.evtx` files or tail the Windows Event Log. "Scan my system" from the hosted UI currently fails with an authorization error because the server has no access to the user's local logs. The plan is to split Pulse the way Splunk does: a hosted multi-tenant dashboard + a downloadable Windows agent that ships detections to it over HTTPS.
+
+### Hosted dashboard (stays on Render)
+- [ ] Multi-tenant data model — every scan / finding / fleet row scoped to an `organization_id` so agents from different customers never cross-contaminate
+- [ ] Agent enrollment flow — Settings > Agents page generates a per-host enrollment token (long-lived, rotatable, scoped to one org); install script on Windows consumes it once and exchanges for a regular API token
+- [ ] Agent status panel — each registered host shows last-heartbeat, agent version, auto-scan schedule, "pause agent" button; stale agents (>24h no check-in) turn red on the Fleet page
+- [ ] `POST /api/agent/heartbeat` + `POST /api/agent/findings` — new endpoints the agent hits instead of uploading raw `.evtx`. Findings arrive pre-computed so the server never has to run detections on Linux
+- [ ] Hide / disable "Scan my system" in hosted mode — replace with a **Download Pulse Agent** button that links to the installer; CLI-upload path stays usable for analysts who prefer to scan manually
+- [ ] Public landing / signup page — Splunk-style `pulse.io`-ish marketing page with Sign Up → org created → agent download link in one flow
+
+### Downloadable Windows agent
+- [ ] Packaged `pulse-agent.exe` via PyInstaller — reuses `pulse/detections.py` and `pulse/core/rules_config.py`; bundles a minimal config + YAML enrollment token
+- [ ] Windows Service installer — registers Pulse Agent as a SYSTEM-privileged service (moved up from Sprint 6) so scheduled scans + Event Log access work without manual UAC each time
+- [ ] Local-scan → HTTPS upload pipeline — agent runs detections every N minutes, POSTs findings to the hosted API using the enrollment-minted bearer token; retries + offline queue if the dashboard is unreachable
+- [ ] Tamper resistance — service locked to Administrators for start/stop, token file ACL'd to SYSTEM + Administrators
+- [ ] Auto-update channel — agent checks `GET /api/agent/latest` on startup, downloads + verifies a signed installer when a newer version is available
+- [ ] Local dashboard mode (optional) — same installer can run Pulse as a single-user local dashboard (current behavior) instead of as an agent, controlled by one install-time checkbox
+
+### Deferred product questions (flag before starting this sprint)
+- Pricing model: free-for-N-agents vs. per-seat vs. self-host-only? Changes whether enrollment needs a billing gate
+- Agent-to-server protocol: plain REST (shipped fast) vs. gRPC (more efficient at fleet scale). Start with REST
+- Code signing: agent `.exe` needs a real Authenticode cert for SmartScreen to stop warning on download

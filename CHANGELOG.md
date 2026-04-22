@@ -7,6 +7,20 @@ Format: newest entries at the top, grouped by date.
 
 ## 2026-04-21 — v1.5.0 (Sprint 5: Auth, compliance, analytics)
 
+### UX blueprint pass (late-sprint polish against `.claude/skills/pulse-ux-blueprint.md`)
+- **Design-token rollout** — semantic color / spacing / type scale variables (`--bg-0..--bg-4`, `--text-high/body/dim`, `--severity-*`, `--space-1..--space-12`, `--font-body/mono`) threaded through every page, so one theme edit repaints the whole app
+- **Monitor three-band rebuild** — replaced stacked cards with a top status strip + middle alert stream + bottom controls; SSE indicator, audio ding, test-alert button, and sliding 15-minute window preserved
+- **Ctrl+K command palette** (`pulse/static/js/cmdk.js`) — fuzzy-scored action search with recents, keyboard-only navigation, highlights match positions; registered across every page
+- **Universal right-side drawer primitive** (`pulse/static/js/drawer.js`) — `openDrawer({title, subtitle, badges, sections, actions, onClose})` pattern; adopted by the Fleet host-detail view, with existing finding-detail drawer left intact for backward compatibility
+- **Rules page upgrade** — per-rule hit counts (total / 24h) + 24-hour sparkline + false-positive rate pill + last-fired relative time, plus a **MITRE Coverage** tab rendering a tactic × technique intensity matrix. Backed by a new `get_rule_stats(db_path, user_id)` aggregator and an enriched `/api/rules/details` endpoint (now auth-gated with per-user scope)
+- **Fleet KPI strip + drawer** — six clickable tiles (Online / At Risk / Critical / Newly Enrolled / Total / Offline) pre-filter the host list; clicking a host row opens the universal drawer with an Overview panel + "View on Dashboard" action that preserves the old dashboard-filter navigation
+- **Firewall pending-changes banner** — Palo-Alto-Panorama-style amber banner when staged rules exist ("N pending changes · Review · Discard"), flashing focus on first pending row. Three-tile KPI strip (Active / Pending / Blocked this week) and a shared tiered bulk-confirm helper (≤10 simple confirm, 11–50 consequence confirm, >50 typed `DELETE N ENTRIES`) replaces the old single-line window.confirm
+- **Whitelist KPI strip** — six tiles (Custom / Accounts / Services / IPs / Rules / Built-in) with the same tiered bulk-confirm pattern
+- **Dashboard standup row** — reduction funnel (Events → Findings → Crit+High → Critical with K/M-formatted counts + tone-colored stages) and a Top Offenders card (top 5 hosts by finding count, proportional bars, relative-time last-seen) sit between the stat cards and the score/history middle row
+- **Compliance hero gauge** — SVG circular gauge of enabled/total rules at the top of the page, plus a stacked bar for Enabled / Disabled (with Waived / N/A placeholders noted as not yet modelled)
+- **Trends anomaly bands** — daily volume chart overlays a translucent yellow mean-±2σ band and a dashed mean line, so spikes stand out against the baseline; tooltips are filtered to the findings line so the band guides stay decorative
+- **Security fix** — `/api/compliance` now requires login (was inadvertently unauthenticated before the release audit)
+
 ### Added
 - **Role-based access control** (`users.role` column, `require_admin` dependency) — admin vs viewer roles enforced in the API. Viewers can read scans / findings / reports but can't change settings, block IPs, or manage users. `_scan_scope_for(app, user_id)` gives admins the full picture while viewers are scoped to the scans they personally ran
 - **Multi-user account management** (`/api/users`, Settings > Users tab) — admins can create, disable, and delete additional accounts. Guardrails reject demoting / deactivating / deleting the last active admin so nobody gets locked out. Every write is audited via `blocker.log_audit`

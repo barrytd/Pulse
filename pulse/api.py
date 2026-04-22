@@ -1953,7 +1953,7 @@ def _register_routes(app: FastAPI) -> None:
     # actually covers and which rules back each control.
     # -------------------------------------------------------------------
     @app.get("/api/compliance")
-    def get_compliance():
+    def get_compliance(user_id: int = Depends(require_login)):
         config = _read_config(app.state.config_path)
         disabled = get_disabled_rules(config)
         return build_compliance_summary(disabled)
