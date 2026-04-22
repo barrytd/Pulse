@@ -67,7 +67,7 @@ import {
   toggleHistorySelectAll,
   deleteSelectedHistory,
 } from './history.js';
-import { fleetOpenHost, exportFleetCsv } from './fleet.js';
+import { fleetOpenHost, exportFleetCsv, fleetFilterByKpi } from './fleet.js';
 import {
   setFirewallTab,
   firewallPushOne,
@@ -237,6 +237,7 @@ const actions = {
   // fleet
   fleetOpenHost,
   exportFleetCsv,
+  fleetFilterByKpi,
 
   // firewall
   setFirewallTab,

@@ -2343,3 +2343,72 @@
 .mon-feed-row.sev-high     .sev-pill { background: rgba(251,146,60,0.15);  color: var(--severity-high, #fb923c); }
 .mon-feed-row.sev-medium   .sev-pill { background: rgba(251,191,36,0.15);  color: var(--severity-medium, #fbbf24); }
 .mon-feed-row.sev-low      .sev-pill { background: rgba(96,165,250,0.15);  color: var(--severity-low, #60a5fa); }
+
+/* ------------------------------------------------------------------ */
+/* Fleet page — clickable KPI tiles + online/offline status dot        */
+/* ------------------------------------------------------------------ */
+.fleet-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.fleet-kpi-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  color: var(--text-body);
+}
+.fleet-kpi-tile:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.fleet-kpi-tile.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+}
+.fleet-kpi-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.fleet-kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-high);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-kpi-tile.tone-ok    .fleet-kpi-value { color: var(--status-ok); }
+.fleet-kpi-tile.tone-warn  .fleet-kpi-value { color: var(--status-warn); }
+.fleet-kpi-tile.tone-error .fleet-kpi-value { color: var(--status-error); }
+.fleet-kpi-tile.tone-off   .fleet-kpi-value { color: var(--status-off); }
+.fleet-kpi-tile.tone-info  .fleet-kpi-value { color: var(--severity-low); }
+
+@media (max-width: 1100px) {
+  .fleet-kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .fleet-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.status-dot.status-online  { background: var(--status-ok); box-shadow: 0 0 4px var(--status-ok); }
+.status-dot.status-offline { background: var(--status-off); }
+
