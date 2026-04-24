@@ -17,9 +17,9 @@
 /* Brand header — icon + "PULSE" side-by-side, "Threat Detection"
    subtitle below. Pinned to 56px to match the topbar on the content
    side so the first nav item below starts at the same vertical line
-   as the first card under the topbar — clean horizontal seam across
-   the full width of the app. No bottom border; the spacing inside
-   .sidebar-nav handles the visual separation. */
+   as the first card under the topbar. Matching rgba border on both
+   blocks + matching box-sizing makes the bottom edge one continuous
+   hairline across the full width of the app. */
 .sidebar-logo {
   display: flex;
   align-items: center;
@@ -27,6 +27,7 @@
   height: 56px;
   padding: 0 20px;
   box-sizing: border-box;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   text-decoration: none;
   cursor: pointer;
   transition: opacity 0.15s ease;

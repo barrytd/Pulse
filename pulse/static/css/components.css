@@ -6,9 +6,14 @@
   top: 0;
   z-index: 50;
   background: var(--topbar-bg);
-  border-bottom: 1px solid var(--border);
+  /* Matches .sidebar-logo's bottom border exactly so the two blocks
+     form a single continuous hairline across the full width of the
+     app. Same rgba + same 56px height + same box-sizing means the
+     border lands at the same y-pixel on both sides. */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   padding: 0 12px 0 32px;
   height: 56px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
