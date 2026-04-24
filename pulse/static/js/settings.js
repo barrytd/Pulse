@@ -624,49 +624,95 @@ export async function renderSettingsPage() {
 function _renderUsersPanel(me, users) {
   var rowsHtml = (users || []).map(function (u) {
     var isSelf = (u.id === me.id);
-    var roleBadge = u.role === 'admin'
-      ? '<span class="badge badge-high">admin</span>'
-      : '<span class="badge badge-medium">viewer</span>';
-    var activeBadge = u.active
-      ? '<span class="badge badge-low">active</span>'
-      : '<span class="badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);">disabled</span>';
-    var actions = isSelf
-      ? '<span style="color:var(--text-muted); font-size:12px;">(you)</span>'
-      : (
-        '<button class="btn btn-secondary btn-sm" data-action="toggleUserRole" data-arg="' +
-            u.id + '|' + (u.role === 'admin' ? 'viewer' : 'admin') +
-          '">Make ' + (u.role === 'admin' ? 'viewer' : 'admin') + '</button> ' +
-        '<button class="btn btn-secondary btn-sm" data-action="toggleUserActive" data-arg="' +
-            u.id + '|' + (u.active ? '0' : '1') +
-          '">' + (u.active ? 'Disable' : 'Enable') + '</button> ' +
-        '<button class="btn btn-danger btn-sm" data-action="deleteUserConfirm" data-arg="' +
-            u.id + '|' + encodeURIComponent(u.email) +
-          '">Delete</button>'
-      );
-    // Display-name cell is an inline editable input — admins can set or
-    // clear any user's name (including their own) without a separate page.
-    // Saves on blur + Enter; the blur handler reads the live value.
-    var dnAttr = ' data-user-id="' + u.id + '"';
+
+    // Role: pill badge. Admin = accent blue, viewer = neutral grey.
+    // Using the canonical .pill styling from pulse-design.md; a new
+    // .pill-admin / .pill-viewer modifier keeps it distinct from the
+    // severity-pill set.
+    var rolePill = u.role === 'admin'
+      ? '<span class="pill pill-admin">Admin</span>'
+      : '<span class="pill pill-viewer">Viewer</span>';
+
+    // Status: dot + label. Green dot + "Active", red dot + "Disabled".
+    var statusCell = u.active
+      ? '<span class="user-status user-status-active">' +
+          '<span class="user-status-dot" aria-hidden="true"></span>Active' +
+        '</span>'
+      : '<span class="user-status user-status-disabled">' +
+          '<span class="user-status-dot" aria-hidden="true"></span>Disabled' +
+        '</span>';
+
+    // Name: inline editable input (admins only touch this panel so all
+    // viewers here have edit rights). data-prior-value is seeded so the
+    // save handler can detect no-ops.
     var dnVal = escapeHtml(u.display_name || '');
     var nameInput =
       '<input type="text" class="user-dn-input" placeholder="— not set —" ' +
-        'value="' + dnVal + '" maxlength="100" ' + dnAttr + ' ' +
+        'value="' + dnVal + '" maxlength="100" data-user-id="' + u.id + '" ' +
+        'data-prior-value="' + dnVal + '" ' +
         'data-action-change="saveUserDisplayName" data-action-keydown="saveUserDisplayNameOnEnter" />';
+
+    // Per-row 3-dot menu using the canonical .pulse-dropdown pattern.
+    // The self row still gets the menu so the admin can flip their own
+    // role (the backend guards the last-admin case); Disable + Delete
+    // are hidden since those would lock them out.
+    var menuItems = (
+      // Change role — always shown; wording flips based on current role.
+      '<a class="pulse-dropdown-item" data-action="toggleUserRole" data-arg="' +
+          u.id + '|' + (u.role === 'admin' ? 'viewer' : 'admin') + '">' +
+        '<i data-lucide="shield"></i>' +
+        '<span>Make ' + (u.role === 'admin' ? 'viewer' : 'admin') + '</span>' +
+      '</a>'
+    ) + (isSelf ? '' : (
+      '<a class="pulse-dropdown-item" data-action="toggleUserActive" data-arg="' +
+          u.id + '|' + (u.active ? '0' : '1') + '">' +
+        '<i data-lucide="' + (u.active ? 'user-minus' : 'user-check') + '"></i>' +
+        '<span>' + (u.active ? 'Disable account' : 'Enable account') + '</span>' +
+      '</a>' +
+      '<div class="pulse-dropdown-divider"></div>' +
+      '<a class="pulse-dropdown-item pulse-dropdown-item-danger" ' +
+         'data-action="deleteUserConfirm" data-arg="' +
+         u.id + '|' + encodeURIComponent(u.email) + '">' +
+        '<i data-lucide="trash-2"></i>' +
+        '<span>Delete account</span>' +
+      '</a>'
+    ));
+
+    var actionsCell = (
+      '<div class="user-actions-wrap">' +
+        '<button type="button" class="user-actions-trigger" ' +
+          'data-action="toggleUserRowMenu" data-arg="' + u.id + '" ' +
+          'aria-haspopup="menu" aria-expanded="false" ' +
+          'aria-label="Row actions">' +
+          '<span class="user-actions-dots" aria-hidden="true">⋯</span>' +
+        '</button>' +
+        '<div class="pulse-dropdown user-actions-menu" id="user-actions-menu-' + u.id + '" hidden>' +
+          '<div class="pulse-dropdown-section">' +
+            menuItems +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+
     return (
-      '<tr>' +
-        '<td>' + nameInput + '</td>' +
-        '<td>' + escapeHtml(u.email) + '</td>' +
-        '<td>' + roleBadge + '</td>' +
-        '<td>' + activeBadge + '</td>' +
-        '<td style="color:var(--text-muted); font-size:12px;">' + escapeHtml(u.created_at || '') + '</td>' +
-        '<td>' + actions + '</td>' +
+      '<tr class="user-row' + (isSelf ? ' is-self' : '') + '">' +
+        '<td class="user-cell-name">' + nameInput +
+          (isSelf ? ' <span class="user-self-badge">you</span>' : '') + '</td>' +
+        '<td class="user-cell-email">' + escapeHtml(u.email) + '</td>' +
+        '<td class="user-cell-role">' + rolePill + '</td>' +
+        '<td class="user-cell-status">' + statusCell + '</td>' +
+        '<td class="user-cell-created">' + escapeHtml(u.created_at || '') + '</td>' +
+        '<td class="user-cell-actions">' + actionsCell + '</td>' +
       '</tr>'
     );
   }).join('');
 
   var tableHtml = users && users.length
-    ? '<div class="table-wrap"><table class="table">' +
-        '<thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>' +
+    ? '<div class="table-wrap"><table class="users-table">' +
+        '<thead><tr>' +
+          '<th>Name</th><th>Email</th><th>Role</th><th>Status</th>' +
+          '<th>Created</th><th class="user-cell-actions" aria-label="Actions"></th>' +
+        '</tr></thead>' +
         '<tbody>' + rowsHtml + '</tbody>' +
       '</table></div>'
     : '<p style="color:var(--text-muted); font-size:13px;">No other users yet.</p>';
@@ -678,6 +724,9 @@ function _renderUsersPanel(me, users) {
         'Admins can create additional accounts. Viewers can see scans and findings but cannot ' +
         'change settings, block IPs, or manage users.' +
       '</p>' +
+      '<div class="form-row"><label>Display name</label>' +
+        '<input type="text" id="new-user-display-name" placeholder="e.g. Robert Perez" ' +
+          'autocomplete="off" maxlength="100"/></div>' +
       '<div class="form-row"><label>Email</label>' +
         '<input type="email" id="new-user-email" placeholder="user@example.com" autocomplete="off"/></div>' +
       '<div class="form-row"><label>Temporary password</label>' +
@@ -1038,6 +1087,8 @@ export async function createUser() {
   var email    = (document.getElementById('new-user-email').value || '').trim();
   var password = document.getElementById('new-user-password').value || '';
   var role     = document.getElementById('new-user-role').value || 'viewer';
+  var dnEl     = document.getElementById('new-user-display-name');
+  var displayName = dnEl ? (dnEl.value || '').trim() : '';
   if (!email || !password) {
     toastError('Email and temporary password are both required.');
     return;
@@ -1049,12 +1100,64 @@ export async function createUser() {
       toastError(err.detail || 'Create failed.');
       return;
     }
-    showToast('Created ' + email);
+    // If the admin typed a display name on the invite form, apply it in
+    // a follow-up call. Keeping the create endpoint as-is (email +
+    // password + role only) means no backend changes for this UX add.
+    if (displayName) {
+      try {
+        var created = await r.json();
+        if (created && created.id) {
+          await apiUpdateUserDisplayName(created.id, displayName);
+        }
+      } catch (e) { /* non-fatal — name can still be set from the row */ }
+    }
+    showToast('Created ' + (displayName || email));
     renderSettingsPage();
   } catch (e) {
     toastError('Network error: ' + e.message);
   }
 }
+
+// Per-row actions dropdown toggle. Closes any other open menu first so
+// only one row's menu is visible at a time.
+export function toggleUserRowMenu(arg, target) {
+  var id = String(arg || '');
+  var menu = document.getElementById('user-actions-menu-' + id);
+  if (!menu) return;
+  var open = !menu.hidden;
+  // Close every other open menu so the page never has two dropdowns up.
+  document.querySelectorAll('.user-actions-menu').forEach(function (m) {
+    if (m !== menu) m.hidden = true;
+  });
+  document.querySelectorAll('.user-actions-trigger').forEach(function (b) {
+    if (b !== target) b.setAttribute('aria-expanded', 'false');
+  });
+  menu.hidden = open;
+  if (target) target.setAttribute('aria-expanded', open ? 'false' : 'true');
+  // Rehydrate the Lucide icons inside the menu since the HTML was
+  // injected during the settings render and icons haven't replaced
+  // their placeholder <i> tags yet on first open.
+  if (!open && window.lucide && window.lucide.createIcons) {
+    window.lucide.createIcons();
+  }
+}
+
+// Close any open user row menu on outside click / Esc.
+document.addEventListener('click', function (e) {
+  var t = e.target;
+  if (t && t.closest && t.closest('.user-actions-wrap')) return;
+  document.querySelectorAll('.user-actions-menu').forEach(function (m) { m.hidden = true; });
+  document.querySelectorAll('.user-actions-trigger').forEach(function (b) {
+    b.setAttribute('aria-expanded', 'false');
+  });
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  document.querySelectorAll('.user-actions-menu').forEach(function (m) { m.hidden = true; });
+  document.querySelectorAll('.user-actions-trigger').forEach(function (b) {
+    b.setAttribute('aria-expanded', 'false');
+  });
+});
 
 // Saves on blur (change event) and on Enter. Other keys are ignored.
 // Bound via data-action-keydown so the registry hands us the event.

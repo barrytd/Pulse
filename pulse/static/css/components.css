@@ -756,9 +756,42 @@ body.light .admin-banner-close {
 }
 .toast.show { opacity: 1; transform: translateY(0); }
 
-/* Admin Users table — inline name input. Reads as a regular table cell
-   until focused; then it looks like a normal text input. Keeps the row
-   compact while still being editable without a modal. */
+/* Admin Users table — the whole layout gets a consistent look with
+   tighter visuals: 12px/16px cell padding, zebra stripes, pill role
+   badges, status dot + label, and a 3-dot menu per row. */
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.users-table thead th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.users-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.users-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.users-table tbody tr:hover td {
+  background: var(--hover-bg);
+}
+.users-table .user-cell-email   { color: var(--text-muted); }
+.users-table .user-cell-created { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.users-table .user-cell-actions { width: 44px; text-align: right; }
+
+/* Inline display-name input. Reads as a plain cell until focused. */
 .user-dn-input {
   width: 100%;
   min-width: 140px;
@@ -775,13 +808,104 @@ body.light .admin-banner-close {
   color: var(--text-light);
   font-style: italic;
 }
-.user-dn-input:hover {
-  background: var(--hover-bg);
-}
-.user-dn-input:focus {
+.user-dn-input:hover   { background: var(--hover-bg); }
+.user-dn-input:focus   {
   outline: none;
   background: var(--bg);
   border-color: var(--accent);
+}
+
+/* "you" tag sitting next to the current admin's name so the row is
+   always recognisable even before opening the actions menu. */
+.user-self-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--hover-row);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+/* Role pills — admin is accent blue, viewer is neutral grey. Sized to
+   match .pill base but not re-using .pill-{crit|high|medium|low} since
+   those carry severity meaning. */
+.pill.pill-admin {
+  color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.14);
+}
+.pill.pill-viewer {
+  color: var(--text-muted);
+  background: rgba(139, 148, 158, 0.14);
+}
+
+/* Status: colored dot + label. Green for active, red for disabled. */
+.user-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.user-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.user-status-active          { color: var(--text); }
+.user-status-active .user-status-dot   { background: #3fb950; }
+.user-status-disabled        { color: var(--text-muted); }
+.user-status-disabled .user-status-dot { background: #f85149; }
+
+/* 3-dot actions menu — canonical .pulse-dropdown, anchored to a
+   24x24 trigger at the right edge of the row. */
+.user-actions-wrap {
+  position: relative;
+  display: inline-block;
+}
+.user-actions-trigger {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.user-actions-trigger:hover,
+.user-actions-trigger[aria-expanded="true"] {
+  background: var(--hover-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+.user-actions-dots {
+  font-size: 18px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+.user-actions-menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 200px;
+}
+.pulse-dropdown-item.pulse-dropdown-item-danger,
+.pulse-dropdown-item.pulse-dropdown-item-danger i,
+.pulse-dropdown-item.pulse-dropdown-item-danger span {
+  color: var(--severity-critical, #f85149);
+}
+.pulse-dropdown-item.pulse-dropdown-item-danger:hover {
+  background: rgba(248, 81, 73, 0.1);
 }
 
 /* Profile tab — read-only Display name row with an "Edit on Users"
