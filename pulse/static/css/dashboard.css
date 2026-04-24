@@ -1131,16 +1131,44 @@
   font-size: 12px;
 }
 
-/* Assign-to dropdown inside the bulk bar — reuses .assign-menu so the
-   listbox styling matches the drawer's assign picker. */
+/* Assign-to dropdown inside the bulk bar — uses the canonical
+   .pulse-dropdown from pulse-design.md. Because the bulk bar is docked
+   at the bottom of the viewport, the dropdown floats ABOVE the trigger
+   instead of below. Higher-specificity selector beats the base
+   .pulse-dropdown so positioning isn't flipped back. */
 .bulk-bar-assign { position: relative; }
-.bulk-bar-assign-menu {
+.bulk-bar .bulk-bar-assign-menu {
+  position: absolute;
   bottom: calc(100% + 6px);
-  top: auto;
   left: 0;
   right: auto;
-  min-width: 220px;
-  max-height: 280px;
+  min-width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 100;
+}
+.bulk-bar-assign-item {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start !important;
+  gap: 2px !important;
+  padding: 6px 12px !important;
+}
+.bulk-bar-assign-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.bulk-bar-assign-item-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.bulk-bar-assign-item-email {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* Selected row accent — subtle accent-tinted background so it's clear

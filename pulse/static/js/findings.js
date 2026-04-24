@@ -742,13 +742,19 @@ function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
       '<span class="bulk-bar-count">' + n + ' finding' + (n === 1 ? '' : 's') + ' selected</span>' +
       selectAllLink +
       '<span class="bulk-bar-spacer"></span>' +
-      // Assign-to custom dropdown (users populated async after mount)
+      // Assign-to dropdown using the canonical .pulse-dropdown pattern
+      // from pulse-design.md. Menu floats above the trigger because the
+      // bulk bar itself is docked at the bottom of the viewport.
       '<div class="bulk-bar-assign">' +
         '<button type="button" class="btn btn-secondary btn-sm" data-action="toggleBulkAssignMenu" ' +
-          'aria-haspopup="listbox" aria-expanded="false">Assign to…</button>' +
-        '<ul id="bulk-bar-assign-menu" class="assign-menu bulk-bar-assign-menu" role="listbox" hidden>' +
-          '<li class="assign-item" style="color:var(--text-muted);">Loading users…</li>' +
-        '</ul>' +
+          'aria-haspopup="menu" aria-expanded="false">Assign to…</button>' +
+        '<div id="bulk-bar-assign-menu" class="pulse-dropdown bulk-bar-assign-menu" hidden>' +
+          '<div class="pulse-dropdown-section" id="bulk-bar-assign-list">' +
+            '<div style="padding:4px 10px; color:var(--text-muted); font-size:12px;">' +
+              'Loading users…' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
       '<button class="btn btn-secondary btn-sm" data-action="bulkAssignToMe">Assign to me</button>' +
       '<button class="btn btn-secondary btn-sm" data-action="bulkUnassign">Unassign</button>' +
@@ -761,32 +767,36 @@ function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
 
 async function _mountBulkBarUsers() {
   // Populate the "Assign to..." dropdown once the users list is ready.
-  // Fails soft for viewers (who 403 /api/users) — the menu still shows
-  // their own account so they can self-assign via the dropdown too.
-  var menu = document.getElementById('bulk-bar-assign-menu');
-  if (!menu) return;
+  // Viewers get a 403 on /api/users — fall back to "me" only so they
+  // can still self-assign via the dropdown.
+  var list = document.getElementById('bulk-bar-assign-list');
+  if (!list) return;
   var users = await _ensureAssignableUsers();
   var me = await _ensureMe();
   if (users.length === 0 && me && me.id) {
     users = [{ id: me.id, email: me.email || 'me', display_name: me.display_name, active: true }];
   }
   if (!users.length) {
-    menu.innerHTML = '<li class="assign-item" style="color:var(--text-muted);">No active users</li>';
+    list.innerHTML = '<div style="padding:6px 10px; color:var(--text-muted); font-size:12px;">' +
+                      'No active users' +
+                    '</div>';
     return;
   }
-  menu.innerHTML = users.map(function (u) {
+  list.innerHTML = users.map(function (u) {
     var display = (u.display_name || '').trim() ||
                   ((u.email || '').split('@')[0] || ('user #' + u.id));
     var isMe = (me && u.id === me.id);
     var primary = display + (isMe ? ' (me)' : '');
     var secondary = (u.display_name && u.email && u.email !== display) ? u.email : '';
-    return '<li class="assign-item" ' +
+    return '<a class="pulse-dropdown-item bulk-bar-assign-item" ' +
              'data-action="bulkAssignPick" data-arg="' + u.id + '|' + _escAttr(display) + '">' +
-             '<span class="assign-item-name">' + escapeHtml(primary) + '</span>' +
-             (secondary
-               ? '<span class="assign-item-email">' + escapeHtml(secondary) + '</span>'
-               : '') +
-           '</li>';
+             '<span class="bulk-bar-assign-item-main">' +
+               '<span class="bulk-bar-assign-item-name">' + escapeHtml(primary) + '</span>' +
+               (secondary
+                 ? '<span class="bulk-bar-assign-item-email">' + escapeHtml(secondary) + '</span>'
+                 : '') +
+             '</span>' +
+           '</a>';
   }).join('');
 }
 
@@ -797,14 +807,12 @@ function _escAttr(s) {
 export function toggleBulkAssignMenu(arg, target) {
   var menu = document.getElementById('bulk-bar-assign-menu');
   if (!menu || !target) return;
-  var open = !menu.hasAttribute('hidden');
-  if (open) {
-    menu.setAttribute('hidden', '');
-    target.setAttribute('aria-expanded', 'false');
-  } else {
-    menu.removeAttribute('hidden');
-    target.setAttribute('aria-expanded', 'true');
-  }
+  // Use the native `hidden` property — matches the .pulse-dropdown
+  // contract (see pulse-design.md "Use the hidden attribute for open
+  // / close — do not toggle inline display").
+  var open = !menu.hidden;
+  menu.hidden = open;
+  target.setAttribute('aria-expanded', open ? 'false' : 'true');
 }
 
 // Close the bulk-bar assign menu on outside click / Esc.
@@ -813,8 +821,8 @@ document.addEventListener('click', function (e) {
   if (!wrap) return;
   if (wrap.contains(e.target)) return;
   var menu = document.getElementById('bulk-bar-assign-menu');
-  if (menu && !menu.hasAttribute('hidden')) {
-    menu.setAttribute('hidden', '');
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
     var trigger = wrap.querySelector('[data-action="toggleBulkAssignMenu"]');
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
   }
@@ -822,8 +830,8 @@ document.addEventListener('click', function (e) {
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
   var menu = document.getElementById('bulk-bar-assign-menu');
-  if (menu && !menu.hasAttribute('hidden')) {
-    menu.setAttribute('hidden', '');
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
     var trigger = document.querySelector('.bulk-bar-assign [data-action="toggleBulkAssignMenu"]');
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
   }
@@ -921,7 +929,7 @@ async function _reconcileAfterBulk(deltaFn) {
 
 function _closeBulkAssignMenu() {
   var menu = document.getElementById('bulk-bar-assign-menu');
-  if (menu) menu.setAttribute('hidden', '');
+  if (menu) menu.hidden = true;
   var trigger = document.querySelector('.bulk-bar-assign [data-action="toggleBulkAssignMenu"]');
   if (trigger) trigger.setAttribute('aria-expanded', 'false');
 }
