@@ -2877,6 +2877,26 @@ tr.pending-flash {
   margin-right: 0;
 }
 
+/* Drawer "Summary" section — one-sentence, highlighted so the reviewer
+   sees the action in plain English at the top of the drawer before
+   the structured fields below. */
+.audit-summary-line {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  background: rgba(88, 166, 255, 0.08);
+  border-left: 3px solid var(--accent, #58a6ff);
+  padding: 10px 14px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+/* Table detail cell — human summary stays at normal color instead of
+   the muted grey used for the old raw-detail rendering. Raw is still
+   available on the hover title and inside the drawer. */
+.audit-detail-cell .audit-detail-human {
+  color: var(--text);
+}
+
 /* Context timeline (vertical rail with tone-tinted dots).                 */
 .audit-timeline {
   position: relative;

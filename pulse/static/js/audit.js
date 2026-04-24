@@ -15,7 +15,7 @@
 // Footer actions: Copy as JSON, Filter to actor / IP / target.
 'use strict';
 
-import { fetchAudit } from './api.js';
+import { fetchAudit, apiListUsers } from './api.js';
 import { escapeHtml } from './dashboard.js';
 import { openDrawer, closeDrawer, isDrawerOpen } from './drawer.js';
 
@@ -28,6 +28,30 @@ var _filteredRows = [];
 var _auditQuery = '';
 var _drawerIdx = -1;      // index within _filteredRows while drawer is open
 var _jkHandler = null;    // keyboard listener installed while drawer is open
+
+// { userId: displayName|email } — populated on mount for name resolution
+// in legacy audit rows that stored assignee_user_id before we switched
+// to writing the name directly on the server.
+var _userIdNameMap = {};
+
+async function _ensureUserIdNameMap() {
+  try {
+    var lu = await apiListUsers();
+    (lu.users || []).forEach(function (u) {
+      if (!u || u.id == null) return;
+      var name = (u.display_name || '').trim() || (u.email || '').split('@')[0] || ('user #' + u.id);
+      _userIdNameMap[String(u.id)] = name;
+    });
+  } catch (e) {
+    // Viewers 403 /api/users — fall through; legacy rows will show
+    // "user #N" as a fallback. Not worth blocking the whole page.
+  }
+}
+
+function _userName(userId) {
+  var key = String(userId);
+  return _userIdNameMap[key] || ('user #' + userId);
+}
 
 // Action classification → color scheme.  See .claude/skills/pulse-design.md:
 // the row-accent severity set is used for left borders and for chip fills.
@@ -73,7 +97,14 @@ function _actionTitle(action) {
 
 export async function renderAuditPage() {
   var c = document.getElementById('content');
-  _auditCache = await fetchAudit(500);
+  // Run both fetches in parallel — the user-id→name map is only used
+  // for legacy audit rows, so even if it 403s for viewers the page
+  // still renders. Rows with modern server-written names (e.g.
+  // "assigned to Robert") bypass the lookup entirely.
+  var auditP = fetchAudit(500);
+  var usersP = _ensureUserIdNameMap();
+  _auditCache = await auditP;
+  await usersP;
 
   c.innerHTML =
     '<div class="page-head">' +
@@ -111,9 +142,10 @@ function _renderTable() {
       '<td>' + _actionChip(r.action, tone) + '</td>' +
       '<td>' + _actorCell(r) + '</td>' +
       '<td>' + (r.ip_address ? '<code>' + escapeHtml(r.ip_address) + '</code>' : '') + '</td>' +
-      '<td class="muted" style="max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+      '<td class="audit-detail-cell" title="' + escapeHtml(r.detail || r.comment || '') + '" ' +
+        'style="max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
         _targetPill(r) +
-        escapeHtml(r.detail || (_parseFindingId(r.comment) ? '' : (r.comment || ''))) +
+        '<span class="audit-detail-human">' + escapeHtml(_formatAuditDetail(r)) + '</span>' +
       '</td>' +
       '</tr>';
   }).join('');
@@ -227,6 +259,7 @@ export function openAuditDrawer(rowId) {
 function _mountDrawerFor(row) {
   var tone = _actionTone(row.action);
   var sections = [
+    { label: 'Summary',         html: _sectionSummary(row) },
     { label: 'Event details',   html: _sectionEventDetails(row) },
     { label: 'Detail breakdown',html: _sectionDetailBreakdown(row) },
     { label: 'Context timeline',html: _sectionTimeline(row) },
@@ -279,6 +312,12 @@ function _timestampHtml(ts) {
   if (isNaN(d.getTime())) return '<code>' + escapeHtml(ts) + '</code>';
   return '<code>' + escapeHtml(d.toLocaleString()) + '</code> · ' +
          '<span class="muted">UTC ' + escapeHtml(d.toISOString().replace('T', ' ').replace('Z', '')) + '</span>';
+}
+
+function _sectionSummary(row) {
+  var human = _formatAuditDetail(row);
+  if (!human) return '<div class="muted">No summary available.</div>';
+  return '<div class="audit-summary-line">' + escapeHtml(human) + '</div>';
 }
 
 function _sectionEventDetails(row) {
@@ -343,6 +382,187 @@ function _sectionDetailBreakdown(row) {
     return '<div class="k">' + escapeHtml(p[0]) + '</div>' +
            '<div class="v">' + p[1] + '</div>';
   }).join('') + '</div>';
+}
+
+// ---------------------------------------------------------------
+// Human-readable audit detail renderer
+// ---------------------------------------------------------------
+//
+// The `audit_log.detail` column is a compact key=value string chosen
+// for searchability + DB-level grep ("assignee_user_id=12 count=5").
+// That's fine for the stored form, but it reads terribly in the
+// reviewer UI. This helper translates each action type into a short
+// sentence ("Assigned 5 findings to Robert") and falls back to the
+// raw detail when no mapping applies. The raw string is always still
+// available in the drawer's Detail Breakdown + Raw JSON sections.
+function _formatAuditDetail(row) {
+  var action = (row.action || '').toLowerCase();
+  var detail = row.detail || '';
+  var comment = row.comment || '';
+  var kv = _kvPairs(detail);
+
+  // Bulk assign / unassign ----------------------------------------------
+  if (action === 'bulk_assign_findings') {
+    var n = _kvNum(kv, 'count');
+    // Server now writes "assigned to <name>" directly; legacy rows have
+    // "assignee_user_id=<id>" and we resolve via the user cache.
+    var name = _extractAssignee(detail, kv);
+    var noun = 'finding' + (n === 1 ? '' : 's');
+    return 'Assigned ' + n + ' ' + noun + ' to ' + name;
+  }
+  if (action === 'bulk_unassign_findings') {
+    var un = _kvNum(kv, 'count');
+    return 'Unassigned ' + un + ' finding' + (un === 1 ? '' : 's');
+  }
+  if (action === 'bulk_review_findings') {
+    var rn = _kvNum(kv, 'count');
+    return 'Marked ' + rn + ' finding' + (rn === 1 ? '' : 's') + ' reviewed';
+  }
+  if (action === 'bulk_unreview_findings') {
+    var un2 = _kvNum(kv, 'count');
+    return 'Cleared review on ' + un2 + ' finding' + (un2 === 1 ? '' : 's');
+  }
+
+  // Per-finding assign / unassign ---------------------------------------
+  if (action === 'assign_finding') {
+    return 'Assigned to ' + _extractAssignee(detail, kv);
+  }
+  if (action === 'unassign_finding') {
+    return 'Unassigned';
+  }
+
+  // Review toggle -------------------------------------------------------
+  if (action === 'review_finding') {
+    var rev = _kvBool(kv, 'reviewed');
+    var fp  = _kvBool(kv, 'false_positive');
+    if (fp)  return 'Marked as false positive';
+    if (rev) return 'Marked as reviewed';
+    return 'Cleared review flags';
+  }
+
+  // Workflow state ------------------------------------------------------
+  if (action === 'set_workflow_state') {
+    var ws = kv.workflow_status || '';
+    return 'Status changed to ' + _titleCase(ws || 'new');
+  }
+
+  // Notes ---------------------------------------------------------------
+  if (action === 'add_note') {
+    var len = _kvNum(kv, 'len');
+    return 'Added note (' + len + ' char' + (len === 1 ? '' : 's') + ')';
+  }
+  if (action === 'delete_note') {
+    return 'Deleted note';
+  }
+
+  // User identity changes -----------------------------------------------
+  if (action === 'update_user_display_name') {
+    // detail is "display_name=<repr>" (Python repr → includes quotes).
+    var raw = (detail.match(/display_name=(.+)$/) || [,''])[1];
+    var cleaned = raw.replace(/^['"]|['"]$/g, '').replace(/\\'/g, "'");
+    if (!cleaned || cleaned === 'None') {
+      return 'Cleared display name for ' + (row.comment || 'user');
+    }
+    return 'Set display name to ' + cleaned;
+  }
+
+  if (action === 'create_user') {
+    return 'Created user ' + (comment || '') +
+           (kv.role ? ' (' + kv.role + ')' : '');
+  }
+  if (action === 'delete_user') {
+    return 'Deleted user ' + (comment || '');
+  }
+  if (action === 'update_user_role') {
+    return 'Changed role of ' + (comment || 'user') +
+           (kv.role ? ' to ' + kv.role : '');
+  }
+  if (action === 'update_user_active') {
+    return (kv.active === '1' || kv.active === 'true')
+      ? 'Reactivated ' + (comment || 'user')
+      : 'Deactivated ' + (comment || 'user');
+  }
+
+  // Scan lifecycle ------------------------------------------------------
+  if (action === 'scan') {
+    var host = kv.hostname || '';
+    var found = _kvNum(kv, 'findings');
+    var parts = [];
+    if (host) parts.push(host);
+    var sent = 'Scanned' + (host ? ' ' + host : ' system');
+    return sent + ' (' + found + ' finding' + (found === 1 ? '' : 's') + ')';
+  }
+  if (action === 'delete_scan') {
+    var d = _kvNum(kv, 'deleted');
+    return 'Deleted ' + d + ' scan' + (d === 1 ? '' : 's');
+  }
+
+  // Firewall actions ---------------------------------------------------
+  if (action === 'unblock') {
+    // detail is the Pulse-managed rule name. Strip the prefix to leave the IP.
+    var ip = detail.replace(/^Pulse-managed:\s*/, '').trim();
+    return 'Unblocked ' + (ip || detail);
+  }
+  if (action === 'block') {
+    return 'Blocked ' + (kv.ip_address || row.ip_address || 'IP');
+  }
+  if (action === 'push') {
+    return 'Pushed firewall rules';
+  }
+  if (action === 'stage') {
+    return 'Staged rule: ' + detail;
+  }
+  if (action === 'stage_forced') {
+    // User specified this stays as-is — stage_forced with the rule name
+    // already reads clearly.
+    return 'Stage-forced: ' + detail;
+  }
+
+  // Feedback ------------------------------------------------------------
+  if (action === 'submit_feedback') {
+    return 'Submitted feedback' + (kv.kind ? ' (' + kv.kind + ')' : '');
+  }
+
+  // Default: raw detail, which the drawer will also show structured.
+  return detail || comment || '';
+}
+
+// Parse "a=1 b=two c='three words'" into { a:'1', b:'two' ... }. Naive
+// splitter: handles bare tokens + quoted values (single-quoted from
+// Python repr strings). Values with embedded spaces need quoting to
+// parse correctly; we never produce those from our own log calls.
+function _kvPairs(s) {
+  var out = {};
+  if (!s) return out;
+  var re = /([a-zA-Z_][\w]*)=(?:'([^']*)'|"([^"]*)"|([^\s]+))/g;
+  var m;
+  while ((m = re.exec(s))) {
+    out[m[1]] = m[2] != null ? m[2] : (m[3] != null ? m[3] : m[4]);
+  }
+  return out;
+}
+
+function _kvNum(kv, key) {
+  var n = Number(kv[key]);
+  return isFinite(n) ? n : 0;
+}
+function _kvBool(kv, key) {
+  var v = kv[key];
+  return v === '1' || v === 'true' || v === 'True';
+}
+function _titleCase(s) {
+  return String(s || '').replace(/(^|\s)[a-z]/g, function (c) { return c.toUpperCase(); });
+}
+
+// Assignment detail resolution. Modern server-side logs already say
+// "assigned to <name>"; legacy rows store "assignee_user_id=N" which
+// we look up in the cached user map. Falls back to "user #N".
+function _extractAssignee(detail, kv) {
+  // Modern form — "assigned to <name>" appears after the count.
+  var modern = /assigned to (.+?)(?:\s*$|\s+[a-zA-Z_]+=)/.exec(detail);
+  if (modern) return modern[1].trim();
+  if (kv.assignee_user_id) return _userName(kv.assignee_user_id);
+  return 'a user';
 }
 
 function _parseDetail(action, detail) {
