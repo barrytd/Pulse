@@ -171,3 +171,18 @@ window.addEventListener('popstate', function (event) {
   }
   navigate(page, { push: false, scanId: scanId });
 });
+
+// ---------------------------------------------------------------
+// Sidebar collapse/expand
+// ---------------------------------------------------------------
+// Toggles body.sidebar-collapsed and persists the state. The inline
+// boot script in index.html restores the class before first paint
+// so the choice sticks across reloads without a visible flash.
+export function toggleSidebar() {
+  var body = document.body;
+  var nowCollapsed = !body.classList.contains('sidebar-collapsed');
+  body.classList.toggle('sidebar-collapsed', nowCollapsed);
+  try {
+    localStorage.setItem('pulseSidebarCollapsed', nowCollapsed ? '1' : '0');
+  } catch (e) { /* localStorage disabled — state is session-only */ }
+}

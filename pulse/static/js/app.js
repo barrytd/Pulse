@@ -4,7 +4,7 @@
 'use strict';
 
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
-import { navigate, validPages, parsePath } from './navigation.js';
+import { navigate, validPages, parsePath, toggleSidebar } from './navigation.js';
 import {
   openUploadModal,
   closeUploadModal,
@@ -200,6 +200,7 @@ import {
 const actions = {
   // theme + navigation
   navigate,
+  toggleSidebar,
   toggleTheme,
   setThemeFromSelect,
 

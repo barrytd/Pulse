@@ -1,118 +1,68 @@
 /* ------------------------------------------------------------------ */
-/* Sidebar — 200px navigation rail                                     */
+/* Sidebar — 200px navigation rail below the app topbar                */
 /*                                                                    */
-/* Uses --bg-1 so the sidebar sits one surface-step BELOW .content     */
-/* (which uses --bg-0) — the rail reads as a distinct chrome layer     */
-/* without needing a divider. Nav items are grouped into three         */
-/* semantic clusters with 12px gutters between groups (no dividers /   */
-/* no section labels) so the visual hierarchy comes from rhythm.       */
+/* QRadar-style chrome: sidebar sits below the full-width .app-topbar */
+/* (top: 48px) and hosts the nav list only — no brand block. When the */
+/* user clicks the hamburger in the topbar, `body.sidebar-collapsed`  */
+/* shrinks this rail to 48px and hides the text labels, leaving an    */
+/* icon-only column with native title tooltips.                       */
 /* ------------------------------------------------------------------ */
+
+:root {
+  /* Width variable so .sidebar and .main stay in sync in both
+     expanded and collapsed states. Overridden below when the body
+     carries .sidebar-collapsed. */
+  --sidebar-w: 200px;
+}
+body.sidebar-collapsed {
+  --sidebar-w: 48px;
+}
+
 .sidebar {
-  width: 200px;
-  min-height: 100vh;
-  background: var(--bg-1, #111827);
-  display: flex;
-  flex-direction: column;
+  width: var(--sidebar-w);
+  /* Fixed below the 48px topbar so the rail always hugs the left
+     edge without scrolling with content. */
   position: fixed;
-  top: 0;
+  top: 48px;
   left: 0;
   bottom: 0;
-  z-index: 100;
-}
-
-/* Brand header — icon + "PULSE" side-by-side, "Threat Detection"
-   subtitle below. Pinned to 56px with the same rgba bottom border as
-   the topbar so the two lines form one continuous hairline across the
-   full app width. */
-.sidebar-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 56px;
-  padding: 0 16px;
-  box-sizing: border-box;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  text-decoration: none;
-  cursor: pointer;
-  transition: opacity 0.15s ease;
-}
-
-.sidebar-logo:hover {
-  opacity: 0.85;
-}
-
-.sidebar-logo-mark {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  /* Green vital-sign green — the row-accent LOW from the design
-     system is the same shade used for healthy / success states, which
-     matches the heartbeat metaphor. */
-  color: #3fb950;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.sidebar-logo-mark svg {
-  width: 26px;
-  height: 26px;
-  display: block;
-}
-
-.sidebar-logo-text {
+  background: var(--bg-1, #111827);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
-  line-height: 1.1;
-  min-width: 0;
+  z-index: 90;
+  transition: width 200ms ease;
+  overflow: hidden;
 }
 
-.sidebar-logo-title {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--text-high, #f3f4f6);
-}
-
-.sidebar-logo-sub {
-  font-size: 10px;
-  letter-spacing: 0.5px;
-  color: var(--text-muted, #8b949e);
-  margin-top: 2px;
-}
-
-/* Flat nav list — every item on the same 8px rhythm, no group
-   separators, no labels. The uniform cadence (Rapid7 InsightIDR
-   style) reads as a single coherent rail instead of a collection of
-   semantic clusters.
-   Spacing from the brand block: explicit margin-top: 24px (not
-   padding on this container, per the UI review). Combined with the
-   brand block's existing 1px rgba(255,255,255,0.06) border-bottom,
-   there's a clear visual separator + 24px of breathing room before
-   the first nav item. Nothing else in the stylesheet overrides this. */
+/* Flat nav list — every item on a consistent 8px rhythm. No brand
+   block at the top; nav starts directly at the rail edge below the
+   topbar. The legacy margin-top was removed because there's nothing
+   above the nav anymore — the topbar hairline is the separator. */
 .sidebar-nav {
   flex: 1;
-  padding: 0 0 12px;
-  margin-top: 24px;
+  padding: 12px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .sidebar-nav a {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* 32px total row height: 8px vertical padding + 16px icon/label.
-     Tight but still comfortable; keeps every item at the same 40px
-     pitch (32px row + 8px gap) from top to bottom of the rail. */
-  padding: 8px 16px;
+  /* 32px row height (8 + 16 + 8). Padding left is shortened by the
+     3px active accent so the icon doesn't jump when a row becomes
+     active. */
+  padding: 8px 16px 8px 13px;
   color: var(--text-muted, #8b949e);
   text-decoration: none;
   font-size: 13px;
   font-weight: 500;
   line-height: 16px;
+  white-space: nowrap;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   cursor: pointer;
   border-left: 3px solid transparent;
@@ -123,10 +73,6 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
-/* Active state: 3px green accent rail + the same subtle white-alpha
-   tint as hover. The rail is what marks the current page — the tint
-   is quiet on purpose so the sidebar stays calm instead of shouting
-   "here". */
 .sidebar-nav a.active {
   color: var(--text-high, #f3f4f6);
   background: rgba(255, 255, 255, 0.04);
@@ -141,15 +87,42 @@
   stroke-width: 2;
 }
 
+.sidebar-nav-label {
+  /* In the collapsed state the labels get display:none and only
+     the icons remain. 200ms fade on opacity so the collapse reads
+     as a smooth animation rather than a snap. */
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+/* Collapsed (48px) variant — icons only, centered, labels hidden.
+   Icons get native title= tooltips via the HTML attribute so hover
+   still names the page. */
+body.sidebar-collapsed .sidebar-nav a {
+  justify-content: center;
+  padding: 8px 0 8px 0;
+  border-left-width: 3px;
+}
+body.sidebar-collapsed .sidebar-nav-label {
+  display: none;
+}
+
 /* ------------------------------------------------------------------ */
-/* Main area                                                           */
+/* App container + main content                                        */
 /* ------------------------------------------------------------------ */
+
+/* The app body sits below the fixed 48px topbar and to the right of
+   the fixed sidebar. Padding-top clears the topbar; margin-left
+   tracks the sidebar width variable so it shrinks with the collapse. */
+.app {
+  padding-top: 48px;
+  min-height: 100vh;
+}
+
 .main {
   flex: 1;
-  /* `min-width: 0` so flex children (Chart.js canvas, tables, filter
-     bars) can actually shrink below min-content and not push the page
-     into horizontal scroll on narrower monitors. */
   min-width: 0;
-  margin-left: 200px;  /* matches .sidebar width */
-  min-height: 100vh;
+  margin-left: var(--sidebar-w);
+  min-height: calc(100vh - 48px);
+  transition: margin-left 200ms ease;
 }

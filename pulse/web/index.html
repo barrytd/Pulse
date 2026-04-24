@@ -15,82 +15,54 @@
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
-  <div class="app">
-    <!-- ============================================================= -->
-    <!-- SIDEBAR                                                        -->
-    <!-- ============================================================= -->
-    <aside class="sidebar">
-      <a class="sidebar-logo" data-action="navigate" data-arg="dashboard">
-        <span class="sidebar-logo-mark" aria-hidden="true">
-          <!-- Simplified single-peak pulse — a vital-sign blip on a
-               flat baseline. 4 line segments total (flat, up, down,
-               flat) sized on a 28x28 canvas so the SVG is the icon
-               itself, not content inside a tile. -->
-          <svg viewBox="0 0 28 28" width="28" height="28" fill="none"
-               stroke="currentColor" stroke-width="2"
-               stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 14 L11 14 L14 5 L17 14 L25 14"/>
-          </svg>
-        </span>
-        <span class="sidebar-logo-text">
-          <span class="sidebar-logo-title">PULSE</span>
-          <span class="sidebar-logo-sub">Threat Detection</span>
-        </span>
-      </a>
+  <!-- Restore sidebar collapsed state before first paint so the page
+       doesn't flash between expanded and collapsed on reload. -->
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem('pulseSidebarCollapsed') === '1') {
+          document.body.classList.add('sidebar-collapsed');
+        }
+      } catch (e) { /* localStorage disabled — default to expanded */ }
+    })();
+  </script>
 
-      <!-- Flat nav list — no group wrappers, no group separators. A
-           consistent 8px gap between every item gives the rail a
-           uniform Rapid7/InsightIDR rhythm instead of breaking the
-           list into semantic chunks. -->
-      <nav class="sidebar-nav">
-        <a class="active" data-action="navigate" data-arg="dashboard">
-          <i data-lucide="layout-dashboard" class="icon"></i> Dashboard
-        </a>
-        <a data-action="navigate" data-arg="monitor">
-          <i data-lucide="activity" class="icon"></i> Monitor
-        </a>
-        <a data-action="navigate" data-arg="scans">
-          <i data-lucide="file-search" class="icon"></i> Scans
-        </a>
-        <a data-action="navigate" data-arg="reports">
-          <i data-lucide="file-text" class="icon"></i> Reports
-        </a>
-        <a data-action="navigate" data-arg="history">
-          <i data-lucide="clock" class="icon"></i> History
-        </a>
-        <a data-action="navigate" data-arg="fleet">
-          <i data-lucide="server" class="icon"></i> Fleet
-        </a>
-        <a data-action="navigate" data-arg="firewall">
-          <i data-lucide="brick-wall" class="icon"></i> Firewall
-        </a>
-        <a data-action="navigate" data-arg="whitelist">
-          <i data-lucide="shield" class="icon"></i> Whitelist
-        </a>
-        <a data-action="navigate" data-arg="rules">
-          <i data-lucide="list-checks" class="icon"></i> Rules
-        </a>
-        <a data-action="navigate" data-arg="audit">
-          <i data-lucide="clipboard-list" class="icon"></i> Audit Log
-        </a>
-        <a data-action="navigate" data-arg="compliance">
-          <i data-lucide="shield-check" class="icon"></i> Compliance
-        </a>
-        <a data-action="navigate" data-arg="trends">
-          <i data-lucide="trending-up" class="icon"></i> Trends
-        </a>
-      </nav>
+  <!-- ============================================================= -->
+  <!-- FULL-WIDTH APP TOPBAR                                           -->
+  <!-- Hamburger (toggles the sidebar) → PULSE brand → current page   -->
+  <!-- crumb → live indicator + action buttons + user avatar on right. -->
+  <!-- ============================================================= -->
+  <header class="app-topbar">
+    <button class="hamburger-btn" type="button"
+            data-action="toggleSidebar"
+            aria-label="Toggle navigation sidebar"
+            title="Toggle sidebar">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="3" y1="6"  x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
 
-    </aside>
+    <a class="app-brand" data-action="navigate" data-arg="dashboard"
+       title="Dashboard home">
+      <span class="app-brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 28 28" width="22" height="22" fill="none"
+             stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 14 L11 14 L14 5 L17 14 L25 14"/>
+        </svg>
+      </span>
+      <span class="app-brand-name">PULSE</span>
+      <span class="app-brand-sep" aria-hidden="true">|</span>
+      <span class="app-brand-sub">Threat Detection</span>
+    </a>
 
-    <!-- ============================================================= -->
-    <!-- MAIN AREA                                                      -->
-    <!-- ============================================================= -->
-    <div class="main">
-      <!-- Top bar -->
-      <header class="topbar">
-        <h2 id="page-title">Dashboard</h2>
-        <div class="topbar-actions">
+    <h2 class="app-page-crumb" id="page-title">Dashboard</h2>
+
+    <div class="topbar-actions">
           <a id="nav-live-indicator" class="nav-live-indicator" data-action="navigate" data-arg="monitor" title="Monitor is running — click to open" style="display:none;">
             <span class="nav-live-dot"></span>
             <span class="nav-live-text">Live</span>
@@ -147,11 +119,75 @@
               </div>
             </div>
           </div>
-        </div>
-      </header>
+    </div>
+  </header>
 
-      <!-- Admin privilege banner — only rendered by JS on Windows when the
-           process is not elevated. Dismissal is per-session in localStorage. -->
+  <!-- ============================================================= -->
+  <!-- APP BODY: SIDEBAR + MAIN CONTENT                                -->
+  <!-- ============================================================= -->
+  <div class="app">
+    <aside class="sidebar">
+      <!-- Flat nav list — no brand block (moved to the topbar), no
+           group wrappers. Each <a> has its label in a span so CSS can
+           hide the text when the sidebar is collapsed to icons-only,
+           and a title= attribute so hovering a collapsed icon surfaces
+           a native browser tooltip with the page name. -->
+      <nav class="sidebar-nav">
+        <a class="active" data-action="navigate" data-arg="dashboard" title="Dashboard">
+          <i data-lucide="layout-dashboard" class="icon"></i>
+          <span class="sidebar-nav-label">Dashboard</span>
+        </a>
+        <a data-action="navigate" data-arg="monitor" title="Monitor">
+          <i data-lucide="activity" class="icon"></i>
+          <span class="sidebar-nav-label">Monitor</span>
+        </a>
+        <a data-action="navigate" data-arg="scans" title="Scans">
+          <i data-lucide="file-search" class="icon"></i>
+          <span class="sidebar-nav-label">Scans</span>
+        </a>
+        <a data-action="navigate" data-arg="reports" title="Reports">
+          <i data-lucide="file-text" class="icon"></i>
+          <span class="sidebar-nav-label">Reports</span>
+        </a>
+        <a data-action="navigate" data-arg="history" title="History">
+          <i data-lucide="clock" class="icon"></i>
+          <span class="sidebar-nav-label">History</span>
+        </a>
+        <a data-action="navigate" data-arg="fleet" title="Fleet">
+          <i data-lucide="server" class="icon"></i>
+          <span class="sidebar-nav-label">Fleet</span>
+        </a>
+        <a data-action="navigate" data-arg="firewall" title="Firewall">
+          <i data-lucide="brick-wall" class="icon"></i>
+          <span class="sidebar-nav-label">Firewall</span>
+        </a>
+        <a data-action="navigate" data-arg="whitelist" title="Whitelist">
+          <i data-lucide="shield" class="icon"></i>
+          <span class="sidebar-nav-label">Whitelist</span>
+        </a>
+        <a data-action="navigate" data-arg="rules" title="Rules">
+          <i data-lucide="list-checks" class="icon"></i>
+          <span class="sidebar-nav-label">Rules</span>
+        </a>
+        <a data-action="navigate" data-arg="audit" title="Audit Log">
+          <i data-lucide="clipboard-list" class="icon"></i>
+          <span class="sidebar-nav-label">Audit Log</span>
+        </a>
+        <a data-action="navigate" data-arg="compliance" title="Compliance">
+          <i data-lucide="shield-check" class="icon"></i>
+          <span class="sidebar-nav-label">Compliance</span>
+        </a>
+        <a data-action="navigate" data-arg="trends" title="Trends">
+          <i data-lucide="trending-up" class="icon"></i>
+          <span class="sidebar-nav-label">Trends</span>
+        </a>
+      </nav>
+    </aside>
+
+    <div class="main">
+      <!-- Admin privilege banner — only rendered by JS on Windows when
+           the process is not elevated. Dismissal is per-session in
+           localStorage. -->
       <div id="admin-banner" class="admin-banner" style="display:none;" role="status">
         <span class="admin-banner-icon" aria-hidden="true">&#9888;</span>
         <span class="admin-banner-text">
