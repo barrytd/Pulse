@@ -169,7 +169,7 @@ import {
   rulesClearFilter,
   filterByTechnique,
 } from './rules.js';
-import { openAuditDrawer } from './audit.js';
+import { openAuditDrawer, openAuditFinding } from './audit.js';
 import {
   mountUserMenu,
   toggleUserMenu,
@@ -365,6 +365,7 @@ const actions = {
 
   // audit log
   openAuditDrawer,
+  openAuditFinding,
 
   // user menu
   toggleUserMenu,

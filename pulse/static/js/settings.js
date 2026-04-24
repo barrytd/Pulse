@@ -291,6 +291,22 @@ export async function renderSettingsPage() {
       '</div>' +
     '</div>';
 
+  // Display name is admin-editable only (Settings > Users). Show the
+  // current value here as a read-only row so the user can see their
+  // own name without leaving the Profile tab.
+  var displayNameValue = (me && me.display_name) ? String(me.display_name).trim() : '';
+  var displayNameHtml = displayNameValue
+    ? escapeHtml(displayNameValue)
+    : '<span style="color:var(--text-light); font-style:italic;">— not set —</span>';
+  // Admins get a nudge that the edit control lives on the Users tab;
+  // non-admins get a "contact an admin" hint. Single-user installs are
+  // always admins so they see the direct link.
+  var nameHint = isAdmin
+    ? '<a class="profile-name-hint" data-action="switchSettingsTab" data-arg="users">' +
+        'Edit on the Users tab' +
+      '</a>'
+    : '<span class="profile-name-hint muted">Ask an admin to change this</span>';
+
   var profileHtml =
     avatarHtml +
     '<div class="card" style="margin-bottom:16px;">' +
@@ -298,6 +314,12 @@ export async function renderSettingsPage() {
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
         'The email and password you use to sign in to Pulse.' +
       '</p>' +
+      '<div class="form-row"><label>Display name</label>' +
+        '<div class="profile-name-row">' +
+          '<span class="profile-name-value">' + displayNameHtml + '</span>' +
+          nameHint +
+        '</div>' +
+      '</div>' +
       '<div class="form-row"><label>Account email</label>' +
         '<input type="email" id="account-email" value="' + escapeHtml(auth.email || '') + '"/></div>' +
       '<div class="form-row"><label>New password</label>' +

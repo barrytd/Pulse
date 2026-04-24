@@ -74,15 +74,19 @@
       <!-- Sidebar utility tray — currently just the quick-assign dropdown.
            Anchored at the bottom of the sidebar via .sidebar-utility. The
            trigger is enabled only when a finding drawer is currently open;
-           otherwise the button shows a muted tooltip. -->
+           otherwise it shows a muted hint line. -->
       <div class="sidebar-utility" id="sidebar-quick-assign-wrap">
         <button class="sidebar-utility-btn" id="sidebar-quick-assign-btn"
                 type="button"
                 data-action="toggleSidebarQuickAssign"
-                aria-haspopup="menu" aria-expanded="false"
-                title="Quick assign (open a finding first)" disabled>
+                aria-haspopup="menu" aria-expanded="false" disabled>
           <i data-lucide="users" class="icon"></i>
-          <span>Quick assign</span>
+          <span class="sidebar-utility-label">
+            <span class="sidebar-utility-title">Quick assign</span>
+            <span class="sidebar-utility-sub" id="sidebar-quick-assign-sub">
+              Open a finding first
+            </span>
+          </span>
         </button>
         <div class="pulse-dropdown sidebar-quick-assign-menu"
              id="sidebar-quick-assign-menu" hidden>

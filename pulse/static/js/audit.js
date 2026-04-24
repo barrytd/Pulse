@@ -112,7 +112,8 @@ function _renderTable() {
       '<td>' + _actorCell(r) + '</td>' +
       '<td>' + (r.ip_address ? '<code>' + escapeHtml(r.ip_address) + '</code>' : '') + '</td>' +
       '<td class="muted" style="max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
-        escapeHtml(r.detail || r.comment || '') +
+        _targetPill(r) +
+        escapeHtml(r.detail || (_parseFindingId(r.comment) ? '' : (r.comment || ''))) +
       '</td>' +
       '</tr>';
   }).join('');
@@ -137,13 +138,74 @@ function _actionChip(action, tone) {
          '</span>';
 }
 
+// Extract the numeric finding id from an audit row's `comment` field.
+// _audit_finding_action stores comments as "finding:<id>" for every
+// finding-level action; anything else returns null.
+function _parseFindingId(comment) {
+  if (!comment) return null;
+  var m = /^finding:(\d+)$/.exec(String(comment).trim());
+  return m ? Number(m[1]) : null;
+}
+
+// Render a clickable "Finding N" pill next to the detail text when the
+// audit row targets a specific finding. Swallows the row-level click so
+// the drawer doesn't steal the pill click.
+function _targetPill(r) {
+  var fid = _parseFindingId(r.comment);
+  if (!fid) return '';
+  return '<a class="audit-target-pill" ' +
+           'data-action="openAuditFinding" data-arg="' + fid + '" ' +
+           'data-default="allow" ' +
+           'title="Open this finding">' +
+           'Finding ' + fid +
+         '</a> ';
+}
+
+// Navigate to the Findings page and open the drawer for the given id.
+// Exported so the action registry can wire it from both the table row
+// pill and the drawer's footer button.
+export async function openAuditFinding(findingId) {
+  var id = Number(findingId);
+  if (!id) return;
+  // Dynamic imports avoid a circular static import with navigation.js /
+  // findings.js at module load time.
+  var [nav, findings] = await Promise.all([
+    import('./navigation.js'),
+    import('./findings.js'),
+  ]);
+  // Close any open audit drawer first so the finding drawer doesn't
+  // open behind it.
+  var universalDrawer = document.getElementById('drawer-root');
+  if (universalDrawer) universalDrawer.setAttribute('hidden', '');
+  nav.navigateWithHistory('findings');
+  // Poll briefly for the findings cache to populate, then open the drawer.
+  var attempts = 0;
+  var timer = setInterval(function () {
+    attempts++;
+    var cache = (findings.findingsState && findings.findingsState.raw) || [];
+    var f = cache.find(function (x) { return Number(x.id) === id; });
+    if (f) {
+      clearInterval(timer);
+      findings.openFindingDrawer(f);
+    } else if (attempts > 40) {   // ~4s max
+      clearInterval(timer);
+    }
+  }, 100);
+}
+
 function _actorCell(r) {
-  var label = r.user || r.source || '-';
-  // Human vs automation marker: any e-mail-shaped user is a human; the CLI
-  // and scheduled jobs log with source='cli' / source='scheduler'.
-  var isHuman = !!(r.user && /@/.test(r.user));
-  var icon = isHuman ? '&#128100;' : '&#9881;';  // person / gear glyph
-  return '<span class="audit-actor" title="' + (isHuman ? 'User' : 'Automation') + '">' +
+  // Prefer the admin-set display_name (joined by get_audit_log), fall
+  // back to the raw email, fall back to the source label. The hover
+  // title always shows the email for disambiguation.
+  var dn = (r.user_display_name || '').trim();
+  var email = r.user || '';
+  var label = dn || email || r.source || '-';
+  var isHuman = !!(email && /@/.test(email));
+  var icon = isHuman ? '&#128100;' : '&#9881;';
+  var title = isHuman
+    ? (email || 'User')
+    : (r.source || 'Automation');
+  return '<span class="audit-actor" title="' + escapeHtml(title) + '">' +
            '<span class="audit-actor-ic">' + icon + '</span>' +
            escapeHtml(label) +
          '</span>';
@@ -223,10 +285,15 @@ function _sectionEventDetails(row) {
   var isHuman = !!(row.user && /@/.test(row.user));
   var actorIcon = isHuman ? '&#128100;' : '&#9881;';
   var actorKind = isHuman ? 'user' : (row.source || 'automation');
+  // Prefer display_name; show email muted on a second line for humans.
+  var actorName = (row.user_display_name || '').trim() || row.user || '-';
+  var actorExtra = (row.user_display_name && row.user)
+    ? ' <span class="muted">' + escapeHtml(row.user) + '</span>'
+    : '';
   var kv = [
     ['Action',   '<code>' + escapeHtml(row.action || '-') + '</code>'],
     ['Actor',    '<span class="audit-actor-ic">' + actorIcon + '</span> ' +
-                 escapeHtml(row.user || '-') +
+                 escapeHtml(actorName) + actorExtra +
                  ' <span class="muted">(' + escapeHtml(actorKind) + ')</span>'],
     ['Source',   escapeHtml(row.source || '-')],
   ];
@@ -241,7 +308,16 @@ function _sectionEventDetails(row) {
        'onclick="window.__auditCopyId(' + Number(row.id) + ')">' +
        'AUD-' + String(row.id).padStart(6, '0') +
     '</code>']);
-  if (row.comment) {
+  // Finding target gets its own clickable row so the reviewer can jump
+  // straight to the drawer for that finding.
+  var fid = _parseFindingId(row.comment);
+  if (fid) {
+    kv.push(['Target',
+      '<a class="audit-target-pill audit-target-pill-lg" ' +
+         'data-action="openAuditFinding" data-arg="' + fid + '" ' +
+         'data-default="allow" ' +
+         'title="Open this finding">Finding ' + fid + ' &rarr;</a>']);
+  } else if (row.comment) {
     kv.push(['Comment', escapeHtml(row.comment)]);
   }
   return '<div class="kv">' + kv.map(function (p) {

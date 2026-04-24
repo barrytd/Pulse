@@ -1685,13 +1685,23 @@ export async function assignFindingToMe() {
 
 function _syncSidebarQuickAssign() {
   var btn = document.getElementById('sidebar-quick-assign-btn');
+  var sub = document.getElementById('sidebar-quick-assign-sub');
   if (!btn) return;
   var enabled = !!(_drawerFinding && _drawerFinding.id != null);
   btn.disabled = !enabled;
-  btn.title = enabled
-    ? 'Quick assign for the open finding'
-    : 'Quick assign (open a finding first)';
-  if (!enabled) {
+  if (enabled) {
+    // Tell the admin WHICH finding this shortcut will act on — display
+    // the rule name (or ref_id fall-back) so there's no ambiguity.
+    var label = _drawerFinding.rule ||
+                (_drawerFinding.ref_id && ('Finding ' + _drawerFinding.ref_id)) ||
+                ('Finding ' + _drawerFinding.id);
+    if (sub) sub.textContent = 'For: ' + label;
+    btn.title = 'Quick assign for the open finding';
+    btn.classList.add('is-armed');
+  } else {
+    if (sub) sub.textContent = 'Open a finding first';
+    btn.title = 'Open a finding, then use this to assign quickly';
+    btn.classList.remove('is-armed');
     var menu = document.getElementById('sidebar-quick-assign-menu');
     if (menu) menu.hidden = true;
     btn.setAttribute('aria-expanded', 'false');

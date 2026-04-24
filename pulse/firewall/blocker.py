@@ -222,14 +222,21 @@ def log_audit(
 
 
 def get_audit_log(db_path: str, limit: int = 200) -> list[dict]:
-    """Return audit rows newest-first. Used by the CLI and a future
-    Dashboard audit view."""
+    """Return audit rows newest-first. Used by the CLI and the dashboard
+    Audit page.
+
+    Joins `users.display_name` on the email stored in `audit_log.user` so
+    the dashboard can render a friendly name where one is set, without a
+    second lookup per row.
+    """
     try:
         with _connect(db_path) as conn:
             cursor = conn.execute(
-                """SELECT id, ts, action, ip_address, comment, source, user, detail
-                   FROM audit_log
-                   ORDER BY id DESC
+                """SELECT a.id, a.ts, a.action, a.ip_address, a.comment, a.source,
+                          a.user, a.detail, u.display_name AS user_display_name
+                   FROM audit_log a
+                   LEFT JOIN users u ON u.email = a.user
+                   ORDER BY a.id DESC
                    LIMIT ?""",
                 (int(limit),),
             )

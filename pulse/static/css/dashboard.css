@@ -2763,6 +2763,33 @@ tr.pending-flash {
 }
 .audit-id-chip:hover { background: var(--bg-4, #484f58); }
 
+/* Audit finding target — compact clickable pill in the row's detail
+   column, and a bigger variant in the drawer's Target row. Uses the
+   accent color so it reads as a navigation affordance. */
+.audit-target-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-right: 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.28);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.audit-target-pill:hover {
+  background: rgba(88, 166, 255, 0.22);
+  border-color: var(--accent, #58a6ff);
+}
+.audit-target-pill-lg {
+  padding: 4px 12px;
+  font-size: 12px;
+  margin-right: 0;
+}
+
 /* Context timeline (vertical rail with tone-tinted dots).                 */
 .audit-timeline {
   position: relative;
