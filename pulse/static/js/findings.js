@@ -660,11 +660,14 @@ export function applyFindingsView() {
     '<div class="card" style="padding:0; overflow:hidden;">' +
       (rows.length === 0
         ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings match the current filters.</div>'
-        : _buildFindingsTable(rows)) +
+        : '<div class="findings-scroll-wrap" id="findings-scroll-wrap">' +
+            _buildFindingsTable(rows) +
+          '</div>') +
     '</div>' +
     _renderBulkBarHtml(visible, total, filtered);
   _restoreSearchFocus('findings-search-box');
   _mountBulkBarUsers();
+  _wireFindingsScrollShadow();
   // Paired with the scrollY capture at the top of this function —
   // `instant` so the page doesn't animate back into place.
   window.scrollTo({ top: _scrollY, left: 0, behavior: 'instant' });
@@ -1055,6 +1058,21 @@ function _rowActionsHtml(f) {
   '</div>';
 }
 
+// Toggles `.is-scrolled` on the scroll container so the sticky checkbox
+// + timestamp columns only show their right-edge shadow once the user
+// has actually scrolled horizontally — at scrollLeft=0 the columns sit
+// flush with the rest of the table and don't need a visual divider.
+function _wireFindingsScrollShadow() {
+  var wrap = document.getElementById('findings-scroll-wrap');
+  if (!wrap) return;
+  function _sync() {
+    if (wrap.scrollLeft > 2) wrap.classList.add('is-scrolled');
+    else wrap.classList.remove('is-scrolled');
+  }
+  wrap.addEventListener('scroll', _sync, { passive: true });
+  _sync();
+}
+
 function _buildFindingsTable(findings) {
   // Stash the filtered slice so "Select all matching filter" in the bulk
   // bar can target exactly what's visible after current filters.
@@ -1122,7 +1140,7 @@ function _buildFindingsTable(findings) {
                  'data-action="toggleFindingExpand" data-arg="' + f._uid + '">' +
         checkboxCell +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
-        '<td>' + sevPillHtml(sev) + '</td>' +
+        '<td class="col-severity">' + sevPillHtml(sev) + '</td>' +
         '<td class="col-rule">' +
           '<div class="rule-cell">' +
             '<span class="rule-name">' + escapeHtml(rule) + '</span>' +
@@ -1131,10 +1149,11 @@ function _buildFindingsTable(findings) {
             _notesBadgeInline(f) +
           '</div>' +
         '</td>' +
-        '<td>' + mitreTag + '</td>' +
-        '<td style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
+        '<td class="col-mitre">' + mitreTag + '</td>' +
+        '<td class="col-desc" title="' + escapeHtml(details) + '" ' +
+          'style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
         '<td class="col-host">' + escapeHtml(f._scan_host || '-') + '</td>' +
-        '<td><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
+        '<td class="col-scan"><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
           'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
         '<td class="col-assigned">' + _assigneeCellHtml(f) + '</td>' +

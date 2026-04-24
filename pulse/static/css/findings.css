@@ -629,28 +629,103 @@
 }
 .sort-arrow.inactive { color: var(--text-muted); opacity: 0.4; }
 
+/* Findings table — the card now scrolls horizontally when needed.
+   Columns declare explicit widths + nowrap where wrapping would look
+   worse than overflowing (timestamps, severity pills, scan #, assignee
+   chip, status pill). Description gets a hard 280px cap with ellipsis
+   so a long tokenized string can never push neighbouring columns off
+   the viewport. The first two columns (checkbox + timestamp) are
+   sticky so the user always has a reference point while scrolling. */
+.findings-scroll-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.data-table { width: 100%; }
+
+.data-table .col-select {
+  width: 32px;
+  min-width: 32px;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--card-bg);
+}
+/* Subtle right-edge shadow so the sticky columns visually detach from
+   the scrolled content behind them. Only shows when actually scrolled. */
+.findings-scroll-wrap.is-scrolled .data-table .col-select::after,
+.findings-scroll-wrap.is-scrolled .data-table .col-time::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; right: -6px;
+  width: 6px;
+  pointer-events: none;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.28), transparent);
+}
+.data-table .col-time {
+  white-space: nowrap;
+  min-width: 160px;
+  position: sticky;
+  left: 32px;
+  z-index: 2;
+  background: var(--card-bg);
+}
+.data-table tr:nth-child(even) .col-select,
+.data-table tr:nth-child(even) .col-time { background: var(--hover-row); }
+.data-table tr.is-selected .col-select,
+.data-table tr.is-selected .col-time {
+  background: rgba(88, 166, 255, 0.08);
+}
+
+/* Compact columns — content is short and wrapping looks worse than a
+   fixed width. */
+.data-table .col-severity,
+.data-table .col-scan,
+.data-table .col-host,
+.data-table .col-assigned,
+.data-table .col-status {
+  white-space: nowrap;
+}
+.data-table .col-severity { min-width: 100px; }
+.data-table .col-host     { min-width: 120px; }
+.data-table .col-scan     { min-width: 110px; }
+.data-table .col-assigned { min-width: 140px; }
+.data-table .col-status   { min-width: 130px; }
+.data-table .col-rule     { min-width: 240px; }
+.data-table .col-mitre    { min-width: 110px; white-space: nowrap; }
+
+/* Description — hard cap with ellipsis. The expanded row shows the
+   full text, so truncation in the list is purely visual. */
+.data-table .col-desc {
+  max-width: 280px;
+  min-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Inline expand row for findings detail. colspan reaches across the
-   whole table, so the inner cell width always matches the table width
-   — no horizontal overflow possible from the expand itself. */
+   whole table so the cell width tracks the table's scroll width. */
 .expand-row td {
   background: var(--bg) !important;
   padding: 16px 20px !important;
   border-bottom: 1px solid var(--border);
-  /* Tables without table-layout:fixed let long tokens expand a column
-     beyond its visual width, pushing the last field (Source Scan) out
-     of the viewport. Word-breaking inside the grid prevents that. */
-  word-break: break-word;
-  overflow-wrap: anywhere;
 }
 
 .expand-grid {
   display: grid;
-  /* 180px min — tight enough that 3 fields fit on typical widths and
-     every field gets to wrap onto a second line cleanly, so nothing
-     ever clips at the right edge of the card. */
+  /* 180px min — tight enough that 3+ fields fit on typical widths and
+     every field wraps cleanly onto the next row so nothing clips. */
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
   margin-bottom: 14px;
+  /* Let grid items shrink below their min-content width — without this,
+     a long token in one cell would force the whole grid to exceed the
+     card width, re-clipping the Source Scan column. */
+  min-width: 0;
+}
+
+.expand-field {
+  min-width: 0;
 }
 
 .expand-field .label {
@@ -666,6 +741,7 @@
   font-size: 13px;
   color: var(--text);
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .expand-field .val.mono {
