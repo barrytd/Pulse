@@ -284,17 +284,20 @@ function _timestampHtml(ts) {
 function _sectionEventDetails(row) {
   var isHuman = !!(row.user && /@/.test(row.user));
   var actorIcon = isHuman ? '&#128100;' : '&#9881;';
-  var actorKind = isHuman ? 'user' : (row.source || 'automation');
-  // Prefer display_name; show email muted on a second line for humans.
+  // Prefer the admin-set display_name. For humans we drop the email +
+  // "(user)" suffix entirely — the icon already signals "human", and
+  // the email is available on the Actor-cell tooltip in the table if
+  // disambiguation is ever needed. Automations keep their source label
+  // since there's no name to substitute.
   var actorName = (row.user_display_name || '').trim() || row.user || '-';
-  var actorExtra = (row.user_display_name && row.user)
-    ? ' <span class="muted">' + escapeHtml(row.user) + '</span>'
-    : '';
+  var actorHtml = '<span class="audit-actor-ic">' + actorIcon + '</span> ' +
+                  escapeHtml(actorName);
+  if (!isHuman) {
+    actorHtml += ' <span class="muted">(' + escapeHtml(row.source || 'automation') + ')</span>';
+  }
   var kv = [
     ['Action',   '<code>' + escapeHtml(row.action || '-') + '</code>'],
-    ['Actor',    '<span class="audit-actor-ic">' + actorIcon + '</span> ' +
-                 escapeHtml(actorName) + actorExtra +
-                 ' <span class="muted">(' + escapeHtml(actorKind) + ')</span>'],
+    ['Actor',    actorHtml],
     ['Source',   escapeHtml(row.source || '-')],
   ];
   if (row.ip_address) {

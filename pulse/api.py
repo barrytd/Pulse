@@ -1569,9 +1569,19 @@ def _register_routes(app: FastAPI) -> None:
                 )
             except ValueError as exc:
                 raise HTTPException(400, detail=str(exc))
+            # Resolve the assignee's display name (fall back to email, fall
+            # back to id) so the audit detail reads as a name instead of an
+            # opaque "assignee_user_id=12". Admins reviewing the log
+            # shouldn't need to cross-reference the users table.
+            assignee_row = get_user_by_id(app.state.db_path, assignee) or {}
+            assignee_label = (
+                (assignee_row.get("display_name") or "").strip()
+                or assignee_row.get("email")
+                or f"user #{assignee}"
+            )
             _audit_finding_action(
                 app, user_id, "bulk_assign_findings",
-                detail=f"count={result['updated']} assignee_user_id={assignee}",
+                detail=f"count={result['updated']} assigned to {assignee_label}",
             )
         elif op == "unassign":
             result = batch_set_finding_assignee(
@@ -1715,12 +1725,11 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
         assignee_label = (updated.get("assignee_display_name")
                           or updated.get("assignee_email")
-                          or "unassigned")
+                          or f"user #{assignee}")
         _audit_finding_action(
             app, user_id, "assign_finding" if assignee is not None else "unassign_finding",
             finding_id=finding_id,
-            detail=(f"assignee_user_id={assignee} ({assignee_label})"
-                    if assignee is not None else "cleared"),
+            detail=(f"assigned to {assignee_label}" if assignee is not None else "cleared"),
         )
         return updated
 
