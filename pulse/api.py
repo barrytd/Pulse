@@ -63,6 +63,8 @@ from pulse.database import (
     set_user_avatar,
     update_user_active, update_user_email, update_user_password,
     update_user_role,
+    insert_finding_note, list_finding_notes, delete_finding_note,
+    count_finding_notes,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -405,6 +407,23 @@ def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_pa
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+def _attach_note_counts(app, findings):
+    """Decorate each finding with `note_count` so list rows can render a
+    notes badge without an N+1 fetch pattern. Silent on DB errors — a
+    missing count just renders as 0."""
+    if not findings:
+        return findings
+    try:
+        ids = [f.get("id") for f in findings if f.get("id") is not None]
+        counts = count_finding_notes(app.state.db_path, ids) if ids else {}
+    except Exception:
+        counts = {}
+    for f in findings:
+        fid = f.get("id")
+        f["note_count"] = int(counts.get(fid, 0)) if fid is not None else 0
+    return findings
+
 
 def _scan_scope_for(app, user_id):
     """Resolve the `user_id` filter to pass into database scan-read helpers.
@@ -1057,7 +1076,7 @@ def _register_routes(app: FastAPI) -> None:
                 "score_label": score_data["label"],
                 "grade": score_data["grade"],
                 "severity_counts": sev_counts,
-                "findings": attach_remediation(findings),
+                "findings": _attach_note_counts(app, attach_remediation(findings)),
                 "alert": alert_summary,
             }
         finally:
@@ -1320,7 +1339,7 @@ def _register_routes(app: FastAPI) -> None:
                 detail=f"Scan {scan_id} not found.",
             )
 
-        decorated = attach_remediation(findings)
+        decorated = _attach_note_counts(app, attach_remediation(findings))
 
         if format == "pdf":
             from pulse.reports.pdf_report import build_pdf
@@ -1427,6 +1446,78 @@ def _register_routes(app: FastAPI) -> None:
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
         return updated
+
+    # -------------------------------------------------------------------
+    # Analyst notes on a finding (append-only thread).
+    #   GET    /api/finding/{id}/notes          — list all notes
+    #   POST   /api/finding/{id}/notes          — append a new note
+    #   DELETE /api/finding/{id}/notes/{nid}    — delete a note
+    # Viewers can only see / post / delete notes on findings whose scan
+    # they own. Admins see and can delete everything. Cross-scope reads
+    # return 404 so note existence doesn't leak.
+    # -------------------------------------------------------------------
+    def _check_finding_scope(finding_id, user_id):
+        """Resolve scope for a single finding. Returns (is_admin, owner_id)
+        or raises 404 if finding doesn't exist or the caller is out of
+        scope. Admins always pass; viewers must own the parent scan."""
+        scope = _scan_scope_for(app, user_id)
+        from pulse import db_backend
+        with db_backend.connect(app.state.db_path) as conn:
+            row = conn.execute(
+                "SELECT scans.user_id FROM findings "
+                "JOIN scans ON scans.id = findings.scan_id "
+                "WHERE findings.id = ?",
+                (int(finding_id),),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(404, detail="Finding not found.")
+        owner = row[0] if not isinstance(row, dict) else row.get("user_id")
+        is_admin = (scope is None)
+        if not is_admin and owner is not None and int(owner) != int(scope):
+            raise HTTPException(404, detail="Finding not found.")
+        return is_admin, owner
+
+    @app.get("/api/finding/{finding_id}/notes")
+    def finding_notes_list(finding_id: int,
+                           user_id: int = Depends(require_login)):
+        _check_finding_scope(finding_id, user_id)
+        return {"notes": list_finding_notes(app.state.db_path, finding_id)}
+
+    @app.post("/api/finding/{finding_id}/notes")
+    async def finding_notes_create(finding_id: int, request: Request,
+                                   user_id: int = Depends(require_login)):
+        _check_finding_scope(finding_id, user_id)
+        # 60 notes per hour per IP is generous for analyst workflows and
+        # caps any runaway script.
+        rate_limit.hit(request, "finding_notes", window_sec=3600, max_hits=60)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        text = str(body.get("body") or "").strip()
+        if not text:
+            raise HTTPException(400, detail="Note body cannot be empty.")
+        if len(text) > 4000:
+            raise HTTPException(400, detail="Note is too long (4000 char max).")
+        row = insert_finding_note(app.state.db_path, finding_id, user_id, text)
+        if row is None:
+            raise HTTPException(404, detail="Finding not found.")
+        return row
+
+    @app.delete("/api/finding/{finding_id}/notes/{note_id}")
+    def finding_notes_delete(finding_id: int, note_id: int,
+                             user_id: int = Depends(require_login)):
+        is_admin, _owner = _check_finding_scope(finding_id, user_id)
+        ok = delete_finding_note(
+            app.state.db_path, note_id,
+            caller_user_id=user_id,
+            caller_is_admin=is_admin,
+        )
+        if not ok:
+            raise HTTPException(404, detail="Note not found.")
+        return {"status": "ok"}
 
     # -------------------------------------------------------------------
     # GET /api/score/daily — aggregated daily scores
@@ -2261,7 +2352,10 @@ def _register_routes(app: FastAPI) -> None:
                                  user_id: int = Depends(require_login)):
         """All findings detected during one monitor session."""
         findings = get_monitor_session_findings(app.state.db_path, session_id)
-        return {"session_id": session_id, "findings": attach_remediation(findings)}
+        return {
+            "session_id": session_id,
+            "findings": _attach_note_counts(app, attach_remediation(findings)),
+        }
 
     # Bulk delete — body {"ids": [...]}. Registered before the
     # /{session_id:int} route even though the typed path param already

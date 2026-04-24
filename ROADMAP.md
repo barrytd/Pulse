@@ -119,8 +119,8 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 - [ ] Windows Service installer — one-time setup that installs Pulse as a Windows Service running with SYSTEM privileges, so scheduled scans and system log access always work without manual elevation
 - [x] Incident workflow states — mark findings as acknowledged, investigating, or resolved
-- [ ] Analyst notes — free-text notes field per finding, stored in DB, shown in report
-- [ ] Assignment — assign a finding to a user, filter dashboard by "assigned to me"
+- [x] Analyst notes — free-text notes field per finding, stored in DB, shown in finding drawer and PDF reports, timestamped and attributed to the author
+- [ ] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
 - [ ] Custom branding — upload company logo, set organization name on reports and dashboard
 - [ ] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
 - [ ] Dashboard widgets — customizable layout with drag-and-drop panels
@@ -157,3 +157,35 @@ The hosted dashboard on Render can't scan a Windows machine itself — the OS ca
 - Pricing model: free-for-N-agents vs. per-seat vs. self-host-only? Changes whether enrollment needs a billing gate
 - Agent-to-server protocol: plain REST (shipped fast) vs. gRPC (more efficient at fleet scale). Start with REST
 - Code signing: agent `.exe` needs a real Authenticode cert for SmartScreen to stop warning on download
+
+---
+
+## Backlog — unscheduled, prioritized by impact
+
+Features validated by SOC/SIEM research but not yet committed to a sprint. Ordered roughly by impact-to-effort ratio.
+
+### Detection depth
+
+- [ ] SIGMA rule import — parse SIGMA YAML files and convert them into Pulse detection rules, enabling community rule packs (thousands of rules on SigmaHQ/sigma GitHub) without hand-writing each one
+- [ ] Time-based correlation rules — sequence and threshold detections that reason over windows of time rather than single events:
+  - Brute force success: N failed logins (4625) followed by a successful login (4624) from the same source IP within a configurable window
+  - Impossible travel: same user authenticating from two different hosts within seconds
+  - Privilege escalation chain: new user created (4720) then immediately added to an admin group (4728/4732)
+  - Lateral spray: same source IP hitting 3+ distinct hosts within 5 minutes
+- [ ] Sysmon log support — parse Sysmon channel events (Event 1 process create, Event 3 network connection, Event 7 image load, Event 11 file create, Event 22 DNS query) to enable command-line-pattern detections (Mimikatz, encoded PowerShell, LOLBins) and network-based detections (C2 beaconing frequency, DNS tunneling) that are impossible with standard Security/Application/System logs alone
+
+### Operational health
+
+- [ ] Alert fatigue metrics — surface detection-pipeline health data: alerts suppressed by throttling this week, reviewed vs ignored ratio, dead rules (never triggered), noisy rules (high fire rate + high false-positive rate); display as a card on Dashboard or a section on Trends
+- [ ] API rate limiting — per-token request limits (e.g. 60 req/min default, configurable) to prevent misbehaving agents or scripts from hammering the API; return 429 with Retry-After header
+- [ ] Data retention policy — configurable retention window (90/180/365 days) with automatic archival or purge of aged findings, scans, and audit log entries; required for GDPR/HIPAA compliance and database performance at scale
+
+### Incident response
+
+- [ ] Evidence preservation — "Export incident package" button on any finding or group of findings that generates a ZIP containing: relevant raw .evtx snippet, PDF report scoped to those findings, audit log entries related to the incident, analyst notes, remediation actions taken, and a JSON manifest with hashes for chain-of-custody integrity
+
+### Platform hardening
+
+- [ ] Webhook signature verification — sign outgoing Slack/Discord webhook payloads with HMAC so receivers can verify authenticity
+- [ ] Encrypted config secrets — encrypt SMTP passwords, API keys, and webhook URLs at rest in pulse.yaml using a machine-derived key rather than storing plaintext
+- [ ] Session hardening — add CSRF tokens to state-changing API endpoints, enforce SameSite=Strict on session cookies, add idle timeout (configurable, default 30 min)

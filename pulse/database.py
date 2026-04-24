@@ -219,6 +219,20 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 """
 
+# Analyst notes — multiple timestamped, author-attributed notes per
+# finding. Append-only from the UI; editing is a deliberate non-goal so
+# the thread is a durable audit trail. Deleting your own note is allowed;
+# admins can delete any note.
+_CREATE_FINDING_NOTES = """
+CREATE TABLE IF NOT EXISTS finding_notes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    finding_id  INTEGER NOT NULL,
+    user_id     INTEGER,
+    body        TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -244,6 +258,7 @@ def init_db(db_path):
         _CREATE_AUDIT_LOG,
         _CREATE_MONITOR_SESSIONS,
         _CREATE_FEEDBACK,
+        _CREATE_FINDING_NOTES,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -1537,6 +1552,111 @@ def list_feedback(db_path, limit=200):
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Analyst notes
+# ---------------------------------------------------------------------------
+
+def insert_finding_note(db_path, finding_id, user_id, body):
+    """Append a note to a finding. Returns the new row as a dict, or None
+    if the finding doesn't exist. Body length is assumed already validated
+    by the caller; this helper is the storage layer only."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        # Verify the finding exists — otherwise we'd leave an orphan note.
+        exists = conn.execute(
+            "SELECT 1 FROM findings WHERE id = ?", (int(finding_id),),
+        ).fetchone()
+        if not exists:
+            return None
+        cursor = conn.execute(
+            """INSERT INTO finding_notes (finding_id, user_id, body, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (int(finding_id), user_id, body, ts),
+        )
+        try:
+            new_id = cursor.lastrowid
+        except Exception:
+            new_id = None
+    # Re-read with the email join so the response shape matches list().
+    return _get_finding_note(db_path, new_id) if new_id else None
+
+
+def _get_finding_note(db_path, note_id):
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at, u.email
+               FROM finding_notes n
+               LEFT JOIN users u ON u.id = n.user_id
+               WHERE n.id = ?""",
+            (int(note_id),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row))
+
+
+def list_finding_notes(db_path, finding_id):
+    """Return every note for a finding, oldest-first so the UI renders a
+    natural top-to-bottom thread."""
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at, u.email
+                   FROM finding_notes n
+                   LEFT JOIN users u ON u.id = n.user_id
+                   WHERE n.finding_id = ?
+                   ORDER BY n.id ASC""",
+                (int(finding_id),),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
+def delete_finding_note(db_path, note_id, caller_user_id, caller_is_admin):
+    """Delete a note by id. Returns True if a row was removed.
+
+    Viewers can only delete their own notes. Admins can delete any note.
+    Cross-scope attempts return False so we don't leak note existence.
+    """
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT user_id FROM finding_notes WHERE id = ?",
+            (int(note_id),),
+        ).fetchone()
+        if not row:
+            return False
+        owner = row[0] if not isinstance(row, dict) else row.get("user_id")
+        if not caller_is_admin and owner is not None and int(owner) != int(caller_user_id):
+            return False
+        conn.execute(
+            "DELETE FROM finding_notes WHERE id = ?", (int(note_id),),
+        )
+    return True
+
+
+def count_finding_notes(db_path, finding_ids):
+    """Return a dict {finding_id: count} for the given ids. Used by the
+    findings list to badge rows with a notes indicator without N+1 queries."""
+    if not finding_ids:
+        return {}
+    try:
+        with _connect(db_path) as conn:
+            placeholders = ",".join("?" * len(finding_ids))
+            cursor = conn.execute(
+                "SELECT finding_id, COUNT(*) FROM finding_notes "
+                "WHERE finding_id IN (" + placeholders + ") "
+                "GROUP BY finding_id",
+                tuple(int(i) for i in finding_ids),
+            )
+            return {int(row[0]): int(row[1]) for row in cursor.fetchall()}
+    except Exception:
+        return {}
 
 
 # ---------------------------------------------------------------------------

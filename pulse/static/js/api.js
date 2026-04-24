@@ -423,6 +423,35 @@ export async function apiSetFindingReview(findingId, flags) {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+// Analyst notes on a finding — append-only thread. List returns notes
+// oldest-first so the UI reads top-to-bottom. Create/delete throw via
+// their truthy .ok field so callers can surface server detail strings.
+export async function apiListFindingNotes(findingId) {
+  var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/notes');
+  if (!resp.ok) return { notes: [] };
+  return resp.json();
+}
+
+export async function apiCreateFindingNote(findingId, body) {
+  var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: body || '' }),
+  });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
+export async function apiDeleteFindingNote(findingId, noteId) {
+  var resp = await fetch(
+    '/api/finding/' + encodeURIComponent(findingId) +
+    '/notes/' + encodeURIComponent(noteId),
+    { method: 'DELETE' }
+  );
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 // Incident workflow state. Orthogonal to the review flags — "how far along
 // is the response?" vs. "is this real?". States: new, acknowledged,
 // investigating, resolved. Returns the full updated finding on success.

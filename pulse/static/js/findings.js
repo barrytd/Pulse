@@ -9,6 +9,9 @@ import {
   apiDeleteScans,
   apiSetFindingReview,
   apiSetFindingWorkflow,
+  apiListFindingNotes,
+  apiCreateFindingNote,
+  apiDeleteFindingNote,
   invalidateScansCache,
   invalidateFindingsCache,
 } from './api.js';
@@ -748,6 +751,7 @@ function _buildFindingsTable(findings) {
             '<span class="rule-name">' + escapeHtml(rule) + '</span>' +
             _refIdPill(f) +
             _wfChipInline(f) +
+            _notesBadgeInline(f) +
           '</div>' +
         '</td>' +
         '<td>' + mitreTag + '</td>' +
@@ -1340,6 +1344,8 @@ export function openFindingDrawer(f) {
 
     _renderWorkflowSection(f) +
 
+    _renderNotesSection(f) +
+
     _renderReviewSection(f);
 
   _updateReviewButtonStates(f);
@@ -1347,6 +1353,15 @@ export function openFindingDrawer(f) {
   document.getElementById('finding-drawer').classList.add('open');
   document.getElementById('finding-drawer-backdrop').classList.add('open');
   document.body.style.overflow = 'hidden';
+
+  // Fire the notes fetch after the drawer mounts so the open animation
+  // isn't blocked on a DB round-trip.
+  if (f && f.id != null) {
+    _loadDrawerNotes(f.id).catch(function () {
+      var list = document.getElementById('drawer-notes-list');
+      if (list) list.innerHTML = '<p class="notes-empty">Could not load notes.</p>';
+    });
+  }
 }
 
 // Workflow states — the incident-response axis. Orthogonal to review
@@ -1373,6 +1388,151 @@ function _wfChipInline(f) {
   if (s === 'new') return '';
   return ' ' + _workflowChipHtml(s);
 }
+
+// Notes-count badge for list rows. Hidden when the count is 0 so rows
+// without analyst activity stay clean.
+function _notesBadgeInline(f) {
+  var n = Number(f && f.note_count || 0);
+  if (!n) return '';
+  var bubbleSvg =
+    '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
+    '</svg>';
+  return ' <span class="notes-chip" title="' + n + ' note' + (n === 1 ? '' : 's') + '" ' +
+         'aria-label="' + n + ' note' + (n === 1 ? '' : 's') + '">' +
+    bubbleSvg + '<span class="notes-chip-count">' + n + '</span>' +
+  '</span>';
+}
+
+// ---------------------------------------------------------------
+// Analyst notes — append-only thread per finding
+// ---------------------------------------------------------------
+
+function _renderNotesSection(f) {
+  // Skeleton only — real content loaded async after the drawer mounts
+  // so the drawer opens instantly even on slow connections.
+  var hasId = f && f.id != null;
+  if (!hasId) {
+    return '<div class="finding-drawer-section">' +
+      '<div class="sec-label">Notes</div>' +
+      '<p style="color:var(--text-muted); font-size:12px; margin:0;">' +
+        'Save this scan to enable analyst notes.' +
+      '</p>' +
+    '</div>';
+  }
+  return '<div class="finding-drawer-section">' +
+    '<div class="sec-label">Notes</div>' +
+    '<div id="drawer-notes-list" class="notes-thread">' +
+      '<div class="notes-loading" style="font-size:12px; color:var(--text-muted);">Loading notes...</div>' +
+    '</div>' +
+    '<div class="notes-compose">' +
+      '<textarea id="drawer-note-input" class="notes-compose-input" rows="2" maxlength="4000" ' +
+        'placeholder="Add a note — what you saw, what you did, what\'s next..."></textarea>' +
+      '<div class="notes-compose-actions">' +
+        '<span class="notes-compose-count"><span id="drawer-note-count">0</span> / 4000</span>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="submitFindingNote">Post note</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+async function _loadDrawerNotes(findingId) {
+  var list = document.getElementById('drawer-notes-list');
+  if (!list) return;
+  var r = await apiListFindingNotes(findingId);
+  var notes = (r && r.notes) || [];
+  _renderNotesThread(notes);
+}
+
+function _renderNotesThread(notes) {
+  var list = document.getElementById('drawer-notes-list');
+  if (!list) return;
+  if (!notes || notes.length === 0) {
+    list.innerHTML =
+      '<p class="notes-empty">No notes yet. Add the first one below.</p>';
+    return;
+  }
+  list.innerHTML = notes.map(function (n) {
+    var author = n.email || ('user #' + (n.user_id || '?'));
+    var when = n.created_at || '';
+    var body = String(n.body || '');
+    return '<div class="note-item" data-note-id="' + escapeHtml(String(n.id)) + '">' +
+      '<div class="note-meta">' +
+        '<span class="note-author">' + escapeHtml(author) + '</span>' +
+        '<span class="note-time" title="' + escapeHtml(when) + '">' +
+          escapeHtml(formatRelativeTime(when) || when) +
+        '</span>' +
+        '<button type="button" class="note-delete" aria-label="Delete note" ' +
+          'title="Delete note" data-action="deleteFindingNote" ' +
+          'data-arg="' + escapeHtml(String(n.id)) + '">&times;</button>' +
+      '</div>' +
+      '<div class="note-body">' + escapeHtml(body) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// Module-level cache so delete can update without a re-fetch.
+let _drawerNotes = [];
+
+async function _refetchDrawerNotes() {
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  var r = await apiListFindingNotes(_drawerFinding.id);
+  _drawerNotes = (r && r.notes) || [];
+  _renderNotesThread(_drawerNotes);
+  // Refresh the list-row note badge via event so every consumer stays in sync.
+  document.dispatchEvent(new CustomEvent('pulse:notes-changed', {
+    detail: { id: _drawerFinding.id, count: _drawerNotes.length },
+  }));
+}
+
+export async function submitFindingNote() {
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  var input = document.getElementById('drawer-note-input');
+  var body = (input && input.value || '').trim();
+  if (!body) {
+    if (input) input.focus();
+    return;
+  }
+  var btn = document.querySelector('[data-action="submitFindingNote"]');
+  if (btn) btn.disabled = true;
+  try {
+    var r = await apiCreateFindingNote(_drawerFinding.id, body);
+    if (!r || !r.ok) {
+      toastError((r && r.data && r.data.detail) || 'Could not post note.');
+      return;
+    }
+    if (input) input.value = '';
+    var countEl = document.getElementById('drawer-note-count');
+    if (countEl) countEl.textContent = '0';
+    await _refetchDrawerNotes();
+    showToast('Note posted');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+export async function deleteFindingNote(noteId) {
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  if (!confirm('Delete this note?')) return;
+  var r = await apiDeleteFindingNote(_drawerFinding.id, noteId);
+  if (!r || !r.ok) {
+    toastError((r && r.data && r.data.detail) || 'Could not delete note.');
+    return;
+  }
+  await _refetchDrawerNotes();
+  showToast('Note deleted');
+}
+
+// Live character counter on the compose textarea.
+document.addEventListener('input', function (e) {
+  var t = e.target;
+  if (t && t.id === 'drawer-note-input') {
+    var c = document.getElementById('drawer-note-count');
+    if (c) c.textContent = String((t.value || '').length);
+  }
+});
 
 function _renderWorkflowSection(f) {
   var current = (f && f.workflow_status) || 'new';
@@ -1614,6 +1774,50 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     var drawer = document.getElementById('finding-drawer');
     if (drawer && drawer.classList.contains('open')) closeFindingDrawer();
+  }
+});
+
+// Notes count sync — when the drawer adds/deletes a note, bump the
+// inline notes badge on every visible row for that finding.
+document.addEventListener('pulse:notes-changed', function (ev) {
+  if (!ev || !ev.detail || ev.detail.id == null) return;
+  var count = Number(ev.detail.count || 0);
+  var rows = document.querySelectorAll(
+    '[data-finding-id="' + String(ev.detail.id) + '"]'
+  );
+  rows.forEach(function (row) {
+    var cell = row.querySelector('.rule-cell');
+    if (!cell) return;
+    var existing = cell.querySelector('.notes-chip');
+    if (count === 0) {
+      if (existing) existing.remove();
+      return;
+    }
+    // Rebuild the badge by dispatching through the same helper. Relying
+    // on innerHTML here would drop event listeners from sibling chips.
+    var bubble =
+      '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+        'stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
+      '</svg>';
+    var html = '<span class="notes-chip" title="' + count + ' note' + (count === 1 ? '' : 's') + '">' +
+      bubble + '<span class="notes-chip-count">' + count + '</span>' +
+    '</span>';
+    if (existing) {
+      existing.outerHTML = html;
+    } else {
+      cell.insertAdjacentHTML('beforeend', ' ' + html);
+    }
+  });
+  // Keep cached list state in sync.
+  var cache = findingsState && findingsState.raw;
+  if (Array.isArray(cache)) {
+    for (var i = 0; i < cache.length; i++) {
+      if (cache[i] && String(cache[i].id) === String(ev.detail.id)) {
+        cache[i].note_count = count;
+      }
+    }
   }
 });
 
