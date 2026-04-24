@@ -339,14 +339,9 @@
   <!-- Global toast (success/error notifications) -->
   <div id="toast" class="toast"></div>
 
-  <!-- Persistent floating feedback button — visible on every page. -->
-  <button id="feedback-fab" class="feedback-fab" type="button"
-          data-action="openFeedbackModal"
-          aria-label="Send feedback"
-          title="Send feedback">
-    <i data-lucide="message-square"></i>
-    <span>Feedback</span>
-  </button>
+  <!-- Feedback now lives only in the user-menu dropdown (avatar ->
+       Give Feedback). The floating FAB was removed because it
+       overlapped the Findings bulk-action bar in the bottom-right. -->
 
   <!-- ============================================================= -->
   <!-- FINDING DETAIL DRAWER                                          -->

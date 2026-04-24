@@ -633,38 +633,3 @@
   margin-top: 0;
 }
 
-/* --- Floating feedback FAB ----------------------------------------------- */
-.feedback-fab {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 1000;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--accent, #58a6ff);
-  background: var(--accent, #58a6ff);
-  color: #fff;
-  font: 600 13px/1 var(--font-body, 'Inter', sans-serif);
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
-  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
-}
-.feedback-fab:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
-  filter: brightness(1.06);
-}
-.feedback-fab i,
-.feedback-fab svg {
-  width: 16px;
-  height: 16px;
-  stroke-width: 2.2;
-}
-@media (max-width: 600px) {
-  .feedback-fab span { display: none; }
-  .feedback-fab { padding: 12px; border-radius: 50%; }
-}
