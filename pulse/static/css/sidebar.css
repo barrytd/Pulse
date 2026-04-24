@@ -84,10 +84,16 @@
 /* Flat nav list — every item on the same 8px rhythm, no group
    separators, no labels. The uniform cadence (Rapid7 InsightIDR
    style) reads as a single coherent rail instead of a collection of
-   semantic clusters. */
+   semantic clusters.
+   Spacing from the brand block: explicit margin-top: 24px (not
+   padding on this container, per the UI review). Combined with the
+   brand block's existing 1px rgba(255,255,255,0.06) border-bottom,
+   there's a clear visual separator + 24px of breathing room before
+   the first nav item. Nothing else in the stylesheet overrides this. */
 .sidebar-nav {
   flex: 1;
-  padding: 12px 0;
+  padding: 0 0 12px;
+  margin-top: 24px;
   display: flex;
   flex-direction: column;
   gap: 8px;
