@@ -660,14 +660,11 @@ export function applyFindingsView() {
     '<div class="card" style="padding:0; overflow:hidden;">' +
       (rows.length === 0
         ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings match the current filters.</div>'
-        : '<div class="findings-scroll-wrap" id="findings-scroll-wrap">' +
-            _buildFindingsTable(rows) +
-          '</div>') +
+        : _buildFindingsTable(rows)) +
     '</div>' +
     _renderBulkBarHtml(visible, total, filtered);
   _restoreSearchFocus('findings-search-box');
   _mountBulkBarUsers();
-  _wireFindingsScrollShadow();
   // Paired with the scrollY capture at the top of this function —
   // `instant` so the page doesn't animate back into place.
   window.scrollTo({ top: _scrollY, left: 0, behavior: 'instant' });
@@ -1058,21 +1055,6 @@ function _rowActionsHtml(f) {
   '</div>';
 }
 
-// Toggles `.is-scrolled` on the scroll container so the sticky checkbox
-// + timestamp columns only show their right-edge shadow once the user
-// has actually scrolled horizontally — at scrollLeft=0 the columns sit
-// flush with the rest of the table and don't need a visual divider.
-function _wireFindingsScrollShadow() {
-  var wrap = document.getElementById('findings-scroll-wrap');
-  if (!wrap) return;
-  function _sync() {
-    if (wrap.scrollLeft > 2) wrap.classList.add('is-scrolled');
-    else wrap.classList.remove('is-scrolled');
-  }
-  wrap.addEventListener('scroll', _sync, { passive: true });
-  _sync();
-}
-
 function _buildFindingsTable(findings) {
   // Stash the filtered slice so "Select all matching filter" in the bulk
   // bar can target exactly what's visible after current filters.
@@ -1093,15 +1075,16 @@ function _buildFindingsTable(findings) {
     ' data-action="toggleFindingSelectAll" aria-label="Select all visible findings" />' +
   '</th>';
 
+  // Description / MITRE / Host were dropped from the row render — the
+  // inline expand and the detail drawer both already surface them,
+  // which frees space for the columns analysts scan most often:
+  // timestamp, severity, rule, scan, assignee, status.
   return '<table class="data-table">' +
     '<thead><tr>' +
       headCheckbox +
       th('time', 'Timestamp') +
       th('severity', 'Severity') +
       th('rule', 'Rule') +
-      '<th>MITRE ATT&amp;CK</th>' +
-      '<th>Description</th>' +
-      th('host', 'Host') +
       th('scan', 'Scan') +
       '<th>Assigned To</th>' +
       '<th>Status</th>' +
@@ -1149,10 +1132,6 @@ function _buildFindingsTable(findings) {
             _notesBadgeInline(f) +
           '</div>' +
         '</td>' +
-        '<td class="col-mitre">' + mitreTag + '</td>' +
-        '<td class="col-desc" title="' + escapeHtml(details) + '" ' +
-          'style="color:var(--text-muted);">' + escapeHtml(shortDetails) + '</td>' +
-        '<td class="col-host">' + escapeHtml(f._scan_host || '-') + '</td>' +
         '<td class="col-scan"><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
           'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
@@ -1162,7 +1141,8 @@ function _buildFindingsTable(findings) {
       '</tr>';
 
       if (!isOpen) return main;
-      return main + _expandRow(f, 11);
+      // 8 columns now: checkbox + time + sev + rule + scan + assigned + status + actions.
+      return main + _expandRow(f, 8);
     }).join('') +
     '</tbody></table>';
 }

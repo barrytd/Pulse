@@ -629,78 +629,46 @@
 }
 .sort-arrow.inactive { color: var(--text-muted); opacity: 0.4; }
 
-/* Findings table — the card now scrolls horizontally when needed.
-   Columns declare explicit widths + nowrap where wrapping would look
-   worse than overflowing (timestamps, severity pills, scan #, assignee
-   chip, status pill). Description gets a hard 280px cap with ellipsis
-   so a long tokenized string can never push neighbouring columns off
-   the viewport. The first two columns (checkbox + timestamp) are
-   sticky so the user always has a reference point while scrolling. */
-.findings-scroll-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
+/* Findings table — 8 columns now (checkbox + timestamp + severity +
+   rule + scan + assigned + status + actions). Description, MITRE, and
+   Host moved to the inline expand row + detail drawer only, which
+   gives every remaining column room to breathe without horizontal
+   scroll. Compact columns stay nowrap + min-widths so pills + chips
+   don't stack into tall cells. Rule takes whatever space is left
+   (width:auto + no min-width) because it's the primary identifier. */
 .data-table { width: 100%; }
 
-.data-table .col-select {
-  width: 32px;
-  min-width: 32px;
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  background: var(--card-bg);
-}
-/* Subtle right-edge shadow so the sticky columns visually detach from
-   the scrolled content behind them. Only shows when actually scrolled. */
-.findings-scroll-wrap.is-scrolled .data-table .col-select::after,
-.findings-scroll-wrap.is-scrolled .data-table .col-time::after {
-  content: "";
-  position: absolute;
-  top: 0; bottom: 0; right: -6px;
-  width: 6px;
-  pointer-events: none;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.28), transparent);
-}
-.data-table .col-time {
-  white-space: nowrap;
-  min-width: 160px;
-  position: sticky;
-  left: 32px;
-  z-index: 2;
-  background: var(--card-bg);
-}
-.data-table tr:nth-child(even) .col-select,
-.data-table tr:nth-child(even) .col-time { background: var(--hover-row); }
-.data-table tr.is-selected .col-select,
-.data-table tr.is-selected .col-time {
-  background: rgba(88, 166, 255, 0.08);
-}
-
-/* Compact columns — content is short and wrapping looks worse than a
-   fixed width. */
+.data-table .col-select  { width: 32px;  min-width: 32px; }
+.data-table .col-time,
 .data-table .col-severity,
 .data-table .col-scan,
-.data-table .col-host,
 .data-table .col-assigned,
 .data-table .col-status {
   white-space: nowrap;
 }
-.data-table .col-severity { min-width: 100px; }
-.data-table .col-host     { min-width: 120px; }
-.data-table .col-scan     { min-width: 110px; }
-.data-table .col-assigned { min-width: 140px; }
-.data-table .col-status   { min-width: 130px; }
-.data-table .col-rule     { min-width: 240px; }
-.data-table .col-mitre    { min-width: 110px; white-space: nowrap; }
+.data-table .col-time     { min-width: 160px; }
+.data-table .col-severity { width: 96px;  min-width: 96px; }
+.data-table .col-scan     { width: 110px; min-width: 110px; }
+.data-table .col-assigned { width: 150px; min-width: 140px; }
+.data-table .col-status   { width: 140px; min-width: 130px; }
+.data-table .col-actions  { width: 112px; min-width: 112px; }
 
-/* Description — hard cap with ellipsis. The expanded row shows the
-   full text, so truncation in the list is purely visual. */
-.data-table .col-desc {
-  max-width: 280px;
-  min-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Rule column is the primary identifier — let it absorb leftover
+   horizontal space. The cell's own grid-ish layout (rule name + ref
+   id + chips) wraps gracefully inside the column if the rule name is
+   unusually long. */
+.data-table .col-rule {
+  width: auto;
+  min-width: 260px;
+}
+.data-table .col-rule .rule-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.data-table .col-rule .rule-name {
+  font-weight: 500;
 }
 
 /* Inline expand row for findings detail. colspan reaches across the
