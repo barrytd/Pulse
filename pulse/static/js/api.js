@@ -210,7 +210,7 @@ export async function apiGetTrends(days) {
   return resp.json();
 }
 
-// Organisation branding — logo + display name that overrides the
+// Organization branding — logo + display name that overrides the
 // default "PULSE / Threat Detection" sidebar lockup. Reads are open to
 // any authenticated user (the sidebar shows the brand); writes are
 // admin-only on the server.

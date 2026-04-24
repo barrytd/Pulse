@@ -69,7 +69,7 @@ export async function mountUserMenu() {
   } catch (e) { /* keep the default PULSE lockup */ }
 }
 
-// Swap the sidebar logo text for the admin-configured organisation name
+// Swap the sidebar logo text for the admin-configured organization name
 // (and optionally an uploaded logo) when branding is set. Exported so
 // the Settings > Appearance handlers can call this after a save to
 // update the sidebar live without a page reload.

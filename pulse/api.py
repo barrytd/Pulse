@@ -709,7 +709,7 @@ def _register_routes(app: FastAPI) -> None:
         return Response(content=blob, media_type=mime or "image/png")
 
     # -------------------------------------------------------------------
-    # Organisation branding — admin-managed logo + org name that swaps
+    # Organization branding — admin-managed logo + org name that swaps
     # into the sidebar / topbar so customers can white-label the UI.
     # GET /api/branding           — any logged-in user reads the metadata
     # PUT /api/branding           — admin-only; sets/clears the org name

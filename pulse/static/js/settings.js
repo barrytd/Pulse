@@ -510,7 +510,7 @@ export async function renderSettingsPage() {
     '</div>';
 
   // --- Appearance tab ------------------------------------------------
-  // Organisation branding card — admin-only. Viewers see the theme
+  // Organization branding card — admin-only. Viewers see the theme
   // picker only; the branding they render is pulled from the sidebar
   // mount code which every user runs regardless.
   var brandingHtml = isAdmin ? _renderBrandingCard(branding) : '';
@@ -637,7 +637,7 @@ export async function renderSettingsPage() {
 // Users tab (admin-only)
 // ------------------------------------------------------------------------
 
-// Organisation branding card — admin-only. The viewer-side render of
+// Organization branding card — admin-only. The viewer-side render of
 // branding lives in mountUserMenu / sidebar mounting, not this card.
 function _renderBrandingCard(branding) {
   var name = (branding && branding.organization_name) || '';
@@ -660,14 +660,14 @@ function _renderBrandingCard(branding) {
 
   return (
     '<div class="card" style="margin-bottom:16px;">' +
-      '<div class="section-label">Organisation Branding</div>' +
+      '<div class="section-label">Organization Branding</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
         'White-label the sidebar with your company name and logo. Changes ' +
         'apply on every user’s next page load.' +
       '</p>' +
 
       '<div class="form-row">' +
-        '<label>Organisation name</label>' +
+        '<label>Organization name</label>' +
         '<input type="text" id="branding-name-input" maxlength="80" ' +
           'placeholder="e.g. Acme Corp" value="' + escapeHtml(name) + '"/>' +
       '</div>' +
@@ -1198,7 +1198,7 @@ export async function createUser() {
 // Per-row actions dropdown toggle. Closes any other open menu first so
 // only one row's menu is visible at a time.
 // ---------------------------------------------------------------
-// Organisation branding handlers
+// Organization branding handlers
 // ---------------------------------------------------------------
 
 export async function saveBrandingName() {
@@ -1207,10 +1207,10 @@ export async function saveBrandingName() {
   var name = (input.value || '').trim();
   var r = await apiSaveBrandingName(name || null);
   if (!r || !r.ok) {
-    toastError((r && r.data && r.data.detail) || 'Could not save organisation name.');
+    toastError((r && r.data && r.data.detail) || 'Could not save organization name.');
     return;
   }
-  showToast(name ? 'Organisation name saved' : 'Organisation name cleared');
+  showToast(name ? 'Organization name saved' : 'Organization name cleared');
   // Rebrand the sidebar in place without forcing a full page reload.
   _applyBrandingToSidebar(r.data || {});
 }

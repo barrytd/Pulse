@@ -908,7 +908,7 @@ body.light .admin-banner-close {
   background: rgba(248, 81, 73, 0.1);
 }
 
-/* Organisation branding card — admin-only logo upload + preview. */
+/* Organization branding card — admin-only logo upload + preview. */
 .branding-logo-row {
   display: flex;
   gap: 16px;
