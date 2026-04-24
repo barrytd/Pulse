@@ -4,7 +4,7 @@
 // Session actions. Outside click + Escape close it.
 'use strict';
 
-import { apiGetAuthStatus, apiGetMe } from './api.js';
+import { apiGetAuthStatus, apiGetMe, apiGetBranding } from './api.js';
 import { navigate } from './navigation.js';
 import { toggleTheme } from './theme.js';
 import { signOut, setActiveSettingsTab } from './settings.js';
@@ -60,6 +60,51 @@ export async function mountUserMenu() {
   if (avatar) avatar.textContent = _initialFromIdentity(displayName, email);
   var greet = document.getElementById('user-dropdown-name');
   if (greet) greet.textContent = _firstNameFromIdentity(displayName, email);
+
+  // Apply org branding to the sidebar — fetched separately so a failure
+  // here never blocks the user menu mount.
+  try {
+    var b = await apiGetBranding();
+    applyBrandingToSidebar(b);
+  } catch (e) { /* keep the default PULSE lockup */ }
+}
+
+// Swap the sidebar logo text for the admin-configured organisation name
+// (and optionally an uploaded logo) when branding is set. Exported so
+// the Settings > Appearance handlers can call this after a save to
+// update the sidebar live without a page reload.
+export function applyBrandingToSidebar(branding) {
+  if (!branding) return;
+  var titleEl = document.querySelector('.sidebar-logo .sidebar-logo-title');
+  var subEl   = document.querySelector('.sidebar-logo .sidebar-logo-sub');
+  var markEl  = document.querySelector('.sidebar-logo .sidebar-logo-mark');
+  var name = (branding.organization_name || '').trim();
+  if (titleEl) {
+    // Keep the uppercase treatment so the lockup still feels like a
+    // brand mark rather than a raw string. Accepts up to 80 chars
+    // (server-capped); CSS truncates with ellipsis if overflowing.
+    titleEl.textContent = name ? name.toUpperCase() : 'PULSE';
+  }
+  if (subEl) {
+    subEl.textContent = name ? 'Powered by Pulse' : 'Threat Detection';
+  }
+  if (markEl) {
+    if (branding.has_logo) {
+      // Swap the SVG "pulse" mark for the uploaded logo. Cache-bust
+      // via updated_at (or Date.now) so a fresh upload appears
+      // immediately.
+      var bust = branding.updated_at ? encodeURIComponent(branding.updated_at) : Date.now();
+      markEl.innerHTML = '<img src="/api/branding/logo?v=' + bust + '" alt="' +
+        (name || 'Pulse') + ' logo" class="sidebar-logo-img" />';
+    } else {
+      // Restore the default ECG SVG mark.
+      markEl.innerHTML =
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
+        'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M2 12h4l2-6 4 12 2-6h8"/>' +
+        '</svg>';
+    }
+  }
 }
 
 // Re-fetch /api/me and repaint the greeting + initial. Called after an

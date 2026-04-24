@@ -219,6 +219,20 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 """
 
+# Custom branding — single-row table the admin can use to white-label
+# the app for their org. `id` is pinned to 1 so UPSERT is trivial; the
+# logo is stored as a BLOB (same pattern as user avatars) so it survives
+# Render restarts without needing a persistent disk.
+_CREATE_BRANDING = """
+CREATE TABLE IF NOT EXISTS branding (
+    id                INTEGER PRIMARY KEY,
+    organization_name TEXT,
+    logo_blob         BLOB,
+    logo_mime         TEXT,
+    updated_at        TEXT
+);
+"""
+
 # Analyst notes — multiple timestamped, author-attributed notes per
 # finding. Append-only from the UI; editing is a deliberate non-goal so
 # the thread is a durable audit trail. Deleting your own note is allowed;
@@ -259,6 +273,7 @@ def init_db(db_path):
         _CREATE_MONITOR_SESSIONS,
         _CREATE_FEEDBACK,
         _CREATE_FINDING_NOTES,
+        _CREATE_BRANDING,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -1849,6 +1864,99 @@ def list_all_notes(db_path, limit=500):
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
     except Exception:
         return []
+
+
+def get_branding(db_path):
+    """Return the single branding row as a dict (always 1 row, id=1),
+    or an empty record if the admin hasn't configured anything yet."""
+    empty = {
+        "organization_name": None,
+        "has_logo": False,
+        "logo_mime": None,
+        "updated_at": None,
+    }
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT organization_name, logo_blob, logo_mime, updated_at "
+                "FROM branding WHERE id = 1"
+            ).fetchone()
+            if not row:
+                return empty
+            has_blob = row[1] is not None
+            return {
+                "organization_name": row[0],
+                "has_logo": bool(has_blob),
+                "logo_mime": row[2],
+                "updated_at": row[3],
+            }
+    except Exception:
+        return empty
+
+
+def get_branding_logo(db_path):
+    """Return (blob, mime) for the current logo, or (None, None)."""
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT logo_blob, logo_mime FROM branding WHERE id = 1"
+            ).fetchone()
+            if not row or row[0] is None:
+                return None, None
+            return row[0], row[1]
+    except Exception:
+        return None, None
+
+
+def _ensure_branding_row(conn):
+    """UPSERT safety net — branding table has a pinned id=1 row. Insert
+    if missing; every caller can then do a plain UPDATE."""
+    existing = conn.execute("SELECT 1 FROM branding WHERE id = 1").fetchone()
+    if not existing:
+        conn.execute(
+            "INSERT INTO branding (id, organization_name, logo_blob, logo_mime, updated_at) "
+            "VALUES (1, NULL, NULL, NULL, NULL)"
+        )
+
+
+def set_organization_name(db_path, name):
+    """Set (or clear with None) the organization display name."""
+    if name is not None:
+        name = str(name).strip()
+        if name and len(name) > 80:
+            name = name[:80]
+        if not name:
+            name = None
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        _ensure_branding_row(conn)
+        conn.execute(
+            "UPDATE branding SET organization_name = ?, updated_at = ? WHERE id = 1",
+            (name, ts),
+        )
+
+
+def set_branding_logo(db_path, blob, mime):
+    """Store a raw logo image. Caller is expected to size/magic-byte
+    check first."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        _ensure_branding_row(conn)
+        conn.execute(
+            "UPDATE branding SET logo_blob = ?, logo_mime = ?, updated_at = ? WHERE id = 1",
+            (blob, mime, ts),
+        )
+
+
+def clear_branding_logo(db_path):
+    """Remove the stored logo without touching the org name."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        _ensure_branding_row(conn)
+        conn.execute(
+            "UPDATE branding SET logo_blob = NULL, logo_mime = NULL, updated_at = ? WHERE id = 1",
+            (ts,),
+        )
 
 
 def count_finding_notes(db_path, finding_ids):
