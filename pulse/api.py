@@ -64,7 +64,7 @@ from pulse.database import (
     update_user_active, update_user_email, update_user_password,
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
-    count_finding_notes,
+    count_finding_notes, list_all_notes,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -1526,6 +1526,16 @@ def _register_routes(app: FastAPI) -> None:
         if not ok:
             raise HTTPException(404, detail="Note not found.")
         return {"status": "ok"}
+
+    # Admin-only: every note across every finding, newest-first. Powers the
+    # Settings > Notes tab so an analyst can skim the full investigation
+    # log without opening each finding individually.
+    @app.get("/api/notes")
+    def api_list_all_notes(limit: int = 500,
+                           user_id: int = Depends(require_admin)):
+        if limit < 1 or limit > 2000:
+            raise HTTPException(400, detail="limit must be between 1 and 2000.")
+        return {"notes": list_all_notes(app.state.db_path, limit=limit)}
 
     # -------------------------------------------------------------------
     # GET /api/score/daily — aggregated daily scores

@@ -26,6 +26,7 @@ import {
   apiCreateToken,
   apiRevokeToken,
   apiListFeedback,
+  apiListAllNotes,
 } from './api.js';
 import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
 import { getTheme } from './theme.js';
@@ -51,6 +52,7 @@ const SETTINGS_TABS = [
   { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
   { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
   { id: 'feedback',      label: 'Feedback',        icon: 'message-square', adminOnly: true },
+  { id: 'notes',         label: 'Notes',           icon: 'sticky-note', adminOnly: true },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
 let _activeSettingsTab = 'profile';
@@ -142,6 +144,15 @@ export async function renderSettingsPage() {
       var fb = await apiListFeedback(500);
       feedbackRows = (fb && fb.rows) || [];
     } catch (e) { feedbackRows = []; }
+  }
+
+  // Admin-only cross-finding notes feed.
+  var notesRows = [];
+  if (isAdmin) {
+    try {
+      var nl = await apiListAllNotes(500);
+      notesRows = (nl && nl.notes) || [];
+    } catch (e) { notesRows = []; }
   }
 
   // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
@@ -501,6 +512,7 @@ export async function renderSettingsPage() {
   // --- Users tab (admins only) --------------------------------------
   var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
   var feedbackHtml = isAdmin ? _renderFeedbackPanel(feedbackRows) : '';
+  var notesHtml = isAdmin ? _renderNotesAdminPanel(notesRows) : '';
 
   // --- API tokens tab -----------------------------------------------
   var tokensHtml = _renderTokensPanel(tokensList);
@@ -514,6 +526,7 @@ export async function renderSettingsPage() {
     tokens:        tokensHtml,
     users:         usersHtml,
     feedback:      feedbackHtml,
+    notes:         notesHtml,
     // SMTP is powerful but noisy — tucked behind a <details> so the
     // Advanced tab reads as a configuration inventory, not a form wall.
     advanced:
@@ -803,6 +816,137 @@ function _renderFeedbackPanel(rows) {
 // Click a row to expand the full message. Re-click collapses.
 export function toggleFeedbackRow(arg, target) {
   var row = target && target.closest ? target.closest('.feedback-row') : null;
+  if (!row) return;
+  var preview = row.querySelector('.feedback-message-preview');
+  var full    = row.querySelector('.feedback-message-full');
+  if (!preview || !full) return;
+  var expanded = !full.hasAttribute('hidden');
+  if (expanded) {
+    full.setAttribute('hidden', '');
+    preview.removeAttribute('hidden');
+    row.classList.remove('is-expanded');
+  } else {
+    preview.setAttribute('hidden', '');
+    full.removeAttribute('hidden');
+    row.classList.add('is-expanded');
+  }
+}
+
+// Admin-only cross-finding Notes feed. Mirrors _renderFeedbackPanel: a
+// 4-tile KPI strip + a submissions table. Row click expands the note body
+// inline; the "Open finding" link in each row navigates to the parent scan
+// so the admin can read the note in its finding context.
+function _renderNotesAdminPanel(rows) {
+  var total = rows.length;
+
+  // KPI math: notes in last 7 days, unique authors, top-noted rule.
+  var weekCutoff = Date.now() - 7 * 86400000;
+  var weekCount = 0;
+  var authors = {};
+  var ruleAgg = {};
+  rows.forEach(function (r) {
+    var t = Date.parse((r.created_at || '').replace(' ', 'T'));
+    if (!isNaN(t) && t >= weekCutoff) weekCount++;
+    if (r.email) authors[r.email] = true;
+    if (r.rule) ruleAgg[r.rule] = (ruleAgg[r.rule] || 0) + 1;
+  });
+  var topRule = '';
+  var topRuleCount = 0;
+  Object.keys(ruleAgg).forEach(function (k) {
+    if (ruleAgg[k] > topRuleCount) { topRuleCount = ruleAgg[k]; topRule = k; }
+  });
+
+  function _tile(label, value, accent) {
+    return '<div class="feedback-kpi' + (accent ? ' feedback-kpi-' + accent : '') + '">' +
+      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
+      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    '</div>';
+  }
+
+  var kpiHtml =
+    '<div class="feedback-kpi-strip">' +
+      _tile('Total Notes', total, '') +
+      _tile('Last 7 Days', weekCount, 'idea') +
+      _tile('Authors', Object.keys(authors).length, 'general') +
+      _tile('Top Rule', topRule || '—', 'muted') +
+    '</div>';
+
+  if (total === 0) {
+    return (
+      '<div class="card" style="margin-bottom:16px;">' +
+        '<div class="section-label">Notes</div>' +
+        '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
+          'Every analyst note posted on any finding will appear here, newest-first. ' +
+          'Nothing yet — notes are added from the Notes section of the finding drawer.' +
+        '</p>' +
+        kpiHtml +
+      '</div>'
+    );
+  }
+
+  var rowsHtml = rows.map(function (r, i) {
+    var sev = (r.severity || 'LOW').toUpperCase();
+    var sevCls = 'badge badge-' + sev.toLowerCase();
+    var ref = r.ref_id || ('#' + r.finding_id);
+    var rule = r.rule || 'Unknown rule';
+    var author = r.email || ('user #' + (r.user_id || '?'));
+    var when = r.created_at || '';
+    var rel = (function () {
+      // Lightweight relative-time; mirrors dashboard formatRelativeTime.
+      var t = Date.parse((when || '').replace(' ', 'T'));
+      if (isNaN(t)) return when;
+      var sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+      if (sec < 45)    return 'just now';
+      if (sec < 3600)  return Math.floor(sec / 60)  + 'm ago';
+      if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+      return Math.floor(sec / 86400) + 'd ago';
+    })();
+    var body = String(r.body || '');
+    var preview = body.length > 140 ? body.slice(0, 140) + '…' : body;
+    var scanHref = r.scan_id ? ('/scans/' + r.scan_id) : '#';
+    return (
+      '<tr class="feedback-row note-admin-row" data-action="toggleNoteAdminRow" data-arg="' + i + '">' +
+        '<td class="feedback-when" title="' + escapeHtml(when) + '">' +
+          escapeHtml(rel) +
+        '</td>' +
+        '<td><span class="' + sevCls + '">' + escapeHtml(sev) + '</span></td>' +
+        '<td class="feedback-from">' + escapeHtml(author) + '</td>' +
+        '<td>' +
+          '<a href="' + escapeHtml(scanHref) + '" data-action="viewScanFromLink" ' +
+             'data-arg="' + escapeHtml(String(r.scan_id || '')) + '" ' +
+             'class="note-rule-link">' +
+             escapeHtml(rule) + ' <span class="mono">' + escapeHtml(ref) + '</span>' +
+          '</a>' +
+        '</td>' +
+        '<td class="feedback-message">' +
+          '<div class="feedback-message-preview">' + escapeHtml(preview) + '</div>' +
+          '<div class="feedback-message-full" hidden>' + escapeHtml(body) + '</div>' +
+        '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  return (
+    kpiHtml +
+    '<div class="card" style="padding:0; overflow:hidden;">' +
+      '<div class="section-label" style="padding:16px 20px 8px;">' +
+        'Notes (' + total + ')' +
+      '</div>' +
+      '<div class="table-wrap"><table class="data-table">' +
+        '<thead><tr>' +
+          '<th>When</th><th>Sev</th><th>Author</th><th>Finding</th><th>Note</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>' +
+    '</div>'
+  );
+}
+
+// Expand/collapse the body preview. Same pattern as toggleFeedbackRow.
+export function toggleNoteAdminRow(arg, target, e) {
+  // Don't toggle when the click originated on the rule link (that navigates).
+  if (e && e.target && e.target.closest && e.target.closest('.note-rule-link')) return;
+  var row = target && target.closest ? target.closest('.note-admin-row') : null;
   if (!row) return;
   var preview = row.querySelector('.feedback-message-preview');
   var full    = row.querySelector('.feedback-message-full');

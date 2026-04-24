@@ -1654,6 +1654,32 @@ def delete_finding_note(db_path, note_id, caller_user_id, caller_is_admin):
     return True
 
 
+def list_all_notes(db_path, limit=500):
+    """Return every note across every finding, newest-first. Admin view.
+
+    Joins against users for the author email and findings for the rule
+    name + ref_id so the Settings > Notes tab can render useful context
+    without an N+1 fetch.
+    """
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT n.id, n.finding_id, n.body, n.created_at,
+                          u.email,
+                          f.rule, f.ref_id, f.severity, f.scan_id
+                   FROM finding_notes n
+                   LEFT JOIN users u    ON u.id = n.user_id
+                   LEFT JOIN findings f ON f.id = n.finding_id
+                   ORDER BY n.id DESC
+                   LIMIT ?""",
+                (int(limit),),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
 def count_finding_notes(db_path, finding_ids):
     """Return a dict {finding_id: count} for the given ids. Used by the
     findings list to badge rows with a notes indicator without N+1 queries."""

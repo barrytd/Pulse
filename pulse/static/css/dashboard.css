@@ -2961,3 +2961,20 @@ tr.pending-flash {
   background: var(--hover-bg);
 }
 
+/* Notes admin tab — link into the parent scan from a note row. */
+.note-rule-link {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+}
+.note-rule-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.note-rule-link .mono {
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+

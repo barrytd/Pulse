@@ -143,6 +143,7 @@ import {
   createToken,
   revokeTokenConfirm,
   toggleFeedbackRow,
+  toggleNoteAdminRow,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -325,6 +326,7 @@ const actions = {
   createToken,
   revokeTokenConfirm,
   toggleFeedbackRow,
+  toggleNoteAdminRow,
 
   // reports
   setReportsQueryFromInput,

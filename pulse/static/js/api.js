@@ -210,6 +210,16 @@ export async function apiGetTrends(days) {
   return resp.json();
 }
 
+// Admin-only: every analyst note across every finding, newest-first.
+// Powers the Settings > Notes tab so admins see the full investigation
+// thread without clicking into each finding.
+export async function apiListAllNotes(limit) {
+  var q = (limit && Number(limit) > 0) ? ('?limit=' + Number(limit)) : '';
+  var resp = await fetch('/api/notes' + q);
+  if (!resp.ok) return { notes: [] };
+  return resp.json();
+}
+
 // Admin-only: list feedback submissions newest-first. Returns [] if the
 // caller isn't an admin so the tab can render an empty state instead of
 // blowing up the Settings render.
