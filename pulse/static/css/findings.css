@@ -438,7 +438,7 @@
   font-weight: 500;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.review-toggle:hover { background: rgba(255, 255, 255, 0.04); }
+.review-toggle:hover { background: var(--hover-bg); }
 
 /* The checkbox — an outlined square that fills when the parent toggle
    is active. ::after draws the checkmark or X depending on which toggle. */

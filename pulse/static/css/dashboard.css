@@ -573,7 +573,7 @@
   user-select: none;
   transition: background 0.12s;
 }
-.mon-settings-row:hover { background: rgba(255, 255, 255, 0.03); }
+.mon-settings-row:hover { background: var(--hover-bg); }
 .mon-settings-row.open  { border-bottom: 1px solid var(--border); }
 .mon-settings-title {
   font-size: 11px;
@@ -1444,7 +1444,7 @@
    based on the worst severity currently in the list.
 ----------------------------------------------------------------- */
 .needs-attention {
-  background: var(--panel, #161b22);
+  background: var(--card-bg);
   border: 1px solid var(--border);
   border-left-width: 4px;
   border-radius: 6px;
@@ -1507,7 +1507,7 @@
   font-size: 13px;
   transition: background 0.12s;
 }
-.needs-attention .na-row:hover { background: rgba(255,255,255,0.04); }
+.needs-attention .na-row:hover { background: var(--hover-bg); }
 .needs-attention .na-rule { font-weight: 500; }
 .needs-attention .na-host {
   font-family: var(--mono, monospace);
@@ -1958,7 +1958,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.cmp-tab:hover { color: var(--text); background: var(--surface-2, rgba(255,255,255,0.04)); }
+.cmp-tab:hover { color: var(--text); background: var(--hover-bg); }
 .cmp-tab.active {
   color: var(--text);
   background: var(--surface-2, rgba(88,166,255,0.1));
