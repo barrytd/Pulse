@@ -412,8 +412,12 @@ export async function apiSetFindingReview(findingId, flags) {
   var body = {
     reviewed: !!(flags && flags.reviewed),
     false_positive: !!(flags && flags.falsePositive),
-    note: (flags && flags.note) || '',
   };
+  // Only include `note` when the caller explicitly passed one. Omitting
+  // it signals the server to leave the existing review_note untouched.
+  if (flags && Object.prototype.hasOwnProperty.call(flags, 'note')) {
+    body.note = String(flags.note || '');
+  }
   var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/review', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

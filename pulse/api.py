@@ -1392,10 +1392,18 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(404, detail="Finding not found.")
         reviewed = bool(p.get("reviewed"))
         false_positive = bool(p.get("false_positive"))
-        note = p.get("note")
-        updated = set_finding_review(
-            app.state.db_path, finding_id, reviewed, false_positive, note,
-        )
+        # Only touch review_note when the client explicitly sent it. The
+        # dedicated Notes thread (finding_notes) replaces this legacy
+        # free-text field; omitting `note` preserves any legacy value
+        # rather than nulling it on every toggle.
+        if "note" in p:
+            updated = set_finding_review(
+                app.state.db_path, finding_id, reviewed, false_positive, p.get("note"),
+            )
+        else:
+            updated = set_finding_review(
+                app.state.db_path, finding_id, reviewed, false_positive,
+            )
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
         return updated

@@ -717,7 +717,11 @@ def test_review_allows_both_flags_simultaneously(client):
     assert body["false_positive"] is True
 
 
-def test_review_reset_clears_note_and_timestamp(client):
+def test_review_reset_clears_timestamp_but_preserves_note_when_omitted(client):
+    """Clearing both flags without sending `note` nulls reviewed_at but
+    preserves any legacy review_note — the dedicated finding_notes thread
+    now owns analyst commentary, so a review toggle shouldn't clobber it.
+    Sending an explicit empty string still clears the legacy note."""
     fid = _seed_finding(client)
     client.put(f"/api/finding/{fid}/review",
                json={"reviewed": True, "false_positive": False, "note": "x"})
@@ -728,7 +732,14 @@ def test_review_reset_clears_note_and_timestamp(client):
     assert body["reviewed"] is False
     assert body["false_positive"] is False
     assert body["reviewed_at"]   is None
-    assert body["review_note"]   is None
+    # note persists because the second call omitted `note`
+    assert body["review_note"]   == "x"
+
+    # Explicit empty string still clears it.
+    r = client.put(f"/api/finding/{fid}/review",
+                   json={"reviewed": False, "false_positive": False, "note": ""})
+    assert r.status_code == 200
+    assert r.json()["review_note"] is None
 
 
 def test_review_rejects_missing_flags(client):

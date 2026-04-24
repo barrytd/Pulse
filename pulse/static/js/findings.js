@@ -1555,7 +1555,6 @@ function _renderWorkflowSection(f) {
 }
 
 function _renderReviewSection(f) {
-  var noteVal = f.review_note || '';
   var touched = isTouched(f);
   var reviewed = isReviewed(f);
   var fp = isFalsePositive(f);
@@ -1569,9 +1568,6 @@ function _renderReviewSection(f) {
   return '<div class="finding-drawer-section">' +
     '<div class="sec-label">Review</div>' +
     reviewedAtHtml +
-    '<textarea id="drawer-review-note" class="review-note-input" placeholder="Optional note (why reviewed, who owns follow-up, etc.)">' +
-      escapeHtml(noteVal) +
-    '</textarea>' +
     '<div class="review-toggles">' +
       '<button type="button" class="review-toggle review-toggle-reviewed' +
         (reviewed ? ' active' : '') + '" ' +
@@ -1638,12 +1634,12 @@ async function _submitReview(nextReviewed, nextFalsePositive) {
     toastError('This finding has no id yet — save a scan first.');
     return;
   }
-  var noteEl = document.getElementById('drawer-review-note');
-  var note = noteEl ? noteEl.value : '';
+  // Review note textarea was removed in favor of the dedicated Notes
+  // thread. Omit `note` from the payload so the server leaves any legacy
+  // review_note untouched rather than nulling it.
   var r = await apiSetFindingReview(_drawerFinding.id, {
     reviewed: nextReviewed,
     falsePositive: nextFalsePositive,
-    note: note,
   });
   if (!r.ok) {
     toastError((r.data && r.data.detail) || 'Review update failed.');

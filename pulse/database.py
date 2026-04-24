@@ -692,7 +692,10 @@ def get_scan_findings(db_path, scan_id, user_id=None):
         return rows
 
 
-def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None):
+_NOTE_UNCHANGED = object()
+
+
+def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE_UNCHANGED):
     """
     Update the review flags (and optional note) for a single finding.
 
@@ -719,16 +722,27 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None)
     # can tell "never touched" apart from "touched then reset".
     reviewed_at = (datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                    if (r or fp) else None)
-    clean_note = (note or "").strip() or None
-
     with _connect(db_path) as conn:
-        conn.execute(
-            """UPDATE findings
-               SET reviewed = ?, false_positive = ?,
-                   review_note = ?, reviewed_at = ?
-               WHERE id = ?""",
-            (r, fp, clean_note, reviewed_at, int(finding_id)),
-        )
+        if note is _NOTE_UNCHANGED:
+            # Preserve any existing review_note. Used by the dashboard now
+            # that the legacy free-text field is superseded by the proper
+            # finding_notes thread — toggling Reviewed shouldn't nuke a
+            # legacy note that predates the thread feature.
+            conn.execute(
+                """UPDATE findings
+                   SET reviewed = ?, false_positive = ?, reviewed_at = ?
+                   WHERE id = ?""",
+                (r, fp, reviewed_at, int(finding_id)),
+            )
+        else:
+            clean_note = (note or "").strip() or None
+            conn.execute(
+                """UPDATE findings
+                   SET reviewed = ?, false_positive = ?,
+                       review_note = ?, reviewed_at = ?
+                   WHERE id = ?""",
+                (r, fp, clean_note, reviewed_at, int(finding_id)),
+            )
         row = conn.execute(
             """SELECT id, ref_id, scan_id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
