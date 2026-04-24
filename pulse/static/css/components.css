@@ -335,7 +335,41 @@ body.light .admin-banner-close {
 /* Content area                                                        */
 /* ------------------------------------------------------------------ */
 .content {
-  padding: 24px 32px 48px;
+  /* Uniform 24px gutter on every side for a denser, more professional
+     feel — matches the global density pass inspired by QRadar /
+     InsightIDR. 48px bottom room left for the sticky bulk bar so it
+     never overlaps the last row of a long table. */
+  padding: 24px 24px 48px;
+}
+
+/* Shared rhythm: every stacked section inside .content should sit
+   16px apart. Kept as a class so individual pages can still override
+   when a tighter or looser break reads better. */
+.content > * + *,
+.content-stack > * + * {
+  margin-top: 16px;
+}
+
+/* Page head — the strip that sits above the first card on every
+   content page ("Findings (206 of 206)", "Settings", etc.). Title
+   is 20px semibold per the density pass. */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.page-head-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.1px;
+}
+.page-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 /* ------------------------------------------------------------------ */
@@ -354,10 +388,14 @@ body.light .admin-banner-close {
 /* Cards                                                               */
 /* ------------------------------------------------------------------ */
 .card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  /* Canonical card for the density pass — --bg-2 surface, 8px radius,
+     subtle 1px white-alpha border so the edge reads against --bg-0 /
+     --bg-1 neighbors without a heavy divider. Shadow stays token-
+     controlled so light/dark themes carry their own weight. */
+  background: var(--bg-2, var(--card-bg));
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  padding: 24px;
+  padding: 16px;
   box-shadow: var(--shadow);
 }
 
@@ -699,17 +737,30 @@ body.light .admin-banner-close {
 .search-box {
   flex: 1;
   min-width: 200px;
-  padding: 7px 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  /* 36px tall matches the filter-pill + status-dropdown height so
+     every control on the filter bar aligns on a single baseline. */
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-2, var(--card-bg));
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
   outline: none;
+  box-sizing: border-box;
 }
 
 .search-box:focus { border-color: var(--accent); }
+
+/* Match the search field height on filter-row pills + the status
+   dropdown so everything on a filter bar sits on the same 36px line. */
+.filter-pill {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+}
 
 /* Built-in / custom whitelist tags */
 .origin-badge {

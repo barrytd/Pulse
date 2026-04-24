@@ -39,42 +39,53 @@
       </a>
 
       <nav class="sidebar-nav">
-        <a class="active" data-action="navigate" data-arg="dashboard">
-          <i data-lucide="layout-dashboard" class="icon"></i> Dashboard
-        </a>
-        <a data-action="navigate" data-arg="monitor">
-          <i data-lucide="activity" class="icon"></i> Monitor
-        </a>
-        <a data-action="navigate" data-arg="scans">
-          <i data-lucide="file-search" class="icon"></i> Scans
-        </a>
-        <a data-action="navigate" data-arg="reports">
-          <i data-lucide="file-text" class="icon"></i> Reports
-        </a>
-        <a data-action="navigate" data-arg="history">
-          <i data-lucide="clock" class="icon"></i> History
-        </a>
-        <a data-action="navigate" data-arg="fleet">
-          <i data-lucide="server" class="icon"></i> Fleet
-        </a>
-        <a data-action="navigate" data-arg="firewall">
-          <i data-lucide="brick-wall" class="icon"></i> Firewall
-        </a>
-        <a data-action="navigate" data-arg="whitelist">
-          <i data-lucide="shield" class="icon"></i> Whitelist
-        </a>
-        <a data-action="navigate" data-arg="rules">
-          <i data-lucide="list-checks" class="icon"></i> Rules
-        </a>
-        <a data-action="navigate" data-arg="audit">
-          <i data-lucide="clipboard-list" class="icon"></i> Audit Log
-        </a>
-        <a data-action="navigate" data-arg="compliance">
-          <i data-lucide="shield-check" class="icon"></i> Compliance
-        </a>
-        <a data-action="navigate" data-arg="trends">
-          <i data-lucide="trending-up" class="icon"></i> Trends
-        </a>
+        <!-- Primary group: live/active workflow -->
+        <div class="sidebar-nav-group">
+          <a class="active" data-action="navigate" data-arg="dashboard">
+            <i data-lucide="layout-dashboard" class="icon"></i> Dashboard
+          </a>
+          <a data-action="navigate" data-arg="monitor">
+            <i data-lucide="activity" class="icon"></i> Monitor
+          </a>
+          <a data-action="navigate" data-arg="scans">
+            <i data-lucide="file-search" class="icon"></i> Scans
+          </a>
+          <a data-action="navigate" data-arg="reports">
+            <i data-lucide="file-text" class="icon"></i> Reports
+          </a>
+          <a data-action="navigate" data-arg="history">
+            <i data-lucide="clock" class="icon"></i> History
+          </a>
+        </div>
+
+        <!-- Assets group: what's out there + what we block/allow -->
+        <div class="sidebar-nav-group">
+          <a data-action="navigate" data-arg="fleet">
+            <i data-lucide="server" class="icon"></i> Fleet
+          </a>
+          <a data-action="navigate" data-arg="firewall">
+            <i data-lucide="brick-wall" class="icon"></i> Firewall
+          </a>
+          <a data-action="navigate" data-arg="whitelist">
+            <i data-lucide="shield" class="icon"></i> Whitelist
+          </a>
+        </div>
+
+        <!-- Config group: tuning knobs + oversight surfaces -->
+        <div class="sidebar-nav-group">
+          <a data-action="navigate" data-arg="rules">
+            <i data-lucide="list-checks" class="icon"></i> Rules
+          </a>
+          <a data-action="navigate" data-arg="audit">
+            <i data-lucide="clipboard-list" class="icon"></i> Audit Log
+          </a>
+          <a data-action="navigate" data-arg="compliance">
+            <i data-lucide="shield-check" class="icon"></i> Compliance
+          </a>
+          <a data-action="navigate" data-arg="trends">
+            <i data-lucide="trending-up" class="icon"></i> Trends
+          </a>
+        </div>
       </nav>
 
     </aside>

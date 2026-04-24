@@ -855,6 +855,87 @@ export function _dashFunnelHtml(scans, findings) {
   '</div>';
 }
 
+// Mean time to detect — average delta between each finding's event
+// timestamp and when the scan that surfaced it actually ran. Lower is
+// better. Operates on a list of findings that know their parent scan's
+// scanned_at date (either inline `.scanned_at` or a hoisted `._scan_date`
+// the attention fetch attaches). Returns seconds, or null when we have
+// nothing to compute from.
+export function _computeMTTDSeconds(findings) {
+  if (!Array.isArray(findings) || !findings.length) return null;
+  var total = 0, n = 0;
+  findings.forEach(function (f) {
+    var evt = Date.parse(String(f.timestamp || _extractTime(f) || '').replace(' ', 'T'));
+    var scanIso = f._scan_date || f.scanned_at || '';
+    var scan = Date.parse(String(scanIso).replace(' ', 'T'));
+    if (isNaN(evt) || isNaN(scan)) return;
+    var delta = (scan - evt) / 1000;
+    if (delta < 0) return;
+    total += delta;
+    n++;
+  });
+  return n ? (total / n) : null;
+}
+
+// Human-readable compact time: "42s", "7m", "3.2h", "1.5d".
+export function _formatDuration(seconds) {
+  if (seconds == null) return '—';
+  if (seconds < 60)    return Math.round(seconds) + 's';
+  if (seconds < 3600)  return Math.round(seconds / 60) + 'm';
+  if (seconds < 86400) return (seconds / 3600).toFixed(1).replace(/\.0$/, '') + 'h';
+  return (seconds / 86400).toFixed(1).replace(/\.0$/, '') + 'd';
+}
+
+// Severity-donut + legend block for the three-column chart row on the
+// Dashboard. Pulls colors from the row-accent palette so it reads like
+// every other sev-coloured surface.
+export function _severityDonutHtml(sevCounts) {
+  var sevs = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+  var colors = { CRITICAL: '#f85149', HIGH: '#f0883e', MEDIUM: '#d29922', LOW: '#3fb950' };
+  var total = sevs.reduce(function (s, k) { return s + (sevCounts[k] || 0); }, 0);
+  var r = 44, cx = 60, cy = 60;
+  var circ = 2 * Math.PI * r;
+  var offset = 0;
+  var arcs;
+  if (total === 0) {
+    arcs = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
+           'stroke="var(--border)" stroke-width="12" />';
+  } else {
+    arcs = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
+           'stroke="var(--border)" stroke-width="12" />';
+    sevs.forEach(function (k) {
+      var count = sevCounts[k] || 0;
+      if (count === 0) return;
+      var dash = (count / total) * circ;
+      arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
+              'stroke="' + colors[k] + '" stroke-width="12" ' +
+              'stroke-linecap="butt" ' +
+              'stroke-dasharray="' + dash.toFixed(2) + ' ' + (circ - dash).toFixed(2) + '" ' +
+              'stroke-dashoffset="' + (-offset).toFixed(2) + '" ' +
+              'transform="rotate(-90 ' + cx + ' ' + cy + ')" />';
+      offset += dash;
+    });
+  }
+  var legend = sevs.map(function (k) {
+    var count = sevCounts[k] || 0;
+    return '<li>' +
+      '<span class="sev-donut-dot" style="background:' + colors[k] + '"></span>' +
+      '<span class="sev-donut-label">' + k + '</span>' +
+      '<span class="sev-donut-count">' + count + '</span>' +
+    '</li>';
+  }).join('');
+  return '<div class="sev-donut-wrap">' +
+    '<svg class="sev-donut" viewBox="0 0 120 120" width="120" height="120">' +
+      arcs +
+    '</svg>' +
+    '<div class="sev-donut-center">' +
+      '<div class="sev-donut-total">' + total + '</div>' +
+      '<div class="sev-donut-sub">FINDINGS</div>' +
+    '</div>' +
+    '<ul class="sev-donut-legend">' + legend + '</ul>' +
+  '</div>';
+}
+
 // Top 5 hosts by finding count in the filtered scan window. Last-seen
 // uses the most recent scanned_at for that host so stale hosts surface.
 export function _dashTopHostsHtml(scans) {
@@ -1158,7 +1239,11 @@ export async function renderDashboardPage() {
     filterBarHtml +
     emptyBannerHtml +
     attentionHtml +
-    '<div class="stat-row">' +
+    // Six-card KPI strip — fits on one row at 1440+. Daily Score on
+    // the far left stays the primary anchor; MTTD + Open Findings slot
+    // in on the right as the response-quality pair computed from the
+    // existing attention-window fetch (see `_computeMTTDSeconds`).
+    '<div class="stat-row stat-row-6">' +
       _trendStatCard('Daily Score',
                      score + ' <span style="font-size:14px; opacity:0.7;">(' + grade + ')</span>',
                      scoreLabel, scoreTrend, _accentForScore(scoreNum), scoreColorClass(scoreNum),
@@ -1174,6 +1259,15 @@ export async function renderDashboardPage() {
       _trendStatCard('Scans Run', scans.length,
                      filtersOn ? 'In filtered window' : 'Since first install', null, 'accent-neutral',
                      null, 'scans') +
+      _trendStatCard('MTTD',
+                     _formatDuration(_computeMTTDSeconds(_attentionFindings)),
+                     _attentionFindings.length ? 'Avg detection lag' : 'No findings to measure',
+                     null, 'accent-info', null, null) +
+      _trendStatCard('Open Findings',
+                     _attentionFindings.length,
+                     'Unreviewed crit / high', null,
+                     _attentionFindings.length > 0 ? 'accent-high' : 'accent-neutral',
+                     null, null) +
     '</div>' +
 
     '<div class="standup-row">' +
@@ -1187,9 +1281,16 @@ export async function renderDashboardPage() {
       '</div>' +
     '</div>' +
 
-    '<div class="middle-row">' +
+    // Three-column chart row: severity donut (left), compact score
+    // ring + label (center), score history line chart (right).
+    '<div class="dash-chart-row">' +
 
-      '<div class="card today-security-score">' +
+      '<div class="card dash-chart-card">' +
+        '<div class="section-label">Severity Breakdown</div>' +
+        _severityDonutHtml(sevCounts) +
+      '</div>' +
+
+      '<div class="card dash-chart-card today-security-score">' +
         '<div class="section-label">Today\u2019s Security Score</div>' +
         '<div class="score-display">' +
           '<div class="score-ring-container">' +
@@ -1215,32 +1316,25 @@ export async function renderDashboardPage() {
           '</div>' +
         '</div>' +
 
-        '<div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">' +
-          '<div class="section-label">Severity Breakdown</div>' +
-          '<div style="display:flex; gap:12px;">' +
-            sevBadge('CRITICAL', sevCounts.CRITICAL) +
-            sevBadge('HIGH', sevCounts.HIGH) +
-            sevBadge('MEDIUM', sevCounts.MEDIUM) +
-            sevBadge('LOW', sevCounts.LOW) +
-          '</div>' +
-        '</div>' +
-
-        '<div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">' +
-          '<div class="section-label">MITRE ATT&amp;CK Categories</div>' +
-          mitreBarsHtml +
-        '</div>' +
-
-        '<div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">' +
-          '<div class="section-label">Top Triggered Rules</div>' +
-          topRulesHtml +
-        '</div>' +
       '</div>' +
 
-      '<div class="card">' +
+      '<div class="card dash-chart-card">' +
         '<div class="section-label">Score History</div>' +
         '<div class="score-chart-wrap"><canvas id="score-line-chart"></canvas></div>' +
-        buildDailyScoreTable(dailyScores.slice(0, 7)) +
         '<div class="history-footer"><a href="#" data-action="navigate" data-arg="history">View full history &rarr;</a></div>' +
+      '</div>' +
+    '</div>' +
+
+    // MITRE categories + Top Triggered Rules row — full-width below
+    // the chart band so the bars get horizontal room to breathe.
+    '<div class="dash-mitre-row">' +
+      '<div class="card">' +
+        '<div class="section-label">MITRE ATT&amp;CK Categories</div>' +
+        mitreBarsHtml +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="section-label">Top Triggered Rules</div>' +
+        topRulesHtml +
       '</div>' +
     '</div>' +
 

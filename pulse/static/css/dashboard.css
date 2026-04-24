@@ -12,6 +12,149 @@
   margin-bottom: 16px;
   min-width: 0;
 }
+/* Density-pass variant: 6 KPI cards on one row at 1440+. Below
+   1100px they wrap to 3x2, below 700 to 2x3 so everything still reads. */
+.stat-row.stat-row-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+@media (max-width: 1280px) {
+  .stat-row.stat-row-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .stat-row.stat-row-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Denser stat card for the 6-up row — reduces internal padding so the
+   row doesn't grow too tall when we cram 6 into the horizontal space. */
+.stat-row.stat-row-6 .stat-card {
+  padding: 12px 14px;
+}
+.stat-row.stat-row-6 .stat-card .value {
+  font-size: 24px;
+}
+
+/* Three-column chart row (severity donut | score ring | score history).
+   Score history gets 1.5fr because the line chart wants horizontal
+   room — the donut + ring are compact circles. */
+.dash-chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.5fr;
+  gap: 16px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+.dash-chart-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dash-chart-card .score-chart-wrap {
+  flex: 1;
+  min-height: 180px;
+}
+@media (max-width: 1100px) {
+  .dash-chart-row { grid-template-columns: 1fr 1fr; }
+  .dash-chart-row .dash-chart-card:nth-child(3) { grid-column: span 2; }
+}
+@media (max-width: 720px) {
+  .dash-chart-row { grid-template-columns: 1fr; }
+  .dash-chart-row .dash-chart-card:nth-child(3) { grid-column: auto; }
+}
+
+/* MITRE row — bars card + top rules card, side by side at full width
+   below the chart band. Collapses on narrow viewports. */
+.dash-mitre-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 960px) {
+  .dash-mitre-row { grid-template-columns: 1fr; }
+}
+
+/* Severity donut — SVG + centered count + legend on the right. */
+.sev-donut-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.sev-donut {
+  flex: 0 0 120px;
+  width: 120px;
+  height: 120px;
+}
+.sev-donut-center {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  line-height: 1;
+}
+.sev-donut-total {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+}
+.sev-donut-sub {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.sev-donut-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sev-donut-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sev-donut-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: 0 0 8px;
+}
+.sev-donut-label {
+  flex: 1;
+  color: var(--text);
+  font-weight: 500;
+}
+.sev-donut-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Compact score display inside the narrower three-column card — stacks
+   ring above the label block instead of side-by-side. */
+.score-display.score-display-compact {
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.score-display.score-display-compact .score-info {
+  text-align: center;
+}
+.score-display.score-display-compact .risk-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
 
 .stat-card {
   background: var(--card-bg);

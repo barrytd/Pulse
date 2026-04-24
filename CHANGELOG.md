@@ -5,6 +5,16 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-24 — Density pass (Sprint 6 polish)
+
+### Changed
+- **Sidebar** — 220→200px, `--bg-1` surface so it sits one elevation below `.content` (`--bg-0`). Nav split into three unlabelled groups (workflow / assets / config) separated by 12px gutters. Active row is a 3px green left-accent + subtle green-tinted background (no more filled highlight). Hover is `rgba(255,255,255,0.04)`. Brand block matches the topbar hairline exactly — both 56px, `box-sizing: border-box`, `1px solid rgba(255,255,255,0.06)` — so the bottom edge runs as one continuous line across the full app width.
+- **Dashboard KPI row expanded to 6 cards** — added **MTTD** (mean time to detect, avg `scanned_at − event_timestamp` across the Needs-Attention window) and **Open Findings** (unreviewed crit/high, shares the same source as the Needs Attention panel). Cards tightened to 12×14 padding + 24px hero number so all six fit on one row at 1440+; wraps to 3×2 under 1280.
+- **Dashboard three-column chart row** replaces the old side-by-side layout — new SVG severity donut (left), compact score ring (center), score history line chart (right), equal-height cards. MITRE bars + Top Triggered Rules move to a full-width 2fr/1fr row below the chart band so the bars get horizontal room.
+- **Global standards** — `.card` now uses `--bg-2` surface with `1px solid rgba(255,255,255,0.06)` border and 16px padding. `.data-table` rows are 36px tall with 12px horizontal cell padding. Search inputs / filter pills are pinned to 36px height so every control on a filter bar aligns on one baseline. Page heads use `20px / 600` titles with a uniform 16px bottom margin. `.content` padding normalized to `24px 24px 48px` with a `.content > * + *` rule giving every stacked section a consistent 16px rhythm
+
+---
+
 ## 2026-04-23 — Sprint 6 (in progress)
 
 ### Added

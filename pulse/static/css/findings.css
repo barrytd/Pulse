@@ -583,7 +583,7 @@
   text-align: left;
   font-weight: 600;
   color: var(--text-muted);
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   font-size: 11px;
@@ -606,9 +606,12 @@
 .data-table tbody tr[data-action] { cursor: pointer; }
 
 .data-table tbody td {
-  padding: 10px 14px;
+  /* 36px target row height (10px vertical + ~16px line) with 12px
+     horizontal padding — the shared density for every list page. */
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  line-height: 16px;
 }
 
 .data-table tbody tr.clickable { cursor: pointer; }
