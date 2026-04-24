@@ -886,6 +886,77 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
         return d
 
 
+def _scope_filter_finding_ids(db_path, finding_ids, scope_user_id):
+    """Return the subset of ``finding_ids`` whose parent scan is visible
+    to the given user. ``scope_user_id=None`` is admin scope — skip the
+    filter and return everything."""
+    if not finding_ids:
+        return []
+    finding_ids = [int(i) for i in finding_ids]
+    if scope_user_id is None:
+        return finding_ids
+    placeholders = ",".join(["?"] * len(finding_ids))
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT f.id FROM findings f "
+            "JOIN scans s ON s.id = f.scan_id "
+            "WHERE f.id IN (" + placeholders + ") AND s.user_id = ?",
+            tuple(finding_ids) + (int(scope_user_id),),
+        ).fetchall()
+    return [int(r[0]) for r in rows]
+
+
+def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id, scope_user_id):
+    """Bulk assignment. Only findings whose parent scan is in the caller's
+    scope are updated. Returns ``{updated, skipped}``."""
+    eligible = _scope_filter_finding_ids(db_path, finding_ids, scope_user_id)
+    if not eligible:
+        return {"updated": 0, "skipped": len(finding_ids)}
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    placeholders = ",".join(["?"] * len(eligible))
+    with _connect(db_path) as conn:
+        if assignee_user_id is None:
+            conn.execute(
+                "UPDATE findings SET assigned_to = NULL, assigned_at = NULL "
+                "WHERE id IN (" + placeholders + ")",
+                tuple(eligible),
+            )
+        else:
+            urow = conn.execute(
+                "SELECT id FROM users WHERE id = ? AND active = 1",
+                (int(assignee_user_id),),
+            ).fetchone()
+            if not urow:
+                raise ValueError("Assignee user is not an active account.")
+            conn.execute(
+                "UPDATE findings SET assigned_to = ?, assigned_at = ? "
+                "WHERE id IN (" + placeholders + ")",
+                (int(assignee_user_id), ts) + tuple(eligible),
+            )
+    return {"updated": len(eligible), "skipped": len(finding_ids) - len(eligible)}
+
+
+def batch_set_finding_review(db_path, finding_ids, reviewed, false_positive, scope_user_id):
+    """Bulk review flag update. Both flags set explicitly. Returns
+    ``{updated, skipped}``. Leaves review_note untouched — the analyst
+    notes thread owns commentary now."""
+    eligible = _scope_filter_finding_ids(db_path, finding_ids, scope_user_id)
+    if not eligible:
+        return {"updated": 0, "skipped": len(finding_ids)}
+    r = 1 if reviewed else 0
+    fp = 1 if false_positive else 0
+    reviewed_at = (datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                   if (r or fp) else None)
+    placeholders = ",".join(["?"] * len(eligible))
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE findings SET reviewed = ?, false_positive = ?, reviewed_at = ? "
+            "WHERE id IN (" + placeholders + ")",
+            (r, fp, reviewed_at) + tuple(eligible),
+        )
+    return {"updated": len(eligible), "skipped": len(finding_ids) - len(eligible)}
+
+
 def get_fleet_summary(db_path, user_id=None):
     """Roll up scan + finding counts per hostname for the Fleet overview.
 

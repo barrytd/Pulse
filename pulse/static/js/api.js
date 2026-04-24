@@ -480,6 +480,21 @@ export async function apiDeleteFindingNote(findingId, noteId) {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+// Bulk assign / unassign / review-toggle across many findings. `op` is
+// one of 'assign' | 'unassign' | 'review' | 'unreview'. For op='assign'
+// pass assigneeUserId. Returns {updated, skipped}.
+export async function apiFindingsBatch(op, findingIds, assigneeUserId) {
+  var body = { op: op, finding_ids: (findingIds || []).map(Number) };
+  if (op === 'assign') body.assignee_user_id = Number(assigneeUserId);
+  var resp = await fetch('/api/findings/batch', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 // Set or clear a finding's assignee. Pass null / undefined / '' for
 // `assigneeUserId` to unassign. Returns the full updated finding on
 // success (same shape as review + workflow endpoints).

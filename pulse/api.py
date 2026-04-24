@@ -61,6 +61,7 @@ from pulse.database import (
     list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
     set_finding_assignee, set_user_avatar,
+    batch_set_finding_assignee, batch_set_finding_review,
     update_user_active, update_user_display_name,
     update_user_email, update_user_password,
     update_user_role,
@@ -1523,6 +1524,83 @@ def _register_routes(app: FastAPI) -> None:
             detail=f"workflow_status={state}",
         )
         return updated
+
+    # -------------------------------------------------------------------
+    # PUT /api/findings/batch — bulk assign / unassign / review toggle
+    # across many findings in one round-trip. Body:
+    #   {finding_ids: [int],
+    #    op: 'assign' | 'unassign' | 'review' | 'unreview',
+    #    assignee_user_id?: int}       # required when op=assign
+    # Rate-limited per IP to prevent runaway scripts; viewers only touch
+    # findings whose parent scan they own (filtered in SQL).
+    # -------------------------------------------------------------------
+    @app.put("/api/findings/batch")
+    async def findings_batch(request: Request,
+                             user_id: int = Depends(require_login)):
+        rate_limit.hit(request, "findings_batch", window_sec=60, max_hits=30)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        ids_raw = body.get("finding_ids")
+        if not isinstance(ids_raw, list) or not ids_raw:
+            raise HTTPException(400, detail="finding_ids must be a non-empty list.")
+        if len(ids_raw) > 1000:
+            raise HTTPException(400, detail="Batch size capped at 1000.")
+        try:
+            finding_ids = [int(i) for i in ids_raw]
+        except (TypeError, ValueError):
+            raise HTTPException(400, detail="finding_ids must be integers.")
+        op = str(body.get("op") or "").strip().lower()
+        scope = _scan_scope_for(app, user_id)
+        if op == "assign":
+            raw = body.get("assignee_user_id")
+            if raw is None or raw == "":
+                raise HTTPException(400, detail="assignee_user_id is required for op=assign.")
+            try:
+                assignee = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="assignee_user_id must be an integer.")
+            try:
+                result = batch_set_finding_assignee(
+                    app.state.db_path, finding_ids, assignee, scope,
+                )
+            except ValueError as exc:
+                raise HTTPException(400, detail=str(exc))
+            _audit_finding_action(
+                app, user_id, "bulk_assign_findings",
+                detail=f"count={result['updated']} assignee_user_id={assignee}",
+            )
+        elif op == "unassign":
+            result = batch_set_finding_assignee(
+                app.state.db_path, finding_ids, None, scope,
+            )
+            _audit_finding_action(
+                app, user_id, "bulk_unassign_findings",
+                detail=f"count={result['updated']}",
+            )
+        elif op == "review":
+            # One-click "Mark reviewed" — sets reviewed=True, false_positive=False.
+            result = batch_set_finding_review(
+                app.state.db_path, finding_ids, True, False, scope,
+            )
+            _audit_finding_action(
+                app, user_id, "bulk_review_findings",
+                detail=f"count={result['updated']}",
+            )
+        elif op == "unreview":
+            result = batch_set_finding_review(
+                app.state.db_path, finding_ids, False, False, scope,
+            )
+            _audit_finding_action(
+                app, user_id, "bulk_unreview_findings",
+                detail=f"count={result['updated']}",
+            )
+        else:
+            raise HTTPException(400, detail="op must be assign, unassign, review, or unreview.")
+        return result
 
     # -------------------------------------------------------------------
     # Analyst notes on a finding (append-only thread).

@@ -10,6 +10,7 @@ import {
   apiSetFindingReview,
   apiSetFindingWorkflow,
   apiSetFindingAssignee,
+  apiFindingsBatch,
   apiListUsers,
   apiGetMe,
   apiListFindingNotes,
@@ -368,6 +369,12 @@ export const findingsState = {
   assignFilter: 'ALL', // ALL | ME (only findings assigned to the current user)
   query:        '',
   expanded:     null,
+  // Bulk-select state: a Set of finding ids currently checked. Separate
+  // from row expansion so toggling the drawer doesn't disturb selection.
+  selected:     Object.create(null),
+  // The last computed filtered+sorted slice, kept so the bulk bar can
+  // offer "Select all matching filter" without redoing the filter math.
+  _lastVisible: [],
 };
 
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
@@ -418,6 +425,7 @@ export async function renderFindingsPage() {
   findingsState.assignFilter = 'ALL';
   findingsState.query        = '';
   findingsState.expanded     = null;
+  findingsState.selected     = Object.create(null);
 
   // Consume a one-shot pre-set filter handoff (e.g. "Needs Attention"
   // widget on the Dashboard deep-links into unreviewed CRITICAL+HIGH).
@@ -627,6 +635,11 @@ export function applyFindingsView() {
   var titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'Findings (' + countLabel + ')';
 
+  // Stash the pre-render visible slice BEFORE we might short-circuit
+  // into the empty-state branch — the bulk bar reads this to compute
+  // "Select all matching filter" counts.
+  s._lastVisible = rows;
+
   var c = document.getElementById('content');
   c.innerHTML =
     _scansTabsBarHtml() +
@@ -643,13 +656,299 @@ export function applyFindingsView() {
       (rows.length === 0
         ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings match the current filters.</div>'
         : _buildFindingsTable(rows)) +
-    '</div>';
+    '</div>' +
+    _renderBulkBarHtml(visible, total, filtered);
   _restoreSearchFocus('findings-search-box');
+  _mountBulkBarUsers();
 }
 
 // Delegator wrapper for the status <select> — pulls the live value.
 export function setFindingsReviewFilterFromSelect(arg, target) {
   setFindingsReviewFilter(target && target.value);
+}
+
+// ---------------------------------------------------------------
+// Findings bulk-select state
+// ---------------------------------------------------------------
+
+export function toggleFindingSelect(id, target, ev) {
+  if (ev) ev.stopPropagation();
+  if (id == null) return;
+  var key = String(id);
+  if (findingsState.selected[key]) delete findingsState.selected[key];
+  else findingsState.selected[key] = true;
+  _updateBulkBar();
+}
+
+// Header checkbox — toggles every visible row.
+export function toggleFindingSelectAll(arg, target) {
+  var checked;
+  if (target && typeof target.checked === 'boolean') checked = target.checked;
+  else checked = (arg === true || arg === 'true');
+  if (!checked) {
+    findingsState.selected = Object.create(null);
+  } else {
+    (findingsState._lastVisible || []).forEach(function (f) {
+      if (f && f.id != null) findingsState.selected[String(f.id)] = true;
+    });
+  }
+  applyFindingsView();
+}
+
+// "Select all matching filter" — same as toggling the header box when the
+// visible slice is already what the filters would produce. Kept as a
+// separate action so the bulk bar can offer an explicit one-click link.
+export function selectAllMatchingFilter() {
+  (findingsState._lastVisible || []).forEach(function (f) {
+    if (f && f.id != null) findingsState.selected[String(f.id)] = true;
+  });
+  applyFindingsView();
+}
+
+export function clearFindingSelection() {
+  findingsState.selected = Object.create(null);
+  applyFindingsView();
+}
+
+function _selectedFindingIds() {
+  return Object.keys(findingsState.selected).map(function (k) { return Number(k); });
+}
+
+// ---------------------------------------------------------------
+// Bulk action bar — appears at the bottom of the Findings page when
+// any rows are selected. Pattern matches the scans bulk-delete bar.
+// ---------------------------------------------------------------
+
+function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
+  var ids = _selectedFindingIds();
+  var n = ids.length;
+  var display = n > 0 ? 'flex' : 'none';
+  // "Select all matching filter" only useful when filters narrow the
+  // view and there's at least one un-selected visible row.
+  var vis = findingsState._lastVisible || [];
+  var selectable = vis.filter(function (f) { return f && f.id != null; });
+  var allVisibleSelected = selectable.length > 0 && selectable.every(function (f) {
+    return findingsState.selected[String(f.id)];
+  });
+  var showSelectAll = filtered && selectable.length > n && !allVisibleSelected;
+  var selectAllLink = showSelectAll
+    ? '<a class="bulk-bar-link" data-action="selectAllMatchingFilter">' +
+        'Select all ' + selectable.length + ' matching filter' +
+      '</a>'
+    : '';
+
+  return (
+    '<div id="findings-bulk-bar" class="bulk-bar bulk-bar-sticky" style="display:' + display + ';">' +
+      '<span class="bulk-bar-count">' + n + ' finding' + (n === 1 ? '' : 's') + ' selected</span>' +
+      selectAllLink +
+      '<span class="bulk-bar-spacer"></span>' +
+      // Assign-to custom dropdown (users populated async after mount)
+      '<div class="bulk-bar-assign">' +
+        '<button type="button" class="btn btn-secondary btn-sm" data-action="toggleBulkAssignMenu" ' +
+          'aria-haspopup="listbox" aria-expanded="false">Assign to…</button>' +
+        '<ul id="bulk-bar-assign-menu" class="assign-menu bulk-bar-assign-menu" role="listbox" hidden>' +
+          '<li class="assign-item" style="color:var(--text-muted);">Loading users…</li>' +
+        '</ul>' +
+      '</div>' +
+      '<button class="btn btn-secondary btn-sm" data-action="bulkAssignToMe">Assign to me</button>' +
+      '<button class="btn btn-secondary btn-sm" data-action="bulkUnassign">Unassign</button>' +
+      '<span class="bulk-bar-divider" aria-hidden="true"></span>' +
+      '<button class="btn btn-secondary btn-sm" data-action="bulkMarkReviewed">Mark reviewed</button>' +
+      '<a class="bulk-bar-clear" data-action="clearFindingSelection">Clear selection</a>' +
+    '</div>'
+  );
+}
+
+async function _mountBulkBarUsers() {
+  // Populate the "Assign to..." dropdown once the users list is ready.
+  // Fails soft for viewers (who 403 /api/users) — the menu still shows
+  // their own account so they can self-assign via the dropdown too.
+  var menu = document.getElementById('bulk-bar-assign-menu');
+  if (!menu) return;
+  var users = await _ensureAssignableUsers();
+  var me = await _ensureMe();
+  if (users.length === 0 && me && me.id) {
+    users = [{ id: me.id, email: me.email || 'me', display_name: me.display_name, active: true }];
+  }
+  if (!users.length) {
+    menu.innerHTML = '<li class="assign-item" style="color:var(--text-muted);">No active users</li>';
+    return;
+  }
+  menu.innerHTML = users.map(function (u) {
+    var display = (u.display_name || '').trim() ||
+                  ((u.email || '').split('@')[0] || ('user #' + u.id));
+    var isMe = (me && u.id === me.id);
+    var primary = display + (isMe ? ' (me)' : '');
+    var secondary = (u.display_name && u.email && u.email !== display) ? u.email : '';
+    return '<li class="assign-item" ' +
+             'data-action="bulkAssignPick" data-arg="' + u.id + '|' + _escAttr(display) + '">' +
+             '<span class="assign-item-name">' + escapeHtml(primary) + '</span>' +
+             (secondary
+               ? '<span class="assign-item-email">' + escapeHtml(secondary) + '</span>'
+               : '') +
+           '</li>';
+  }).join('');
+}
+
+function _escAttr(s) {
+  return String(s || '').replace(/"/g, '&quot;').replace(/\|/g, '&#124;');
+}
+
+export function toggleBulkAssignMenu(arg, target) {
+  var menu = document.getElementById('bulk-bar-assign-menu');
+  if (!menu || !target) return;
+  var open = !menu.hasAttribute('hidden');
+  if (open) {
+    menu.setAttribute('hidden', '');
+    target.setAttribute('aria-expanded', 'false');
+  } else {
+    menu.removeAttribute('hidden');
+    target.setAttribute('aria-expanded', 'true');
+  }
+}
+
+// Close the bulk-bar assign menu on outside click / Esc.
+document.addEventListener('click', function (e) {
+  var wrap = document.querySelector('.bulk-bar-assign');
+  if (!wrap) return;
+  if (wrap.contains(e.target)) return;
+  var menu = document.getElementById('bulk-bar-assign-menu');
+  if (menu && !menu.hasAttribute('hidden')) {
+    menu.setAttribute('hidden', '');
+    var trigger = wrap.querySelector('[data-action="toggleBulkAssignMenu"]');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var menu = document.getElementById('bulk-bar-assign-menu');
+  if (menu && !menu.hasAttribute('hidden')) {
+    menu.setAttribute('hidden', '');
+    var trigger = document.querySelector('.bulk-bar-assign [data-action="toggleBulkAssignMenu"]');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+});
+
+async function _runBulk(op, extras) {
+  var ids = _selectedFindingIds();
+  if (!ids.length) return;
+  var r = await apiFindingsBatch(op, ids, extras && extras.assignee_user_id);
+  if (!r || !r.ok) {
+    toastError((r && r.data && r.data.detail) || 'Bulk action failed.');
+    return null;
+  }
+  return r.data || { updated: 0, skipped: 0 };
+}
+
+export async function bulkAssignPick(arg) {
+  // data-arg format: "<user_id>|<display name>"
+  var parts = String(arg || '').split('|');
+  var uid = Number(parts[0]);
+  var display = parts.slice(1).join('|') || 'user';
+  if (!uid) return;
+  var result = await _runBulk('assign', { assignee_user_id: uid });
+  if (!result) return;
+  showToast('Assigned ' + result.updated + ' finding' +
+            (result.updated === 1 ? '' : 's') + ' to ' + display);
+  await _reconcileAfterBulk(ids => ({ assigned_to: uid }));
+  _closeBulkAssignMenu();
+}
+
+export async function bulkAssignToMe() {
+  var me = await _ensureMe();
+  if (!me || !me.id) { toastError('Could not identify current user.'); return; }
+  var display = (me.display_name || '').trim() ||
+                ((me.email || '').split('@')[0]) || 'me';
+  var result = await _runBulk('assign', { assignee_user_id: me.id });
+  if (!result) return;
+  showToast('Assigned ' + result.updated + ' finding' +
+            (result.updated === 1 ? '' : 's') + ' to ' + display);
+  await _reconcileAfterBulk(function () { return { assigned_to: me.id }; });
+}
+
+export async function bulkUnassign() {
+  var result = await _runBulk('unassign');
+  if (!result) return;
+  showToast('Unassigned ' + result.updated + ' finding' +
+            (result.updated === 1 ? '' : 's'));
+  await _reconcileAfterBulk(function () { return { assigned_to: null }; });
+}
+
+export async function bulkMarkReviewed() {
+  var result = await _runBulk('review');
+  if (!result) return;
+  showToast('Marked ' + result.updated + ' finding' +
+            (result.updated === 1 ? '' : 's') + ' reviewed');
+  await _reconcileAfterBulk(function () { return { reviewed: true }; });
+}
+
+// After a successful bulk op, refresh cached finding rows so the visible
+// table shows the new state without a full refetch. Clears selection at
+// the end (matches the scans bulk-delete flow).
+async function _reconcileAfterBulk(deltaFn) {
+  // Re-fetch /api/me for display_name so assignee cells render fresh.
+  var me = null;
+  try { me = await apiGetMe(); } catch (e) {}
+  var cache = findingsState.raw || [];
+  var sel = findingsState.selected;
+  cache.forEach(function (f) {
+    if (!f || f.id == null) return;
+    if (!sel[String(f.id)]) return;
+    var d = deltaFn ? deltaFn(f) : {};
+    if ('assigned_to' in d) {
+      f.assigned_to = d.assigned_to;
+      if (d.assigned_to == null) {
+        f.assignee_email = null;
+        f.assignee_display_name = null;
+      } else if (me && me.id === d.assigned_to) {
+        f.assignee_email = me.email;
+        f.assignee_display_name = me.display_name || null;
+      } else {
+        // Look up the user in our cached list if we have it.
+        var u = (_assignableUsers || []).find(function (x) { return x.id === d.assigned_to; });
+        f.assignee_email = u ? u.email : null;
+        f.assignee_display_name = u ? u.display_name : null;
+      }
+    }
+    if ('reviewed' in d) {
+      f.reviewed = !!d.reviewed;
+      if (d.reviewed) f.reviewed_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    }
+  });
+  findingsState.selected = Object.create(null);
+  applyFindingsView();
+}
+
+function _closeBulkAssignMenu() {
+  var menu = document.getElementById('bulk-bar-assign-menu');
+  if (menu) menu.setAttribute('hidden', '');
+  var trigger = document.querySelector('.bulk-bar-assign [data-action="toggleBulkAssignMenu"]');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+function _updateBulkBar() {
+  // Cheap in-place update: if the row count hasn't moved between zero
+  // and non-zero, just refresh the counter. Otherwise full re-render so
+  // the bar appears / disappears with the right layout.
+  var ids = _selectedFindingIds();
+  var bar = document.getElementById('findings-bulk-bar');
+  if (!bar) { applyFindingsView(); return; }
+  var visible = ids.length > 0;
+  var wasVisible = bar.style.display !== 'none';
+  if (visible !== wasVisible) { applyFindingsView(); return; }
+  var counter = bar.querySelector('.bulk-bar-count');
+  if (counter) {
+    counter.textContent = ids.length + ' finding' + (ids.length === 1 ? '' : 's') + ' selected';
+  }
+  // Also refresh the header checkbox state in case the user picked the
+  // last unchecked row.
+  var head = document.querySelector('.data-table .col-select input[type="checkbox"]');
+  var vis = findingsState._lastVisible || [];
+  var selectable = vis.filter(function (f) { return f && f.id != null; });
+  var allSel = selectable.length > 0 && selectable.every(function (f) {
+    return findingsState.selected[String(f.id)];
+  });
+  if (head) head.checked = allSel;
 }
 
 export async function toggleAssignedToMeFilter() {
@@ -741,13 +1040,28 @@ function _rowActionsHtml(f) {
 }
 
 function _buildFindingsTable(findings) {
+  // Stash the filtered slice so "Select all matching filter" in the bulk
+  // bar can target exactly what's visible after current filters.
+  findingsState._lastVisible = findings;
   var expanded = findingsState.expanded;
   var th = function (col, label) {
     return '<th class="sortable" data-action="setFindingsSort" data-arg="' + col + '">' + label + _sortArrow(col) + '</th>';
   };
 
+  // Header checkbox — checked only when every visible row is selected.
+  var selectableFindings = findings.filter(function (f) { return f && f.id != null; });
+  var allVisibleSelected = selectableFindings.length > 0 &&
+    selectableFindings.every(function (f) {
+      return findingsState.selected[String(f.id)];
+    });
+  var headCheckbox = '<th class="col-select" style="width:32px;">' +
+    '<input type="checkbox"' + (allVisibleSelected ? ' checked' : '') +
+    ' data-action="toggleFindingSelectAll" aria-label="Select all visible findings" />' +
+  '</th>';
+
   return '<table class="data-table">' +
     '<thead><tr>' +
+      headCheckbox +
       th('time', 'Timestamp') +
       th('severity', 'Severity') +
       th('rule', 'Rule') +
@@ -777,8 +1091,20 @@ function _buildFindingsTable(findings) {
       if (isTouched(f)) rowCls += ' row-reviewed';
       var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
 
+      var selectable = (f && f.id != null);
+      var selected = selectable && !!findingsState.selected[String(f.id)];
+      if (selected) rowCls += ' is-selected';
+      var checkboxCell = selectable
+        ? '<td class="col-select" data-action="stopClickPropagation">' +
+            '<input type="checkbox"' + (selected ? ' checked' : '') +
+              ' data-action="toggleFindingSelect" data-arg="' + f.id + '" ' +
+              ' aria-label="Select finding ' + f.id + '" />' +
+          '</td>'
+        : '<td class="col-select"></td>';
+
       var main = '<tr class="' + rowCls + '"' + fidAttr + ' ' +
                  'data-action="toggleFindingExpand" data-arg="' + f._uid + '">' +
+        checkboxCell +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
         '<td>' + sevPillHtml(sev) + '</td>' +
         '<td class="col-rule">' +
@@ -801,7 +1127,7 @@ function _buildFindingsTable(findings) {
       '</tr>';
 
       if (!isOpen) return main;
-      return main + _expandRow(f, 10);
+      return main + _expandRow(f, 11);
     }).join('') +
     '</tbody></table>';
 }
@@ -1404,7 +1730,6 @@ export function openFindingDrawer(f) {
     });
   }
 
-  _syncSidebarQuickAssign();
 }
 
 // Workflow states — the incident-response axis. Orthogonal to review
@@ -1678,90 +2003,6 @@ export async function assignFindingToMe() {
   return setFindingAssignee();
 }
 
-// ---------------------------------------------------------------
-// Sidebar quick-assign dropdown — operates on the currently-open
-// finding drawer. Disabled when no drawer is open.
-// ---------------------------------------------------------------
-
-function _syncSidebarQuickAssign() {
-  var btn = document.getElementById('sidebar-quick-assign-btn');
-  var sub = document.getElementById('sidebar-quick-assign-sub');
-  if (!btn) return;
-  var enabled = !!(_drawerFinding && _drawerFinding.id != null);
-  btn.disabled = !enabled;
-  if (enabled) {
-    // Tell the admin WHICH finding this shortcut will act on — display
-    // the rule name (or ref_id fall-back) so there's no ambiguity.
-    var label = _drawerFinding.rule ||
-                (_drawerFinding.ref_id && ('Finding ' + _drawerFinding.ref_id)) ||
-                ('Finding ' + _drawerFinding.id);
-    if (sub) sub.textContent = 'For: ' + label;
-    btn.title = 'Quick assign for the open finding';
-    btn.classList.add('is-armed');
-  } else {
-    if (sub) sub.textContent = 'Open a finding first';
-    btn.title = 'Open a finding, then use this to assign quickly';
-    btn.classList.remove('is-armed');
-    var menu = document.getElementById('sidebar-quick-assign-menu');
-    if (menu) menu.hidden = true;
-    btn.setAttribute('aria-expanded', 'false');
-  }
-}
-
-export function toggleSidebarQuickAssign() {
-  var btn = document.getElementById('sidebar-quick-assign-btn');
-  var menu = document.getElementById('sidebar-quick-assign-menu');
-  if (!btn || !menu || btn.disabled) return;
-  var open = !menu.hidden;
-  menu.hidden = open;
-  btn.setAttribute('aria-expanded', open ? 'false' : 'true');
-}
-
-function _closeSidebarQuickAssign() {
-  var menu = document.getElementById('sidebar-quick-assign-menu');
-  var btn = document.getElementById('sidebar-quick-assign-btn');
-  if (menu) menu.hidden = true;
-  if (btn) btn.setAttribute('aria-expanded', 'false');
-}
-
-export async function quickAssignToMe() {
-  _closeSidebarQuickAssign();
-  if (!_drawerFinding || _drawerFinding.id == null) return;
-  return assignFindingToMe();
-}
-
-export function quickAssignPickUser() {
-  _closeSidebarQuickAssign();
-  // Open the drawer's existing picker so the admin can scroll / search
-  // the user list. Focuses the trigger so keyboard flow keeps working.
-  var trigger = document.querySelector('.assign-picker .assign-trigger');
-  if (!trigger) return;
-  trigger.click();
-  trigger.focus();
-  trigger.scrollIntoView({ block: 'center', behavior: 'smooth' });
-}
-
-export async function quickUnassign() {
-  _closeSidebarQuickAssign();
-  if (!_drawerFinding || _drawerFinding.id == null) return;
-  var select = document.getElementById('drawer-assign-select');
-  if (select) select.value = '';
-  return setFindingAssignee();
-}
-
-// Outside-click / Escape close the sidebar menu.
-document.addEventListener('click', function (e) {
-  var wrap = document.getElementById('sidebar-quick-assign-wrap');
-  if (!wrap) return;
-  if (wrap.contains(e.target)) return;
-  var menu = document.getElementById('sidebar-quick-assign-menu');
-  if (menu && !menu.hidden) _closeSidebarQuickAssign();
-});
-document.addEventListener('keydown', function (e) {
-  if (e.key !== 'Escape') return;
-  var menu = document.getElementById('sidebar-quick-assign-menu');
-  if (menu && !menu.hidden) _closeSidebarQuickAssign();
-});
 
 // ---------------------------------------------------------------
 // Analyst notes — append-only thread per finding
@@ -2122,7 +2363,6 @@ export function closeFindingDrawer() {
   document.getElementById('finding-drawer-backdrop').classList.remove('open');
   document.body.style.overflow = '';
   _drawerFinding = null;
-  _syncSidebarQuickAssign();
 }
 
 // Esc closes the drawer.

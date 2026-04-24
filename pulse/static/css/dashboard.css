@@ -1096,6 +1096,65 @@
 .bulk-bar-count { font-size: 13px; color: var(--text-muted); }
 .bulk-bar-clear { font-size: 12px; color: var(--text-muted); cursor: pointer; text-decoration: underline; }
 .bulk-bar-clear:hover { color: var(--text); }
+.bulk-bar-link {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.bulk-bar-link:hover { text-decoration: underline; }
+.bulk-bar-spacer { flex: 1; }
+.bulk-bar-divider {
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+/* Sticky variant — used by the Findings bulk bar. Sits docked at the
+   bottom of the viewport (above the browser chrome / safe area) so a
+   long list doesn't force the user to scroll back to the top to act on
+   a selection. Floats over the table edge with a subtle shadow. */
+.bulk-bar-sticky {
+  position: fixed;
+  left: 240px;   /* sidebar 220px + 20px page gutter */
+  right: 24px;
+  bottom: 20px;
+  z-index: 90;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  border-color: var(--accent);
+  background: var(--card-bg);
+}
+.bulk-bar-sticky .btn-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* Assign-to dropdown inside the bulk bar — reuses .assign-menu so the
+   listbox styling matches the drawer's assign picker. */
+.bulk-bar-assign { position: relative; }
+.bulk-bar-assign-menu {
+  bottom: calc(100% + 6px);
+  top: auto;
+  left: 0;
+  right: auto;
+  min-width: 220px;
+  max-height: 280px;
+}
+
+/* Selected row accent — subtle accent-tinted background so it's clear
+   which rows the bulk action will hit. */
+.findings-table tr.is-selected td,
+.data-table tr.is-selected td {
+  background: rgba(88, 166, 255, 0.08) !important;
+}
+.col-select {
+  width: 32px;
+  padding-left: 14px !important;
+  padding-right: 0 !important;
+}
+.col-select input[type="checkbox"] { cursor: pointer; }
 
 /* ------------------------------------------------------------------ */
 /* Empty state                                                         */
