@@ -503,6 +503,11 @@ export function toggleFindingExpand(uid) {
 }
 
 export function applyFindingsView() {
+  // Re-rendering the whole content div wipes scroll position, which
+  // jerks the user back to the top every time they expand a row, flip
+  // a filter, or run a bulk action. Capture scrollY up-front and
+  // restore it after the DOM is rebuilt so the page feels static.
+  var _scrollY = window.scrollY;
   var s = findingsState;
   var rows = s.raw.slice();
 
@@ -660,6 +665,9 @@ export function applyFindingsView() {
     _renderBulkBarHtml(visible, total, filtered);
   _restoreSearchFocus('findings-search-box');
   _mountBulkBarUsers();
+  // Paired with the scrollY capture at the top of this function —
+  // `instant` so the page doesn't animate back into place.
+  window.scrollTo({ top: _scrollY, left: 0, behavior: 'instant' });
 }
 
 // Delegator wrapper for the status <select> — pulls the live value.

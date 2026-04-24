@@ -629,16 +629,26 @@
 }
 .sort-arrow.inactive { color: var(--text-muted); opacity: 0.4; }
 
-/* Inline expand row for findings detail */
+/* Inline expand row for findings detail. colspan reaches across the
+   whole table, so the inner cell width always matches the table width
+   — no horizontal overflow possible from the expand itself. */
 .expand-row td {
   background: var(--bg) !important;
   padding: 16px 20px !important;
   border-bottom: 1px solid var(--border);
+  /* Tables without table-layout:fixed let long tokens expand a column
+     beyond its visual width, pushing the last field (Source Scan) out
+     of the viewport. Word-breaking inside the grid prevents that. */
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .expand-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* 180px min — tight enough that 3 fields fit on typical widths and
+     every field gets to wrap onto a second line cleanly, so nothing
+     ever clips at the right edge of the card. */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
   margin-bottom: 14px;
 }
