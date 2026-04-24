@@ -108,6 +108,34 @@ body.sidebar-collapsed .sidebar-nav-label {
 }
 
 /* ------------------------------------------------------------------ */
+/* Sidebar divider — the single hairline between the nav list and the */
+/* page-filter panel below it. Kept as a standalone element so an     */
+/* empty filter panel still shows the seam.                           */
+/* ------------------------------------------------------------------ */
+.sidebar-divider {
+  flex: 0 0 auto;
+  height: 1px;
+  margin: 12px 0 0;
+  background: rgba(255, 255, 255, 0.06);
+}
+body.sidebar-collapsed .sidebar-divider { display: none; }
+
+/* Inline page-filter panels (one per page). Hidden by default via
+   attribute selectors so each panel only renders on its own page.
+   #dash-sidebar-filters shows on Dashboard; #sidebar-filters
+   (dynamic) handles Scans + any other registered page. */
+.sidebar-page-filters {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 0 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#dash-sidebar-filters { display: none; }
+body[data-page="dashboard"] #dash-sidebar-filters { display: block; }
+body.sidebar-collapsed .sidebar-page-filters { display: none; }
+
+/* ------------------------------------------------------------------ */
 /* Contextual filter panel                                             */
 /*                                                                    */
 /* Sits below the nav with a hairline divider. Populated per-page by  */

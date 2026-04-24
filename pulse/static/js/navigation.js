@@ -65,6 +65,7 @@ export function navigate(page, opts) {
     _currentPage = 'scans';
     _updateSidebarHighlight('scans');
     _updateTitle('Scans');
+    document.body.dataset.page = 'scans';
     setScansPageTab('findings');
     _refreshSidebarFilters();
     return;
@@ -74,6 +75,9 @@ export function navigate(page, opts) {
   _currentPage = page;
   _updateSidebarHighlight(page);
   _updateTitle(_titleFor(page, opts.scanId));
+  // Expose the current page via body[data-page] so page-specific
+  // sidebar panels (inline filter panels) can show / hide via CSS.
+  document.body.dataset.page = page;
 
   // Scan detail is a sub-page of Scans: show Scans highlighted in the
   // sidebar but render the detail view instead of the list.

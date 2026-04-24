@@ -1174,11 +1174,12 @@ export async function renderDashboardPage() {
   var recentFindings = [];
   if (latestWithFindings) {
     var all = await fetchFindings(latestWithFindings.id);
-    recentFindings = filterFindingsByDashState(all).slice().sort(function (a, b) {
-      var at = a.timestamp || _extractTime(a) || '';
-      var bt = b.timestamp || _extractTime(b) || '';
-      return at < bt ? 1 : at > bt ? -1 : 0;
-    }).slice(0, 5);
+    recentFindings = applyDashSidebarFilters(filterFindingsByDashState(all))
+      .slice().sort(function (a, b) {
+        var at = a.timestamp || _extractTime(a) || '';
+        var bt = b.timestamp || _extractTime(b) || '';
+        return at < bt ? 1 : at > bt ? -1 : 0;
+      }).slice(0, 5);
   }
 
   var filterBarHtml = _dashFilterBarHtml(rules, sourceList);
@@ -1201,7 +1202,12 @@ export async function renderDashboardPage() {
   // fetches since it reuses allScans and issues its own per-scan fetches.
   _lastFilteredScanCount = scans.length;
   _attentionFindings = await _fetchAttentionFindings(allScans);
-  var attentionInner = _needsAttentionHtml(_attentionFindings, scans.length);
+  // Sidebar Status / Severity filter — narrows the findings lists
+  // rendered on this page (Needs Attention + Last Scan Findings) in
+  // real-time. Severity donut + stat cards stay on the unfiltered
+  // totals so the page keeps its "here's the full picture" frame.
+  var attentionFiltered = applyDashSidebarFilters(_attentionFindings);
+  var attentionInner = _needsAttentionHtml(attentionFiltered, scans.length);
   var attentionHtml = '<div id="dash-needs-attention">' + attentionInner + '</div>';
 
   // Slim inline empty-state row. Only shown when no scans fall in the
@@ -1353,4 +1359,102 @@ export async function renderDashboardPage() {
 
   _initScoreLineChart(dailyScores);
   _startDashUpdatedTimer(updatedIso);
+  // Sidebar filter panel — refresh counts + checkbox state + clear
+  // link after the main render. Feeding the unfiltered attention
+  // window keeps the count badges absolute ("how many findings have
+  // this status overall"), not intersected with current selection.
+  refreshDashSidebarPanel(_attentionFindings);
+}
+
+// ---------------------------------------------------------------
+// Dashboard sidebar filter panel (inline in index.html)
+// ---------------------------------------------------------------
+// Two filter groups — Status + Severity — whose checkboxes sit in the
+// sidebar below the nav. State lives here (not in URL params) because
+// this is a "filter my view now" tool, not a persistent preference.
+// Checkbox toggles, group-collapse toggles, and the clear link all
+// fire re-renders via `applyDashSidebarFilters` so the Dashboard's
+// findings surfaces (Needs Attention + Last Scan Findings) respond
+// in real time.
+
+export const dashSidebarState = {
+  status:   new Set(),   // 'new' | 'acknowledged' | 'investigating' | 'resolved'
+  severity: new Set(),   // 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+};
+
+// Called from renderDashboardPage() to refresh the <span class="sidebar
+// -filter-count"> values + the "Clear filters" link visibility after
+// each full render. Idempotent; safe to call even if the DOM doesn't
+// exist yet.
+export function refreshDashSidebarPanel(findings) {
+  var statusCounts = { new: 0, acknowledged: 0, investigating: 0, resolved: 0 };
+  var sevCounts    = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  (findings || []).forEach(function (f) {
+    var st = (f.workflow_status || 'new').toLowerCase();
+    if (statusCounts[st] !== undefined) statusCounts[st]++;
+    var sv = (f.severity || '').toUpperCase();
+    if (sevCounts[sv] !== undefined) sevCounts[sv]++;
+  });
+  // Write counts into the DOM placeholders.
+  Object.keys(statusCounts).forEach(function (k) {
+    var el = document.querySelector('[data-count-for="status|' + k + '"]');
+    if (el) el.textContent = statusCounts[k];
+  });
+  Object.keys(sevCounts).forEach(function (k) {
+    var el = document.querySelector('[data-count-for="severity|' + k + '"]');
+    if (el) el.textContent = sevCounts[k];
+  });
+  // Re-hydrate checkbox checked state so a re-render doesn't lose selection.
+  document.querySelectorAll('[data-action-change="dashSidebarToggleItem"]').forEach(function (cb) {
+    var parts = (cb.getAttribute('data-arg') || '').split('|');
+    var g = parts[0], id = parts[1];
+    var set = dashSidebarState[g];
+    cb.checked = !!(set && set.has(id));
+  });
+  // Show/hide "Clear filters" link.
+  var active = dashSidebarState.status.size + dashSidebarState.severity.size;
+  var clearLink = document.getElementById('dash-filter-clear');
+  if (clearLink) {
+    if (active > 0) clearLink.removeAttribute('hidden');
+    else clearLink.setAttribute('hidden', '');
+  }
+}
+
+// Intersection filter: status groups AND severity group. Empty set on
+// a group means "no filter on that axis". Applied to any findings list
+// the Dashboard wants to narrow (attention window, last-scan findings).
+export function applyDashSidebarFilters(findings) {
+  var st  = dashSidebarState.status;
+  var sev = dashSidebarState.severity;
+  if (!st.size && !sev.size) return findings || [];
+  return (findings || []).filter(function (f) {
+    if (st.size && !st.has((f.workflow_status || 'new').toLowerCase())) return false;
+    if (sev.size && !sev.has((f.severity || '').toUpperCase())) return false;
+    return true;
+  });
+}
+
+// Checkbox toggle handler. data-arg is "groupId|itemId".
+export function dashSidebarToggleItem(arg, target) {
+  var parts = String(arg || '').split('|');
+  var groupId = parts[0], itemId = parts[1];
+  var set = dashSidebarState[groupId];
+  if (!set || !itemId) return;
+  if (target && target.checked) set.add(itemId);
+  else set.delete(itemId);
+  // Real-time: re-render the dashboard with the new filter set.
+  renderDashboardPage();
+}
+
+// Group header click → collapse / expand.
+export function dashSidebarToggleGroup(groupId) {
+  var el = document.querySelector('.sidebar-filter-group[data-group="' + groupId + '"]');
+  if (el) el.classList.toggle('is-collapsed');
+}
+
+// Clear link → wipe every filter + re-render.
+export function dashSidebarClear() {
+  dashSidebarState.status.clear();
+  dashSidebarState.severity.clear();
+  renderDashboardPage();
 }

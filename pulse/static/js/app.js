@@ -28,6 +28,9 @@ import {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
+  dashSidebarToggleItem,
+  dashSidebarToggleGroup,
+  dashSidebarClear,
 } from './dashboard.js';
 import {
   toggleScanSelect,
@@ -229,6 +232,9 @@ const actions = {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
+  dashSidebarToggleItem,
+  dashSidebarToggleGroup,
+  dashSidebarClear,
   openUnreviewedCriticalHigh,
 
   // scans + findings
