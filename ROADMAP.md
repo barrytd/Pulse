@@ -121,7 +121,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Incident workflow states — mark findings as acknowledged, investigating, or resolved
 - [x] Analyst notes — free-text notes field per finding, stored in DB, shown in finding drawer and PDF reports, timestamped and attributed to the author
 - [x] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
-- [x] Custom branding — upload company logo, set organization name on reports and dashboard
+- [ ] ~~Custom branding~~ — *deferred to Backlog; first pass shipped then reverted on 2026-04-24 because replacing the Pulse brand in the sidebar conflicted with the product identity. The future pass should keep the Pulse logo + "PULSE" title, and surface the org name as a subtitle underneath. The empty `branding` table already exists on current installs so the future sprint can reuse the schema.*
 - [ ] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
 - [ ] Dashboard widgets — customizable layout with drag-and-drop panels
 - [ ] Threat intel integration — correlate source IPs with AbuseIPDB / OTX feeds
@@ -183,6 +183,10 @@ Features validated by SOC/SIEM research but not yet committed to a sprint. Order
 ### Incident response
 
 - [ ] Evidence preservation — "Export incident package" button on any finding or group of findings that generates a ZIP containing: relevant raw .evtx snippet, PDF report scoped to those findings, audit log entries related to the incident, analyst notes, remediation actions taken, and a JSON manifest with hashes for chain-of-custody integrity
+
+### Branding + white-label
+
+- [ ] Custom branding (v2) — admin uploads a company logo + sets an organization name, but both render as a SUBTITLE under the Pulse brand (not as a replacement). Keep the Pulse logo + "PULSE" title always visible so the product identity stays intact. A first pass was shipped then reverted because replacing the Pulse lockup with just the company name lost too much brand recognition. The empty `branding` table from the v1 schema is still in the DB — reuse it rather than recreating. Also reach into HTML/PDF report headers for the same subtitle treatment
 
 ### Platform hardening
 

@@ -67,8 +67,6 @@ from pulse.database import (
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
     count_finding_notes, list_all_notes,
-    get_branding, get_branding_logo, set_organization_name,
-    set_branding_logo, clear_branding_logo,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -707,97 +705,6 @@ def _register_routes(app: FastAPI) -> None:
         if blob is None:
             raise HTTPException(404, detail="No avatar.")
         return Response(content=blob, media_type=mime or "image/png")
-
-    # -------------------------------------------------------------------
-    # Organization branding — admin-managed logo + org name that swaps
-    # into the sidebar / topbar so customers can white-label the UI.
-    # GET /api/branding           — any logged-in user reads the metadata
-    # PUT /api/branding           — admin-only; sets/clears the org name
-    # GET /api/branding/logo      — any logged-in user, streams the PNG/JPEG
-    # POST /api/branding/logo     — admin-only; upload a new logo
-    # DELETE /api/branding/logo   — admin-only; remove the stored logo
-    # -------------------------------------------------------------------
-    _BRANDING_LOGO_MAX_BYTES = 2 * 1024 * 1024
-    _BRANDING_LOGO_MIMES = {"image/png", "image/jpeg", "image/svg+xml"}
-
-    @app.get("/api/branding")
-    def api_branding_get(user_id: int = Depends(require_login)):
-        return get_branding(app.state.db_path)
-
-    @app.put("/api/branding")
-    async def api_branding_update(request: Request,
-                                  user_id: int = Depends(require_admin)):
-        try:
-            body = await request.json()
-        except Exception:
-            raise HTTPException(400, detail="Invalid JSON body.")
-        if not isinstance(body, dict):
-            raise HTTPException(400, detail="Body must be a JSON object.")
-        raw = body.get("organization_name")
-        if raw is None:
-            name = None
-        else:
-            name = str(raw).strip()
-            if len(name) > 80:
-                raise HTTPException(400, detail="Organization name is too long (80 char max).")
-            if not name:
-                name = None
-        set_organization_name(app.state.db_path, name)
-        _audit_finding_action(
-            app, user_id, "update_branding",
-            detail=f"organization_name={name!r}",
-        )
-        return get_branding(app.state.db_path)
-
-    @app.get("/api/branding/logo")
-    def api_branding_logo_get(user_id: int = Depends(require_login)):
-        blob, mime = get_branding_logo(app.state.db_path)
-        if blob is None:
-            raise HTTPException(404, detail="No logo configured.")
-        return Response(content=blob, media_type=mime or "image/png")
-
-    @app.post("/api/branding/logo")
-    async def api_branding_logo_upload(
-        file: UploadFile = File(...),
-        user_id: int = Depends(require_admin),
-    ):
-        mime = (file.content_type or "").lower()
-        # Allow SVG for the logo even though avatars don't — logos are
-        # much more likely to be vector.
-        if mime not in _BRANDING_LOGO_MIMES:
-            raise HTTPException(400, detail="Logo must be PNG, JPEG, or SVG.")
-        data = await file.read()
-        if not data:
-            raise HTTPException(400, detail="Uploaded file is empty.")
-        if len(data) > _BRANDING_LOGO_MAX_BYTES:
-            raise HTTPException(400, detail="Logo must be 2MB or smaller.")
-        # Magic-byte check (defense-in-depth — content-type is client
-        # controlled). SVG is text, so we look for `<svg` or `<?xml` +
-        # `<svg`; bitmap formats get the same PNG/JPEG header check we
-        # use for avatars.
-        head = data[:128]
-        if mime == "image/png":
-            if head[:4] != b"\x89PNG":
-                raise HTTPException(400, detail="PNG header did not match the bytes.")
-        elif mime == "image/jpeg":
-            if head[:3] != b"\xFF\xD8\xFF":
-                raise HTTPException(400, detail="JPEG header did not match the bytes.")
-        else:  # image/svg+xml
-            lowered = head.lower()
-            if b"<svg" not in lowered and b"<?xml" not in lowered:
-                raise HTTPException(400, detail="SVG header did not match the bytes.")
-        set_branding_logo(app.state.db_path, data, mime)
-        _audit_finding_action(
-            app, user_id, "update_branding_logo",
-            detail=f"mime={mime} bytes={len(data)}",
-        )
-        return get_branding(app.state.db_path)
-
-    @app.delete("/api/branding/logo")
-    def api_branding_logo_delete(user_id: int = Depends(require_admin)):
-        clear_branding_logo(app.state.db_path)
-        _audit_finding_action(app, user_id, "clear_branding_logo", detail="")
-        return get_branding(app.state.db_path)
 
     # -------------------------------------------------------------------
     # API tokens (/api/tokens)

@@ -28,10 +28,6 @@ import {
   apiRevokeToken,
   apiListFeedback,
   apiListAllNotes,
-  apiGetBranding,
-  apiSaveBrandingName,
-  apiUploadBrandingLogo,
-  apiDeleteBrandingLogo,
 } from './api.js';
 import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
 import { getTheme } from './theme.js';
@@ -159,12 +155,6 @@ export async function renderSettingsPage() {
       notesRows = (nl && nl.notes) || [];
     } catch (e) { notesRows = []; }
   }
-
-  // Branding — every logged-in user can read it (the sidebar needs it),
-  // but only admins see the edit card further down. Fall back to empty
-  // so viewers on an unbranded install don't error.
-  var branding = { organization_name: null, has_logo: false };
-  try { branding = await apiGetBranding(); } catch (e) {}
 
   // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
   // a saved URL), fall back to Profile so we don't render an empty panel.
@@ -510,13 +500,7 @@ export async function renderSettingsPage() {
     '</div>';
 
   // --- Appearance tab ------------------------------------------------
-  // Organization branding card — admin-only. Viewers see the theme
-  // picker only; the branding they render is pulled from the sidebar
-  // mount code which every user runs regardless.
-  var brandingHtml = isAdmin ? _renderBrandingCard(branding) : '';
-
   var appearanceHtml =
-    brandingHtml +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Appearance</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -636,67 +620,6 @@ export async function renderSettingsPage() {
 // ------------------------------------------------------------------------
 // Users tab (admin-only)
 // ------------------------------------------------------------------------
-
-// Organization branding card — admin-only. The viewer-side render of
-// branding lives in mountUserMenu / sidebar mounting, not this card.
-function _renderBrandingCard(branding) {
-  var name = (branding && branding.organization_name) || '';
-  var hasLogo = !!(branding && branding.has_logo);
-  var cacheBust = Date.now();
-  // Empty-state tile shows just a centered image glyph — trying to fit
-  // "No logo uploaded" text into a 72-square cramped and wrapped badly.
-  // The Upload button next to it already communicates the empty state.
-  var logoPreview = hasLogo
-    ? '<img src="/api/branding/logo?v=' + cacheBust + '" alt="Current logo" ' +
-         'class="branding-logo-preview" />'
-    : '<div class="branding-logo-placeholder" aria-label="No logo uploaded" ' +
-           'title="No logo uploaded">' +
-        '<i data-lucide="image"></i>' +
-      '</div>';
-  var removeBtn = hasLogo
-    ? '<button type="button" class="btn btn-secondary btn-sm" ' +
-        'data-action="removeBrandingLogo">Remove logo</button>'
-    : '';
-
-  return (
-    '<div class="card" style="margin-bottom:16px;">' +
-      '<div class="section-label">Organization Branding</div>' +
-      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
-        'White-label the sidebar with your company name and logo. Changes ' +
-        'apply on every user’s next page load.' +
-      '</p>' +
-
-      '<div class="form-row">' +
-        '<label>Organization name</label>' +
-        '<input type="text" id="branding-name-input" maxlength="80" ' +
-          'placeholder="e.g. Acme Corp" value="' + escapeHtml(name) + '"/>' +
-      '</div>' +
-
-      '<div class="form-row">' +
-        '<label>Logo</label>' +
-        '<div class="branding-logo-row">' +
-          logoPreview +
-          '<div style="display:flex; flex-direction:column; gap:6px;">' +
-            '<button type="button" class="btn btn-secondary btn-sm" ' +
-              'data-action="uploadBrandingLogoClick">' +
-              (hasLogo ? 'Replace logo' : 'Upload logo') +
-            '</button>' +
-            removeBtn +
-            '<span style="color:var(--text-muted); font-size:11px;">' +
-              'PNG, JPEG, or SVG. Max 2MB. Square logos look best.' +
-            '</span>' +
-          '</div>' +
-          '<input type="file" id="branding-logo-input" accept="image/png,image/jpeg,image/svg+xml" ' +
-            'style="display:none;" data-action-change="onBrandingLogoFileSelected" />' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveBrandingName">Save name</button>' +
-      '</div>' +
-    '</div>'
-  );
-}
 
 function _renderUsersPanel(me, users) {
   var rowsHtml = (users || []).map(function (u) {
@@ -1197,66 +1120,6 @@ export async function createUser() {
 
 // Per-row actions dropdown toggle. Closes any other open menu first so
 // only one row's menu is visible at a time.
-// ---------------------------------------------------------------
-// Organization branding handlers
-// ---------------------------------------------------------------
-
-export async function saveBrandingName() {
-  var input = document.getElementById('branding-name-input');
-  if (!input) return;
-  var name = (input.value || '').trim();
-  var r = await apiSaveBrandingName(name || null);
-  if (!r || !r.ok) {
-    toastError((r && r.data && r.data.detail) || 'Could not save organization name.');
-    return;
-  }
-  showToast(name ? 'Organization name saved' : 'Organization name cleared');
-  // Rebrand the sidebar in place without forcing a full page reload.
-  _applyBrandingToSidebar(r.data || {});
-}
-
-export function uploadBrandingLogoClick() {
-  var f = document.getElementById('branding-logo-input');
-  if (f) f.click();
-}
-
-export async function onBrandingLogoFileSelected(arg, target) {
-  var file = target && target.files && target.files[0];
-  if (!file) return;
-  var r = await apiUploadBrandingLogo(file);
-  if (!r || !r.ok) {
-    toastError((r && r.data && r.data.detail) || 'Logo upload failed.');
-    if (target) target.value = '';
-    return;
-  }
-  showToast('Logo updated');
-  if (target) target.value = '';
-  _applyBrandingToSidebar(r.data || {});
-  renderSettingsPage();  // refresh the preview tile
-}
-
-export async function removeBrandingLogo() {
-  if (!confirm('Remove the current logo?')) return;
-  var r = await apiDeleteBrandingLogo();
-  if (!r || !r.ok) {
-    toastError((r && r.data && r.data.detail) || 'Could not remove logo.');
-    return;
-  }
-  showToast('Logo removed');
-  _applyBrandingToSidebar(r.data || {});
-  renderSettingsPage();
-}
-
-// Shared between save/upload/remove so the sidebar updates live. The
-// global applyBranding() lives in user-menu.js; importing it here keeps
-// the two files honest about the contract.
-async function _applyBrandingToSidebar(data) {
-  try {
-    var m = await import('./user-menu.js');
-    if (m.applyBrandingToSidebar) m.applyBrandingToSidebar(data);
-  } catch (e) { /* non-fatal */ }
-}
-
 export function toggleUserRowMenu(arg, target) {
   var id = String(arg || '');
   var menu = document.getElementById('user-actions-menu-' + id);

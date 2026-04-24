@@ -210,40 +210,6 @@ export async function apiGetTrends(days) {
   return resp.json();
 }
 
-// Organization branding — logo + display name that overrides the
-// default "PULSE / Threat Detection" sidebar lockup. Reads are open to
-// any authenticated user (the sidebar shows the brand); writes are
-// admin-only on the server.
-export async function apiGetBranding() {
-  var resp = await fetch('/api/branding');
-  if (!resp.ok) return { organization_name: null, has_logo: false };
-  return resp.json();
-}
-
-export async function apiSaveBrandingName(name) {
-  var resp = await fetch('/api/branding', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ organization_name: name == null ? null : String(name) }),
-  });
-  var data = await resp.json().catch(function () { return {}; });
-  return { ok: resp.ok, status: resp.status, data: data };
-}
-
-export async function apiUploadBrandingLogo(file) {
-  var fd = new FormData();
-  fd.append('file', file);
-  var resp = await fetch('/api/branding/logo', { method: 'POST', body: fd });
-  var data = await resp.json().catch(function () { return {}; });
-  return { ok: resp.ok, status: resp.status, data: data };
-}
-
-export async function apiDeleteBrandingLogo() {
-  var resp = await fetch('/api/branding/logo', { method: 'DELETE' });
-  var data = await resp.json().catch(function () { return {}; });
-  return { ok: resp.ok, status: resp.status, data: data };
-}
-
 // Admin-only: every analyst note across every finding, newest-first.
 // Powers the Settings > Notes tab so admins see the full investigation
 // thread without clicking into each finding.
