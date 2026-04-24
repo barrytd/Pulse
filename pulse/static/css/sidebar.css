@@ -14,56 +14,65 @@
   z-index: 100;
 }
 
+/* Brand header — icon + "PULSE" side-by-side, "Threat Detection"
+   subtitle below, a single hairline divider to the rest of the nav.
+   Kept geometric and quiet (no tile, no gradient, no glow) so the
+   product mark reads as confident rather than decorative. */
 .sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 24px 20px 20px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  gap: 10px;
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   text-decoration: none;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s ease;
 }
 
 .sidebar-logo:hover {
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
-
 .sidebar-logo-mark {
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  /* Green vital-sign green — the row-accent LOW from the design
+     system is the same shade used for healthy / success states, which
+     matches the heartbeat metaphor. */
+  color: #3fb950;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-
 .sidebar-logo-mark svg {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
+  display: block;
 }
 
 .sidebar-logo-text {
   display: flex;
   flex-direction: column;
   line-height: 1.1;
+  min-width: 0;
 }
 
 .sidebar-logo-title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: #e6edf3;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  /* --text-high from the UX blueprint; hard fall-back to the sidebar's
+     historical bright-white (#e6edf3) so the mark always reads clearly
+     against the dark navy surface. */
+  color: var(--text-high, #f3f4f6);
 }
 
 .sidebar-logo-sub {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.5px;
-  color: #8b949e;
+  color: var(--text-muted, #8b949e);
   margin-top: 3px;
 }
 
@@ -121,10 +130,3 @@
   min-height: 100vh;
 }
 
-.sidebar-quick-assign-menu {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: calc(100% - 8px);
-  z-index: 110;
-}
