@@ -210,6 +210,32 @@ export async function apiGetTrends(days) {
   return resp.json();
 }
 
+// Admin-only: list feedback submissions newest-first. Returns [] if the
+// caller isn't an admin so the tab can render an empty state instead of
+// blowing up the Settings render.
+export async function apiListFeedback(limit) {
+  var q = (limit && Number(limit) > 0) ? ('?limit=' + Number(limit)) : '';
+  var resp = await fetch('/api/feedback' + q);
+  if (!resp.ok) return { rows: [] };
+  return resp.json();
+}
+
+// Submit in-app feedback (bug / idea / general). Server validates length
+// + kind; throws on non-2xx so the modal can surface the message.
+export async function apiSubmitFeedback(payload) {
+  var resp = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!resp.ok) {
+    var msg = 'HTTP ' + resp.status;
+    try { var j = await resp.json(); if (j && j.detail) msg = j.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return resp.json();
+}
+
 // Diff two past scans: returns { scan_a, scan_b, new, resolved, shared }.
 export async function apiCompareScans(idA, idB) {
   var resp = await fetch('/api/compare?a=' + idA + '&b=' + idB);

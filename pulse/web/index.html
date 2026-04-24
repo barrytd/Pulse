@@ -338,6 +338,15 @@
   <!-- Global toast (success/error notifications) -->
   <div id="toast" class="toast"></div>
 
+  <!-- Persistent floating feedback button — visible on every page. -->
+  <button id="feedback-fab" class="feedback-fab" type="button"
+          data-action="openFeedbackModal"
+          aria-label="Send feedback"
+          title="Send feedback">
+    <i data-lucide="message-square"></i>
+    <span>Feedback</span>
+  </button>
+
   <!-- ============================================================= -->
   <!-- FINDING DETAIL DRAWER                                          -->
   <!-- ============================================================= -->
@@ -379,6 +388,58 @@
         <button class="btn" data-action="closeForceBlockModal">Cancel</button>
         <button class="btn btn-danger" id="force-block-confirm-btn"
                 data-action="confirmForceBlock" disabled>Block anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- FEEDBACK MODAL                                                  -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="feedback-modal" role="dialog" aria-label="Send feedback">
+    <div class="modal feedback-modal">
+      <div class="feedback-head">
+        <h2 class="feedback-title">Feedback</h2>
+        <p class="feedback-subtitle">Help us improve Pulse.</p>
+      </div>
+
+      <div class="feedback-section">
+        <div class="feedback-section-label">Type</div>
+        <div class="feedback-type-row" role="radiogroup" aria-label="Feedback type">
+          <button type="button" class="feedback-type-pill is-selected"
+                  data-action="setFeedbackKind" data-arg="bug"
+                  aria-pressed="true">Bug</button>
+          <button type="button" class="feedback-type-pill"
+                  data-action="setFeedbackKind" data-arg="idea"
+                  aria-pressed="false">Idea</button>
+          <button type="button" class="feedback-type-pill"
+                  data-action="setFeedbackKind" data-arg="general"
+                  aria-pressed="false">General</button>
+        </div>
+      </div>
+
+      <div class="feedback-section">
+        <div class="feedback-section-label">Send us your suggestions, ideas, or a bug report</div>
+        <textarea id="feedback-message" rows="7" maxlength="4000"
+                  placeholder="Type your feedback here..."></textarea>
+        <div class="feedback-meta">
+          <span class="feedback-page-hint">
+            On <span id="feedback-page-hint-label" class="mono">—</span>
+          </span>
+          <span class="feedback-counter"><span id="feedback-count">0</span> / 4000 characters</span>
+        </div>
+      </div>
+
+      <div class="upload-status" id="feedback-status"></div>
+
+      <p class="feedback-help">
+        <strong>Need help?</strong> This form is for general feedback.
+        For support, open an issue at
+        <a href="https://github.com/barrytd/Pulse/issues" target="_blank" rel="noopener">github.com/barrytd/Pulse</a>.
+      </p>
+
+      <div class="modal-actions feedback-actions">
+        <button class="btn" data-action="closeFeedbackModal">Cancel</button>
+        <button class="btn btn-primary" id="feedback-submit-btn" data-action="submitFeedback">Send Feedback</button>
       </div>
     </div>
   </div>

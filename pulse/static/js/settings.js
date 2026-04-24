@@ -25,8 +25,9 @@ import {
   apiListTokens,
   apiCreateToken,
   apiRevokeToken,
+  apiListFeedback,
 } from './api.js';
-import { escapeHtml, showToast, toastError } from './dashboard.js';
+import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
 import { getTheme } from './theme.js';
 import { refreshUserMenuAvatar } from './user-menu.js';
 
@@ -49,6 +50,7 @@ const SETTINGS_TABS = [
   { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
   { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
   { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
+  { id: 'feedback',      label: 'Feedback',        icon: 'message-square', adminOnly: true },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
 let _activeSettingsTab = 'profile';
@@ -131,6 +133,16 @@ export async function renderSettingsPage() {
     var tl = await apiListTokens();
     tokensList = tl.tokens || [];
   } catch (e) { tokensList = []; }
+
+  // Admin-only feedback submissions — same "skip for viewers" pattern
+  // as the users list so the Network tab stays clean.
+  var feedbackRows = [];
+  if (isAdmin) {
+    try {
+      var fb = await apiListFeedback(500);
+      feedbackRows = (fb && fb.rows) || [];
+    } catch (e) { feedbackRows = []; }
+  }
 
   // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
   // a saved URL), fall back to Profile so we don't render an empty panel.
@@ -488,6 +500,7 @@ export async function renderSettingsPage() {
 
   // --- Users tab (admins only) --------------------------------------
   var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
+  var feedbackHtml = isAdmin ? _renderFeedbackPanel(feedbackRows) : '';
 
   // --- API tokens tab -----------------------------------------------
   var tokensHtml = _renderTokensPanel(tokensList);
@@ -500,6 +513,7 @@ export async function renderSettingsPage() {
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
     users:         usersHtml,
+    feedback:      feedbackHtml,
     // SMTP is powerful but noisy — tucked behind a <details> so the
     // Advanced tab reads as a configuration inventory, not a form wall.
     advanced:
@@ -692,6 +706,117 @@ function _renderTokensPanel(tokens) {
       tableHtml +
     '</div>'
   );
+}
+
+// Admin-only panel listing in-app feedback submissions. Structure:
+//   1. KPI strip (Total / Bugs / Ideas / General / Hot page) — matches the
+//      Fleet/Whitelist clickable-tile pattern from the UX blueprint
+//   2. Table of submissions with kind chip, relative time, author, page,
+//      truncated message preview.
+// Messages expand inline on click so admins can read long notes without
+// leaving the page.
+function _renderFeedbackPanel(rows) {
+  var total = rows.length;
+  var counts = { bug: 0, idea: 0, general: 0 };
+  var pageHits = {};
+  rows.forEach(function (r) {
+    var k = (r.kind || 'general').toLowerCase();
+    if (counts[k] !== undefined) counts[k]++;
+    var p = (r.page_hint || '').trim();
+    if (p) pageHits[p] = (pageHits[p] || 0) + 1;
+  });
+  var hottestPage = '';
+  var hottestCount = 0;
+  Object.keys(pageHits).forEach(function (p) {
+    if (pageHits[p] > hottestCount) { hottestCount = pageHits[p]; hottestPage = p; }
+  });
+
+  function _tile(label, value, accent) {
+    return '<div class="feedback-kpi' + (accent ? ' feedback-kpi-' + accent : '') + '">' +
+      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
+      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    '</div>';
+  }
+
+  var kpiHtml =
+    '<div class="feedback-kpi-strip">' +
+      _tile('Total', total, '') +
+      _tile('Bugs', counts.bug, 'bug') +
+      _tile('Ideas', counts.idea, 'idea') +
+      _tile('General', counts.general, 'general') +
+      _tile('Top Page', hottestPage ? '/' + hottestPage : '—', 'muted') +
+    '</div>';
+
+  if (total === 0) {
+    return (
+      '<div class="card" style="margin-bottom:16px;">' +
+        '<div class="section-label">Feedback</div>' +
+        '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
+          'Submissions from the in-app feedback modal land here. Nothing yet — ' +
+          'the FAB in the bottom-right corner of every page lets users file bugs, ideas, and general thoughts.' +
+        '</p>' +
+        kpiHtml +
+      '</div>'
+    );
+  }
+
+  var rowsHtml = rows.map(function (r, i) {
+    var kind = (r.kind || 'general').toLowerCase();
+    var submittedAt = r.submitted_at || '';
+    var rel = formatRelativeTime(submittedAt);
+    var email = r.email || ('user #' + (r.user_id || '?'));
+    var page = r.page_hint ? '/' + r.page_hint : '—';
+    var msg = String(r.message || '');
+    var preview = msg.length > 140 ? msg.slice(0, 140) + '…' : msg;
+    return (
+      '<tr class="feedback-row" data-action="toggleFeedbackRow" data-arg="' + i + '">' +
+        '<td class="feedback-when" title="' + escapeHtml(submittedAt) + '">' +
+          escapeHtml(rel) +
+        '</td>' +
+        '<td><span class="feedback-chip feedback-chip-' + kind + '">' + escapeHtml(kind) + '</span></td>' +
+        '<td class="feedback-from">' + escapeHtml(email) + '</td>' +
+        '<td><span class="mono feedback-page">' + escapeHtml(page) + '</span></td>' +
+        '<td class="feedback-message">' +
+          '<div class="feedback-message-preview">' + escapeHtml(preview) + '</div>' +
+          '<div class="feedback-message-full" hidden>' + escapeHtml(msg) + '</div>' +
+        '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  return (
+    kpiHtml +
+    '<div class="card" style="padding:0; overflow:hidden;">' +
+      '<div class="section-label" style="padding:16px 20px 8px;">' +
+        'Submissions (' + total + ')' +
+      '</div>' +
+      '<div class="table-wrap"><table class="data-table">' +
+        '<thead><tr>' +
+          '<th>When</th><th>Kind</th><th>From</th><th>Page</th><th>Message</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>' +
+    '</div>'
+  );
+}
+
+// Click a row to expand the full message. Re-click collapses.
+export function toggleFeedbackRow(arg, target) {
+  var row = target && target.closest ? target.closest('.feedback-row') : null;
+  if (!row) return;
+  var preview = row.querySelector('.feedback-message-preview');
+  var full    = row.querySelector('.feedback-message-full');
+  if (!preview || !full) return;
+  var expanded = !full.hasAttribute('hidden');
+  if (expanded) {
+    full.setAttribute('hidden', '');
+    preview.removeAttribute('hidden');
+    row.classList.remove('is-expanded');
+  } else {
+    preview.setAttribute('hidden', '');
+    full.removeAttribute('hidden');
+    row.classList.add('is-expanded');
+  }
 }
 
 export async function createToken() {

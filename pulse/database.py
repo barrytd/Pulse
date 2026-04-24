@@ -202,6 +202,23 @@ CREATE TABLE IF NOT EXISTS monitor_sessions (
 );
 """
 
+# In-app feedback submissions. Populated by the user-menu "Give Feedback"
+# modal; `kind` is one of 'bug' / 'idea' / 'general'. `page_hint` records
+# the SPA route the user was on when they opened the modal so bug reports
+# land with context. `status` is reserved for future triage ('new',
+# 'read', 'closed') — no UI yet.
+_CREATE_FEEDBACK = """
+CREATE TABLE IF NOT EXISTS feedback (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    submitted_at TEXT    NOT NULL,
+    user_id      INTEGER,
+    kind         TEXT    NOT NULL,
+    message      TEXT    NOT NULL,
+    page_hint    TEXT,
+    status       TEXT    NOT NULL DEFAULT 'new'
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -226,6 +243,7 @@ def init_db(db_path):
         _CREATE_IP_BLOCK_LIST,
         _CREATE_AUDIT_LOG,
         _CREATE_MONITOR_SESSIONS,
+        _CREATE_FEEDBACK,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -1409,6 +1427,54 @@ def touch_api_token(db_path, token_sha256):
             " WHERE token_sha256 = ? AND revoked = 0",
             (now, token_sha256),
         )
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+_FEEDBACK_KINDS = ("bug", "idea", "general")
+
+
+def insert_feedback(db_path, user_id, kind, message, page_hint=None):
+    """Persist one feedback submission. Returns the new row id.
+
+    Caller is expected to validate `kind` + `message` length before calling;
+    this function re-validates `kind` as a cheap safety net but does not
+    re-truncate the message.
+    """
+    if kind not in _FEEDBACK_KINDS:
+        kind = "general"
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            """INSERT INTO feedback (submitted_at, user_id, kind, message, page_hint)
+               VALUES (?, ?, ?, ?, ?)""",
+            (ts, user_id, kind, message, page_hint),
+        )
+        try:
+            return cursor.lastrowid
+        except Exception:
+            return None
+
+
+def list_feedback(db_path, limit=200):
+    """Return feedback submissions newest-first. Admin view only."""
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                """SELECT f.id, f.submitted_at, f.user_id, f.kind, f.message,
+                          f.page_hint, f.status, u.email
+                   FROM feedback f
+                   LEFT JOIN users u ON u.id = f.user_id
+                   ORDER BY f.id DESC
+                   LIMIT ?""",
+                (int(limit),),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------

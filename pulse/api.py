@@ -57,7 +57,8 @@ from pulse.database import (
     get_monitor_session_findings, get_rule_stats, get_scan_findings,
     get_trend_analytics,
     get_user_avatar, get_user_by_email, get_user_by_id, init_db,
-    list_api_tokens, list_monitor_sessions, list_users,
+    insert_feedback, list_api_tokens, list_feedback,
+    list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_user_avatar,
     update_user_active, update_user_email, update_user_password,
     update_user_role,
@@ -171,6 +172,7 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     app.state.db_path = db_path
     app.state.config_path = config_path
     app.state.auth_required = not disable_auth
+    app.state.is_production = _is_production
 
     # Resolve (and if needed, generate + persist) the session signing secret
     # so every logged-in browser cookie can be verified on future requests.
@@ -533,6 +535,7 @@ def _register_routes(app: FastAPI) -> None:
         resp.set_cookie(
             SESSION_COOKIE_NAME, cookie,
             max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+            secure=bool(getattr(app.state, "is_production", False)),
         )
         return resp
 
@@ -552,6 +555,7 @@ def _register_routes(app: FastAPI) -> None:
         resp.set_cookie(
             SESSION_COOKIE_NAME, cookie,
             max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+            secure=bool(getattr(app.state, "is_production", False)),
         )
         return resp
 
@@ -792,6 +796,46 @@ def _register_routes(app: FastAPI) -> None:
         delete_user(app.state.db_path, target_id)
         _audit_user_action(user_id, "delete_user", target=target["email"])
         return {"status": "ok"}
+
+    # -------------------------------------------------------------------
+    # POST /api/feedback — in-app feedback submission
+    # GET  /api/feedback — admin-only list view
+    # -------------------------------------------------------------------
+    @app.post("/api/feedback")
+    async def api_submit_feedback(request: Request,
+                                  user_id: int = Depends(require_login)):
+        """Persist a user-submitted feedback message. Keeps the bar to
+        submission low — any authenticated user can file feedback, admin
+        reviews it via GET /api/feedback."""
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        # Coerce to str defensively so a client sending a list/dict for any
+        # field gets a clean 400 instead of a 500 from .strip().
+        kind = str(body.get("kind") or "general").strip().lower()
+        message = str(body.get("message") or "").strip()
+        page_hint_raw = str(body.get("page_hint") or "").strip()
+        page_hint = page_hint_raw or None
+        if kind not in ("bug", "idea", "general"):
+            raise HTTPException(400, detail="kind must be bug, idea, or general.")
+        if not message:
+            raise HTTPException(400, detail="Message cannot be empty.")
+        if len(message) > 4000:
+            raise HTTPException(400, detail="Message is too long (4000 char max).")
+        if page_hint and len(page_hint) > 120:
+            page_hint = page_hint[:120]
+        new_id = insert_feedback(app.state.db_path, user_id, kind, message, page_hint)
+        return {"status": "ok", "id": new_id}
+
+    @app.get("/api/feedback")
+    def api_list_feedback(limit: int = 200,
+                          user_id: int = Depends(require_admin)):
+        if limit < 1 or limit > 1000:
+            raise HTTPException(400, detail="limit must be between 1 and 1000.")
+        return {"rows": list_feedback(app.state.db_path, limit=limit)}
 
     # -------------------------------------------------------------------
     # GET /api/health
@@ -1211,17 +1255,37 @@ def _register_routes(app: FastAPI) -> None:
     # PUT /api/finding/{id}/review — toggle reviewed / false_positive
     # -------------------------------------------------------------------
     @app.put("/api/finding/{finding_id}/review")
-    def review_finding(finding_id: int, payload: dict = Body(...)):
+    def review_finding(finding_id: int, payload: dict = Body(...),
+                       user_id: int = Depends(require_login)):
         """Update a finding's review flags. The two flags are independent —
         an analyst can mark something reviewed, false-positive, both, or
         neither. Body: {"reviewed": bool, "false_positive": bool,
-        "note": "..."}."""
+        "note": "..."}. Viewers can only touch findings belonging to scans
+        they own; admins can review any finding."""
         p = payload or {}
         if "reviewed" not in p or "false_positive" not in p:
             raise HTTPException(
                 400,
                 detail="body must include 'reviewed' and 'false_positive' booleans",
             )
+        # Ownership check: look up the finding's scan and reject if the
+        # caller is a viewer trying to touch someone else's finding. Admins
+        # (scope == None) skip the filter.
+        scope = _scan_scope_for(app, user_id)
+        if scope is not None:
+            from pulse import db_backend
+            with db_backend.connect(app.state.db_path) as conn:
+                row = conn.execute(
+                    "SELECT scans.user_id FROM findings "
+                    "JOIN scans ON scans.id = findings.scan_id "
+                    "WHERE findings.id = ?",
+                    (int(finding_id),),
+                ).fetchone()
+            if row is None:
+                raise HTTPException(404, detail="Finding not found.")
+            owner = row[0] if not isinstance(row, dict) else row.get("user_id")
+            if owner is not None and int(owner) != int(scope):
+                raise HTTPException(404, detail="Finding not found.")
         reviewed = bool(p.get("reviewed"))
         false_positive = bool(p.get("false_positive"))
         note = p.get("note")
@@ -1373,7 +1437,7 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/reports — list persisted reports on disk (reports/ dir)
     # -------------------------------------------------------------------
     @app.get("/api/reports")
-    def list_reports():
+    def list_reports(user_id: int = Depends(require_login)):
         """
         List every file in the ``reports/`` directory. Returns filename,
         format (extension), byte size, and generated timestamp derived
@@ -1418,7 +1482,8 @@ def _register_routes(app: FastAPI) -> None:
     # /{filename} route so "batch" isn't interpreted as a filename.
     # -------------------------------------------------------------------
     @app.delete("/api/reports/batch")
-    def delete_reports_batch(payload: dict = Body(...)):
+    def delete_reports_batch(payload: dict = Body(...),
+                             user_id: int = Depends(require_admin)):
         names = payload.get("filenames") if isinstance(payload, dict) else None
         if not isinstance(names, list) or not names:
             raise HTTPException(400, detail="Body must be {\"filenames\": [...]}")
@@ -1448,7 +1513,7 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/reports/{filename} — download a persisted report
     # -------------------------------------------------------------------
     @app.get("/api/reports/{filename}")
-    def download_report(filename: str):
+    def download_report(filename: str, user_id: int = Depends(require_login)):
         # Defence in depth: os.path.basename strips any path, then we
         # re-check the resolved path is still inside reports/ so a
         # crafted filename cannot escape the directory.
@@ -1470,7 +1535,7 @@ def _register_routes(app: FastAPI) -> None:
     # DELETE /api/reports/{filename} — remove a persisted report from disk
     # -------------------------------------------------------------------
     @app.delete("/api/reports/{filename}")
-    def delete_report(filename: str):
+    def delete_report(filename: str, user_id: int = Depends(require_admin)):
         safe = os.path.basename(filename)
         if not safe or safe != filename:
             raise HTTPException(400, detail="Invalid filename.")
@@ -1546,7 +1611,8 @@ def _register_routes(app: FastAPI) -> None:
     # PUT /api/config/email — update SMTP settings
     # -------------------------------------------------------------------
     @app.put("/api/config/email")
-    async def update_email(request: Request):
+    async def update_email(request: Request,
+                           user_id: int = Depends(require_admin)):
         """
         Update the email section of pulse.yaml.
 
@@ -1583,7 +1649,8 @@ def _register_routes(app: FastAPI) -> None:
     # PUT /api/config/alerts — update alert thresholds + cooldown
     # -------------------------------------------------------------------
     @app.put("/api/config/alerts")
-    async def update_alerts(request: Request):
+    async def update_alerts(request: Request,
+                            user_id: int = Depends(require_admin)):
         """Update the alerts section of pulse.yaml."""
         body = await request.json()
         config = _read_config(app.state.config_path)
@@ -1632,7 +1699,7 @@ def _register_routes(app: FastAPI) -> None:
     # POST /api/alerts/test — fire a single dummy alert email
     # -------------------------------------------------------------------
     @app.post("/api/alerts/test")
-    def send_test_alert():
+    def send_test_alert(user_id: int = Depends(require_admin)):
         """
         Fire one synthetic alert email to verify SMTP credentials work.
 
@@ -1672,7 +1739,8 @@ def _register_routes(app: FastAPI) -> None:
     # PUT /api/config/webhook — update Slack/Discord webhook settings
     # -------------------------------------------------------------------
     @app.put("/api/config/webhook")
-    async def update_webhook(request: Request):
+    async def update_webhook(request: Request,
+                             user_id: int = Depends(require_admin)):
         """
         Update the webhook section of pulse.yaml.
 
@@ -1709,7 +1777,7 @@ def _register_routes(app: FastAPI) -> None:
     # POST /api/webhook/test — fire a single synthetic webhook message
     # -------------------------------------------------------------------
     @app.post("/api/webhook/test")
-    def send_test_webhook():
+    def send_test_webhook(user_id: int = Depends(require_admin)):
         """Fire one synthetic webhook to verify the URL and flavor work.
 
         Bypasses the enabled toggle — the whole point is to verify before
@@ -1809,7 +1877,8 @@ def _register_routes(app: FastAPI) -> None:
     # POST /api/scheduler/config — save the scheduled-scan configuration
     # -------------------------------------------------------------------
     @app.post("/api/scheduler/config")
-    async def scheduler_config(request: Request):
+    async def scheduler_config(request: Request,
+                               user_id: int = Depends(require_admin)):
         try:
             body = await request.json()
         except Exception:
@@ -1846,7 +1915,8 @@ def _register_routes(app: FastAPI) -> None:
     # they can't be selected.
     # -------------------------------------------------------------------
     @app.delete("/api/whitelist/batch")
-    def delete_whitelist_batch(payload: dict = Body(...)):
+    def delete_whitelist_batch(payload: dict = Body(...),
+                               user_id: int = Depends(require_admin)):
         entries = payload.get("entries") if isinstance(payload, dict) else None
         if not isinstance(entries, list) or not entries:
             raise HTTPException(400, detail="Body must be {\"entries\": [{key,value},...]}")
@@ -1880,7 +1950,8 @@ def _register_routes(app: FastAPI) -> None:
     # PUT /api/config/whitelist — update the whitelist
     # -------------------------------------------------------------------
     @app.put("/api/config/whitelist")
-    async def update_whitelist(request: Request):
+    async def update_whitelist(request: Request,
+                               user_id: int = Depends(require_admin)):
         """Update the whitelist section in pulse.yaml."""
         body = await request.json()
 
@@ -1974,7 +2045,8 @@ def _register_routes(app: FastAPI) -> None:
     # PUT /api/rules/{name}/enabled — toggle a rule on/off in pulse.yaml
     # -------------------------------------------------------------------
     @app.put("/api/rules/{name}/enabled")
-    async def set_rule_enabled_endpoint(name: str, request: Request):
+    async def set_rule_enabled_endpoint(name: str, request: Request,
+                                        user_id: int = Depends(require_admin)):
         try:
             body = await request.json()
         except Exception:

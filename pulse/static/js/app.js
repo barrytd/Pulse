@@ -139,6 +139,7 @@ import {
   onAvatarFileSelected,
   createToken,
   revokeTokenConfirm,
+  toggleFeedbackRow,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -165,6 +166,12 @@ import {
   toggleDarkModeFromMenu,
 } from './user-menu.js';
 import { mountCommandPalette, openCommandPalette } from './command-palette.js';
+import {
+  openFeedbackModal,
+  closeFeedbackModal,
+  submitFeedback,
+  setFeedbackKind,
+} from './feedback.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -311,6 +318,7 @@ const actions = {
   onAvatarFileSelected,
   createToken,
   revokeTokenConfirm,
+  toggleFeedbackRow,
 
   // reports
   setReportsQueryFromInput,
@@ -336,6 +344,12 @@ const actions = {
   openFeedback,
   logOutFromMenu,
   toggleDarkModeFromMenu,
+
+  // feedback modal
+  openFeedbackModal,
+  closeFeedbackModal,
+  submitFeedback,
+  setFeedbackKind,
 
   // admin privilege banner
   dismissAdminBanner,

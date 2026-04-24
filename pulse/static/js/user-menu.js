@@ -8,6 +8,7 @@ import { apiGetAuthStatus, apiGetMe } from './api.js';
 import { navigate } from './navigation.js';
 import { toggleTheme } from './theme.js';
 import { signOut, setActiveSettingsTab } from './settings.js';
+import { openFeedbackModal } from './feedback.js';
 
 const GITHUB_REPO = 'https://github.com/barrytd/Pulse';
 
@@ -84,7 +85,7 @@ export function openDocs() {
 
 export function openFeedback() {
   _closeUserMenu();
-  window.open(GITHUB_REPO + '/issues/new', '_blank', 'noopener');
+  openFeedbackModal();
 }
 
 // Dedicated wrapper so the dropdown closes before the signOut POST

@@ -524,3 +524,147 @@
   color: #fff;
 }
 .drawer-btn.variant-danger:hover { filter: brightness(1.05); }
+
+/* --- Feedback modal ------------------------------------------------------ */
+.feedback-modal {
+  max-width: 520px;
+  padding: 28px 28px 22px;
+}
+.feedback-head { margin-bottom: 20px; }
+.feedback-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 6px;
+  letter-spacing: -0.2px;
+}
+.feedback-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+.feedback-section { margin-bottom: 18px; }
+.feedback-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+.feedback-type-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.feedback-type-pill {
+  appearance: none;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.feedback-type-pill:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.feedback-type-pill.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+#feedback-message {
+  width: 100%;
+  resize: vertical;
+  min-height: 140px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color 150ms ease;
+}
+#feedback-message::placeholder { color: var(--text-light); }
+#feedback-message:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.feedback-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-light);
+}
+.feedback-page-hint .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted);
+}
+.feedback-counter { text-align: right; }
+
+.feedback-help {
+  font-size: 12px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin: 4px 0 16px;
+  line-height: 1.5;
+}
+.feedback-help strong { color: var(--text); font-weight: 600; }
+.feedback-help a { color: var(--accent); text-decoration: none; }
+.feedback-help a:hover { text-decoration: underline; }
+
+.feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 0;
+}
+
+/* --- Floating feedback FAB ----------------------------------------------- */
+.feedback-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--accent, #58a6ff);
+  background: var(--accent, #58a6ff);
+  color: #fff;
+  font: 600 13px/1 var(--font-body, 'Inter', sans-serif);
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+.feedback-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  filter: brightness(1.06);
+}
+.feedback-fab i,
+.feedback-fab svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+}
+@media (max-width: 600px) {
+  .feedback-fab span { display: none; }
+  .feedback-fab { padding: 12px; border-radius: 50%; }
+}

@@ -5,6 +5,25 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-23 — Sprint 6 (in progress)
+
+### Added
+- **In-app feedback** (`feedback` table, `POST /api/feedback`, `GET /api/feedback` admin-only) — "Give Feedback" in the user-avatar dropdown now opens an in-app modal, and a persistent floating "Feedback" pill sits in the bottom-right corner of every page. Users pick a type (Bug / Idea / General), type a message up to 4000 chars, and submit; the current SPA route is captured as `page_hint` for context. Rows land in `pulse.db` with `user_id` + timestamp
+- **Settings → Feedback admin tab** — admin-only review UI with a 5-tile KPI strip (Total / Bugs / Ideas / General / Top Page) and a table of submissions (relative time + UTC on hover, kind chip, submitter email, page path, 140-char preview). Click a row to expand the full message
+
+### Security
+- **RBAC gaps closed on admin-config endpoints** — every config-mutating or outbound-side-effect endpoint now declares `Depends(require_admin)`, preventing viewers from modifying global SMTP/webhook/scheduler/whitelist/rule state:
+  - `PUT /api/config/email`, `PUT /api/config/alerts`, `PUT /api/config/webhook`, `PUT /api/config/whitelist`
+  - `POST /api/alerts/test`, `POST /api/webhook/test` (also closes the SSRF chain: previously, any authenticated viewer could repoint `webhook.url` to an internal address and trigger a server-side POST)
+  - `POST /api/scheduler/config`, `PUT /api/rules/{name}/enabled`, `DELETE /api/whitelist/batch`
+  - `DELETE /api/reports/batch`, `DELETE /api/reports/{filename}` (admin-only; reports are shared filesystem state)
+  - `GET /api/reports`, `GET /api/reports/{filename}` (require_login — viewers can download their own scans' reports)
+- **Finding review auth + ownership check** — `PUT /api/finding/{finding_id}/review` now requires login and verifies the finding's scan belongs to the caller (admins unaffected; viewers get a 404 on cross-scope findings to avoid leaking existence)
+- **Session cookie `Secure` flag in production** — login / signup cookies now set `secure=True` when `PULSE_ENV=production` so they can't travel over plaintext on accidental `http://` hops. Dev-mode cookies stay non-secure so `http://127.0.0.1` works
+- **Feedback endpoint hardening** — `POST /api/feedback` now rejects non-JSON / non-object bodies with 400 and coerces `kind` / `message` / `page_hint` to strings defensively so weird client payloads can't 500 the server
+
+---
+
 ## 2026-04-21 — v1.5.0 (Sprint 5: Auth, compliance, analytics)
 
 ### UX blueprint pass (late-sprint polish against `.claude/skills/pulse-ux-blueprint.md`)
