@@ -1458,3 +1458,22 @@ export function dashSidebarClear() {
   dashSidebarState.severity.clear();
   renderDashboardPage();
 }
+
+// "Find filter..." search input handler. Narrows the visible rows by
+// substring match on the label text. data-action-input fires on every
+// keystroke so the filter feels live.
+export function dashSidebarSearch(arg, target) {
+  var needle = String((target && target.value) || '').trim().toLowerCase();
+  var items = document.querySelectorAll('#dash-sidebar-filters .sidebar-filter-list li');
+  items.forEach(function (li) {
+    var label = (li.querySelector('.sidebar-filter-label') || {}).textContent || '';
+    var match = !needle || label.toLowerCase().indexOf(needle) >= 0;
+    li.classList.toggle('is-hidden', !match);
+  });
+  // If a whole group's rows are hidden, collapse the group visually
+  // by adding is-collapsed so its body doesn't show an empty list.
+  document.querySelectorAll('#dash-sidebar-filters .sidebar-filter-group').forEach(function (g) {
+    var visible = g.querySelectorAll('.sidebar-filter-list li:not(.is-hidden)').length;
+    g.classList.toggle('has-no-matches', !visible);
+  });
+}

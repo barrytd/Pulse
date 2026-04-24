@@ -31,6 +31,7 @@ import {
   dashSidebarToggleItem,
   dashSidebarToggleGroup,
   dashSidebarClear,
+  dashSidebarSearch,
 } from './dashboard.js';
 import {
   toggleScanSelect,
@@ -235,6 +236,7 @@ const actions = {
   dashSidebarToggleItem,
   dashSidebarToggleGroup,
   dashSidebarClear,
+  dashSidebarSearch,
   openUnreviewedCriticalHigh,
 
   // scans + findings

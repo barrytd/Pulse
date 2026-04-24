@@ -127,11 +127,141 @@
   <!-- ============================================================= -->
   <div class="app">
     <aside class="sidebar">
-      <!-- Flat nav list — no brand block (moved to the topbar), no
-           group wrappers. Each <a> has its label in a span so CSS can
-           hide the text when the sidebar is collapsed to icons-only,
-           and a title= attribute so hovering a collapsed icon surfaces
-           a native browser tooltip with the page name. -->
+      <!-- =========================================================
+           DASHBOARD FILTER PANEL — primary sidebar content (top).
+           Nav moves below the divider. QRadar layout: filters are the
+           tool, nav is the chrome, so filters get the visual weight.
+           ========================================================= -->
+      <div class="sidebar-page-filters" id="dash-sidebar-filters">
+
+        <!-- Header row: "Filters" label left, "Clear" link right. The
+             Clear link is hidden until at least one checkbox is on. -->
+        <div class="sidebar-filter-header">
+          <span class="sidebar-filter-heading">Filters</span>
+          <a class="sidebar-filter-clear"
+             id="dash-filter-clear"
+             data-action="dashSidebarClear"
+             hidden>Clear</a>
+        </div>
+
+        <!-- Find-filter input — narrows the visible rows by label
+             substring match as the user types. JS handler lives in
+             dashboard.js and talks to data-action-input="dashSidebarSearch". -->
+        <input type="search"
+               class="sidebar-filter-search"
+               id="dash-filter-search"
+               placeholder="Find filter..."
+               data-action-input="dashSidebarSearch"
+               autocomplete="off" />
+
+        <div class="sidebar-filter-group" data-group="status">
+          <button type="button" class="sidebar-filter-group-head"
+                  data-action="dashSidebarToggleGroup" data-arg="status">
+            <span class="sidebar-filter-chevron" aria-hidden="true">
+              <svg viewBox="0 0 12 12" width="12" height="12" fill="none"
+                   stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 4.5 L6 7.5 L9 4.5"/>
+              </svg>
+            </span>
+            <span class="sidebar-filter-group-label">Status</span>
+          </button>
+          <ul class="sidebar-filter-list" id="dash-filter-status">
+            <li data-group="status" data-item="new">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="status|new" />
+                <span class="sidebar-filter-label">New</span>
+                <span class="sidebar-filter-count" data-count-for="status|new">0</span>
+              </label>
+            </li>
+            <li data-group="status" data-item="acknowledged">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="status|acknowledged" />
+                <span class="sidebar-filter-label">Acknowledged</span>
+                <span class="sidebar-filter-count" data-count-for="status|acknowledged">0</span>
+              </label>
+            </li>
+            <li data-group="status" data-item="investigating">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="status|investigating" />
+                <span class="sidebar-filter-label">Investigating</span>
+                <span class="sidebar-filter-count" data-count-for="status|investigating">0</span>
+              </label>
+            </li>
+            <li data-group="status" data-item="resolved">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="status|resolved" />
+                <span class="sidebar-filter-label">Resolved</span>
+                <span class="sidebar-filter-count" data-count-for="status|resolved">0</span>
+              </label>
+            </li>
+          </ul>
+        </div>
+
+        <div class="sidebar-filter-group" data-group="severity">
+          <button type="button" class="sidebar-filter-group-head"
+                  data-action="dashSidebarToggleGroup" data-arg="severity">
+            <span class="sidebar-filter-chevron" aria-hidden="true">
+              <svg viewBox="0 0 12 12" width="12" height="12" fill="none"
+                   stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 4.5 L6 7.5 L9 4.5"/>
+              </svg>
+            </span>
+            <span class="sidebar-filter-group-label">Severity</span>
+          </button>
+          <ul class="sidebar-filter-list" id="dash-filter-severity">
+            <li data-group="severity" data-item="CRITICAL">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="severity|CRITICAL" />
+                <span class="sidebar-filter-dot" style="background:#f85149"></span>
+                <span class="sidebar-filter-label">Critical</span>
+                <span class="sidebar-filter-count" data-count-for="severity|CRITICAL">0</span>
+              </label>
+            </li>
+            <li data-group="severity" data-item="HIGH">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="severity|HIGH" />
+                <span class="sidebar-filter-dot" style="background:#f0883e"></span>
+                <span class="sidebar-filter-label">High</span>
+                <span class="sidebar-filter-count" data-count-for="severity|HIGH">0</span>
+              </label>
+            </li>
+            <li data-group="severity" data-item="MEDIUM">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="severity|MEDIUM" />
+                <span class="sidebar-filter-dot" style="background:#d29922"></span>
+                <span class="sidebar-filter-label">Medium</span>
+                <span class="sidebar-filter-count" data-count-for="severity|MEDIUM">0</span>
+              </label>
+            </li>
+            <li data-group="severity" data-item="LOW">
+              <label>
+                <input type="checkbox" data-action-change="dashSidebarToggleItem"
+                       data-arg="severity|LOW" />
+                <span class="sidebar-filter-dot" style="background:#3fb950"></span>
+                <span class="sidebar-filter-label">Low</span>
+                <span class="sidebar-filter-count" data-count-for="severity|LOW">0</span>
+              </label>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Horizontal divider separates the filter panel (primary
+           content) from the nav list (secondary, always-visible). -->
+      <div class="sidebar-divider" aria-hidden="true"></div>
+
+      <!-- Flat nav list — icons + labels. Label span so CSS can hide
+           text when the sidebar collapses to icons-only; title attrs
+           surface native browser tooltips in the collapsed state. -->
       <nav class="sidebar-nav">
         <a class="active" data-action="navigate" data-arg="dashboard" title="Dashboard">
           <i data-lucide="layout-dashboard" class="icon"></i>
@@ -183,116 +313,10 @@
         </a>
       </nav>
 
-      <!-- Horizontal divider between the nav list and the filter
-           panel. Matches the same hairline used under the topbar so
-           the sidebar reads as one continuous chrome with a single
-           seam between "pages" and "filters on this page". -->
-      <div class="sidebar-divider" aria-hidden="true"></div>
-
-      <!-- =========================================================
-           DASHBOARD FILTER PANEL — rendered inline in the sidebar.
-           Two collapsible groups (Status + Severity). Counts are
-           computed from the current attention-window findings on
-           every dashboard render; checkbox toggles call a handler
-           on `window.__dashSidebarFilter` that re-renders the
-           dashboard in real-time (no Apply button).
-           The whole panel is hidden unless the current page is the
-           Dashboard; see body[data-page] selector in sidebar.css.
-           ========================================================= -->
-      <div class="sidebar-page-filters" id="dash-sidebar-filters">
-        <a class="sidebar-filter-clear"
-           id="dash-filter-clear"
-           data-action="dashSidebarClear"
-           hidden>Clear filters</a>
-
-        <div class="sidebar-filter-group" data-group="status">
-          <button type="button" class="sidebar-filter-group-head"
-                  data-action="dashSidebarToggleGroup" data-arg="status">
-            <span class="sidebar-filter-chevron" aria-hidden="true">
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none"
-                   stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 4.5 L6 7.5 L9 4.5"/>
-              </svg>
-            </span>
-            <span class="sidebar-filter-group-label">Status</span>
-          </button>
-          <ul class="sidebar-filter-list" id="dash-filter-status">
-            <li data-group="status" data-item="new">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="status|new" />
-              <span class="sidebar-filter-label">New</span>
-              <span class="sidebar-filter-count" data-count-for="status|new">0</span>
-            </li>
-            <li data-group="status" data-item="acknowledged">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="status|acknowledged" />
-              <span class="sidebar-filter-label">Acknowledged</span>
-              <span class="sidebar-filter-count" data-count-for="status|acknowledged">0</span>
-            </li>
-            <li data-group="status" data-item="investigating">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="status|investigating" />
-              <span class="sidebar-filter-label">Investigating</span>
-              <span class="sidebar-filter-count" data-count-for="status|investigating">0</span>
-            </li>
-            <li data-group="status" data-item="resolved">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="status|resolved" />
-              <span class="sidebar-filter-label">Resolved</span>
-              <span class="sidebar-filter-count" data-count-for="status|resolved">0</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="sidebar-filter-group" data-group="severity">
-          <button type="button" class="sidebar-filter-group-head"
-                  data-action="dashSidebarToggleGroup" data-arg="severity">
-            <span class="sidebar-filter-chevron" aria-hidden="true">
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none"
-                   stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 4.5 L6 7.5 L9 4.5"/>
-              </svg>
-            </span>
-            <span class="sidebar-filter-group-label">Severity</span>
-          </button>
-          <ul class="sidebar-filter-list" id="dash-filter-severity">
-            <li data-group="severity" data-item="CRITICAL">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="severity|CRITICAL" />
-              <span class="sidebar-filter-dot" style="background:#f85149"></span>
-              <span class="sidebar-filter-label">Critical</span>
-              <span class="sidebar-filter-count" data-count-for="severity|CRITICAL">0</span>
-            </li>
-            <li data-group="severity" data-item="HIGH">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="severity|HIGH" />
-              <span class="sidebar-filter-dot" style="background:#f0883e"></span>
-              <span class="sidebar-filter-label">High</span>
-              <span class="sidebar-filter-count" data-count-for="severity|HIGH">0</span>
-            </li>
-            <li data-group="severity" data-item="MEDIUM">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="severity|MEDIUM" />
-              <span class="sidebar-filter-dot" style="background:#d29922"></span>
-              <span class="sidebar-filter-label">Medium</span>
-              <span class="sidebar-filter-count" data-count-for="severity|MEDIUM">0</span>
-            </li>
-            <li data-group="severity" data-item="LOW">
-              <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                     data-arg="severity|LOW" />
-              <span class="sidebar-filter-dot" style="background:#3fb950"></span>
-              <span class="sidebar-filter-label">Low</span>
-              <span class="sidebar-filter-count" data-count-for="severity|LOW">0</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-
       <!-- Legacy dynamic filter panel (sidebar-filters.js) — still
            drives the Findings tab on Scans. Kept separate so the
-           inline Dashboard panel above doesn't collide with it. -->
+           inline Dashboard panel at the top doesn't collide with it.
+           On pages other than Scans/Findings this stays hidden. -->
       <div class="sidebar-filters" id="sidebar-filters" hidden></div>
     </aside>
 
