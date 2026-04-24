@@ -82,13 +82,19 @@
 
 .sidebar-nav {
   flex: 1;
-  padding: 12px 0;
+  /* 16px top pushes the menu a hair below the hairline divider so the
+     brand block reads as its own chapter. Bottom stays 12px so the
+     last item doesn't float in empty space on short sidebars. */
+  padding: 16px 0 12px;
 }
 
 .sidebar-nav a {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* 10px vertical keeps each row a comfortable 36px tall (10 + 16px
+     icon/label + 10). Tight enough to list 12 pages without scroll,
+     loose enough that rows don't feel stacked on top of each other. */
   padding: 10px 20px;
   color: #8b949e;
   text-decoration: none;
