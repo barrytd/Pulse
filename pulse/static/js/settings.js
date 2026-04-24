@@ -643,12 +643,15 @@ function _renderBrandingCard(branding) {
   var name = (branding && branding.organization_name) || '';
   var hasLogo = !!(branding && branding.has_logo);
   var cacheBust = Date.now();
+  // Empty-state tile shows just a centered image glyph — trying to fit
+  // "No logo uploaded" text into a 72-square cramped and wrapped badly.
+  // The Upload button next to it already communicates the empty state.
   var logoPreview = hasLogo
     ? '<img src="/api/branding/logo?v=' + cacheBust + '" alt="Current logo" ' +
          'class="branding-logo-preview" />'
-    : '<div class="branding-logo-placeholder" aria-hidden="true">' +
+    : '<div class="branding-logo-placeholder" aria-label="No logo uploaded" ' +
+           'title="No logo uploaded">' +
         '<i data-lucide="image"></i>' +
-        '<span>No logo uploaded</span>' +
       '</div>';
   var removeBtn = hasLogo
     ? '<button type="button" class="btn btn-secondary btn-sm" ' +

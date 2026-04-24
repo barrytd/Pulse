@@ -930,14 +930,16 @@ body.light .admin-banner-close {
   border: 1px dashed var(--border);
   background: var(--bg);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  color: var(--text-muted);
-  font-size: 10px;
+  color: var(--text-light);
+  flex: 0 0 72px;
 }
-.branding-logo-placeholder svg { width: 20px; height: 20px; }
+.branding-logo-placeholder svg,
+.branding-logo-placeholder i {
+  width: 24px;
+  height: 24px;
+}
 
 /* Profile tab — read-only Display name row with an "Edit on Users"
    nudge. Mirrors the .form-row grid so the value aligns with the
