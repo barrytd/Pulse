@@ -15,15 +15,18 @@
 }
 
 /* Brand header — icon + "PULSE" side-by-side, "Threat Detection"
-   subtitle below, a single hairline divider to the rest of the nav.
-   Kept geometric and quiet (no tile, no gradient, no glow) so the
-   product mark reads as confident rather than decorative. */
+   subtitle below. Pinned to 56px to match the topbar on the content
+   side so the first nav item below starts at the same vertical line
+   as the first card under the topbar — clean horizontal seam across
+   the full width of the app. No bottom border; the spacing inside
+   .sidebar-nav handles the visual separation. */
 .sidebar-logo {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 22px 20px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  height: 56px;
+  padding: 0 20px;
+  box-sizing: border-box;
   text-decoration: none;
   cursor: pointer;
   transition: opacity 0.15s ease;
