@@ -66,6 +66,7 @@ export function navigate(page, opts) {
     _updateSidebarHighlight('scans');
     _updateTitle('Scans');
     setScansPageTab('findings');
+    _refreshSidebarFilters();
     return;
   }
 
@@ -103,6 +104,16 @@ export function navigate(page, opts) {
     trends:     renderTrendsPage,
   };
   (renderers[page] || renderDashboardPage)();
+  _refreshSidebarFilters();
+}
+
+// Lazy-imported to break the sidebar-filters → navigation cycle at
+// module load time. Fires after every page change so the sidebar's
+// contextual filter panel matches the new page.
+function _refreshSidebarFilters() {
+  import('./sidebar-filters.js').then(function (m) {
+    if (m.updateSidebarFilters) m.updateSidebarFilters();
+  }).catch(function () { /* module not yet loaded; next nav will retry */ });
 }
 
 // Keep a thin back-compat shim — older callers pass a second arg meaning

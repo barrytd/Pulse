@@ -369,6 +369,13 @@ export const findingsState = {
   assignFilter: 'ALL', // ALL | ME (only findings assigned to the current user)
   query:        '',
   expanded:     null,
+  // Sidebar multi-select filters (UNION inside a group, INTERSECTION
+  // across groups). Each Set holds the currently-checked ids for that
+  // filter group. Empty set = no filter on that dimension.
+  sidebarSev:      new Set(),
+  sidebarStatus:   new Set(),   // workflow_status values
+  sidebarAssignee: new Set(),   // user ids (stringified)
+  sidebarHost:     new Set(),   // hostnames
   // Bulk-select state: a Set of finding ids currently checked. Separate
   // from row expansion so toggling the drawer doesn't disturb selection.
   selected:     Object.create(null),
@@ -417,15 +424,19 @@ export async function renderFindingsPage() {
     batches.forEach(function (b) { allFindings = allFindings.concat(b); });
   }
 
-  findingsState.raw          = allFindings;
-  findingsState.sortCol      = 'time';
-  findingsState.sortDir      = 'desc';
-  findingsState.sevFilter    = 'ALL';
-  findingsState.reviewFilter = 'ALL';
-  findingsState.assignFilter = 'ALL';
-  findingsState.query        = '';
-  findingsState.expanded     = null;
-  findingsState.selected     = Object.create(null);
+  findingsState.raw             = allFindings;
+  findingsState.sortCol         = 'time';
+  findingsState.sortDir         = 'desc';
+  findingsState.sevFilter       = 'ALL';
+  findingsState.reviewFilter    = 'ALL';
+  findingsState.assignFilter    = 'ALL';
+  findingsState.query           = '';
+  findingsState.expanded        = null;
+  findingsState.selected        = Object.create(null);
+  findingsState.sidebarSev      = new Set();
+  findingsState.sidebarStatus   = new Set();
+  findingsState.sidebarAssignee = new Set();
+  findingsState.sidebarHost     = new Set();
 
   // Consume a one-shot pre-set filter handoff (e.g. "Needs Attention"
   // widget on the Dashboard deep-links into unreviewed CRITICAL+HIGH).
@@ -535,6 +546,30 @@ export function applyFindingsView() {
     var myId = Number(_meCache.id);
     rows = rows.filter(function (f) {
       return Number(f.assigned_to) === myId;
+    });
+  }
+
+  // Sidebar multi-select filters — each group is a UNION (match any),
+  // groups AND together. Empty sets are no-ops.
+  if (s.sidebarSev && s.sidebarSev.size) {
+    rows = rows.filter(function (f) {
+      return s.sidebarSev.has((f.severity || '').toUpperCase());
+    });
+  }
+  if (s.sidebarStatus && s.sidebarStatus.size) {
+    rows = rows.filter(function (f) {
+      return s.sidebarStatus.has((f.workflow_status || 'new').toLowerCase());
+    });
+  }
+  if (s.sidebarAssignee && s.sidebarAssignee.size) {
+    rows = rows.filter(function (f) {
+      var key = f.assigned_to == null ? 'unassigned' : String(f.assigned_to);
+      return s.sidebarAssignee.has(key);
+    });
+  }
+  if (s.sidebarHost && s.sidebarHost.size) {
+    rows = rows.filter(function (f) {
+      return s.sidebarHost.has(f._scan_host || '-');
     });
   }
 
@@ -2546,3 +2581,137 @@ export function buildFindingsTable(findings) {
     }).join('') +
     '</tbody></table>';
 }
+
+// --------------------------------------------------------------------
+// Sidebar filter panel — Findings page config
+//
+// Registers a builder that returns the current filter groups + counts
+// for the Findings list. Counts reflect the raw population (not the
+// filtered slice) so toggling a checkbox shows the user how many
+// findings would match in isolation, not after intersection with the
+// other groups.
+// --------------------------------------------------------------------
+import('./sidebar-filters.js').then(function (mod) {
+  mod.registerSidebarFilterConfig('scans', function buildFindingsFilters() {
+    // Only show when the Scans page is on the "All Findings" tab —
+    // the Scans-list tab has its own focus and no finding-level
+    // filters to offer.
+    if (scansPageTab !== 'findings') return null;
+    var raw = findingsState.raw || [];
+
+    var sevColors = {
+      CRITICAL: '#f85149',
+      HIGH:     '#f0883e',
+      MEDIUM:   '#d29922',
+      LOW:      '#3fb950',
+    };
+    var sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+    var statusCounts = { new: 0, acknowledged: 0, investigating: 0, resolved: 0 };
+    var assigneeMap = {};
+    var hostCounts  = {};
+    raw.forEach(function (f) {
+      var sv = (f.severity || '').toUpperCase();
+      if (sevCounts[sv] !== undefined) sevCounts[sv]++;
+      var ws = (f.workflow_status || 'new').toLowerCase();
+      if (statusCounts[ws] !== undefined) statusCounts[ws]++;
+      // Bucket by assignee: unassigned goes into the 'unassigned' key.
+      var akey = f.assigned_to == null ? 'unassigned' : String(f.assigned_to);
+      var alabel = f.assigned_to == null
+        ? 'Unassigned'
+        : (f.assignee_display_name || f.assignee_email || ('user #' + f.assigned_to));
+      if (!assigneeMap[akey]) assigneeMap[akey] = { label: alabel, count: 0 };
+      assigneeMap[akey].count++;
+      var host = f._scan_host || '-';
+      hostCounts[host] = (hostCounts[host] || 0) + 1;
+    });
+
+    var s = findingsState;
+    var active = s.sidebarSev.size + s.sidebarStatus.size +
+                 s.sidebarAssignee.size + s.sidebarHost.size;
+
+    function _applyAndRerender() { applyFindingsView(); }
+
+    function _toggleSet(set, id, checked) {
+      if (checked) set.add(id); else set.delete(id);
+      _applyAndRerender();
+    }
+
+    // Severity — four fixed options with dots.
+    var sevGroup = {
+      id: 'severity',
+      label: 'Severity',
+      items: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (k) {
+        return {
+          id: k,
+          label: k.charAt(0) + k.slice(1).toLowerCase(),
+          count: sevCounts[k],
+          dotColor: sevColors[k],
+          checked: s.sidebarSev.has(k),
+        };
+      }),
+      onToggle: function (id, checked) { _toggleSet(s.sidebarSev, id, checked); },
+    };
+
+    // Workflow status — four states.
+    var statusLabels = {
+      new: 'New',
+      acknowledged: 'Acknowledged',
+      investigating: 'Investigating',
+      resolved: 'Resolved',
+    };
+    var statusGroup = {
+      id: 'status',
+      label: 'Status',
+      items: Object.keys(statusLabels).map(function (k) {
+        return {
+          id: k,
+          label: statusLabels[k],
+          count: statusCounts[k],
+          checked: s.sidebarStatus.has(k),
+        };
+      }),
+      onToggle: function (id, checked) { _toggleSet(s.sidebarStatus, id, checked); },
+    };
+
+    // Assigned To — one entry per user that actually owns at least one
+    // finding, plus an "Unassigned" bucket. Sorted by count descending
+    // so the most active analysts surface first.
+    var assigneeItems = Object.keys(assigneeMap).map(function (k) {
+      return {
+        id: k,
+        label: assigneeMap[k].label,
+        count: assigneeMap[k].count,
+        checked: s.sidebarAssignee.has(k),
+      };
+    }).sort(function (a, b) { return b.count - a.count; });
+    var assigneeGroup = {
+      id: 'assignee',
+      label: 'Assigned to',
+      items: assigneeItems,
+      onToggle: function (id, checked) { _toggleSet(s.sidebarAssignee, id, checked); },
+    };
+
+    // Host — one entry per unique scanned host.
+    var hostItems = Object.keys(hostCounts).map(function (h) {
+      return { id: h, label: h, count: hostCounts[h], checked: s.sidebarHost.has(h) };
+    }).sort(function (a, b) { return b.count - a.count; });
+    var hostGroup = {
+      id: 'host',
+      label: 'Host',
+      items: hostItems,
+      onToggle: function (id, checked) { _toggleSet(s.sidebarHost, id, checked); },
+    };
+
+    return {
+      clearActive: active > 0,
+      onClear: function () {
+        s.sidebarSev.clear();
+        s.sidebarStatus.clear();
+        s.sidebarAssignee.clear();
+        s.sidebarHost.clear();
+        _applyAndRerender();
+      },
+      groups: [sevGroup, statusGroup, assigneeGroup, hostGroup],
+    };
+  });
+}).catch(function () { /* sidebar-filters module not yet loaded */ });

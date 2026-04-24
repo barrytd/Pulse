@@ -5,6 +5,18 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-24 — Contextual sidebar filter panel (first pass)
+
+### Added
+- **Sidebar filter framework** (`pulse/static/js/sidebar-filters.js`) — pluggable per-page registry. A page calls `registerSidebarFilterConfig(pageId, builder)` with a builder that returns `{ clearActive, onClear, groups: [{ id, label, items, onToggle }] }`, and `navigate()` calls `updateSidebarFilters()` on every page change to re-render the panel. Each group is collapsible; collapse state persists per-(page, group) in `localStorage.pulseSidebarFilterCollapsed`. Checkbox toggles fire real-time (no Apply button); the "Clear filters" link at the top only surfaces when at least one filter is active. Panel hides entirely when the sidebar is collapsed to 48 px.
+- **Findings page sidebar filters** — four multi-select groups wired: Severity (with colored dots), Status (workflow state: new / acknowledged / investigating / resolved), Assigned to (live-computed from every user that currently owns a finding + an "Unassigned" bucket), Host (one entry per unique scanned hostname). Filters compose as UNION-within-group, INTERSECTION-across-groups on top of the existing toolbar filters. New sidebar state on `findingsState`: `sidebarSev`, `sidebarStatus`, `sidebarAssignee`, `sidebarHost` (all `Set` instances, reset on every `renderFindingsPage()`).
+
+### Deferred to follow-up
+- Rule filter on Findings (rule list can get long — needs a dedicated top-N + "Show all" UI)
+- Dashboard, Monitor, Fleet, Audit Log, Firewall sidebar filter configs — the framework is in place; each page can register its own builder when it's next touched
+
+---
+
 ## 2026-04-24 — Density pass (Sprint 6 polish)
 
 ### Changed

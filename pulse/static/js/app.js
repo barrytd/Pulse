@@ -5,6 +5,7 @@
 
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
 import { navigate, validPages, parsePath, toggleSidebar } from './navigation.js';
+import { toggleSidebarFilterGroup, clearSidebarFilters } from './sidebar-filters.js';
 import {
   openUploadModal,
   closeUploadModal,
@@ -201,6 +202,8 @@ const actions = {
   // theme + navigation
   navigate,
   toggleSidebar,
+  toggleSidebarFilterGroup,
+  clearSidebarFilters,
   toggleTheme,
   setThemeFromSelect,
 
