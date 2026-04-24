@@ -31,7 +31,15 @@
 
 /* Admin-uploaded branding logo — swaps into .sidebar-logo-mark when
    configured. Keep the fixed square mark size so the sidebar header
-   height stays identical between branded + unbranded installs. */
+   height stays identical between branded + unbranded installs.
+   .has-custom-logo strips the default Pulse-blue tile background so a
+   transparent PNG / SVG uploaded logo renders natively instead of
+   showing the blue bleeding through. */
+.sidebar-logo-mark.has-custom-logo {
+  background: transparent !important;
+  border-radius: 4px;
+  overflow: hidden;
+}
 .sidebar-logo-mark .sidebar-logo-img {
   width: 100%;
   height: 100%;

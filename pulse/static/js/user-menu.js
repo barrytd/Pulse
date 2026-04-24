@@ -92,12 +92,16 @@ export function applyBrandingToSidebar(branding) {
     if (branding.has_logo) {
       // Swap the SVG "pulse" mark for the uploaded logo. Cache-bust
       // via updated_at (or Date.now) so a fresh upload appears
-      // immediately.
+      // immediately. `.has-custom-logo` strips the default Pulse-blue
+      // tile background so transparent PNG / SVG logos don't show the
+      // accent color bleeding through.
       var bust = branding.updated_at ? encodeURIComponent(branding.updated_at) : Date.now();
+      markEl.classList.add('has-custom-logo');
       markEl.innerHTML = '<img src="/api/branding/logo?v=' + bust + '" alt="' +
         (name || 'Pulse') + ' logo" class="sidebar-logo-img" />';
     } else {
-      // Restore the default ECG SVG mark.
+      // Restore the default ECG SVG mark + the blue tile.
+      markEl.classList.remove('has-custom-logo');
       markEl.innerHTML =
         '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
         'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
