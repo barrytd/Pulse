@@ -8,6 +8,7 @@ import {
   fetchFindings,
   apiDeleteScans,
   apiSetFindingReview,
+  apiSetFindingWorkflow,
   invalidateScansCache,
   invalidateFindingsCache,
 } from './api.js';
@@ -746,6 +747,7 @@ function _buildFindingsTable(findings) {
           '<div class="rule-cell">' +
             '<span class="rule-name">' + escapeHtml(rule) + '</span>' +
             _refIdPill(f) +
+            _wfChipInline(f) +
           '</div>' +
         '</td>' +
         '<td>' + mitreTag + '</td>' +
@@ -1336,6 +1338,8 @@ export function openFindingDrawer(f) {
 
     _stageBlockSection(f) +
 
+    _renderWorkflowSection(f) +
+
     _renderReviewSection(f);
 
   _updateReviewButtonStates(f);
@@ -1343,6 +1347,51 @@ export function openFindingDrawer(f) {
   document.getElementById('finding-drawer').classList.add('open');
   document.getElementById('finding-drawer-backdrop').classList.add('open');
   document.body.style.overflow = 'hidden';
+}
+
+// Workflow states — the incident-response axis. Orthogonal to review
+// flags: "how far along is the response?" not "is this real?".
+const _WF_STATES = [
+  { id: 'new',           label: 'New' },
+  { id: 'acknowledged',  label: 'Acknowledged' },
+  { id: 'investigating', label: 'Investigating' },
+  { id: 'resolved',      label: 'Resolved' },
+];
+
+export function _workflowChipHtml(state) {
+  var s = (state || 'new').toLowerCase();
+  if (!_WF_STATES.some(function (w) { return w.id === s; })) s = 'new';
+  var label = _WF_STATES.find(function (w) { return w.id === s; }).label;
+  return '<span class="wf-chip wf-chip-' + s + '">' + escapeHtml(label) + '</span>';
+}
+
+// Inline chip for list rows. Hidden when the state is still 'new' so
+// untouched findings stay visually quiet; only actively-triaged items
+// get the ack/investigating/resolved badge next to the rule name.
+function _wfChipInline(f) {
+  var s = (f && f.workflow_status || 'new').toLowerCase();
+  if (s === 'new') return '';
+  return ' ' + _workflowChipHtml(s);
+}
+
+function _renderWorkflowSection(f) {
+  var current = (f && f.workflow_status) || 'new';
+  var updatedLine = f && f.workflow_updated_at
+    ? '<div class="wf-meta">Updated <strong>' + escapeHtml(f.workflow_updated_at) + '</strong></div>'
+    : '';
+  var pills = _WF_STATES.map(function (w) {
+    var on = (w.id === current);
+    return '<button type="button" class="wf-pill wf-pill-' + w.id + (on ? ' is-selected' : '') + '" ' +
+             'data-action="setFindingWorkflow" data-arg="' + w.id + '" ' +
+             'aria-pressed="' + (on ? 'true' : 'false') + '">' +
+             escapeHtml(w.label) +
+           '</button>';
+  }).join('');
+  return '<div class="finding-drawer-section">' +
+    '<div class="sec-label">Workflow</div>' +
+    '<div class="wf-pill-row">' + pills + '</div>' +
+    updatedLine +
+  '</div>';
 }
 
 function _renderReviewSection(f) {
@@ -1497,6 +1546,63 @@ export function markFindingFalsePositive() {
   _submitReview(keepR, nextFP);
 }
 
+// Workflow-state pill click handler. Registered via data-action in the
+// drawer; `state` is the pill's data-arg value.
+export async function setFindingWorkflow(state) {
+  if (!_drawerFinding) return;
+  if (!_drawerFinding.id) return;
+  var current = (_drawerFinding.workflow_status || 'new');
+  if (current === state) return;
+  // Optimistic update — flip the UI first so the click feels instant,
+  // then reconcile with the server's canonical response.
+  _drawerFinding.workflow_status = state;
+  _repaintWorkflowPills(state, _drawerFinding.workflow_updated_at);
+  var r = await apiSetFindingWorkflow(_drawerFinding.id, state);
+  if (!r || !r.ok || !r.data) {
+    // Roll back on failure.
+    _drawerFinding.workflow_status = current;
+    _repaintWorkflowPills(current, _drawerFinding.workflow_updated_at);
+    toastError('Could not update workflow state.');
+    return;
+  }
+  _drawerFinding.workflow_status = r.data.workflow_status || state;
+  _drawerFinding.workflow_updated_at = r.data.workflow_updated_at || '';
+  _repaintWorkflowPills(_drawerFinding.workflow_status, _drawerFinding.workflow_updated_at);
+  // Broadcast so list rows can repaint their chip without a full refetch.
+  document.dispatchEvent(new CustomEvent('pulse:workflow-changed', {
+    detail: {
+      id: _drawerFinding.id,
+      workflow_status: _drawerFinding.workflow_status,
+      workflow_updated_at: _drawerFinding.workflow_updated_at,
+    },
+  }));
+  showToast('Marked ' + (state === 'new' ? 'New' :
+                         state === 'acknowledged' ? 'Acknowledged' :
+                         state === 'investigating' ? 'Investigating' :
+                         'Resolved'));
+}
+
+function _repaintWorkflowPills(state, updatedAt) {
+  var pills = document.querySelectorAll('.wf-pill');
+  pills.forEach(function (p) {
+    var on = (p.getAttribute('data-arg') === state);
+    p.classList.toggle('is-selected', on);
+    p.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  // Refresh the "Updated ..." meta line if present.
+  var wrap = document.querySelector('.finding-drawer-section .wf-pill-row');
+  if (!wrap) return;
+  var meta = wrap.parentElement.querySelector('.wf-meta');
+  if (updatedAt) {
+    if (!meta) {
+      meta = document.createElement('div');
+      meta.className = 'wf-meta';
+      wrap.parentElement.appendChild(meta);
+    }
+    meta.innerHTML = 'Updated <strong>' + escapeHtml(updatedAt) + '</strong>';
+  }
+}
+
 export function closeFindingDrawer() {
   document.getElementById('finding-drawer').classList.remove('open');
   document.getElementById('finding-drawer-backdrop').classList.remove('open');
@@ -1508,6 +1614,46 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     var drawer = document.getElementById('finding-drawer');
     if (drawer && drawer.classList.contains('open')) closeFindingDrawer();
+  }
+});
+
+// Workflow chip sync — when the drawer changes workflow state, patch the
+// inline chip on every visible row for that finding id without a full
+// list re-render. Keeps the flash-of-stale-state window to a frame.
+document.addEventListener('pulse:workflow-changed', function (ev) {
+  if (!ev || !ev.detail || ev.detail.id == null) return;
+  var state = (ev.detail.workflow_status || 'new').toLowerCase();
+  var rows = document.querySelectorAll(
+    '[data-finding-id="' + String(ev.detail.id) + '"]'
+  );
+  rows.forEach(function (row) {
+    // Update any cached finding object on list modules so future renders
+    // stay correct. Handled by findings-page state below.
+    var cell = row.querySelector('.rule-cell');
+    if (!cell) return;
+    var existing = cell.querySelector('.wf-chip');
+    if (state === 'new') {
+      if (existing) existing.remove();
+      return;
+    }
+    var wfLabel = (_WF_STATES.find(function (w) { return w.id === state; }) || {}).label || 'New';
+    var html = '<span class="wf-chip wf-chip-' + state + '">' + escapeHtml(wfLabel) + '</span>';
+    if (existing) {
+      existing.outerHTML = html;
+    } else {
+      cell.insertAdjacentHTML('beforeend', ' ' + html);
+    }
+  });
+  // Keep cached findings list in sync so subsequent scroll / filter
+  // re-renders preserve the new state.
+  var cache = findingsState && findingsState.raw;
+  if (Array.isArray(cache)) {
+    for (var i = 0; i < cache.length; i++) {
+      if (cache[i] && String(cache[i].id) === String(ev.detail.id)) {
+        cache[i].workflow_status = state;
+        cache[i].workflow_updated_at = ev.detail.workflow_updated_at || '';
+      }
+    }
   }
 });
 

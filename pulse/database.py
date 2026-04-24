@@ -268,6 +268,12 @@ def init_db(db_path):
         "ALTER TABLE findings ADD COLUMN reviewed INTEGER DEFAULT 0",
         "ALTER TABLE findings ADD COLUMN false_positive INTEGER DEFAULT 0",
         "ALTER TABLE findings ADD COLUMN ref_id TEXT",
+        # Sprint 6 incident workflow state. Orthogonal to `reviewed` /
+        # `false_positive`: those answer "is this a real issue?", while
+        # `workflow_status` answers "how far along is the response?".
+        # Valid values: 'new' | 'acknowledged' | 'investigating' | 'resolved'.
+        "ALTER TABLE findings ADD COLUMN workflow_status TEXT DEFAULT 'new'",
+        "ALTER TABLE findings ADD COLUMN workflow_updated_at TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -644,7 +650,8 @@ def get_scan_findings(db_path, scan_id, user_id=None):
         cursor = conn.execute(
             """SELECT id, ref_id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
-                      reviewed, false_positive, review_note, reviewed_at
+                      reviewed, false_positive, review_note, reviewed_at,
+                      workflow_status, workflow_updated_at
                FROM findings
                WHERE scan_id = ?
                ORDER BY
@@ -663,6 +670,9 @@ def get_scan_findings(db_path, scan_id, user_id=None):
             d = dict(zip(cols, row))
             d["reviewed"] = bool(d.get("reviewed"))
             d["false_positive"] = bool(d.get("false_positive"))
+            # Normalize workflow state — an old row created before the
+            # column existed may read back as None on Postgres.
+            d["workflow_status"] = d.get("workflow_status") or "new"
             rows.append(d)
         return rows
 
@@ -707,7 +717,8 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None)
         row = conn.execute(
             """SELECT id, ref_id, scan_id, timestamp, event_id, severity, rule,
                       mitre, description, details, raw_xml, hostname,
-                      reviewed, false_positive, review_note, reviewed_at
+                      reviewed, false_positive, review_note, reviewed_at,
+                      workflow_status, workflow_updated_at
                FROM findings WHERE id = ?""",
             (int(finding_id),),
         ).fetchone()
@@ -715,10 +726,55 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=None)
             return None
         cols = ("id", "ref_id", "scan_id", "timestamp", "event_id", "severity", "rule",
                 "mitre", "description", "details", "raw_xml", "hostname",
-                "reviewed", "false_positive", "review_note", "reviewed_at")
+                "reviewed", "false_positive", "review_note", "reviewed_at",
+                "workflow_status", "workflow_updated_at")
         d = dict(zip(cols, row))
         d["reviewed"] = bool(d["reviewed"])
         d["false_positive"] = bool(d["false_positive"])
+        d["workflow_status"] = d.get("workflow_status") or "new"
+        return d
+
+
+_WORKFLOW_STATES = ("new", "acknowledged", "investigating", "resolved")
+
+
+def set_finding_workflow(db_path, finding_id, workflow_status):
+    """Update a finding's incident-workflow state.
+
+    Returns the updated finding row (same shape as get_scan_findings items)
+    or None if no such finding id exists. Raises ValueError for invalid
+    state values so the API layer can turn them into 400s.
+    """
+    if workflow_status not in _WORKFLOW_STATES:
+        raise ValueError(
+            "workflow_status must be one of: " + ", ".join(_WORKFLOW_STATES)
+        )
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        conn.execute(
+            """UPDATE findings
+               SET workflow_status = ?, workflow_updated_at = ?
+               WHERE id = ?""",
+            (workflow_status, ts, int(finding_id)),
+        )
+        row = conn.execute(
+            """SELECT id, ref_id, scan_id, timestamp, event_id, severity, rule,
+                      mitre, description, details, raw_xml, hostname,
+                      reviewed, false_positive, review_note, reviewed_at,
+                      workflow_status, workflow_updated_at
+               FROM findings WHERE id = ?""",
+            (int(finding_id),),
+        ).fetchone()
+        if not row:
+            return None
+        cols = ("id", "ref_id", "scan_id", "timestamp", "event_id", "severity", "rule",
+                "mitre", "description", "details", "raw_xml", "hostname",
+                "reviewed", "false_positive", "review_note", "reviewed_at",
+                "workflow_status", "workflow_updated_at")
+        d = dict(zip(cols, row))
+        d["reviewed"] = bool(d["reviewed"])
+        d["false_positive"] = bool(d["false_positive"])
+        d["workflow_status"] = d.get("workflow_status") or "new"
         return d
 
 
@@ -1081,6 +1137,7 @@ def get_monitor_session_findings(db_path, session_id):
                 """SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity,
                           f.rule, f.mitre, f.description, f.details, f.raw_xml,
                           f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
+                          f.workflow_status, f.workflow_updated_at,
                           s.scanned_at
                    FROM findings f
                    JOIN scans s ON s.id = f.scan_id
@@ -1089,7 +1146,12 @@ def get_monitor_session_findings(db_path, session_id):
                 (int(session_id),),
             )
             cols = [d[0] for d in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            rows = []
+            for row in cursor.fetchall():
+                d = dict(zip(cols, row))
+                d["workflow_status"] = d.get("workflow_status") or "new"
+                rows.append(d)
+            return rows
     except Exception:
         return []
 

@@ -423,6 +423,19 @@ export async function apiSetFindingReview(findingId, flags) {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+// Incident workflow state. Orthogonal to the review flags — "how far along
+// is the response?" vs. "is this real?". States: new, acknowledged,
+// investigating, resolved. Returns the full updated finding on success.
+export async function apiSetFindingWorkflow(findingId, state) {
+  var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/workflow', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workflow_status: state }),
+  });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 // ---------------------------------------------------------------
 // Daily scores
 // ---------------------------------------------------------------

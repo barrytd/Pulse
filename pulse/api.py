@@ -59,7 +59,8 @@ from pulse.database import (
     get_user_avatar, get_user_by_email, get_user_by_id, init_db,
     insert_feedback, list_api_tokens, list_feedback,
     list_monitor_sessions, list_users,
-    revoke_api_token, save_scan, set_finding_review, set_user_avatar,
+    revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
+    set_user_avatar,
     update_user_active, update_user_email, update_user_password,
     update_user_role,
 )
@@ -1376,6 +1377,53 @@ def _register_routes(app: FastAPI) -> None:
         updated = set_finding_review(
             app.state.db_path, finding_id, reviewed, false_positive, note,
         )
+        if updated is None:
+            raise HTTPException(404, detail=f"Finding {finding_id} not found.")
+        return updated
+
+    # -------------------------------------------------------------------
+    # PUT /api/finding/{id}/workflow — set incident workflow state.
+    # Orthogonal to /review: that toggles "is this real?", this toggles
+    # "how far along is the response?". States: new, acknowledged,
+    # investigating, resolved.
+    # -------------------------------------------------------------------
+    @app.put("/api/finding/{finding_id}/workflow")
+    async def workflow_finding(finding_id: int, request: Request,
+                               user_id: int = Depends(require_login)):
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        state = str(body.get("workflow_status") or "").strip().lower()
+        if state not in ("new", "acknowledged", "investigating", "resolved"):
+            raise HTTPException(
+                400,
+                detail="workflow_status must be one of: new, acknowledged, investigating, resolved.",
+            )
+        # Ownership check — mirror /review: viewers can only touch findings
+        # whose scan they own; admins skip the filter. 404 on cross-scope so
+        # we don't leak existence.
+        scope = _scan_scope_for(app, user_id)
+        if scope is not None:
+            from pulse import db_backend
+            with db_backend.connect(app.state.db_path) as conn:
+                row = conn.execute(
+                    "SELECT scans.user_id FROM findings "
+                    "JOIN scans ON scans.id = findings.scan_id "
+                    "WHERE findings.id = ?",
+                    (int(finding_id),),
+                ).fetchone()
+            if row is None:
+                raise HTTPException(404, detail="Finding not found.")
+            owner = row[0] if not isinstance(row, dict) else row.get("user_id")
+            if owner is not None and int(owner) != int(scope):
+                raise HTTPException(404, detail="Finding not found.")
+        try:
+            updated = set_finding_workflow(app.state.db_path, finding_id, state)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc))
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
         return updated
