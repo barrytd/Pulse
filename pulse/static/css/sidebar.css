@@ -81,28 +81,27 @@
   margin-top: 2px;
 }
 
+/* Flat nav list — every item on the same 8px rhythm, no group
+   separators, no labels. The uniform cadence (Rapid7 InsightIDR
+   style) reads as a single coherent rail instead of a collection of
+   semantic clusters. */
 .sidebar-nav {
   flex: 1;
   padding: 12px 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;           /* space between the three semantic groups */
-  overflow-y: auto;    /* scroll gracefully on short viewports */
-}
-
-/* Each group is just a flex column of links. No visible divider or
-   label — only the 12px gap between groups communicates the split. */
-.sidebar-nav-group {
-  display: flex;
-  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
 }
 
 .sidebar-nav a {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* 36px total row height: 10px vertical padding + 16px icon/label. */
-  padding: 10px 16px;
+  /* 32px total row height: 8px vertical padding + 16px icon/label.
+     Tight but still comfortable; keeps every item at the same 40px
+     pitch (32px row + 8px gap) from top to bottom of the rail. */
+  padding: 8px 16px;
   color: var(--text-muted, #8b949e);
   text-decoration: none;
   font-size: 13px;
@@ -118,13 +117,13 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
-/* Active state: 3px green accent on the left edge + subtle bg tint.
-   Deliberately NOT a filled highlight — the user's design call was
-   to reserve solid background for hover/danger states and let the
-   accent rail carry the "you are here" signal. */
+/* Active state: 3px green accent rail + the same subtle white-alpha
+   tint as hover. The rail is what marks the current page — the tint
+   is quiet on purpose so the sidebar stays calm instead of shouting
+   "here". */
 .sidebar-nav a.active {
   color: var(--text-high, #f3f4f6);
-  background: rgba(63, 185, 80, 0.08);
+  background: rgba(255, 255, 255, 0.04);
   border-left-color: #3fb950;
 }
 
