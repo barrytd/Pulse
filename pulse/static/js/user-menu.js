@@ -62,6 +62,27 @@ export async function mountUserMenu() {
   if (greet) greet.textContent = _firstNameFromIdentity(displayName, email);
 }
 
+// Re-fetch /api/me and repaint the greeting + initial. Called after an
+// admin saves their own display_name so the topbar updates without a
+// page reload.
+export async function refreshUserMenuIdentity() {
+  try {
+    var me = await apiGetMe();
+    if (!me) return;
+    var dn = me.display_name || '';
+    var email = me.email || '';
+    var avatar = document.getElementById('user-avatar-initials');
+    // Only repaint initial if the corner is still showing text — an
+    // uploaded avatar replaces the inner HTML with an <img>, which we
+    // shouldn't clobber.
+    if (avatar && avatar.tagName === 'SPAN') {
+      avatar.textContent = _initialFromIdentity(dn, email);
+    }
+    var greet = document.getElementById('user-dropdown-name');
+    if (greet) greet.textContent = _firstNameFromIdentity(dn, email);
+  } catch (e) { /* keep stale — better than flicker */ }
+}
+
 // Called after a fresh avatar upload so the corner picks up the new
 // image without a page reload. `bust` cache-busts the <img> src.
 export function refreshUserMenuAvatar(bust) {

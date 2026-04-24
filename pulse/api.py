@@ -409,6 +409,28 @@ def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_pa
 # Routes
 # ---------------------------------------------------------------------------
 
+def _audit_finding_action(app, user_id, action, *, finding_id=None, detail=None):
+    """Record a finding-level action (review / workflow / notes / assign)
+    in the audit_log table. Wrapped like _audit_scan_delete so a logging
+    failure never breaks the primary request."""
+    try:
+        from pulse.firewall import blocker
+        from pulse.database import get_user_by_id as _get_user_by_id
+        user_row = _get_user_by_id(app.state.db_path, user_id) if user_id else None
+        email = (user_row or {}).get("email") if user_row else None
+        target = f"finding:{finding_id}" if finding_id is not None else None
+        blocker.log_audit(
+            app.state.db_path,
+            action=action,
+            source="dashboard",
+            user=email,
+            comment=target,
+            detail=detail,
+        )
+    except Exception:
+        pass
+
+
 def _attach_note_counts(app, findings):
     """Decorate each finding with `note_count` so list rows can render a
     notes badge without an N+1 fetch pattern. Silent on DB errors — a
@@ -954,6 +976,10 @@ def _register_routes(app: FastAPI) -> None:
         if page_hint and len(page_hint) > 120:
             page_hint = page_hint[:120]
         new_id = insert_feedback(app.state.db_path, user_id, kind, message, page_hint)
+        _audit_finding_action(
+            app, user_id, "submit_feedback",
+            detail=f"kind={kind} id={new_id} page_hint={page_hint!r}",
+        )
         return {"status": "ok", "id": new_id}
 
     @app.get("/api/feedback")
@@ -1439,6 +1465,11 @@ def _register_routes(app: FastAPI) -> None:
             )
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
+        _audit_finding_action(
+            app, user_id, "review_finding",
+            finding_id=finding_id,
+            detail=f"reviewed={int(reviewed)} false_positive={int(false_positive)}",
+        )
         return updated
 
     # -------------------------------------------------------------------
@@ -1486,6 +1517,11 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail=str(exc))
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
+        _audit_finding_action(
+            app, user_id, "set_workflow_state",
+            finding_id=finding_id,
+            detail=f"workflow_status={state}",
+        )
         return updated
 
     # -------------------------------------------------------------------
@@ -1545,6 +1581,11 @@ def _register_routes(app: FastAPI) -> None:
         row = insert_finding_note(app.state.db_path, finding_id, user_id, text)
         if row is None:
             raise HTTPException(404, detail="Finding not found.")
+        _audit_finding_action(
+            app, user_id, "add_note",
+            finding_id=finding_id,
+            detail=f"note_id={row.get('id')} len={len(text)}",
+        )
         return row
 
     @app.delete("/api/finding/{finding_id}/notes/{note_id}")
@@ -1558,6 +1599,11 @@ def _register_routes(app: FastAPI) -> None:
         )
         if not ok:
             raise HTTPException(404, detail="Note not found.")
+        _audit_finding_action(
+            app, user_id, "delete_note",
+            finding_id=finding_id,
+            detail=f"note_id={note_id}",
+        )
         return {"status": "ok"}
 
     # -------------------------------------------------------------------
@@ -1589,6 +1635,15 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail=str(exc))
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
+        assignee_label = (updated.get("assignee_display_name")
+                          or updated.get("assignee_email")
+                          or "unassigned")
+        _audit_finding_action(
+            app, user_id, "assign_finding" if assignee is not None else "unassign_finding",
+            finding_id=finding_id,
+            detail=(f"assignee_user_id={assignee} ({assignee_label})"
+                    if assignee is not None else "cleared"),
+        )
         return updated
 
     # Admin-only: every note across every finding, newest-first. Powers the

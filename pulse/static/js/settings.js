@@ -31,7 +31,7 @@ import {
 } from './api.js';
 import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
 import { getTheme } from './theme.js';
-import { refreshUserMenuAvatar } from './user-menu.js';
+import { refreshUserMenuAvatar, refreshUserMenuIdentity } from './user-menu.js';
 
 // Map the "Email provider" dropdown back to host+port so users never
 // have to know those exist for Gmail/Outlook/Yahoo.
@@ -1060,6 +1060,14 @@ export async function saveUserDisplayName(arg, target) {
     }
     target.setAttribute('data-prior-value', next);
     showToast(next ? 'Name saved' : 'Name cleared');
+    // If the admin just renamed themselves, refresh the topbar greeting
+    // so "Hey, Robert!" lands without a page reload.
+    try {
+      var me = await apiGetMe();
+      if (me && Number(me.id) === id) {
+        refreshUserMenuIdentity();
+      }
+    } catch (e) { /* best effort */ }
   } finally {
     target.disabled = false;
   }
