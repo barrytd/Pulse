@@ -466,6 +466,21 @@ export async function apiDeleteFindingNote(findingId, noteId) {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+// Set or clear a finding's assignee. Pass null / undefined / '' for
+// `assigneeUserId` to unassign. Returns the full updated finding on
+// success (same shape as review + workflow endpoints).
+export async function apiSetFindingAssignee(findingId, assigneeUserId) {
+  var resp = await fetch('/api/finding/' + encodeURIComponent(findingId) + '/assign', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      assignee_user_id: (assigneeUserId === '' || assigneeUserId == null) ? null : Number(assigneeUserId),
+    }),
+  });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 // Incident workflow state. Orthogonal to the review flags — "how far along
 // is the response?" vs. "is this real?". States: new, acknowledged,
 // investigating, resolved. Returns the full updated finding on success.

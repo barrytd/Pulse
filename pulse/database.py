@@ -289,6 +289,11 @@ def init_db(db_path):
         # Valid values: 'new' | 'acknowledged' | 'investigating' | 'resolved'.
         "ALTER TABLE findings ADD COLUMN workflow_status TEXT DEFAULT 'new'",
         "ALTER TABLE findings ADD COLUMN workflow_updated_at TEXT",
+        # Sprint 6 assignment — who is actively working this finding.
+        # NULL = unassigned. assigned_at is the timestamp of the most
+        # recent change so the UI can show "assigned to X, 4h ago".
+        "ALTER TABLE findings ADD COLUMN assigned_to INTEGER",
+        "ALTER TABLE findings ADD COLUMN assigned_at TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -663,14 +668,16 @@ def get_scan_findings(db_path, scan_id, user_id=None):
             if not owner or owner[0] != int(user_id):
                 return []
         cursor = conn.execute(
-            """SELECT id, ref_id, timestamp, event_id, severity, rule,
-                      mitre, description, details, raw_xml, hostname,
-                      reviewed, false_positive, review_note, reviewed_at,
-                      workflow_status, workflow_updated_at
-               FROM findings
-               WHERE scan_id = ?
+            """SELECT f.id, f.ref_id, f.timestamp, f.event_id, f.severity, f.rule,
+                      f.mitre, f.description, f.details, f.raw_xml, f.hostname,
+                      f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
+                      f.workflow_status, f.workflow_updated_at,
+                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+               FROM findings f
+               LEFT JOIN users u ON u.id = f.assigned_to
+               WHERE f.scan_id = ?
                ORDER BY
-                   CASE severity
+                   CASE f.severity
                        WHEN 'CRITICAL' THEN 1
                        WHEN 'HIGH'     THEN 2
                        WHEN 'MEDIUM'   THEN 3
@@ -744,11 +751,14 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE
                 (r, fp, clean_note, reviewed_at, int(finding_id)),
             )
         row = conn.execute(
-            """SELECT id, ref_id, scan_id, timestamp, event_id, severity, rule,
-                      mitre, description, details, raw_xml, hostname,
-                      reviewed, false_positive, review_note, reviewed_at,
-                      workflow_status, workflow_updated_at
-               FROM findings WHERE id = ?""",
+            """SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity, f.rule,
+                      f.mitre, f.description, f.details, f.raw_xml, f.hostname,
+                      f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
+                      f.workflow_status, f.workflow_updated_at,
+                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+               FROM findings f
+               LEFT JOIN users u ON u.id = f.assigned_to
+               WHERE f.id = ?""",
             (int(finding_id),),
         ).fetchone()
         if not row:
@@ -756,7 +766,8 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE
         cols = ("id", "ref_id", "scan_id", "timestamp", "event_id", "severity", "rule",
                 "mitre", "description", "details", "raw_xml", "hostname",
                 "reviewed", "false_positive", "review_note", "reviewed_at",
-                "workflow_status", "workflow_updated_at")
+                "workflow_status", "workflow_updated_at",
+                "assigned_to", "assigned_at", "assignee_email")
         d = dict(zip(cols, row))
         d["reviewed"] = bool(d["reviewed"])
         d["false_positive"] = bool(d["false_positive"])
@@ -765,6 +776,58 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE
 
 
 _WORKFLOW_STATES = ("new", "acknowledged", "investigating", "resolved")
+
+
+def set_finding_assignee(db_path, finding_id, assignee_user_id):
+    """Assign (or unassign) a finding. Pass ``None`` for ``assignee_user_id``
+    to clear the assignment.
+
+    Returns the updated finding as a dict with ``assignee_email`` joined in,
+    or ``None`` if no such finding id exists.
+    """
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        if assignee_user_id is None:
+            conn.execute(
+                "UPDATE findings SET assigned_to = NULL, assigned_at = NULL WHERE id = ?",
+                (int(finding_id),),
+            )
+        else:
+            # Verify the user exists + is active so we don't assign to a
+            # deleted / deactivated account.
+            urow = conn.execute(
+                "SELECT id FROM users WHERE id = ? AND active = 1",
+                (int(assignee_user_id),),
+            ).fetchone()
+            if not urow:
+                raise ValueError("Assignee user is not an active account.")
+            conn.execute(
+                "UPDATE findings SET assigned_to = ?, assigned_at = ? WHERE id = ?",
+                (int(assignee_user_id), ts, int(finding_id)),
+            )
+        row = conn.execute(
+            """SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity,
+                      f.rule, f.mitre, f.description, f.details, f.raw_xml, f.hostname,
+                      f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
+                      f.workflow_status, f.workflow_updated_at,
+                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+               FROM findings f
+               LEFT JOIN users u ON u.id = f.assigned_to
+               WHERE f.id = ?""",
+            (int(finding_id),),
+        ).fetchone()
+        if not row:
+            return None
+        cols = ("id", "ref_id", "scan_id", "timestamp", "event_id", "severity", "rule",
+                "mitre", "description", "details", "raw_xml", "hostname",
+                "reviewed", "false_positive", "review_note", "reviewed_at",
+                "workflow_status", "workflow_updated_at",
+                "assigned_to", "assigned_at", "assignee_email")
+        d = dict(zip(cols, row))
+        d["reviewed"] = bool(d["reviewed"])
+        d["false_positive"] = bool(d["false_positive"])
+        d["workflow_status"] = d.get("workflow_status") or "new"
+        return d
 
 
 def set_finding_workflow(db_path, finding_id, workflow_status):
@@ -787,11 +850,14 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
             (workflow_status, ts, int(finding_id)),
         )
         row = conn.execute(
-            """SELECT id, ref_id, scan_id, timestamp, event_id, severity, rule,
-                      mitre, description, details, raw_xml, hostname,
-                      reviewed, false_positive, review_note, reviewed_at,
-                      workflow_status, workflow_updated_at
-               FROM findings WHERE id = ?""",
+            """SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity, f.rule,
+                      f.mitre, f.description, f.details, f.raw_xml, f.hostname,
+                      f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
+                      f.workflow_status, f.workflow_updated_at,
+                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+               FROM findings f
+               LEFT JOIN users u ON u.id = f.assigned_to
+               WHERE f.id = ?""",
             (int(finding_id),),
         ).fetchone()
         if not row:
@@ -799,7 +865,8 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
         cols = ("id", "ref_id", "scan_id", "timestamp", "event_id", "severity", "rule",
                 "mitre", "description", "details", "raw_xml", "hostname",
                 "reviewed", "false_positive", "review_note", "reviewed_at",
-                "workflow_status", "workflow_updated_at")
+                "workflow_status", "workflow_updated_at",
+                "assigned_to", "assigned_at", "assignee_email")
         d = dict(zip(cols, row))
         d["reviewed"] = bool(d["reviewed"])
         d["false_positive"] = bool(d["false_positive"])
@@ -1167,9 +1234,11 @@ def get_monitor_session_findings(db_path, session_id):
                           f.rule, f.mitre, f.description, f.details, f.raw_xml,
                           f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                           f.workflow_status, f.workflow_updated_at,
+                          f.assigned_to, f.assigned_at, u.email AS assignee_email,
                           s.scanned_at
                    FROM findings f
                    JOIN scans s ON s.id = f.scan_id
+                   LEFT JOIN users u ON u.id = f.assigned_to
                    WHERE s.session_id = ?
                    ORDER BY f.id DESC""",
                 (int(session_id),),

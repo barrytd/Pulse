@@ -120,7 +120,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Windows Service installer — one-time setup that installs Pulse as a Windows Service running with SYSTEM privileges, so scheduled scans and system log access always work without manual elevation
 - [x] Incident workflow states — mark findings as acknowledged, investigating, or resolved
 - [x] Analyst notes — free-text notes field per finding, stored in DB, shown in finding drawer and PDF reports, timestamped and attributed to the author
-- [ ] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
+- [x] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
 - [ ] Custom branding — upload company logo, set organization name on reports and dashboard
 - [ ] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
 - [ ] Dashboard widgets — customizable layout with drag-and-drop panels

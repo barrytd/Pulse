@@ -60,7 +60,7 @@ from pulse.database import (
     insert_feedback, list_api_tokens, list_feedback,
     list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
-    set_user_avatar,
+    set_finding_assignee, set_user_avatar,
     update_user_active, update_user_email, update_user_password,
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
@@ -1526,6 +1526,37 @@ def _register_routes(app: FastAPI) -> None:
         if not ok:
             raise HTTPException(404, detail="Note not found.")
         return {"status": "ok"}
+
+    # -------------------------------------------------------------------
+    # PUT /api/finding/{id}/assign — set or clear a finding's assignee.
+    # Body: {"assignee_user_id": int | null}. null clears the assignment.
+    # Scan-ownership gated like /review + /workflow: viewers can only
+    # assign findings they own; admins can assign anything.
+    # -------------------------------------------------------------------
+    @app.put("/api/finding/{finding_id}/assign")
+    async def assign_finding(finding_id: int, request: Request,
+                             user_id: int = Depends(require_login)):
+        _check_finding_scope(finding_id, user_id)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        raw = body.get("assignee_user_id")
+        assignee = None
+        if raw is not None and raw != "":
+            try:
+                assignee = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="assignee_user_id must be an integer or null.")
+        try:
+            updated = set_finding_assignee(app.state.db_path, finding_id, assignee)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc))
+        if updated is None:
+            raise HTTPException(404, detail=f"Finding {finding_id} not found.")
+        return updated
 
     # Admin-only: every note across every finding, newest-first. Powers the
     # Settings > Notes tab so an analyst can skim the full investigation

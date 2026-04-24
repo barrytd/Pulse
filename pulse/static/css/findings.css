@@ -1035,6 +1035,104 @@
   color: var(--text-light);
 }
 
+/* --- Assignment: drawer dropdown, list cell, toolbar filter ------------- */
+.assign-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.assign-select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+.assign-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.assign-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.assign-meta strong { color: var(--text); font-weight: 600; }
+.btn-link-sm {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  white-space: nowrap;
+}
+.btn-link-sm:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+
+.assignee-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.28);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.assignee-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.assigned-to-me-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.assigned-to-me-chip:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.assigned-to-me-chip.is-active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.assigned-to-me-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+.assigned-to-me-chip.is-active .assigned-to-me-dot { opacity: 1; }
+
 /* Inline notes-count badge on findings list rows. */
 .notes-chip {
   display: inline-flex;

@@ -9,6 +9,9 @@ import {
   apiDeleteScans,
   apiSetFindingReview,
   apiSetFindingWorkflow,
+  apiSetFindingAssignee,
+  apiListUsers,
+  apiGetMe,
   apiListFindingNotes,
   apiCreateFindingNote,
   apiDeleteFindingNote,
@@ -362,6 +365,7 @@ export const findingsState = {
   sortDir:      'desc',
   sevFilter:    'ALL',
   reviewFilter: 'ALL', // ALL | OPEN (hide reviewed + fp) | REVIEWED | FP
+  assignFilter: 'ALL', // ALL | ME (only findings assigned to the current user)
   query:        '',
   expanded:     null,
 };
@@ -411,6 +415,7 @@ export async function renderFindingsPage() {
   findingsState.sortDir      = 'desc';
   findingsState.sevFilter    = 'ALL';
   findingsState.reviewFilter = 'ALL';
+  findingsState.assignFilter = 'ALL';
   findingsState.query        = '';
   findingsState.expanded     = null;
 
@@ -513,6 +518,13 @@ export function applyFindingsView() {
     });
   }
 
+  if (s.assignFilter === 'ME' && _meCache && _meCache.id) {
+    var myId = Number(_meCache.id);
+    rows = rows.filter(function (f) {
+      return Number(f.assigned_to) === myId;
+    });
+  }
+
   var q = s.query.trim().toLowerCase();
   if (q) {
     rows = rows.filter(function (f) {
@@ -589,12 +601,23 @@ export function applyFindingsView() {
       '</select>' +
     '</div>';
 
+  var assignFilter =
+    '<button type="button" class="assigned-to-me-chip' +
+      (s.assignFilter === 'ME' ? ' is-active' : '') + '" ' +
+      'data-action="toggleAssignedToMeFilter" ' +
+      'aria-pressed="' + (s.assignFilter === 'ME' ? 'true' : 'false') + '" ' +
+      'title="Show only findings assigned to you">' +
+      '<span class="assigned-to-me-dot"></span>' +
+      'Assigned to me' +
+    '</button>';
+
   // Page title + header count — "Findings (32)" when unfiltered,
   // "Findings (12 of 32)" when filters narrow the view.
   var total = s.raw.length;
   var visible = rows.length;
   var filtered = (s.sevFilter !== 'ALL') ||
                  (s.reviewFilter && s.reviewFilter !== 'ALL') ||
+                 (s.assignFilter === 'ME') ||
                  !!q;
   var countLabel = filtered ? (visible + ' of ' + total) : String(total);
   var titleEl = document.getElementById('page-title');
@@ -609,6 +632,7 @@ export function applyFindingsView() {
     '<div class="filter-bar">' +
       '<div class="filter-pills">' + pills + '</div>' +
       reviewDropdown +
+      assignFilter +
       '<input type="search" id="findings-search-box" class="search-box" placeholder="Search rule, description, or MITRE..." ' +
         'value="' + escapeHtml(s.query) + '" data-action-input="setFindingsQueryFromInput" />' +
     '</div>' +
@@ -623,6 +647,14 @@ export function applyFindingsView() {
 // Delegator wrapper for the status <select> — pulls the live value.
 export function setFindingsReviewFilterFromSelect(arg, target) {
   setFindingsReviewFilter(target && target.value);
+}
+
+export async function toggleAssignedToMeFilter() {
+  // Need `me.id` before we can filter — load it once on the first flip.
+  await _ensureMe();
+  findingsState.assignFilter = (findingsState.assignFilter === 'ME') ? 'ALL' : 'ME';
+  findingsState.expanded = null;
+  applyFindingsView();
 }
 
 function _sortArrow(col) {
@@ -760,7 +792,7 @@ function _buildFindingsTable(findings) {
         '<td><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
           'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
-        '<td class="col-assigned">Unassigned</td>' +
+        '<td class="col-assigned">' + _assigneeCellHtml(f) + '</td>' +
         '<td class="col-status" data-status-slot="pill">' + _statusPillHtml(f) + '</td>' +
         '<td class="col-actions">' + _rowActionsHtml(f) + '</td>' +
       '</tr>';
@@ -1344,6 +1376,8 @@ export function openFindingDrawer(f) {
 
     _renderWorkflowSection(f) +
 
+    _renderAssignSection(f) +
+
     _renderNotesSection(f) +
 
     _renderReviewSection(f);
@@ -1354,12 +1388,16 @@ export function openFindingDrawer(f) {
   document.getElementById('finding-drawer-backdrop').classList.add('open');
   document.body.style.overflow = 'hidden';
 
-  // Fire the notes fetch after the drawer mounts so the open animation
-  // isn't blocked on a DB round-trip.
+  // Fire the notes + assignee fetches after the drawer mounts so the
+  // open animation isn't blocked on DB / user-list round-trips.
   if (f && f.id != null) {
     _loadDrawerNotes(f.id).catch(function () {
       var list = document.getElementById('drawer-notes-list');
       if (list) list.innerHTML = '<p class="notes-empty">Could not load notes.</p>';
+    });
+    _loadDrawerAssign(f).catch(function () {
+      var wrap = document.getElementById('drawer-assign-wrap');
+      if (wrap) wrap.innerHTML = '<p style="color:var(--text-muted); font-size:12px; margin:0;">Could not load users.</p>';
     });
   }
 }
@@ -1378,6 +1416,19 @@ export function _workflowChipHtml(state) {
   if (!_WF_STATES.some(function (w) { return w.id === s; })) s = 'new';
   var label = _WF_STATES.find(function (w) { return w.id === s; }).label;
   return '<span class="wf-chip wf-chip-' + s + '">' + escapeHtml(label) + '</span>';
+}
+
+// Assignee cell for list rows. Renders the short local-part of the
+// assignee email (everything before @) as a small chip, or a muted
+// "Unassigned" placeholder.
+function _assigneeCellHtml(f) {
+  var email = (f && f.assignee_email) || '';
+  if (!email) {
+    return '<span class="assignee-empty">Unassigned</span>';
+  }
+  var short = email.split('@')[0] || email;
+  return '<span class="assignee-chip" title="' + escapeHtml(email) + '">' +
+    escapeHtml(short) + '</span>';
 }
 
 // Inline chip for list rows. Hidden when the state is still 'new' so
@@ -1404,6 +1455,125 @@ function _notesBadgeInline(f) {
          'aria-label="' + n + ' note' + (n === 1 ? '' : 's') + '">' +
     bubbleSvg + '<span class="notes-chip-count">' + n + '</span>' +
   '</span>';
+}
+
+// ---------------------------------------------------------------
+// Assignment — who is actively working a finding
+// ---------------------------------------------------------------
+
+// Cached once per page load; the drawer reuses this to populate the
+// assignee dropdown without a refetch per open.
+let _assignableUsers = null;
+let _meCache = null;
+
+async function _ensureAssignableUsers() {
+  if (_assignableUsers !== null) return _assignableUsers;
+  try {
+    var lu = await apiListUsers();
+    _assignableUsers = (lu && lu.users || []).filter(function (u) { return u && u.active; });
+  } catch (e) {
+    // Viewers get a 403 from /api/users — fall back to just "me" so they
+    // can still self-assign. Admins see the full list.
+    _assignableUsers = [];
+  }
+  return _assignableUsers;
+}
+
+async function _ensureMe() {
+  if (_meCache !== null) return _meCache;
+  try { _meCache = await apiGetMe(); } catch (e) { _meCache = {}; }
+  return _meCache;
+}
+
+function _renderAssignSection(f) {
+  var hasId = f && f.id != null;
+  if (!hasId) {
+    return '<div class="finding-drawer-section">' +
+      '<div class="sec-label">Assigned to</div>' +
+      '<p style="color:var(--text-muted); font-size:12px; margin:0;">' +
+        'Save this scan to enable assignment.' +
+      '</p>' +
+    '</div>';
+  }
+  return '<div class="finding-drawer-section">' +
+    '<div class="sec-label">Assigned to</div>' +
+    '<div id="drawer-assign-wrap">' +
+      '<div style="font-size:12px; color:var(--text-muted);">Loading users…</div>' +
+    '</div>' +
+  '</div>';
+}
+
+async function _loadDrawerAssign(f) {
+  var mount = document.getElementById('drawer-assign-wrap');
+  if (!mount || !f) return;
+  var users = await _ensureAssignableUsers();
+  var me = await _ensureMe();
+  // If /api/users 403s (viewer), the list is empty — inject `me` so they
+  // can at least self-assign.
+  if (users.length === 0 && me && me.id) {
+    users = [{ id: me.id, email: me.email || 'me', active: true }];
+  }
+  var current = f.assigned_to != null ? String(f.assigned_to) : '';
+  var assignedAt = f.assigned_at ? '<div class="assign-meta">Assigned <strong>' +
+    escapeHtml(f.assigned_at) + '</strong></div>' : '';
+  var meBtn = (me && me.id && current !== String(me.id))
+    ? '<button type="button" class="btn-link-sm" data-action="assignFindingToMe">Assign to me</button>'
+    : '';
+
+  var options = ['<option value="">— Unassigned —</option>'];
+  users.forEach(function (u) {
+    var sel = (String(u.id) === current) ? ' selected' : '';
+    var label = (u.email || 'user') +
+                (me && u.id === me.id ? ' (me)' : '');
+    options.push('<option value="' + escapeHtml(String(u.id)) + '"' + sel + '>' +
+                 escapeHtml(label) + '</option>');
+  });
+  mount.innerHTML =
+    '<div class="assign-row">' +
+      '<select id="drawer-assign-select" class="assign-select" ' +
+        'data-action-change="setFindingAssignee">' +
+        options.join('') +
+      '</select>' +
+      meBtn +
+    '</div>' +
+    assignedAt;
+}
+
+export async function setFindingAssignee(arg, target) {
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  var select = document.getElementById('drawer-assign-select');
+  var val = select ? select.value : '';
+  var r = await apiSetFindingAssignee(_drawerFinding.id, val || null);
+  if (!r || !r.ok) {
+    toastError((r && r.data && r.data.detail) || 'Could not update assignment.');
+    // Roll back the dropdown to the pre-change value so the UI stays honest.
+    if (select) {
+      select.value = _drawerFinding.assigned_to != null ? String(_drawerFinding.assigned_to) : '';
+    }
+    return;
+  }
+  _drawerFinding.assigned_to    = r.data.assigned_to;
+  _drawerFinding.assigned_at    = r.data.assigned_at;
+  _drawerFinding.assignee_email = r.data.assignee_email;
+  // Repaint the section so the meta line + "Assign to me" button reflect
+  // the new state, and broadcast so list rows can update their column.
+  _loadDrawerAssign(_drawerFinding);
+  document.dispatchEvent(new CustomEvent('pulse:assignee-changed', {
+    detail: {
+      id: _drawerFinding.id,
+      assigned_to: r.data.assigned_to,
+      assignee_email: r.data.assignee_email,
+    },
+  }));
+  showToast(r.data.assigned_to ? ('Assigned to ' + (r.data.assignee_email || 'user')) : 'Unassigned');
+}
+
+export async function assignFindingToMe() {
+  var me = await _ensureMe();
+  if (!me || !me.id) { toastError('Could not identify current user.'); return; }
+  var select = document.getElementById('drawer-assign-select');
+  if (select) select.value = String(me.id);
+  return setFindingAssignee();
 }
 
 // ---------------------------------------------------------------
@@ -1770,6 +1940,36 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     var drawer = document.getElementById('finding-drawer');
     if (drawer && drawer.classList.contains('open')) closeFindingDrawer();
+  }
+});
+
+// Assignee sync — when the drawer changes assignment, update the
+// list-row cell + cached state so the rest of the page stays honest.
+document.addEventListener('pulse:assignee-changed', function (ev) {
+  if (!ev || !ev.detail || ev.detail.id == null) return;
+  var email = ev.detail.assignee_email || '';
+  var rows = document.querySelectorAll(
+    '[data-finding-id="' + String(ev.detail.id) + '"]'
+  );
+  rows.forEach(function (row) {
+    var cell = row.querySelector('.col-assigned');
+    if (!cell) return;
+    if (!email) {
+      cell.innerHTML = '<span class="assignee-empty">Unassigned</span>';
+    } else {
+      var short = email.split('@')[0] || email;
+      cell.innerHTML = '<span class="assignee-chip" title="' + escapeHtml(email) + '">' +
+        escapeHtml(short) + '</span>';
+    }
+  });
+  var cache = findingsState && findingsState.raw;
+  if (Array.isArray(cache)) {
+    for (var i = 0; i < cache.length; i++) {
+      if (cache[i] && String(cache[i].id) === String(ev.detail.id)) {
+        cache[i].assigned_to = ev.detail.assigned_to;
+        cache[i].assignee_email = ev.detail.assignee_email;
+      }
+    }
   }
 });
 
