@@ -21,6 +21,11 @@ Format: newest entries at the top, grouped by date.
 - **Finding review auth + ownership check** — `PUT /api/finding/{finding_id}/review` now requires login and verifies the finding's scan belongs to the caller (admins unaffected; viewers get a 404 on cross-scope findings to avoid leaking existence)
 - **Session cookie `Secure` flag in production** — login / signup cookies now set `secure=True` when `PULSE_ENV=production` so they can't travel over plaintext on accidental `http://` hops. Dev-mode cookies stay non-secure so `http://127.0.0.1` works
 - **Feedback endpoint hardening** — `POST /api/feedback` now rejects non-JSON / non-object bodies with 400 and coerces `kind` / `message` / `page_hint` to strings defensively so weird client payloads can't 500 the server
+- **Rate limiting** (`pulse/rate_limit.py`) — new per-IP sliding-window limiter applied to the brute-forceable / spammable endpoints: `POST /api/auth/login` (10/5min), `POST /api/auth/signup` (10/5min), `POST /api/feedback` (10/hr), `POST /api/tokens` (20/hr). Over-the-limit returns `429` with a `Retry-After` header. In-process only (single-worker Render free tier); for horizontal scale the backing dict can be swapped for Redis
+- **Input validation hardening** — every body-taking endpoint in the auth / user / token / block-ip surface now rejects non-dict JSON bodies, coerces string fields defensively, and caps lengths (email 320, password 1024, comment 500, IP 64) so oversized strings can't reach the DB
+- **Avatar magic-byte verification** — `POST /api/me/avatar` now checks the first bytes against PNG (`89 50 4E 47`) and JPEG (`FF D8 FF`) magic numbers; a client-set `Content-Type: image/png` on a non-PNG file is rejected with 400. Stored mime is derived from the bytes, not the header
+- **Explicit auth on remaining routes** — every `/api/*` route (except the documented exempts: `/api/health`, `/api/auth/*`) now declares `Depends(require_login)` or `Depends(require_admin)`. Previously some routes relied only on the middleware; this closes the "future refactor strips middleware for one path" class of regression. Monitor bulk-delete endpoints tightened to `require_admin`
+- **Production CORS misconfig warning** — when `PULSE_ENV=production` but `PULSE_ALLOWED_ORIGIN` is empty, the startup banner now prints a warning instead of silently dropping CORS middleware
 
 ---
 

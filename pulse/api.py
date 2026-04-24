@@ -71,6 +71,7 @@ from pulse.core.rules_config import (
 )
 from pulse.alerts.emailer import dispatch_alerts
 from pulse.remediation import attach_remediation
+from pulse import rate_limit
 from pulse.monitor.monitor_service import MonitorManager
 from pulse.core.parser import parse_evtx
 from pulse.reports.reporter import (
@@ -259,6 +260,16 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     if _is_production:
         allowed = os.environ.get("PULSE_ALLOWED_ORIGIN", "").strip()
         allow_origins = [o.strip() for o in allowed.split(",") if o.strip()]
+        if not allow_origins:
+            # Same-origin requests still work (browsers don't hit CORS on
+            # them), but any legitimate cross-origin integration will now
+            # silently fail. Warn loudly at startup so misconfigurations
+            # surface before someone debugs a phantom "CORS blocked" error.
+            print(
+                "[*] WARNING: PULSE_ENV=production but PULSE_ALLOWED_ORIGIN "
+                "is not set. Cross-origin requests will be rejected by the "
+                "browser. Set PULSE_ALLOWED_ORIGIN=https://your-domain to fix."
+            )
     else:
         allow_origins = ["http://127.0.0.1:8000", "http://localhost:8000"]
     if allow_origins:
@@ -520,11 +531,20 @@ def _register_routes(app: FastAPI) -> None:
     @app.post("/api/auth/signup")
     async def auth_signup(request: Request):
         """Create the one and only user. 409s after the first row exists."""
+        # Signup is self-closing after the first user, but rate-limit
+        # anyway so an attacker can't flood the endpoint during a brief
+        # bootstrap window on a fresh deploy.
+        rate_limit.hit(request, "auth_signup", window_sec=300, max_hits=10)
         if count_users(app.state.db_path) > 0:
             raise HTTPException(409, detail="Signup is closed. An account already exists.")
-        body = await request.json()
-        email = (body.get("email") or "").strip().lower()
-        password = body.get("password") or ""
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        email = str(body.get("email") or "").strip().lower()[:320]
+        password = str(body.get("password") or "")
         if "@" not in email or "." not in email:
             raise HTTPException(400, detail="Please enter a valid email address.")
         if len(password) < 8:
@@ -541,9 +561,20 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/api/auth/login")
     async def auth_login(request: Request):
-        body = await request.json()
-        email = (body.get("email") or "").strip().lower()
-        password = body.get("password") or ""
+        # 10 attempts per 5 minutes per IP. Enough for a fat-fingered user
+        # to recover; slow enough that online password brute-force is
+        # impractical. Runs even when auth is disabled (test mode) so the
+        # limiter itself is exercised — tests that need more hits can call
+        # rate_limit.reset_all_for_tests() in a fixture.
+        rate_limit.hit(request, "auth_login", window_sec=300, max_hits=10)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        email = str(body.get("email") or "").strip().lower()[:320]
+        password = str(body.get("password") or "")
         user = get_user_by_email(app.state.db_path, email)
         if not user or not verify_password(password, user["password_hash"]):
             # Deliberately vague — don't leak whether the email exists.
@@ -607,6 +638,17 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail="Uploaded file is empty.")
         if len(data) > _AVATAR_MAX_BYTES:
             raise HTTPException(400, detail="Avatar must be 2MB or smaller.")
+        # Magic-byte check — content-type header is client-controlled, so
+        # verify the first few bytes match the claimed format before we
+        # store and serve the blob back. PNG: 89 50 4E 47. JPEG: FF D8 FF.
+        head = data[:4]
+        is_png  = head[:4] == b"\x89PNG"
+        is_jpeg = head[:3] == b"\xFF\xD8\xFF"
+        if not (is_png or is_jpeg):
+            raise HTTPException(400, detail="Avatar bytes do not match a PNG or JPEG header.")
+        # Reconcile declared mime with what the bytes actually are — prefer
+        # the bytes so a mislabeled upload lands stored as its real format.
+        mime = "image/png" if is_png else "image/jpeg"
         set_user_avatar(app.state.db_path, user_id, data, mime)
         return {"status": "ok", "has_avatar": True}
 
@@ -639,8 +681,16 @@ def _register_routes(app: FastAPI) -> None:
     async def api_create_token(request: Request, user_id: int = Depends(require_login)):
         if not app.state.auth_required:
             raise HTTPException(400, detail="Tokens require authentication to be enabled.")
-        body = await request.json()
-        name = (body.get("name") or "").strip()
+        # 20 tokens per hour per IP. Normal flow is 1-2 per session; anything
+        # more looks like an abuse attempt.
+        rate_limit.hit(request, "token_create", window_sec=3600, max_hits=20)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        name = str(body.get("name") or "").strip()
         if not name:
             raise HTTPException(400, detail="Token name is required.")
         if len(name) > _TOKEN_NAME_MAX:
@@ -666,9 +716,14 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):
-        body = await request.json()
-        current_password = body.get("current_password") or ""
-        new_email = (body.get("email") or "").strip().lower()
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        current_password = str(body.get("current_password") or "")
+        new_email = str(body.get("email") or "").strip().lower()[:320]
         if "@" not in new_email or "." not in new_email:
             raise HTTPException(400, detail="Please enter a valid email address.")
         user = get_user_by_id(app.state.db_path, user_id)
@@ -685,11 +740,18 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.put("/api/auth/password")
     async def auth_update_password(request: Request, user_id: int = Depends(require_login)):
-        body = await request.json()
-        current_password = body.get("current_password") or ""
-        new_password = body.get("new_password") or ""
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        current_password = str(body.get("current_password") or "")
+        new_password = str(body.get("new_password") or "")
         if len(new_password) < 8:
             raise HTTPException(400, detail="New password must be at least 8 characters.")
+        if len(new_password) > 1024:
+            raise HTTPException(400, detail="Password is too long.")
         user = get_user_by_id(app.state.db_path, user_id)
         if not user or not verify_password(current_password, user["password_hash"]):
             raise HTTPException(401, detail="Current password is incorrect.")
@@ -729,14 +791,21 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/api/users")
     async def api_create_user(request: Request, user_id: int = Depends(require_admin)):
-        body = await request.json()
-        email = (body.get("email") or "").strip().lower()
-        password = body.get("password") or ""
-        role = (body.get("role") or "viewer").strip().lower()
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        email = str(body.get("email") or "").strip().lower()[:320]
+        password = str(body.get("password") or "")
+        role = str(body.get("role") or "viewer").strip().lower()
         if "@" not in email or "." not in email:
             raise HTTPException(400, detail="Please enter a valid email address.")
         if len(password) < 8:
             raise HTTPException(400, detail="Password must be at least 8 characters.")
+        if len(password) > 1024:
+            raise HTTPException(400, detail="Password is too long.")
         if role not in ("admin", "viewer"):
             raise HTTPException(400, detail="Role must be 'admin' or 'viewer'.")
         if get_user_by_email(app.state.db_path, email):
@@ -807,6 +876,10 @@ def _register_routes(app: FastAPI) -> None:
         """Persist a user-submitted feedback message. Keeps the bar to
         submission low — any authenticated user can file feedback, admin
         reviews it via GET /api/feedback."""
+        # 10 submissions per hour per IP so a single user can't flood the
+        # feedback table. Legitimate bug-report bursts (3-4 in a row) fit
+        # comfortably under the ceiling.
+        rate_limit.hit(request, "feedback", window_sec=3600, max_hits=10)
         try:
             body = await request.json()
         except Exception:
@@ -1090,11 +1163,22 @@ def _register_routes(app: FastAPI) -> None:
         it to Windows Firewall immediately (Windows + admin required)."""
         from pulse.firewall import blocker
 
-        body = await request.json() if await request.body() else {}
-        ip = (body.get("ip") or "").strip()
+        raw_body = await request.body()
+        if raw_body:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, detail="Invalid JSON body.")
+        else:
+            body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        ip = str(body.get("ip") or "").strip()[:64]
         if not ip:
             raise HTTPException(400, detail="'ip' is required.")
         comment = body.get("comment")
+        if comment is not None:
+            comment = str(comment)[:500]
         finding_id = body.get("finding_id")
         confirm = bool(body.get("confirm"))
         # `force=true` bypasses the RFC1918 safety check for the
@@ -1555,7 +1639,7 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/config — read current whitelist + settings + email + alerts
     # -------------------------------------------------------------------
     @app.get("/api/config")
-    def get_config():
+    def get_config(user_id: int = Depends(require_login)):
         """
         Return the current pulse.yaml config for the dashboard to render.
 
@@ -1862,7 +1946,7 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/scheduler/status — read-only scheduler state for the dashboard
     # -------------------------------------------------------------------
     @app.get("/api/scheduler/status")
-    def scheduler_status():
+    def scheduler_status(user_id: int = Depends(require_login)):
         cfg = (_read_config(app.state.config_path) or {}).get("scheduled_scan") or {}
         next_run = compute_next_run(cfg)
         return {
@@ -1973,7 +2057,7 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/rules — list all available detection rule names
     # -------------------------------------------------------------------
     @app.get("/api/rules")
-    def list_rules():
+    def list_rules(user_id: int = Depends(require_login)):
         """Return the names of all detection rules Pulse can run."""
         return {"rules": _get_rule_names()}
 
@@ -2072,7 +2156,8 @@ def _register_routes(app: FastAPI) -> None:
     # that fans out events in real time.
 
     @app.post("/api/monitor/start")
-    async def monitor_start(request: Request):
+    async def monitor_start(request: Request,
+                            user_id: int = Depends(require_login)):
         """Start or reconfigure the live monitor.
 
         Request body (all optional):
@@ -2095,17 +2180,18 @@ def _register_routes(app: FastAPI) -> None:
         return status
 
     @app.post("/api/monitor/stop")
-    async def monitor_stop():
+    async def monitor_stop(user_id: int = Depends(require_login)):
         """Stop the live monitor. Idempotent."""
         return await app.state.monitor.stop()
 
     @app.get("/api/monitor/status")
-    def monitor_status():
+    def monitor_status(user_id: int = Depends(require_login)):
         """Current monitor state — used by the dashboard on page load."""
         return app.state.monitor.status()
 
     @app.get("/api/monitor/history")
-    def monitor_history(limit: int = 50):
+    def monitor_history(limit: int = 50,
+                        user_id: int = Depends(require_login)):
         """Recent poll history — each entry is one check, with or without findings."""
         if limit < 1 or limit > 100:
             raise HTTPException(400, detail="limit must be between 1 and 100.")
@@ -2115,14 +2201,16 @@ def _register_routes(app: FastAPI) -> None:
     # Monitor sessions — one row per Start→Stop span, with linked findings
     # -------------------------------------------------------------------
     @app.get("/api/monitor/sessions")
-    def monitor_sessions(limit: int = 100):
+    def monitor_sessions(limit: int = 100,
+                         user_id: int = Depends(require_login)):
         """List monitor sessions, newest first."""
         if limit < 1 or limit > 500:
             raise HTTPException(400, detail="limit must be between 1 and 500.")
         return {"sessions": list_monitor_sessions(app.state.db_path, limit=limit)}
 
     @app.get("/api/monitor/sessions/{session_id}/findings")
-    def monitor_session_findings(session_id: int):
+    def monitor_session_findings(session_id: int,
+                                 user_id: int = Depends(require_login)):
         """All findings detected during one monitor session."""
         findings = get_monitor_session_findings(app.state.db_path, session_id)
         return {"session_id": session_id, "findings": attach_remediation(findings)}
@@ -2132,7 +2220,8 @@ def _register_routes(app: FastAPI) -> None:
     # rejects non-int matches; keeping it above for symmetry with the
     # other batch endpoints.
     @app.delete("/api/monitor/sessions/batch")
-    def monitor_sessions_delete_batch(payload: dict = Body(...)):
+    def monitor_sessions_delete_batch(payload: dict = Body(...),
+                                      user_id: int = Depends(require_admin)):
         ids = payload.get("ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not ids:
             raise HTTPException(400, detail="Body must be {\"ids\": [...]}")
@@ -2157,7 +2246,8 @@ def _register_routes(app: FastAPI) -> None:
         return {"deleted": deleted, "failed": failed}
 
     @app.delete("/api/monitor/sessions/{session_id}")
-    def monitor_session_delete(session_id: int):
+    def monitor_session_delete(session_id: int,
+                               user_id: int = Depends(require_admin)):
         """Delete one session plus its scans and findings."""
         # Refuse to delete the currently-active session so the dashboard
         # doesn't end up with a dangling session_id on fresh scans.
@@ -2170,7 +2260,7 @@ def _register_routes(app: FastAPI) -> None:
         return {"deleted": 1}
 
     @app.delete("/api/monitor/sessions")
-    def monitor_sessions_clear():
+    def monitor_sessions_clear(user_id: int = Depends(require_admin)):
         """Wipe every monitor session and its linked scans/findings.
 
         Active session is preserved — callers should stop monitoring first
@@ -2183,7 +2273,7 @@ def _register_routes(app: FastAPI) -> None:
         return {"deleted": count}
 
     @app.post("/api/monitor/test-alert")
-    async def monitor_test_alert():
+    async def monitor_test_alert(user_id: int = Depends(require_login)):
         """Inject a synthetic finding through the live-monitor fan-out.
 
         Useful for verifying that the full SSE + UI pipeline (stream ->
@@ -2200,7 +2290,8 @@ def _register_routes(app: FastAPI) -> None:
         return {"status": "sent"}
 
     @app.get("/api/monitor/stream")
-    async def monitor_stream(request: Request):
+    async def monitor_stream(request: Request,
+                             user_id: int = Depends(require_login)):
         """Server-Sent Events stream.
 
         Each message is emitted as:
@@ -2252,7 +2343,7 @@ def _register_routes(app: FastAPI) -> None:
     # GET /api/whitelist/builtin — list the built-in known-good services
     # -------------------------------------------------------------------
     @app.get("/api/whitelist/builtin")
-    def builtin_whitelist():
+    def builtin_whitelist(user_id: int = Depends(require_login)):
         """Return the built-in KNOWN_GOOD_SERVICES list the whitelist UI renders.
 
         These are always active and cannot be removed — the UI shows them
