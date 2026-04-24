@@ -11,6 +11,7 @@ import {
   apiCreateUser,
   apiUpdateUserRole,
   apiUpdateUserActive,
+  apiUpdateUserDisplayName,
   apiDeleteUser,
   apiChangeEmail,
   apiChangePassword,
@@ -607,9 +608,6 @@ function _renderUsersPanel(me, users) {
     var activeBadge = u.active
       ? '<span class="badge badge-low">active</span>'
       : '<span class="badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);">disabled</span>';
-    // Self-rows get no action buttons — the backend rejects self-demotion
-    // and self-deactivation anyway, but dimming the controls keeps the
-    // UI honest.
     var actions = isSelf
       ? '<span style="color:var(--text-muted); font-size:12px;">(you)</span>'
       : (
@@ -623,8 +621,18 @@ function _renderUsersPanel(me, users) {
             u.id + '|' + encodeURIComponent(u.email) +
           '">Delete</button>'
       );
+    // Display-name cell is an inline editable input — admins can set or
+    // clear any user's name (including their own) without a separate page.
+    // Saves on blur + Enter; the blur handler reads the live value.
+    var dnAttr = ' data-user-id="' + u.id + '"';
+    var dnVal = escapeHtml(u.display_name || '');
+    var nameInput =
+      '<input type="text" class="user-dn-input" placeholder="— not set —" ' +
+        'value="' + dnVal + '" maxlength="100" ' + dnAttr + ' ' +
+        'data-action-change="saveUserDisplayName" data-action-keydown="saveUserDisplayNameOnEnter" />';
     return (
       '<tr>' +
+        '<td>' + nameInput + '</td>' +
         '<td>' + escapeHtml(u.email) + '</td>' +
         '<td>' + roleBadge + '</td>' +
         '<td>' + activeBadge + '</td>' +
@@ -636,7 +644,7 @@ function _renderUsersPanel(me, users) {
 
   var tableHtml = users && users.length
     ? '<div class="table-wrap"><table class="table">' +
-        '<thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>' +
+        '<thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>' +
         '<tbody>' + rowsHtml + '</tbody>' +
       '</table></div>'
     : '<p style="color:var(--text-muted); font-size:13px;">No other users yet.</p>';
@@ -889,7 +897,8 @@ function _renderNotesAdminPanel(rows) {
     var sevCls = 'badge badge-' + sev.toLowerCase();
     var ref = r.ref_id || ('#' + r.finding_id);
     var rule = r.rule || 'Unknown rule';
-    var author = r.email || ('user #' + (r.user_id || '?'));
+    var author = (r.display_name && r.display_name.trim()) ||
+                 r.email || ('user #' + (r.user_id || '?'));
     var when = r.created_at || '';
     var rel = (function () {
       // Lightweight relative-time; mirrors dashboard formatRelativeTime.
@@ -1022,6 +1031,37 @@ export async function createUser() {
     renderSettingsPage();
   } catch (e) {
     toastError('Network error: ' + e.message);
+  }
+}
+
+// Saves on blur (change event) and on Enter. Other keys are ignored.
+// Bound via data-action-keydown so the registry hands us the event.
+export function saveUserDisplayNameOnEnter(arg, target, e) {
+  if (e && e.key === 'Enter' && target) {
+    target.blur();
+  }
+}
+
+export async function saveUserDisplayName(arg, target) {
+  if (!target) return;
+  var id = Number(target.getAttribute('data-user-id'));
+  if (!id) return;
+  var prior = target.getAttribute('data-prior-value');
+  if (prior === null) prior = target.defaultValue || '';
+  var next = (target.value || '').trim();
+  if (next === prior) return; // no-op
+  target.disabled = true;
+  try {
+    var r = await apiUpdateUserDisplayName(id, next || null);
+    if (!r || !r.ok) {
+      toastError((r && r.data && r.data.detail) || 'Could not save name.');
+      target.value = prior;
+      return;
+    }
+    target.setAttribute('data-prior-value', next);
+    showToast(next ? 'Name saved' : 'Name cleared');
+  } finally {
+    target.disabled = false;
   }
 }
 

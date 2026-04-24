@@ -572,7 +572,18 @@ export function applyFindingsView() {
     if (isActive && sev !== 'ALL') cls += ' sev-' + sev.toLowerCase();
     return '<div class="' + cls + '" data-action="setFindingsFilter" data-arg="' + sev + '">' +
       sev + ' <span style="opacity:0.7;">(' + counts[sev] + ')</span></div>';
-  }).join('');
+  }).join('') +
+  // "Assigned to me" lives in the same filter row as the severity pills so
+  // all list-level filters read as one horizontal group.
+  '<div class="filter-pill-divider" aria-hidden="true"></div>' +
+  '<div class="filter-pill assigned-to-me-pill' +
+    (s.assignFilter === 'ME' ? ' active' : '') + '" ' +
+    'data-action="toggleAssignedToMeFilter" ' +
+    'aria-pressed="' + (s.assignFilter === 'ME' ? 'true' : 'false') + '" ' +
+    'title="Show only findings assigned to you">' +
+    '<span class="assigned-to-me-dot" aria-hidden="true"></span>' +
+    'Assigned to me' +
+  '</div>';
 
   var reviewCounts = { ALL: s.raw.length, OPEN: 0, REVIEWED: 0, FP: 0 };
   s.raw.forEach(function (f) {
@@ -601,15 +612,8 @@ export function applyFindingsView() {
       '</select>' +
     '</div>';
 
-  var assignFilter =
-    '<button type="button" class="assigned-to-me-chip' +
-      (s.assignFilter === 'ME' ? ' is-active' : '') + '" ' +
-      'data-action="toggleAssignedToMeFilter" ' +
-      'aria-pressed="' + (s.assignFilter === 'ME' ? 'true' : 'false') + '" ' +
-      'title="Show only findings assigned to you">' +
-      '<span class="assigned-to-me-dot"></span>' +
-      'Assigned to me' +
-    '</button>';
+  // Assigned-to-me toggle now lives in the severity pill row; nothing
+  // extra to render here.
 
   // Page title + header count — "Findings (32)" when unfiltered,
   // "Findings (12 of 32)" when filters narrow the view.
@@ -632,7 +636,6 @@ export function applyFindingsView() {
     '<div class="filter-bar">' +
       '<div class="filter-pills">' + pills + '</div>' +
       reviewDropdown +
-      assignFilter +
       '<input type="search" id="findings-search-box" class="search-box" placeholder="Search rule, description, or MITRE..." ' +
         'value="' + escapeHtml(s.query) + '" data-action-input="setFindingsQueryFromInput" />' +
     '</div>' +
@@ -1400,6 +1403,8 @@ export function openFindingDrawer(f) {
       if (wrap) wrap.innerHTML = '<p style="color:var(--text-muted); font-size:12px; margin:0;">Could not load users.</p>';
     });
   }
+
+  _syncSidebarQuickAssign();
 }
 
 // Workflow states — the incident-response axis. Orthogonal to review
@@ -1418,17 +1423,27 @@ export function _workflowChipHtml(state) {
   return '<span class="wf-chip wf-chip-' + s + '">' + escapeHtml(label) + '</span>';
 }
 
-// Assignee cell for list rows. Renders the short local-part of the
-// assignee email (everything before @) as a small chip, or a muted
-// "Unassigned" placeholder.
+// Prefer the admin-set display_name, fall back to the email local-part
+// so an unnamed user still gets a readable handle.
+function _displayFromAssignee(f) {
+  if (!f) return '';
+  var dn = (f.assignee_display_name || '').trim();
+  if (dn) return dn;
+  var email = f.assignee_email || '';
+  if (!email) return '';
+  return email.split('@')[0] || email;
+}
+
+// Assignee cell for list rows. Renders the display name as a chip, with
+// the email as the hover title for disambiguation.
 function _assigneeCellHtml(f) {
-  var email = (f && f.assignee_email) || '';
-  if (!email) {
+  var display = _displayFromAssignee(f);
+  if (!display) {
     return '<span class="assignee-empty">Unassigned</span>';
   }
-  var short = email.split('@')[0] || email;
-  return '<span class="assignee-chip" title="' + escapeHtml(email) + '">' +
-    escapeHtml(short) + '</span>';
+  var email = (f && f.assignee_email) || '';
+  return '<span class="assignee-chip" title="' + escapeHtml(email || display) + '">' +
+    escapeHtml(display) + '</span>';
 }
 
 // Inline chip for list rows. Hidden when the state is still 'new' so
@@ -1520,24 +1535,110 @@ async function _loadDrawerAssign(f) {
     ? '<button type="button" class="btn-link-sm" data-action="assignFindingToMe">Assign to me</button>'
     : '';
 
+  // Options are display_name primary, email secondary (muted) so a team
+  // with real names reads clean. A <select> can't render rich HTML inside
+  // <option>, so the custom list below is what the user actually sees; the
+  // native <select> stays screen-reader friendly and holds the source of
+  // truth for the selection.
   var options = ['<option value="">— Unassigned —</option>'];
+  var listItems = [
+    '<li class="assign-item' + (current === '' ? ' is-selected' : '') + '" ' +
+      'data-action="pickFindingAssignee" data-arg="">' +
+      '<span class="assign-item-name">— Unassigned —</span>' +
+    '</li>',
+  ];
   users.forEach(function (u) {
     var sel = (String(u.id) === current) ? ' selected' : '';
-    var label = (u.email || 'user') +
-                (me && u.id === me.id ? ' (me)' : '');
+    var display = (u.display_name || '').trim() ||
+                  ((u.email || '').split('@')[0] || ('user #' + u.id));
+    var isMe = (me && u.id === me.id);
+    var primary = display + (isMe ? ' (me)' : '');
+    var secondary = (u.display_name && u.email && u.email !== display) ? u.email : '';
     options.push('<option value="' + escapeHtml(String(u.id)) + '"' + sel + '>' +
-                 escapeHtml(label) + '</option>');
+                 escapeHtml(primary + (secondary ? ' — ' + secondary : '')) +
+                 '</option>');
+    listItems.push(
+      '<li class="assign-item' + (String(u.id) === current ? ' is-selected' : '') + '" ' +
+        'data-action="pickFindingAssignee" data-arg="' + escapeHtml(String(u.id)) + '">' +
+        '<span class="assign-item-name">' + escapeHtml(primary) + '</span>' +
+        (secondary
+          ? '<span class="assign-item-email">' + escapeHtml(secondary) + '</span>'
+          : '') +
+      '</li>'
+    );
   });
   mount.innerHTML =
     '<div class="assign-row">' +
-      '<select id="drawer-assign-select" class="assign-select" ' +
-        'data-action-change="setFindingAssignee">' +
-        options.join('') +
-      '</select>' +
+      '<div class="assign-picker">' +
+        '<button type="button" class="assign-trigger" data-action="toggleAssignPicker" ' +
+          'aria-haspopup="listbox" aria-expanded="false">' +
+          '<span class="assign-trigger-label">' +
+            escapeHtml(
+              _drawerFinding && _displayFromAssignee(_drawerFinding) ||
+              '— Unassigned —'
+            ) +
+          '</span>' +
+          '<span class="assign-trigger-caret" aria-hidden="true">▾</span>' +
+        '</button>' +
+        '<ul class="assign-menu" role="listbox" hidden>' + listItems.join('') + '</ul>' +
+        // Hidden native select keeps the value + fires change for screen readers.
+        '<select id="drawer-assign-select" class="sr-only" ' +
+          'data-action-change="setFindingAssignee">' +
+          options.join('') +
+        '</select>' +
+      '</div>' +
       meBtn +
     '</div>' +
     assignedAt;
 }
+
+// Toggle the custom assign picker popover.
+export function toggleAssignPicker(arg, target) {
+  var menu = target ? target.parentElement.querySelector('.assign-menu') : null;
+  if (!menu) return;
+  var open = !menu.hasAttribute('hidden');
+  if (open) {
+    menu.setAttribute('hidden', '');
+    target.setAttribute('aria-expanded', 'false');
+  } else {
+    menu.removeAttribute('hidden');
+    target.setAttribute('aria-expanded', 'true');
+  }
+}
+
+// Clicking an item in the custom menu commits the selection.
+export async function pickFindingAssignee(userId) {
+  var select = document.getElementById('drawer-assign-select');
+  if (!select) return;
+  select.value = userId || '';
+  // Close the popover before the request fires so the UI feels snappy.
+  var menu = document.querySelector('.assign-picker .assign-menu');
+  var trigger = document.querySelector('.assign-picker .assign-trigger');
+  if (menu) menu.setAttribute('hidden', '');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  return setFindingAssignee();
+}
+
+// Close the assign popover on outside click / Esc — mirrors the pattern
+// used by the user-avatar menu.
+document.addEventListener('click', function (e) {
+  var picker = document.querySelector('.assign-picker');
+  if (!picker) return;
+  if (picker.contains(e.target)) return;
+  var menu = picker.querySelector('.assign-menu');
+  var trigger = picker.querySelector('.assign-trigger');
+  if (menu && !menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var menu = document.querySelector('.assign-picker .assign-menu');
+  var trigger = document.querySelector('.assign-picker .assign-trigger');
+  if (menu && !menu.hasAttribute('hidden')) {
+    menu.setAttribute('hidden', '');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+});
 
 export async function setFindingAssignee(arg, target) {
   if (!_drawerFinding || _drawerFinding.id == null) return;
@@ -1552,20 +1653,21 @@ export async function setFindingAssignee(arg, target) {
     }
     return;
   }
-  _drawerFinding.assigned_to    = r.data.assigned_to;
-  _drawerFinding.assigned_at    = r.data.assigned_at;
-  _drawerFinding.assignee_email = r.data.assignee_email;
-  // Repaint the section so the meta line + "Assign to me" button reflect
-  // the new state, and broadcast so list rows can update their column.
+  _drawerFinding.assigned_to           = r.data.assigned_to;
+  _drawerFinding.assigned_at           = r.data.assigned_at;
+  _drawerFinding.assignee_email        = r.data.assignee_email;
+  _drawerFinding.assignee_display_name = r.data.assignee_display_name;
   _loadDrawerAssign(_drawerFinding);
   document.dispatchEvent(new CustomEvent('pulse:assignee-changed', {
     detail: {
       id: _drawerFinding.id,
       assigned_to: r.data.assigned_to,
       assignee_email: r.data.assignee_email,
+      assignee_display_name: r.data.assignee_display_name,
     },
   }));
-  showToast(r.data.assigned_to ? ('Assigned to ' + (r.data.assignee_email || 'user')) : 'Unassigned');
+  var nm = _displayFromAssignee(_drawerFinding);
+  showToast(r.data.assigned_to ? ('Assigned to ' + (nm || 'user')) : 'Unassigned');
 }
 
 export async function assignFindingToMe() {
@@ -1575,6 +1677,81 @@ export async function assignFindingToMe() {
   if (select) select.value = String(me.id);
   return setFindingAssignee();
 }
+
+// ---------------------------------------------------------------
+// Sidebar quick-assign dropdown — operates on the currently-open
+// finding drawer. Disabled when no drawer is open.
+// ---------------------------------------------------------------
+
+function _syncSidebarQuickAssign() {
+  var btn = document.getElementById('sidebar-quick-assign-btn');
+  if (!btn) return;
+  var enabled = !!(_drawerFinding && _drawerFinding.id != null);
+  btn.disabled = !enabled;
+  btn.title = enabled
+    ? 'Quick assign for the open finding'
+    : 'Quick assign (open a finding first)';
+  if (!enabled) {
+    var menu = document.getElementById('sidebar-quick-assign-menu');
+    if (menu) menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+export function toggleSidebarQuickAssign() {
+  var btn = document.getElementById('sidebar-quick-assign-btn');
+  var menu = document.getElementById('sidebar-quick-assign-menu');
+  if (!btn || !menu || btn.disabled) return;
+  var open = !menu.hidden;
+  menu.hidden = open;
+  btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+}
+
+function _closeSidebarQuickAssign() {
+  var menu = document.getElementById('sidebar-quick-assign-menu');
+  var btn = document.getElementById('sidebar-quick-assign-btn');
+  if (menu) menu.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+export async function quickAssignToMe() {
+  _closeSidebarQuickAssign();
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  return assignFindingToMe();
+}
+
+export function quickAssignPickUser() {
+  _closeSidebarQuickAssign();
+  // Open the drawer's existing picker so the admin can scroll / search
+  // the user list. Focuses the trigger so keyboard flow keeps working.
+  var trigger = document.querySelector('.assign-picker .assign-trigger');
+  if (!trigger) return;
+  trigger.click();
+  trigger.focus();
+  trigger.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+export async function quickUnassign() {
+  _closeSidebarQuickAssign();
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  var select = document.getElementById('drawer-assign-select');
+  if (select) select.value = '';
+  return setFindingAssignee();
+}
+
+// Outside-click / Escape close the sidebar menu.
+document.addEventListener('click', function (e) {
+  var wrap = document.getElementById('sidebar-quick-assign-wrap');
+  if (!wrap) return;
+  if (wrap.contains(e.target)) return;
+  var menu = document.getElementById('sidebar-quick-assign-menu');
+  if (menu && !menu.hidden) _closeSidebarQuickAssign();
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var menu = document.getElementById('sidebar-quick-assign-menu');
+  if (menu && !menu.hidden) _closeSidebarQuickAssign();
+});
 
 // ---------------------------------------------------------------
 // Analyst notes — append-only thread per finding
@@ -1625,7 +1802,8 @@ function _renderNotesThread(notes) {
     return;
   }
   list.innerHTML = notes.map(function (n) {
-    var author = n.email || ('user #' + (n.user_id || '?'));
+    var dn = (n.display_name || '').trim();
+    var author = dn || n.email || ('user #' + (n.user_id || '?'));
     var when = n.created_at || '';
     var body = String(n.body || '');
     return '<div class="note-item" data-note-id="' + escapeHtml(String(n.id)) + '">' +
@@ -1933,6 +2111,8 @@ export function closeFindingDrawer() {
   document.getElementById('finding-drawer').classList.remove('open');
   document.getElementById('finding-drawer-backdrop').classList.remove('open');
   document.body.style.overflow = '';
+  _drawerFinding = null;
+  _syncSidebarQuickAssign();
 }
 
 // Esc closes the drawer.
@@ -1948,18 +2128,20 @@ document.addEventListener('keydown', function (e) {
 document.addEventListener('pulse:assignee-changed', function (ev) {
   if (!ev || !ev.detail || ev.detail.id == null) return;
   var email = ev.detail.assignee_email || '';
+  var dn    = (ev.detail.assignee_display_name || '').trim();
+  var display = dn || (email ? (email.split('@')[0] || email) : '');
   var rows = document.querySelectorAll(
     '[data-finding-id="' + String(ev.detail.id) + '"]'
   );
   rows.forEach(function (row) {
     var cell = row.querySelector('.col-assigned');
     if (!cell) return;
-    if (!email) {
+    if (!display) {
       cell.innerHTML = '<span class="assignee-empty">Unassigned</span>';
     } else {
-      var short = email.split('@')[0] || email;
-      cell.innerHTML = '<span class="assignee-chip" title="' + escapeHtml(email) + '">' +
-        escapeHtml(short) + '</span>';
+      cell.innerHTML = '<span class="assignee-chip" title="' +
+        escapeHtml(email || display) + '">' +
+        escapeHtml(display) + '</span>';
     }
   });
   var cache = findingsState && findingsState.raw;
@@ -1968,6 +2150,7 @@ document.addEventListener('pulse:assignee-changed', function (ev) {
       if (cache[i] && String(cache[i].id) === String(ev.detail.id)) {
         cache[i].assigned_to = ev.detail.assigned_to;
         cache[i].assignee_email = ev.detail.assignee_email;
+        cache[i].assignee_display_name = ev.detail.assignee_display_name;
       }
     }
   }

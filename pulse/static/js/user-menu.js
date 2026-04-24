@@ -12,40 +12,54 @@ import { openFeedbackModal } from './feedback.js';
 
 const GITHUB_REPO = 'https://github.com/barrytd/Pulse';
 
-function _initialFromEmail(email) {
-  if (!email) return 'P';
-  var name = String(email).split('@')[0] || 'P';
-  return (name.charAt(0) || 'P').toUpperCase();
+function _initialFromIdentity(displayName, email) {
+  // Prefer the display name's first letter — that's what lines up with
+  // the greeting. Fall back to the email local-part's first letter.
+  var source = (displayName || '').trim() || String(email || '').split('@')[0];
+  return (source.charAt(0) || 'P').toUpperCase();
 }
 
-function _displayName(email) {
+function _firstNameFromIdentity(displayName, email) {
+  // If an admin has set a display_name, use the first whitespace-delimited
+  // token ("Robert Perez" -> "Robert"). Otherwise fall back to the email
+  // local-part. Returns 'there' when we have nothing usable so the greeting
+  // still reads naturally.
+  var dn = (displayName || '').trim();
+  if (dn) {
+    return dn.split(/\s+/)[0];
+  }
   if (!email || email === 'local') return 'there';
-  var name = String(email).split('@')[0] || email;
-  // Capitalise the first letter only — leave the rest as-is so
-  // usernames like "johnDoe42" keep their shape.
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  var local = String(email).split('@')[0] || email;
+  // Title-case so "robert" -> "Robert" without mangling mixed case.
+  return local.charAt(0).toUpperCase() + local.slice(1);
 }
 
 // Populate the avatar and the greeting once at boot. The avatar markup
 // lives statically in index.html so styles apply even before this runs.
 export async function mountUserMenu() {
+  var email = '';
+  var displayName = '';
   try {
     var s = await apiGetAuthStatus();
-    var initials = _initialFromEmail(s && s.email);
-    var name = _displayName(s && s.email);
-    var avatar = document.getElementById('user-avatar-initials');
-    if (avatar) avatar.textContent = initials;
-    var greet = document.getElementById('user-dropdown-name');
-    if (greet) greet.textContent = name;
+    email = (s && s.email) || '';
   } catch (e) { /* offline or auth disabled — keep defaults */ }
 
-  // Swap the initial for an <img> when the user has uploaded an avatar.
-  // Done separately from the greeting so a /api/me 401 doesn't take the
-  // initial fallback down with it.
+  // /api/me is the canonical source of display_name; /api/auth/status
+  // only returns the session email. Fetch both so the greeting prefers
+  // the admin-set name without falling back to email on every boot.
   try {
     var me = await apiGetMe();
-    if (me && me.has_avatar) refreshUserMenuAvatar();
+    if (me) {
+      displayName = me.display_name || '';
+      if (!email && me.email) email = me.email;
+      if (me.has_avatar) refreshUserMenuAvatar();
+    }
   } catch (e) { /* no-op — corner keeps the initial */ }
+
+  var avatar = document.getElementById('user-avatar-initials');
+  if (avatar) avatar.textContent = _initialFromIdentity(displayName, email);
+  var greet = document.getElementById('user-dropdown-name');
+  if (greet) greet.textContent = _firstNameFromIdentity(displayName, email);
 }
 
 // Called after a fresh avatar upload so the corner picks up the new

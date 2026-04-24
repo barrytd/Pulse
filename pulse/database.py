@@ -294,6 +294,10 @@ def init_db(db_path):
         # recent change so the UI can show "assigned to X, 4h ago".
         "ALTER TABLE findings ADD COLUMN assigned_to INTEGER",
         "ALTER TABLE findings ADD COLUMN assigned_at TEXT",
+        # Sprint 6 user identity — admin-editable display name so analysts
+        # can surface their real name instead of an email prefix. NULL
+        # means "fall back to the email local-part" at render time.
+        "ALTER TABLE users ADD COLUMN display_name TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -672,7 +676,9 @@ def get_scan_findings(db_path, scan_id, user_id=None):
                       f.mitre, f.description, f.details, f.raw_xml, f.hostname,
                       f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                       f.workflow_status, f.workflow_updated_at,
-                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+                      f.assigned_to, f.assigned_at,
+                      u.email AS assignee_email,
+                      u.display_name AS assignee_display_name
                FROM findings f
                LEFT JOIN users u ON u.id = f.assigned_to
                WHERE f.scan_id = ?
@@ -755,7 +761,9 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE
                       f.mitre, f.description, f.details, f.raw_xml, f.hostname,
                       f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                       f.workflow_status, f.workflow_updated_at,
-                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+                      f.assigned_to, f.assigned_at,
+                      u.email AS assignee_email,
+                      u.display_name AS assignee_display_name
                FROM findings f
                LEFT JOIN users u ON u.id = f.assigned_to
                WHERE f.id = ?""",
@@ -767,7 +775,7 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE
                 "mitre", "description", "details", "raw_xml", "hostname",
                 "reviewed", "false_positive", "review_note", "reviewed_at",
                 "workflow_status", "workflow_updated_at",
-                "assigned_to", "assigned_at", "assignee_email")
+                "assigned_to", "assigned_at", "assignee_email", "assignee_display_name")
         d = dict(zip(cols, row))
         d["reviewed"] = bool(d["reviewed"])
         d["false_positive"] = bool(d["false_positive"])
@@ -810,7 +818,9 @@ def set_finding_assignee(db_path, finding_id, assignee_user_id):
                       f.rule, f.mitre, f.description, f.details, f.raw_xml, f.hostname,
                       f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                       f.workflow_status, f.workflow_updated_at,
-                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+                      f.assigned_to, f.assigned_at,
+                      u.email AS assignee_email,
+                      u.display_name AS assignee_display_name
                FROM findings f
                LEFT JOIN users u ON u.id = f.assigned_to
                WHERE f.id = ?""",
@@ -822,7 +832,7 @@ def set_finding_assignee(db_path, finding_id, assignee_user_id):
                 "mitre", "description", "details", "raw_xml", "hostname",
                 "reviewed", "false_positive", "review_note", "reviewed_at",
                 "workflow_status", "workflow_updated_at",
-                "assigned_to", "assigned_at", "assignee_email")
+                "assigned_to", "assigned_at", "assignee_email", "assignee_display_name")
         d = dict(zip(cols, row))
         d["reviewed"] = bool(d["reviewed"])
         d["false_positive"] = bool(d["false_positive"])
@@ -854,7 +864,9 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
                       f.mitre, f.description, f.details, f.raw_xml, f.hostname,
                       f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                       f.workflow_status, f.workflow_updated_at,
-                      f.assigned_to, f.assigned_at, u.email AS assignee_email
+                      f.assigned_to, f.assigned_at,
+                      u.email AS assignee_email,
+                      u.display_name AS assignee_display_name
                FROM findings f
                LEFT JOIN users u ON u.id = f.assigned_to
                WHERE f.id = ?""",
@@ -866,7 +878,7 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
                 "mitre", "description", "details", "raw_xml", "hostname",
                 "reviewed", "false_positive", "review_note", "reviewed_at",
                 "workflow_status", "workflow_updated_at",
-                "assigned_to", "assigned_at", "assignee_email")
+                "assigned_to", "assigned_at", "assignee_email", "assignee_display_name")
         d = dict(zip(cols, row))
         d["reviewed"] = bool(d["reviewed"])
         d["false_positive"] = bool(d["false_positive"])
@@ -1234,7 +1246,9 @@ def get_monitor_session_findings(db_path, session_id):
                           f.rule, f.mitre, f.description, f.details, f.raw_xml,
                           f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                           f.workflow_status, f.workflow_updated_at,
-                          f.assigned_to, f.assigned_at, u.email AS assignee_email,
+                          f.assigned_to, f.assigned_at,
+                          u.email AS assignee_email,
+                          u.display_name AS assignee_display_name,
                           s.scanned_at
                    FROM findings f
                    JOIN scans s ON s.id = f.scan_id
@@ -1366,7 +1380,7 @@ def count_users(db_path):
         return int(row[0]) if row else 0
 
 
-_USER_COLS = "id, email, password_hash, created_at, role, active, avatar_mime"
+_USER_COLS = "id, email, password_hash, created_at, role, active, avatar_mime, display_name"
 
 
 def _row_to_user(row):
@@ -1380,7 +1394,22 @@ def _row_to_user(row):
         "role": row[4] or "admin",
         "active": bool(row[5]) if row[5] is not None else True,
         "avatar_mime": row[6] if len(row) > 6 else None,
+        "display_name": row[7] if len(row) > 7 else None,
     }
+
+
+def update_user_display_name(db_path, user_id, display_name):
+    """Set (or clear, with None / empty) a user's display name. Admin-only
+    upstream — this helper doesn't enforce that, the API layer does."""
+    if display_name is not None:
+        display_name = str(display_name).strip() or None
+        if display_name and len(display_name) > 100:
+            display_name = display_name[:100]
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET display_name = ? WHERE id = ?",
+            (display_name, int(user_id)),
+        )
 
 
 def set_user_avatar(db_path, user_id, blob, mime):
@@ -1669,7 +1698,8 @@ def insert_finding_note(db_path, finding_id, user_id, body):
 def _get_finding_note(db_path, note_id):
     with _connect(db_path) as conn:
         cursor = conn.execute(
-            """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at, u.email
+            """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at,
+                      u.email, u.display_name
                FROM finding_notes n
                LEFT JOIN users u ON u.id = n.user_id
                WHERE n.id = ?""",
@@ -1688,7 +1718,8 @@ def list_finding_notes(db_path, finding_id):
     try:
         with _connect(db_path) as conn:
             cursor = conn.execute(
-                """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at, u.email
+                """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at,
+                          u.email, u.display_name
                    FROM finding_notes n
                    LEFT JOIN users u ON u.id = n.user_id
                    WHERE n.finding_id = ?
@@ -1726,15 +1757,15 @@ def delete_finding_note(db_path, note_id, caller_user_id, caller_is_admin):
 def list_all_notes(db_path, limit=500):
     """Return every note across every finding, newest-first. Admin view.
 
-    Joins against users for the author email and findings for the rule
-    name + ref_id so the Settings > Notes tab can render useful context
-    without an N+1 fetch.
+    Joins against users for the author email + display_name and findings
+    for the rule name + ref_id so the Settings > Notes tab can render
+    useful context without an N+1 fetch.
     """
     try:
         with _connect(db_path) as conn:
             cursor = conn.execute(
                 """SELECT n.id, n.finding_id, n.body, n.created_at,
-                          u.email,
+                          u.email, u.display_name,
                           f.rule, f.ref_id, f.severity, f.scan_id
                    FROM finding_notes n
                    LEFT JOIN users u    ON u.id = n.user_id

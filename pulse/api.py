@@ -61,7 +61,8 @@ from pulse.database import (
     list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
     set_finding_assignee, set_user_avatar,
-    update_user_active, update_user_email, update_user_password,
+    update_user_active, update_user_display_name,
+    update_user_email, update_user_password,
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
     count_finding_notes, list_all_notes,
@@ -632,6 +633,7 @@ def _register_routes(app: FastAPI) -> None:
             "active": user.get("active", True),
             "created_at": user.get("created_at"),
             "has_avatar": bool(user.get("avatar_mime")),
+            "display_name": user.get("display_name"),
         }
 
     # -------------------------------------------------------------------
@@ -787,11 +789,12 @@ def _register_routes(app: FastAPI) -> None:
     # admins, reject it with 409.
     def _public_user(u):
         return {
-            "id":         u["id"],
-            "email":      u["email"],
-            "role":       u.get("role", "admin"),
-            "active":     bool(u.get("active", True)),
-            "created_at": u.get("created_at"),
+            "id":           u["id"],
+            "email":        u["email"],
+            "role":         u.get("role", "admin"),
+            "active":       bool(u.get("active", True)),
+            "created_at":   u.get("created_at"),
+            "display_name": u.get("display_name"),
         }
 
     def _audit_user_action(acting_user_id, action, *, target=None, detail=None):
@@ -852,6 +855,36 @@ def _register_routes(app: FastAPI) -> None:
         update_user_role(app.state.db_path, target_id, role)
         _audit_user_action(user_id, "update_user_role",
                            target=target["email"], detail=f"role={role}")
+        return _public_user(get_user_by_id(app.state.db_path, target_id))
+
+    @app.put("/api/users/{target_id}/display_name")
+    async def api_update_user_display_name(target_id: int, request: Request,
+                                           user_id: int = Depends(require_admin)):
+        """Admin-only: set or clear a user's display name. Intentionally
+        not reachable by non-admins — users don't edit their own name so
+        analyst identities stay under admin control."""
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        raw = body.get("display_name")
+        if raw is None:
+            display_name = None
+        else:
+            display_name = str(raw).strip()
+            if len(display_name) > 100:
+                raise HTTPException(400, detail="Display name is too long (100 char max).")
+            if not display_name:
+                display_name = None
+        target = get_user_by_id(app.state.db_path, target_id)
+        if not target:
+            raise HTTPException(404, detail="User not found.")
+        update_user_display_name(app.state.db_path, target_id, display_name)
+        _audit_user_action(user_id, "update_user_display_name",
+                           target=target["email"],
+                           detail=f"display_name={display_name!r}")
         return _public_user(get_user_by_id(app.state.db_path, target_id))
 
     @app.put("/api/users/{target_id}/active")

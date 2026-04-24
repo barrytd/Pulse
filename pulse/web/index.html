@@ -70,6 +70,39 @@
           <i data-lucide="trending-up" class="icon"></i> Trends
         </a>
       </nav>
+
+      <!-- Sidebar utility tray — currently just the quick-assign dropdown.
+           Anchored at the bottom of the sidebar via .sidebar-utility. The
+           trigger is enabled only when a finding drawer is currently open;
+           otherwise the button shows a muted tooltip. -->
+      <div class="sidebar-utility" id="sidebar-quick-assign-wrap">
+        <button class="sidebar-utility-btn" id="sidebar-quick-assign-btn"
+                type="button"
+                data-action="toggleSidebarQuickAssign"
+                aria-haspopup="menu" aria-expanded="false"
+                title="Quick assign (open a finding first)" disabled>
+          <i data-lucide="users" class="icon"></i>
+          <span>Quick assign</span>
+        </button>
+        <div class="pulse-dropdown sidebar-quick-assign-menu"
+             id="sidebar-quick-assign-menu" hidden>
+          <div class="pulse-dropdown-section">
+            <div class="pulse-dropdown-header">Assignment</div>
+            <a class="pulse-dropdown-item" data-action="quickAssignToMe">
+              <i data-lucide="user-check"></i>
+              <span>Assign to me</span>
+            </a>
+            <a class="pulse-dropdown-item" data-action="quickAssignPickUser">
+              <i data-lucide="users"></i>
+              <span>Assign to…</span>
+            </a>
+            <a class="pulse-dropdown-item" data-action="quickUnassign">
+              <i data-lucide="user-minus"></i>
+              <span>Unassign</span>
+            </a>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <!-- ============================================================= -->

@@ -353,6 +353,20 @@ export async function apiUpdateUserActive(userId, active) {
   });
 }
 
+// Admin-only: set/clear a user's display_name. Pass null (or empty
+// string) to clear. Returns the updated public_user payload.
+export async function apiUpdateUserDisplayName(userId, displayName) {
+  var resp = await fetch('/api/users/' + Number(userId) + '/display_name', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      display_name: (displayName == null || displayName === '') ? null : String(displayName),
+    }),
+  });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 export async function apiDeleteUser(userId) {
   return fetch('/api/users/' + Number(userId), { method: 'DELETE' });
 }
