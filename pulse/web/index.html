@@ -105,6 +105,23 @@
     </a>
 
     <div class="sidebar-scroll">
+      <!-- Command-palette launcher. This is a button-styled-as-input —
+           clicking it (or Ctrl+K anywhere) opens the existing fuzzy
+           launcher modal. Rendering as a <button> instead of a real
+           <input> keeps keyboard focus + accessibility obvious and
+           avoids a double-input (this one + the palette's real one). -->
+      <button type="button" class="sidebar-search"
+              data-action="openCommandPalette"
+              aria-label="Open command palette">
+        <svg class="sidebar-search-icon" viewBox="0 0 16 16" fill="none"
+             stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5"/>
+          <path d="M10.5 10.5L14 14"/>
+        </svg>
+        <span class="sidebar-search-placeholder">Search (Ctrl+K)</span>
+      </button>
+
       <div class="sidebar-group">
         <span class="sidebar-group-label">General</span>
         <a class="sidebar-nav" data-action="navigate" data-arg="dashboard">

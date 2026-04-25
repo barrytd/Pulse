@@ -102,10 +102,61 @@
   padding: 8px 0 12px;
 }
 
-/* Groups stack with breathing room between them. First group has no
-   extra top margin so it hugs the brand block's hairline. */
+/* ------------------------------------------------------------------
+ * Command-palette launcher (rendered at the top of .sidebar-scroll)
+ *
+ * Styled as a compact input but is actually a <button> — it opens the
+ * existing command-palette modal on click. Ctrl+K reaches the palette
+ * through its own document-wide keydown listener in command-palette.js,
+ * so this element doesn't need a keyboard handler of its own.
+ * ------------------------------------------------------------------ */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  height: 28px;
+  margin: 0 8px 12px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: var(--text-muted, #8b949e);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.sidebar-search:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text-body, #d1d5db);
+}
+.sidebar-search:focus {
+  outline: none;
+  border-color: rgba(88, 166, 255, 0.5);
+  background: rgba(255, 255, 255, 0.06);
+}
+.sidebar-search-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: inherit;
+}
+.sidebar-search-placeholder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Groups stack with breathing room between them. The first group
+   sits 0px below the search launcher since the launcher already has
+   a 12px bottom margin. */
 .sidebar-group { margin-top: 12px; }
-.sidebar-group:first-child { margin-top: 4px; }
+.sidebar-group:first-of-type { margin-top: 0; }
 
 .sidebar-group-label {
   display: block;
