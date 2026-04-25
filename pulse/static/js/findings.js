@@ -39,11 +39,19 @@ import { navigate } from './navigation.js';
 // Scans page state — now with a tab for "All Findings"
 // ---------------------------------------------------------------
 export const scansState = {
-  raw:      [],
-  query:    '',
-  sortCol:  'date',
-  sortDir:  'desc',
-  selected: {},
+  raw:         [],
+  query:       '',
+  // New filter dropdowns on the Scans page top bar. All default to 'all'
+  // so a fresh load shows every scan; the filter bar falls back to the
+  // unfiltered population for its dropdown options.
+  hostFilter:  'all',
+  gradeFilter: 'all',
+  scopeFilter: 'all',   // 'all' | '24h' | '7d' | '30d'
+  dateFrom:    '',      // ISO YYYY-MM-DD
+  dateTo:      '',      // ISO YYYY-MM-DD
+  sortCol:     'date',
+  sortDir:     'desc',
+  selected:    {},
 };
 
 // Which tab is active on the merged Scans page. Persisted so
@@ -185,10 +193,115 @@ export function setScansQueryFromInput(arg, target) {
   setScansQuery(target && target.value);
 }
 
+// Type icon — leads the subtitle in the Date/Time cell. Inferred from
+// filename + scope since the DB has no dedicated type column.
+function _scanTypeMeta(row) {
+  var fn = row && row.filename ? String(row.filename) : '';
+  var sc = row && row.scope ? String(row.scope) : '';
+  if (fn.indexOf('[monitor]') === 0) return { key: 'monitor', title: 'Live monitor' };
+  if (fn === 'System Scan') {
+    if (sc && /^Last\s/i.test(sc)) return { key: 'scheduled', title: 'Scheduled scan' };
+    return { key: 'system', title: 'System scan' };
+  }
+  return { key: 'upload', title: 'Uploaded file' };
+}
+
+// Hand-drawn SVGs (not Lucide) so the row renders synchronously — a big
+// re-render with hundreds of rows would otherwise flash blank <i> tags
+// until lucide.createIcons() catches up.
+function _scanTypeIconSvg(typeKey) {
+  switch (typeKey) {
+    case 'system':
+      return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+             '<rect x="4" y="4" width="8" height="8" rx="1.2"/>' +
+             '<path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2"/>' +
+             '</svg>';
+    case 'scheduled':
+      return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+             '<circle cx="8" cy="8" r="6"/><path d="M8 4.5v3.8l2.4 1.6"/>' +
+             '</svg>';
+    case 'monitor':
+      return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+             '<path d="M1.5 8h3l2-5 2 10 2-5h4"/>' +
+             '</svg>';
+    default: // upload
+      return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+             '<path d="M8 11V3M4.5 6.5L8 3l3.5 3.5M2.5 11v2h11v-2"/>' +
+             '</svg>';
+  }
+}
+
+// "1m 24s" / "45s" / "1h 3m" from a seconds input.
+function _formatDuration(sec) {
+  if (sec == null || isNaN(sec)) return '—';
+  sec = Math.max(0, Math.round(Number(sec)));
+  if (sec < 60) return sec + 's';
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  if (m < 60) return s ? (m + 'm ' + s + 's') : (m + 'm');
+  var h = Math.floor(m / 60);
+  m = m % 60;
+  return m ? (h + 'h ' + m + 'm') : (h + 'h');
+}
+
+// "2 hours ago" — compact relative time from an ISO-ish timestamp.
+function _relativeTimeShort(iso) {
+  if (!iso) return '—';
+  var t = Date.parse(iso);
+  if (isNaN(t)) return '—';
+  var diff = Math.max(0, Date.now() - t);
+  var s = Math.floor(diff / 1000);
+  if (s < 60) return 'just now';
+  var m = Math.floor(s / 60);
+  if (m < 60) return m + ' minute' + (m === 1 ? '' : 's') + ' ago';
+  var h = Math.floor(m / 60);
+  if (h < 24) return h + ' hour' + (h === 1 ? '' : 's') + ' ago';
+  var d = Math.floor(h / 24);
+  if (d < 30) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+  var mo = Math.floor(d / 30);
+  if (mo < 12) return mo + ' month' + (mo === 1 ? '' : 's') + ' ago';
+  var y = Math.floor(mo / 12);
+  return y + ' year' + (y === 1 ? '' : 's') + ' ago';
+}
+
+// Severity-mix mini pills — compact "2C 4H 6M 1L" signature. Zeroes
+// are omitted so low-noise scans stay uncluttered.
+function _sevMixHtml(row) {
+  var pills = [];
+  function push(cls, label, n) {
+    if (n > 0) pills.push('<span class="sev-mix-pill ' + cls + '">' + n + label + '</span>');
+  }
+  push('sev-c', 'C', row.sev_critical || 0);
+  push('sev-h', 'H', row.sev_high     || 0);
+  push('sev-m', 'M', row.sev_medium   || 0);
+  push('sev-l', 'L', row.sev_low      || 0);
+  if (pills.length === 0) return '';
+  return '<span class="sev-mix">' + pills.join('') + '</span>';
+}
+
+// Scope filter cutoff in ms (null = no cutoff).
+function _scopeCutoffMs(scope) {
+  var day = 86400000;
+  if (scope === '24h') return Date.now() -  1 * day;
+  if (scope === '7d')  return Date.now() -  7 * day;
+  if (scope === '30d') return Date.now() - 30 * day;
+  return null;
+}
+
+// Previous-period window for KPI deltas (null when no comparable prior).
+function _scopePreviousWindow(scope) {
+  var day = 86400000;
+  var size = ({ '24h': 1 * day, '7d': 7 * day, '30d': 30 * day })[scope];
+  if (!size) return null;
+  var to = Date.now() - size;
+  return { from: to - size, to: to };
+}
+
 export function applyScansView() {
   var s = scansState;
   var q = s.query.trim().toLowerCase();
 
+  // ----- Filter pipeline ---------------------------------------------
   var rows = s.raw.slice();
   if (q) {
     rows = rows.filter(function (sc) {
@@ -198,16 +311,43 @@ export function applyScansView() {
       return fname.indexOf(q) >= 0 || when.indexOf(q) >= 0 || host.indexOf(q) >= 0;
     });
   }
+  if (s.hostFilter && s.hostFilter !== 'all') {
+    rows = rows.filter(function (sc) { return (sc.hostname || '') === s.hostFilter; });
+  }
+  if (s.gradeFilter && s.gradeFilter !== 'all') {
+    rows = rows.filter(function (sc) { return _gradeFor(sc.score) === s.gradeFilter; });
+  }
+  var cutoff = _scopeCutoffMs(s.scopeFilter);
+  if (cutoff != null) {
+    rows = rows.filter(function (sc) {
+      var t = Date.parse(sc.scanned_at || '');
+      return !isNaN(t) && t >= cutoff;
+    });
+  }
+  if (s.dateFrom) {
+    var df = Date.parse(s.dateFrom + 'T00:00:00');
+    if (!isNaN(df)) rows = rows.filter(function (sc) {
+      var t = Date.parse(sc.scanned_at || ''); return !isNaN(t) && t >= df;
+    });
+  }
+  if (s.dateTo) {
+    var dt = Date.parse(s.dateTo + 'T23:59:59');
+    if (!isNaN(dt)) rows = rows.filter(function (sc) {
+      var t = Date.parse(sc.scanned_at || ''); return !isNaN(t) && t <= dt;
+    });
+  }
 
+  // ----- Sort --------------------------------------------------------
   var dir = s.sortDir === 'asc' ? 1 : -1;
   rows.sort(function (a, b) {
     var av, bv;
     switch (s.sortCol) {
-      case 'files':    av = a.files_scanned || 0;  bv = b.files_scanned || 0; break;
+      case 'host':     av = (a.hostname || '').toLowerCase(); bv = (b.hostname || '').toLowerCase(); break;
       case 'events':   av = a.total_events || 0;   bv = b.total_events || 0;  break;
       case 'findings': av = a.total_findings || 0; bv = b.total_findings || 0; break;
       case 'score':    av = a.score != null ? a.score : -1; bv = b.score != null ? b.score : -1; break;
       case 'grade':    av = _gradeRank(a.score);   bv = _gradeRank(b.score); break;
+      case 'duration': av = a.duration_sec || 0;   bv = b.duration_sec || 0;  break;
       default:         av = a.scanned_at || '';    bv = b.scanned_at || '';
     }
     if (av < bv) return -1 * dir;
@@ -222,16 +362,8 @@ export function applyScansView() {
   var c = document.getElementById('content');
   c.innerHTML =
     _scansTabsBarHtml() +
-    '<div class="page-head">' +
-      '<div class="page-head-title"><strong>' + rows.length + '</strong> of ' + s.raw.length + ' scans</div>' +
-      '<div class="page-head-actions">' +
-        '<button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>' +
-      '</div>' +
-    '</div>' +
-    '<div class="filter-bar">' +
-      '<input type="search" id="scans-search-box" class="search-box" placeholder="Search by filename, date, or host..." ' +
-        'value="' + escapeHtml(s.query) + '" data-action-input="setScansQueryFromInput" />' +
-    '</div>' +
+    _scansKpisHtml(rows) +
+    _scansFilterBarHtml(s.raw) +
     '<div id="scans-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
       '<span class="bulk-bar-count">' + nSelected + ' selected</span>' +
       '<button class="btn btn-danger" id="scans-delete-btn" data-action="deleteSelectedScans">' +
@@ -241,20 +373,161 @@ export function applyScansView() {
     '</div>' +
     '<div class="card" style="padding:0; overflow:hidden;">' +
       (rows.length === 0
-        ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No scans match your search.</div>'
+        ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No scans match your filters.</div>'
         : _buildScansTable(rows)) +
     '</div>';
   _restoreSearchFocus('scans-search-box');
 }
 
-// Pick what to show in the Scope column. Back-compat: older scans predate
-// the `scope` column and will have null — fall back to the filename, and
-// finally to an em dash so the cell is never blank.
-function _scopeLabel(row) {
-  if (row && row.scope) return row.scope;
-  if (row && row.filename === 'System Scan') return 'System scan';
-  if (row && row.filename) return row.filename;
-  return '\u2014';
+// ----- KPI strip -----------------------------------------------------
+// 4 compact cards above the filter bar. Metrics are computed over the
+// current filtered slice so the cards track whatever the user sees.
+function _scansKpisHtml(rows) {
+  var total = rows.length;
+
+  // Average score — null-scores excluded.
+  var scored = rows.filter(function (r) { return r.score != null; });
+  var avg = scored.length
+    ? Math.round(scored.reduce(function (a, r) { return a + (r.score || 0); }, 0) / scored.length)
+    : null;
+  var avgGrade = avg != null ? _gradeFor(avg) : null;
+
+  // Total findings + delta vs preceding period (only when a scope is set).
+  var findingsTotal = rows.reduce(function (a, r) { return a + (r.total_findings || 0); }, 0);
+  var delta = null;
+  var prev = _scopePreviousWindow(scansState.scopeFilter);
+  if (prev) {
+    var prevTotal = 0;
+    scansState.raw.forEach(function (r) {
+      var t = Date.parse(r.scanned_at || '');
+      if (!isNaN(t) && t >= prev.from && t < prev.to) {
+        prevTotal += (r.total_findings || 0);
+      }
+    });
+    if (prevTotal > 0) {
+      var pct = Math.round(((findingsTotal - prevTotal) / prevTotal) * 100);
+      delta = { pct: pct, prev: prevTotal };
+    } else if (findingsTotal > 0) {
+      delta = { pct: null, prev: 0 };
+    }
+  }
+
+  // Last scan — newest in the filtered set.
+  var last = rows.slice().sort(function (a, b) {
+    var at = Date.parse(a.scanned_at || '') || 0;
+    var bt = Date.parse(b.scanned_at || '') || 0;
+    return bt - at;
+  })[0];
+
+  function kpi(label, value, sub) {
+    return '<div class="scans-kpi">' +
+      '<div class="scans-kpi-label">' + escapeHtml(label) + '</div>' +
+      '<div class="scans-kpi-value">' + value + '</div>' +
+      '<div class="scans-kpi-sub">' + (sub || '&nbsp;') + '</div>' +
+    '</div>';
+  }
+
+  var kTotal = kpi('Total scans',
+    String(total),
+    total === scansState.raw.length
+      ? 'Across all history'
+      : (total + ' of ' + scansState.raw.length + ' match filters'));
+
+  var kAvg;
+  if (avg == null) {
+    kAvg = kpi('Average score', '<span style="color:var(--text-muted);">&mdash;</span>',
+      'No scored scans in range');
+  } else {
+    var gradeChip = avgGrade
+      ? '<span class="scans-kpi-grade grade-' + avgGrade + '">' + avgGrade + '</span>'
+      : '';
+    kAvg = kpi('Average score',
+      '<span style="color:' + scoreColor(avg) + ';">' + avg + '</span>' + gradeChip,
+      avgGrade ? (avgGrade + ' grade across ' + scored.length + ' scan' + (scored.length === 1 ? '' : 's'))
+               : scored.length + ' scan' + (scored.length === 1 ? '' : 's'));
+  }
+
+  var deltaHtml = '';
+  var subTotal;
+  if (delta == null) {
+    subTotal = 'Across current view';
+  } else if (delta.pct == null) {
+    deltaHtml = '<span class="scans-kpi-delta delta-up">new</span>';
+    subTotal = 'No findings in the prior window';
+  } else {
+    var cls = delta.pct > 0 ? 'delta-up' : (delta.pct < 0 ? 'delta-down' : 'delta-flat');
+    var sign = delta.pct > 0 ? '+' : '';
+    deltaHtml = '<span class="scans-kpi-delta ' + cls + '">' + sign + delta.pct + '%</span>';
+    subTotal = 'vs. prior ' + ({ '24h': '24 hours', '7d': '7 days', '30d': '30 days' }[scansState.scopeFilter] || 'window');
+  }
+  var kFindings = kpi('Total findings',
+    findingsTotal.toLocaleString() + (deltaHtml ? ' ' + deltaHtml : ''),
+    subTotal);
+
+  var kLast;
+  if (!last) {
+    kLast = kpi('Last scan', '<span style="color:var(--text-muted);">&mdash;</span>', 'No scans in range');
+  } else {
+    kLast = kpi('Last scan',
+      escapeHtml(_relativeTimeShort(last.scanned_at)),
+      escapeHtml(last.hostname || last.filename || 'Unknown host'));
+  }
+
+  return '<div class="scans-kpis">' + kTotal + kAvg + kFindings + kLast + '</div>';
+}
+
+// ----- Filter bar ----------------------------------------------------
+// Search + Host + Grade + Scope + date range + Upload button. Dropdown
+// options come from the UNFILTERED population so the user can always
+// reach every host/grade regardless of current selection.
+function _scansFilterBarHtml(allRows) {
+  var s = scansState;
+  var hosts = {};
+  allRows.forEach(function (r) {
+    var h = (r.hostname || '').trim();
+    if (h) hosts[h] = true;
+  });
+  var hostOptions = Object.keys(hosts).sort().map(function (h) {
+    return '<option value="' + escapeHtml(h) + '"' +
+           (s.hostFilter === h ? ' selected' : '') + '>' + escapeHtml(h) + '</option>';
+  }).join('');
+
+  function opt(val, label, current) {
+    return '<option value="' + val + '"' + (current === val ? ' selected' : '') + '>' + label + '</option>';
+  }
+
+  return '<div class="scans-filter-bar">' +
+    '<input type="search" id="scans-search-box" class="search-box" placeholder="Search by filename, date, or host..." ' +
+      'value="' + escapeHtml(s.query) + '" data-action-input="setScansQueryFromInput" />' +
+    '<select class="scans-filter-select" data-action-change="setScansHostFilter" aria-label="Host">' +
+      opt('all', 'Host: All', s.hostFilter) +
+      hostOptions +
+    '</select>' +
+    '<select class="scans-filter-select" data-action-change="setScansGradeFilter" aria-label="Grade">' +
+      opt('all', 'Grade: All', s.gradeFilter) +
+      opt('A', 'Grade: A', s.gradeFilter) +
+      opt('B', 'Grade: B', s.gradeFilter) +
+      opt('C', 'Grade: C', s.gradeFilter) +
+      opt('D', 'Grade: D', s.gradeFilter) +
+      opt('F', 'Grade: F', s.gradeFilter) +
+    '</select>' +
+    '<select class="scans-filter-select" data-action-change="setScansScopeFilter" aria-label="Scope">' +
+      opt('all', 'Scope: All', s.scopeFilter) +
+      opt('24h', 'Last 24 hours', s.scopeFilter) +
+      opt('7d',  'Last 7 days',  s.scopeFilter) +
+      opt('30d', 'Last 30 days', s.scopeFilter) +
+    '</select>' +
+    '<input type="date" class="scans-filter-date" value="' + escapeHtml(s.dateFrom) + '" ' +
+      'data-action-change="setScansDateFrom" aria-label="From date" />' +
+    '<span class="scans-filter-date-sep">–</span>' +
+    '<input type="date" class="scans-filter-date" value="' + escapeHtml(s.dateTo) + '" ' +
+      'data-action-change="setScansDateTo" aria-label="To date" />' +
+    '<div class="scans-filter-spacer"></div>' +
+    '<button class="btn btn-primary" data-action="openUploadModal">' +
+      '<i data-lucide="upload" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px;"></i>' +
+      'Upload .evtx' +
+    '</button>' +
+  '</div>';
 }
 
 function _buildScansTable(rows) {
@@ -275,39 +548,127 @@ function _buildScansTable(rows) {
     (allSelected ? 'checked ' : '') +
     'data-action="toggleScanSelectAll" aria-label="Select all scans" /></th>';
 
+  // Precompute "previous scan" mapping so the Compare-with-previous
+  // hover button can embed the sibling id directly in data-arg. The
+  // next row in the current sort is treated as "older".
+  var prevById = {};
+  rows.forEach(function (r, i) {
+    var sibling = rows[i + 1];
+    if (sibling) prevById[r.id] = sibling.id;
+  });
+
   return '<table class="data-table">' +
     '<thead><tr>' +
       headCheckbox +
       sortable('date',     'Date / Time') +
-      sortable('files',    'Files') +
+      sortable('host',     'Host') +
       sortable('events',   'Events') +
       sortable('findings', 'Findings') +
       sortable('score',    'Score') +
       sortable('grade',    'Grade') +
-      '<th>Scope</th>' +
+      sortable('duration', 'Duration') +
+      '<th style="width:80px;"></th>' +
     '</tr></thead>' +
     '<tbody>' +
     rows.map(function (row) {
-      var grade = _gradeFor(row.score);
-      var checked = s.selected[String(row.id)] ? 'checked' : '';
+      var grade    = _gradeFor(row.score);
+      var checked  = s.selected[String(row.id)] ? 'checked' : '';
+      var typeMeta = _scanTypeMeta(row);
+      var hostLabel = row.hostname || row.filename || 'Unknown';
+      var prevId = prevById[row.id];
+      var compareDisabled = prevId == null;
+
       return '<tr class="clickable" data-action="viewScan" data-arg="' + row.id + '">' +
         '<td data-action="stopClickPropagation"><input type="checkbox" ' + checked +
           ' data-action="toggleScanSelect" data-arg="' + row.id + '" aria-label="Select scan ' + row.id + '" /></td>' +
+        // Date/Time \u2014 bold timestamp + type icon + host subtitle.
         '<td><div style="font-weight:500;">' + escapeHtml(row.scanned_at || '-') + '</div>' +
-          '<div style="font-size:11px; color:var(--text-muted);">' +
-            escapeHtml(row.filename || 'Unknown') +
-            (row.hostname ? ' \u2022 ' + escapeHtml(row.hostname) : '') +
+          '<div class="scan-when-sub" title="' + escapeHtml(typeMeta.title) + '">' +
+            '<span class="scan-type-icon" aria-hidden="true">' + _scanTypeIconSvg(typeMeta.key) + '</span>' +
+            escapeHtml(hostLabel) +
           '</div></td>' +
-        '<td>' + (row.files_scanned || 0) + '</td>' +
+        // Host \u2014 dedicated column.
+        '<td>' + escapeHtml(row.hostname || '\u2014') + '</td>' +
         '<td>' + (row.total_events || 0).toLocaleString() + '</td>' +
-        '<td>' + row.total_findings + '</td>' +
+        // Findings + inline severity-mix pills.
+        '<td>' + (row.total_findings || 0) + _sevMixHtml(row) + '</td>' +
         '<td style="font-weight:700; color:' + scoreColor(row.score) + '">' +
           (row.score != null ? row.score : '-') + '</td>' +
         '<td>' + (grade ? '<span class="grade-pill grade-' + grade + '">' + grade + '</span>' : '-') + '</td>' +
-        '<td style="color:var(--text-muted);">' + escapeHtml(_scopeLabel(row)) + '</td>' +
+        '<td class="scan-duration">' + escapeHtml(_formatDuration(row.duration_sec)) + '</td>' +
+        // Hover actions \u2014 right-aligned. stopClickPropagation on the td
+        // keeps the row-click (viewScan) from firing when a button is hit.
+        '<td data-action="stopClickPropagation" style="text-align:right;">' +
+          '<div class="scans-row-actions">' +
+            '<button class="scans-row-action" data-action="viewScanReport" data-arg="' + row.id + '" ' +
+              'title="Download PDF report" aria-label="Download PDF report">' +
+              '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M3 1.5h6.5L13 5v9.5H3z"/><path d="M9 1.5V5h4"/><path d="M6 9h4M6 11.5h3"/>' +
+              '</svg>' +
+            '</button>' +
+            '<button class="scans-row-action" data-action="compareScanWithPrevious" ' +
+              'data-arg="' + (prevId != null ? prevId : '') + '" ' +
+              (compareDisabled ? 'disabled ' : '') +
+              'title="' + (compareDisabled ? 'No earlier scan to compare' : 'Compare with previous scan') + '" ' +
+              'aria-label="Compare with previous scan">' +
+              '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M3 4h10M3 4l2-2M3 4l2 2"/><path d="M13 12H3M13 12l-2-2M13 12l-2 2"/>' +
+              '</svg>' +
+            '</button>' +
+          '</div>' +
+        '</td>' +
       '</tr>';
     }).join('') +
     '</tbody></table>';
+}
+
+// ----- Filter-bar handlers (exported for app.js registry) -----------
+export function setScansHostFilter(_arg, target) {
+  scansState.hostFilter = (target && target.value) || 'all';
+  applyScansView();
+}
+export function setScansGradeFilter(_arg, target) {
+  scansState.gradeFilter = (target && target.value) || 'all';
+  applyScansView();
+}
+export function setScansScopeFilter(_arg, target) {
+  scansState.scopeFilter = (target && target.value) || 'all';
+  applyScansView();
+}
+export function setScansDateFrom(_arg, target) {
+  scansState.dateFrom = (target && target.value) || '';
+  applyScansView();
+}
+export function setScansDateTo(_arg, target) {
+  scansState.dateTo = (target && target.value) || '';
+  applyScansView();
+}
+
+// ----- Hover action handlers ----------------------------------------
+// Download PDF report \u2014 hits /api/report/{id}?format=pdf, which the
+// backend streams with a download-dispositioned PDF header. Reuses the
+// same endpoint the Scan detail page's "Download PDF" button calls.
+export function viewScanReport(id, _target, ev) {
+  if (ev) ev.stopPropagation();
+  var scanId = Number(id);
+  if (!scanId) return;
+  var a = document.createElement('a');
+  a.href = '/api/report/' + scanId + '?format=pdf';
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Navigate to the previous scan in the current sort \u2014 simplest form of
+// "compare with previous" (side-by-side view is a later pass). The
+// sibling scan id is embedded in data-arg at render time.
+export function compareScanWithPrevious(prevId, _target, ev) {
+  if (ev) ev.stopPropagation();
+  var id = Number(prevId);
+  if (!id) return;
+  viewScan(id);
 }
 
 export async function viewScan(scanId, opts) {

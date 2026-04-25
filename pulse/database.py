@@ -460,13 +460,24 @@ def get_history(db_path, limit=20, user_id=None):
                 where_outer = " WHERE s.user_id = ?"
                 where_inner = " AND s2.user_id = ?"
                 params = (int(user_id), int(user_id))
+            # LEFT JOIN findings + GROUP BY lets us compute the per-scan
+            # severity breakdown in the same round trip, so the Scans page
+            # can render a sev-mix badge row without fetching every scan's
+            # findings individually. The aggregate is cheap because the
+            # findings table is indexed on scan_id.
             cursor = conn.execute(
                 f"""SELECT s.id, s.scanned_at, s.hostname, s.files_scanned,
                           s.total_events, s.total_findings, s.score, s.score_label,
                           s.filename, s.scope, s.duration_sec,
                           (SELECT COUNT(*) FROM scans s2
-                           WHERE s2.id <= s.id{where_inner}) AS number
-                   FROM scans s{where_outer}
+                           WHERE s2.id <= s.id{where_inner}) AS number,
+                          COALESCE(SUM(CASE WHEN f.severity='CRITICAL' THEN 1 ELSE 0 END), 0) AS sev_critical,
+                          COALESCE(SUM(CASE WHEN f.severity='HIGH'     THEN 1 ELSE 0 END), 0) AS sev_high,
+                          COALESCE(SUM(CASE WHEN f.severity='MEDIUM'   THEN 1 ELSE 0 END), 0) AS sev_medium,
+                          COALESCE(SUM(CASE WHEN f.severity='LOW'      THEN 1 ELSE 0 END), 0) AS sev_low
+                   FROM scans s
+                   LEFT JOIN findings f ON f.scan_id = s.id{where_outer}
+                   GROUP BY s.id
                    ORDER BY s.id DESC
                    LIMIT ?""",
                 params + (limit,)
