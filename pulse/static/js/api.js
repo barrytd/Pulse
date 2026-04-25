@@ -193,6 +193,22 @@ export async function apiGetRules() {
   return resp.json();
 }
 
+// Threat-intel lookup for one IP. Backend returns 404 for private/
+// invalid IPs and 400 when no API key is configured; the envelope below
+// lets the caller distinguish "no key" from "lookup failed" without
+// throwing. Backend already strips the raw provider payload before
+// responding, so the data we return here is safe to render directly.
+export async function apiFetchIntel(ip) {
+  try {
+    var resp = await fetch('/api/intel/' + encodeURIComponent(ip));
+    var data = null;
+    try { data = await resp.json(); } catch (e) { /* non-JSON 5xx */ }
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
 // Per-framework compliance coverage summary. Returns { nist_csf, iso_27001, rules }.
 export async function apiGetCompliance() {
   var resp = await fetch('/api/compliance');

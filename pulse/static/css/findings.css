@@ -1463,3 +1463,123 @@
 }
 .scans-row-action svg { width: 14px; height: 14px; }
 
+/* ==================================================================
+ * Threat-intel block — finding drawer "Threat Intelligence" section.
+ * Renders an AbuseIPDB confidence-of-abuse badge alongside a small
+ * key/value grid (country, ISP, report count, last report).
+ * ================================================================== */
+
+.intel-loading,
+.intel-empty,
+.intel-error {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.intel-error { color: #f85149; }
+
+.intel-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.intel-score-block {
+  flex: 0 0 80px;
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.intel-score {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.intel-score-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+/* Score buckets: 75+ malicious, 25-74 suspicious, <25 clean. The
+   colors echo the row-accent severity palette so the drawer reads
+   coherent against everything else. */
+.intel-score-high {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: #f85149;
+}
+.intel-score-med {
+  background: rgba(240, 136, 62, 0.12);
+  border-color: rgba(240, 136, 62, 0.35);
+  color: #f0883e;
+}
+.intel-score-low {
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.35);
+  color: #3fb950;
+}
+.intel-score-na {
+  background: var(--hover-row);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.intel-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.intel-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+}
+.intel-meta-row:last-child { border-bottom: 0; }
+.intel-meta-row .k {
+  flex: 0 0 110px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.intel-meta-row .v {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.intel-mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+.intel-cache-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--hover-row);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.intel-footer {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+

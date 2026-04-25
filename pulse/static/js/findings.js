@@ -16,6 +16,7 @@ import {
   apiListFindingNotes,
   apiCreateFindingNote,
   apiDeleteFindingNote,
+  apiFetchIntel,
   invalidateScansCache,
   invalidateFindingsCache,
 } from './api.js';
@@ -1805,6 +1806,112 @@ function _extractSourceIp(text) {
   return null;
 }
 
+// ---------------------------------------------------------------------
+// Threat-intel section (AbuseIPDB) — rendered into the finding drawer
+// just before the "Block Source IP" block so the analyst sees reputation
+// data before deciding to block.
+//
+// Returns '' (skipped section) for any finding whose details + description
+// don't yield a public IPv4 address. Private / reserved IPs intentionally
+// never get sent off-host; the backend rejects them too.
+// ---------------------------------------------------------------------
+
+function _renderIntelSection(f) {
+  if (!f) return '';
+  var ip = _extractSourceIp(f.details || '') || _extractSourceIp(f.description || '');
+  if (!ip || _classifyIpv4(ip) !== 'public') return '';
+  return '<div class="finding-drawer-section" id="drawer-intel-wrap" data-intel-ip="' + escapeHtml(ip) + '">' +
+    '<div class="sec-label">Threat Intelligence</div>' +
+    '<div id="drawer-intel-body" class="intel-loading" style="font-size:12px; color:var(--text-muted);">' +
+      'Looking up ' + escapeHtml(ip) + ' on AbuseIPDB…' +
+    '</div>' +
+  '</div>';
+}
+
+function _intelScoreClass(score) {
+  // Buckets follow AbuseIPDB convention: 75+ is "high confidence abuse",
+  // 25–74 is "some reports", below that is "clean / unknown". The buckets
+  // also drive the badge color so the drawer reads at a glance.
+  if (score == null) return 'intel-score-na';
+  if (score >= 75)  return 'intel-score-high';
+  if (score >= 25)  return 'intel-score-med';
+  return 'intel-score-low';
+}
+
+function _intelScoreLabel(score) {
+  if (score == null) return 'No data';
+  if (score >= 75) return 'Malicious';
+  if (score >= 25) return 'Suspicious';
+  return 'Clean';
+}
+
+async function _loadDrawerIntel(f) {
+  var wrap = document.getElementById('drawer-intel-wrap');
+  if (!wrap) return;
+  var body = document.getElementById('drawer-intel-body');
+  var ip = wrap.getAttribute('data-intel-ip');
+  if (!ip || !body) return;
+
+  var resp = await apiFetchIntel(ip);
+  // Drawer may have been closed/replaced during the fetch — bail if the
+  // section we were going to write into is gone.
+  if (!document.body.contains(body)) return;
+
+  if (resp.status === 400) {
+    // No API key configured. Tell the user how to enable it instead of
+    // hiding the section silently — the value is in discoverability.
+    body.classList.remove('intel-loading');
+    body.innerHTML =
+      '<div class="intel-empty">' +
+        'Threat-intel lookups are off. Add an AbuseIPDB API key under ' +
+        '<a href="#" data-action="navigate" data-arg="settings" ' +
+        'style="color:var(--accent); text-decoration:none;">Settings &rsaquo; Notifications</a> ' +
+        'to enrich source IPs.' +
+      '</div>';
+    return;
+  }
+  if (!resp.ok || !resp.data) {
+    body.classList.remove('intel-loading');
+    body.innerHTML = '<div class="intel-error">Could not reach AbuseIPDB. Try again later.</div>';
+    return;
+  }
+
+  var d = resp.data;
+  var score   = d.score;
+  var sclass  = _intelScoreClass(score);
+  var slabel  = _intelScoreLabel(score);
+  var country = d.country ? escapeHtml(d.country) : '—';
+  var isp     = d.isp     ? escapeHtml(d.isp)     : '—';
+  var reports = d.total_reports != null ? d.total_reports.toLocaleString() : '—';
+  var lastReported = d.last_reported
+    ? escapeHtml(String(d.last_reported).replace('T', ' ').slice(0, 19))
+    : 'Never reported';
+  var cached = d.cached
+    ? '<span class="intel-cache-flag" title="Served from local cache">cached</span>'
+    : '';
+
+  body.classList.remove('intel-loading');
+  body.innerHTML =
+    '<div class="intel-header">' +
+      '<div class="intel-score-block ' + sclass + '">' +
+        '<div class="intel-score">' + (score == null ? '—' : score) + '</div>' +
+        '<div class="intel-score-label">' + escapeHtml(slabel) + '</div>' +
+      '</div>' +
+      '<div class="intel-meta">' +
+        '<div class="intel-meta-row"><span class="k">IP</span><span class="v intel-mono">' + escapeHtml(ip) + '</span>' + cached + '</div>' +
+        '<div class="intel-meta-row"><span class="k">Country</span><span class="v">' + country + '</span></div>' +
+        '<div class="intel-meta-row"><span class="k">ISP</span><span class="v">' + isp + '</span></div>' +
+        '<div class="intel-meta-row"><span class="k">Reports (90d)</span><span class="v">' + reports + '</span></div>' +
+        '<div class="intel-meta-row"><span class="k">Last reported</span><span class="v">' + lastReported + '</span></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="intel-footer">' +
+      'Source: <a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" ' +
+        'target="_blank" rel="noopener" data-default="allow" ' +
+        'style="color:var(--accent); text-decoration:none;">AbuseIPDB report &rsaquo;</a>' +
+    '</div>';
+}
+
 function _stageBlockSection(f) {
   if (!f || !_BLOCKABLE_RULES[f.rule]) return '';
   var ip = _extractSourceIp(f.details || '') || _extractSourceIp(f.description || '');
@@ -2112,6 +2219,8 @@ export function openFindingDrawer(f) {
       _remediationBlock(f) +
     '</div>' +
 
+    _renderIntelSection(f) +
+
     _stageBlockSection(f) +
 
     _renderWorkflowSection(f) +
@@ -2140,6 +2249,9 @@ export function openFindingDrawer(f) {
       if (wrap) wrap.innerHTML = '<p style="color:var(--text-muted); font-size:12px; margin:0;">Could not load users.</p>';
     });
   }
+  // Threat-intel lookup. Section only renders when a public source IP
+  // was extracted, so this no-ops on findings without one.
+  _loadDrawerIntel(f);
 
 }
 
