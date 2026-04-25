@@ -4,8 +4,7 @@
 'use strict';
 
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
-import { navigate, validPages, parsePath, toggleSidebar } from './navigation.js';
-import { toggleSidebarFilterGroup, clearSidebarFilters } from './sidebar-filters.js';
+import { navigate, validPages, parsePath } from './navigation.js';
 import {
   openUploadModal,
   closeUploadModal,
@@ -28,10 +27,6 @@ import {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
-  dashSidebarToggleItem,
-  dashSidebarToggleGroup,
-  dashSidebarClear,
-  dashSidebarSearch,
 } from './dashboard.js';
 import {
   toggleScanSelect,
@@ -205,9 +200,6 @@ import {
 const actions = {
   // theme + navigation
   navigate,
-  toggleSidebar,
-  toggleSidebarFilterGroup,
-  clearSidebarFilters,
   toggleTheme,
   setThemeFromSelect,
 
@@ -233,10 +225,6 @@ const actions = {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
-  dashSidebarToggleItem,
-  dashSidebarToggleGroup,
-  dashSidebarClear,
-  dashSidebarSearch,
   openUnreviewedCriticalHigh,
 
   // scans + findings

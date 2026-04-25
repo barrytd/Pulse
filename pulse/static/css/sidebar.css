@@ -1,313 +1,181 @@
-/* ------------------------------------------------------------------ */
-/* Sidebar — 200px navigation rail below the app topbar                */
-/*                                                                    */
-/* QRadar-style chrome: sidebar sits below the full-width .app-topbar */
-/* (top: 48px) and hosts the nav list only — no brand block. When the */
-/* user clicks the hamburger in the topbar, `body.sidebar-collapsed`  */
-/* shrinks this rail to 48px and hides the text labels, leaving an    */
-/* icon-only column with native title tooltips.                       */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * Pulse sidebar — Microsoft Sentinel-style left navigation
+ *
+ * 200px fixed rail, always visible on every page. Holds PULSE
+ * branding, four labeled nav groups, and a pinned footer with
+ * Settings + Feedback. No collapse, no filter pane — filters live
+ * in each page's top bar.
+ *
+ * Structure:
+ *   .sidebar
+ *     .sidebar-brand            — PULSE | Threat Detection, 48px
+ *     .sidebar-scroll           — groups + nav items, scrolls if tall
+ *       .sidebar-group
+ *         .sidebar-group-label  — "GENERAL", "THREAT MANAGEMENT", etc.
+ *         a.sidebar-nav         — nav item row
+ *     .sidebar-footer           — pinned Settings + Feedback
+ *
+ * The sidebar spans full height (top: 0). The topbar (components.css)
+ * shifts right by the sidebar width so the two chrome pieces sit
+ * flush without overlap — this matches the Sentinel pattern where
+ * branding owns the top-left corner.
+ * ================================================================== */
 
 :root {
-  /* Width variable so .sidebar and .main stay in sync in both
-     expanded and collapsed states. Overridden below when the body
-     carries .sidebar-collapsed. */
   --sidebar-w: 200px;
 }
-body.sidebar-collapsed {
-  --sidebar-w: 48px;
-}
+
+/* ==================================================================
+ * SIDEBAR SHELL
+ * ================================================================== */
 
 .sidebar {
-  width: var(--sidebar-w);
-  /* Fixed below the 48px topbar so the rail always hugs the left
-     edge without scrolling with content. */
   position: fixed;
-  top: 48px;
+  top: 0;
   left: 0;
   bottom: 0;
-  background: var(--bg-1, #111827);
+  width: var(--sidebar-w);
+  /* Hard-coded dark navy per pulse-design.md — the sidebar stays
+     dark in both light and dark themes so app chrome reads as
+     scaffolding, not page surface. */
+  background: #0f1623;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
-  z-index: 90;
-  transition: width 200ms ease;
-  overflow: hidden;
+  z-index: 95;
+  overflow: hidden; /* inner scroll region handles overflow */
 }
 
-/* Flat nav list — every item on a consistent 8px rhythm. No brand
-   block at the top; nav starts directly at the rail edge below the
-   topbar. The legacy margin-top was removed because there's nothing
-   above the nav anymore — the topbar hairline is the separator. */
-.sidebar-nav {
-  flex: 1;
-  padding: 12px 0;
+/* ==================================================================
+ * BRAND BLOCK (top of sidebar, 48px — height-matches the topbar)
+ * ================================================================== */
+
+.sidebar-brand {
+  flex: 0 0 48px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-high, #f3f4f6);
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+.sidebar-brand:hover { opacity: 0.85; }
+
+.sidebar-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #3fb950; /* pulse/ECG green */
+  flex: 0 0 auto;
+}
+.sidebar-brand-name {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  color: var(--text-high, #f3f4f6);
+}
+.sidebar-brand-sep {
+  color: rgba(255, 255, 255, 0.18);
+  font-weight: 300;
+  padding: 0 1px;
+}
+.sidebar-brand-sub {
+  font-size: 10px;
+  color: var(--text-muted, #8b949e);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+/* ==================================================================
+ * SCROLL REGION (main groups)
+ * ================================================================== */
+
+.sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  padding: 8px 0 12px;
 }
 
-.sidebar-nav a {
+/* Groups stack with breathing room between them. First group has no
+   extra top margin so it hugs the brand block's hairline. */
+.sidebar-group { margin-top: 12px; }
+.sidebar-group:first-child { margin-top: 4px; }
+
+.sidebar-group-label {
+  display: block;
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-dim, #6b7280);
+  user-select: none;
+}
+
+/* ==================================================================
+ * NAV ITEMS
+ * 32px row height, 8px inner padding (+ 3px left-accent reservation),
+ * 13px body text with 16px icon.
+ * ================================================================== */
+
+.sidebar-nav {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* 32px row height (8 + 16 + 8). Padding left is shortened by the
-     3px active accent so the icon doesn't jump when a row becomes
-     active. */
-  padding: 8px 16px 8px 13px;
-  color: var(--text-muted, #8b949e);
+  height: 32px;
+  padding: 0 12px 0 8px;
+  color: var(--text-body, #d1d5db);
   text-decoration: none;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 16px;
   white-space: nowrap;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   cursor: pointer;
   border-left: 3px solid transparent;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-
-.sidebar-nav a:hover {
-  color: #c9d1d9;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.sidebar-nav a.active {
+.sidebar-nav:hover {
   color: var(--text-high, #f3f4f6);
   background: rgba(255, 255, 255, 0.04);
-  border-left-color: #3fb950;
+}
+.sidebar-nav.active {
+  color: var(--text-high, #f3f4f6);
+  background: rgba(255, 255, 255, 0.06);
+  border-left-color: var(--accent, #58a6ff);
+  font-weight: 600;
 }
 
-.sidebar-nav a .icon,
-.sidebar-nav a i[data-lucide] {
+.sidebar-nav .icon,
+.sidebar-nav i[data-lucide] {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
   stroke-width: 2;
 }
 
-.sidebar-nav-label {
-  /* In the collapsed state the labels get display:none and only
-     the icons remain. 200ms fade on opacity so the collapse reads
-     as a smooth animation rather than a snap. */
-  opacity: 1;
-  transition: opacity 120ms ease;
-}
+/* ==================================================================
+ * FOOTER (pinned to bottom — Settings + Feedback)
+ * ================================================================== */
 
-/* Collapsed (48px) variant — icons only, centered, labels hidden.
-   Icons get native title= tooltips via the HTML attribute so hover
-   still names the page. */
-body.sidebar-collapsed .sidebar-nav a {
-  justify-content: center;
-  padding: 8px 0 8px 0;
-  border-left-width: 3px;
-}
-body.sidebar-collapsed .sidebar-nav-label {
-  display: none;
-}
-
-/* ------------------------------------------------------------------ */
-/* SIDEBAR FILTER PANEL (top position)                                 */
-/*                                                                    */
-/* Filters are the primary sidebar content, docked above the nav      */
-/* with a hairline divider between them. QRadar-style minimal layout: */
-/* no backgrounds, no borders around individual sections, clean       */
-/* native checkboxes. The sidebar never scrolls — if a filter group   */
-/* would overflow, the user collapses it.                             */
-/* ------------------------------------------------------------------ */
-
-.sidebar-page-filters {
-  /* flex:1 takes whatever vertical space is left above the nav.
-     overflow:hidden so no scrollbar appears even if content bleeds. */
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 12px 10px 12px;
-  overflow: hidden;
-}
-#dash-sidebar-filters { display: none; }
-body[data-page="dashboard"] #dash-sidebar-filters { display: flex; flex-direction: column; }
-body.sidebar-collapsed .sidebar-page-filters { display: none; }
-
-/* Divider: single hairline between filter panel and nav below. */
-.sidebar-divider {
+.sidebar-footer {
   flex: 0 0 auto;
-  height: 1px;
-  margin: 0;
-  background: rgba(255, 255, 255, 0.06);
-}
-body.sidebar-collapsed .sidebar-divider { display: none; }
-
-/* Nav row now lives BELOW the filter panel. It shrinks to the exact
-   space its 12 rows + 8px gaps need, so the filter panel grows to
-   fill the rest of the sidebar height. */
-.sidebar:has(.sidebar-page-filters) .sidebar-nav {
-  flex: 0 0 auto;
-  overflow: visible;
-  padding: 12px 0;
-  margin-top: 0;
-}
-
-/* Header row: "Filters" label left, "Clear" link right, aligned
-   to the top of the panel. */
-.sidebar-filter-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 0 6px 8px;
-}
-.sidebar-filter-heading {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-muted, #8b949e);
-}
-.sidebar-filter-clear {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--accent, #58a6ff);
-  cursor: pointer;
-  text-decoration: none;
-}
-.sidebar-filter-clear:hover { text-decoration: underline; }
-
-/* Find-filter search input — 28px tall, subtle 1px border, quiet
-   background so it doesn't compete with the checkboxes below. */
-.sidebar-filter-search {
-  display: block;
-  width: 100%;
-  height: 28px;
-  margin: 0 0 10px;
-  padding: 0 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
-  color: var(--text, #e6edf3);
-  font: 400 12px/1 var(--font-body, 'Inter', sans-serif);
-  outline: none;
-  box-sizing: border-box;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-.sidebar-filter-search:focus {
-  border-color: rgba(88, 166, 255, 0.5);
-  background: rgba(255, 255, 255, 0.05);
-}
-.sidebar-filter-search::placeholder { color: var(--text-light, #6b7280); }
-
-/* Filter groups — no card styling, just rhythm. */
-.sidebar-filter-group { }
-
-.sidebar-filter-group-head {
-  appearance: none;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 6px;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--text-muted, #8b949e);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  text-align: left;
-}
-.sidebar-filter-group-head:hover { color: var(--text, #e6edf3); }
-
-.sidebar-filter-chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  color: var(--text-muted);
-  transition: transform 150ms ease;
-  flex: 0 0 12px;
-}
-/* Open state = chevron points down (as authored). Collapsed = -90°
-   so it points right. */
-.sidebar-filter-group.is-collapsed .sidebar-filter-chevron {
-  transform: rotate(-90deg);
-}
-.sidebar-filter-group-label { flex: 1; }
-
-.sidebar-filter-list {
-  list-style: none;
-  margin: 0 0 4px;
-  padding: 0;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
 }
-.sidebar-filter-group.is-collapsed .sidebar-filter-list { display: none; }
+.sidebar-footer .sidebar-nav { height: 36px; }
 
-/* Each row = a full-width <label> so clicking anywhere on the label
-   toggles the checkbox. 6px vertical, 6px left gutter for the native
-   checkbox. No custom chrome — the browser renders a standard box. */
-.sidebar-filter-list li { padding: 0; }
-.sidebar-filter-list li.is-hidden { display: none; }
-.sidebar-filter-list li > label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 6px 6px 8px;
-  cursor: pointer;
-  user-select: none;
-}
-.sidebar-filter-list li > label:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-.sidebar-filter-list input[type="checkbox"] {
-  /* Native look — no accent-color override, no custom size. Let the
-     OS paint it for that QRadar "feels like an app" texture. */
-  flex: 0 0 auto;
-  margin: 0;
-  cursor: pointer;
-}
-.sidebar-filter-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: 0 0 8px;
-}
-.sidebar-filter-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--text-body, var(--text, #d1d5db));
-}
-.sidebar-filter-count {
-  font-size: 12px;
-  color: var(--text-muted, #8b949e);
-  font-variant-numeric: tabular-nums;
-  padding-left: 4px;
-}
+/* ==================================================================
+ * MAIN CONTENT — always offset by the sidebar width.
+ * ================================================================== */
 
-/* ------------------------------------------------------------------ */
-/* Legacy .sidebar-filters panel (dynamic via sidebar-filters.js,     */
-/* used for the Findings tab). Kept minimal — same look as the inline */
-/* Dashboard panel so both feel identical.                            */
-/* ------------------------------------------------------------------ */
-.sidebar-filters {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 12px 10px;
-  overflow: hidden;
-}
-body.sidebar-collapsed .sidebar-filters { display: none; }
-
-/* ------------------------------------------------------------------ */
-/* App container + main content                                        */
-/* ------------------------------------------------------------------ */
-
-/* The app body sits below the fixed 48px topbar and to the right of
-   the fixed sidebar. Padding-top clears the topbar; margin-left
-   tracks the sidebar width variable so it shrinks with the collapse. */
 .app {
   padding-top: 48px;
   min-height: 100vh;
@@ -318,5 +186,15 @@ body.sidebar-collapsed .sidebar-filters { display: none; }
   min-width: 0;
   margin-left: var(--sidebar-w);
   min-height: calc(100vh - 48px);
-  transition: margin-left 200ms ease;
+}
+
+/* ==================================================================
+ * RESPONSIVE
+ * On narrow viewports collapse the sidebar off-screen and let the
+ * content use the full width. A mobile drawer is a later pass; for
+ * now the app is desktop-first and drops gracefully below 768px.
+ * ================================================================== */
+@media (max-width: 768px) {
+  :root { --sidebar-w: 0px; } /* cascades to .main margin + .app-topbar left */
+  .sidebar { display: none; }
 }

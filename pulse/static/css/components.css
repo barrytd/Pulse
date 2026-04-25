@@ -1,19 +1,15 @@
 /* ------------------------------------------------------------------ */
-/* Top bar                                                             */
-/* ------------------------------------------------------------------ */
-/* ------------------------------------------------------------------ */
-/* Full-width app chrome topbar                                        */
+/* App topbar                                                          */
 /*                                                                    */
-/* QRadar-style header: hamburger on the far left, PULSE brand next,  */
-/* current page title as a crumb, then user/live/action buttons on    */
-/* the far right. Spans the entire viewport — sidebar sits BELOW      */
-/* this bar at top: 48px. Fixed position + body padding on .app       */
-/* keeps it pinned without jumping on scroll.                         */
+/* Sentinel-style header: the sidebar owns the top-left corner, so    */
+/* the topbar shifts right to begin after the 200px sidebar. Holds    */
+/* just the page breadcrumb (left) and the utility cluster (right).   */
+/* Fixed position + .app padding-top keeps it pinned on scroll.       */
 /* ------------------------------------------------------------------ */
 .app-topbar {
   position: fixed;
   top: 0;
-  left: 0;
+  left: var(--sidebar-w, 200px);
   right: 0;
   z-index: 110;
   height: 48px;
@@ -26,78 +22,20 @@
   gap: 16px;
 }
 
-.hamburger-btn {
-  appearance: none;
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-muted, #9ca3af);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-.hamburger-btn:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.06);
-}
-
-.app-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-  color: var(--text);
-  line-height: 1;
-  transition: opacity 120ms ease;
-}
-.app-brand:hover { opacity: 0.85; }
-
-.app-brand-mark {
-  color: #3fb950;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.app-brand-name {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-  color: var(--text-high, #f3f4f6);
-}
-.app-brand-sep {
-  color: var(--text-light, rgba(255, 255, 255, 0.15));
-  font-weight: 300;
-  padding: 0 2px;
-}
-.app-brand-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  letter-spacing: 0.3px;
-}
-
-/* Current-page crumb in the middle of the topbar — replaces the old
-   full-height h2. Flex-grows into whatever space is left between the
-   brand and the right-side action cluster. */
+/* Current-page crumb — left edge of the topbar. Flex-grows into
+   whatever space is left before the right-side action cluster. */
 .app-page-crumb {
   flex: 1;
-  margin: 0 0 0 12px;
+  margin: 0;
   font-size: 14px;
-  font-weight: 500;
-  color: var(--text-muted);
+  font-weight: 600;
+  color: var(--text-high, #f3f4f6);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Topbar actions live on the right edge — reuses existing rules
-   below for .topbar-actions positioning / button styling. */
+/* Topbar actions live on the right edge. */
 .app-topbar .topbar-actions {
   margin-left: auto;
 }
