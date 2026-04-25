@@ -168,6 +168,7 @@ export async function renderSettingsPage() {
   var em = config.email || {};
   var al = config.alerts || {};
   var wh = config.webhook || {};
+  var ti = config.threat_intel || {};
   var scanDefaults = config.settings || {};
   var whFlavor = wh.flavor || '';
   var flavorOpts = [
@@ -482,6 +483,43 @@ export async function renderSettingsPage() {
       '</div>' +
     '</div>';
 
+  // ----- Threat-intel (AbuseIPDB) ------------------------------------
+  // Once a key is saved, the dashboard can enrich findings + firewall
+  // rows with abuse confidence scores. Same secret-handling rules as
+  // the webhook URL: the raw key never leaves the server, the input
+  // shows a "leave blank to keep current" placeholder when one is set.
+  var tiKeyStatus = ti.api_key_set
+    ? '<span class="password-status set">\u2713 AbuseIPDB key saved</span>'
+    : '<span class="password-status">No AbuseIPDB key saved yet</span>';
+  var threatIntelHtml =
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Threat Intelligence</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Enrich source IPs with AbuseIPDB reputation data \u2014 every finding ' +
+        'or blocked IP gets a 0\u2013100 confidence-of-abuse score, country, ISP, ' +
+        'and recent-report count. Lookups are cached for 24 hours so a ' +
+        'noisy host doesn\u2019t burn quota. ' +
+        '<a href="https://www.abuseipdb.com/account/api" target="_blank" data-default="allow" ' +
+          'style="color:var(--accent); text-decoration:none;">Get a free API key \u2192</a>' +
+      '</p>' +
+      '<div class="form-row"><label>Enable lookups</label>' +
+        '<label class="form-checkbox"><input type="checkbox" id="ti-enabled"' +
+          (ti.enabled ? ' checked' : '') + '/> Look up source IPs against AbuseIPDB</label></div>' +
+      '<div class="form-row"><label>API key</label>' +
+        '<input type="password" id="ti-api-key" placeholder="' +
+          (ti.api_key_set ? 'leave blank to keep current' : 'paste AbuseIPDB API key') +
+          '" autocomplete="new-password"/></div>' +
+      '<div class="form-row"><label>Cache TTL (hours)</label>' +
+        '<input type="number" id="ti-cache-ttl" min="1" max="720" value="' +
+          (ti.cache_ttl_hours || 24) + '"/></div>' +
+      '<div class="form-row"><span></span><span>' + tiKeyStatus + '</span></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary" data-action="saveThreatIntelSettings">Save threat-intel settings</button>' +
+        '<button class="btn" data-action="testThreatIntelKey"' +
+          (ti.api_key_set ? '' : ' disabled') + '>Test key</button>' +
+      '</div>' +
+    '</div>';
+
   // --- Advanced tab --------------------------------------------------
   var scanDefaultsHtml =
     '<div class="card" style="margin-bottom:16px;">' +
@@ -543,7 +581,7 @@ export async function renderSettingsPage() {
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
-    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml,
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml + threatIntelHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
@@ -1421,6 +1459,51 @@ export async function sendTestWebhook() {
       return;
     }
     showToast('Test notification posted');
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+// Threat-intel (AbuseIPDB) settings — same secret-handling rules as the
+// webhook URL: an empty input means "leave alone", so saving the toggle
+// without retyping the key works.
+export async function saveThreatIntelSettings() {
+  var keyInput = document.getElementById('ti-api-key');
+  var ttlInput = document.getElementById('ti-cache-ttl');
+  var body = {
+    enabled:         document.getElementById('ti-enabled').checked,
+    abuseipdb_api_key: (keyInput && keyInput.value) || '',
+    cache_ttl_hours: parseInt((ttlInput && ttlInput.value) || '24', 10) || 24,
+  };
+  try {
+    var r = await fetch('/api/config/threat_intel', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Save failed.');
+      return;
+    }
+    showToast('Threat-intel settings saved');
+    if (keyInput) keyInput.value = '';
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function testThreatIntelKey() {
+  showToast('Testing AbuseIPDB key...');
+  try {
+    var r = await fetch('/api/intel/test', { method: 'POST' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      toastError(data.detail || 'Lookup failed.');
+      return;
+    }
+    showToast('AbuseIPDB key works (1.1.1.1 score: ' + (data.score == null ? 'n/a' : data.score) + ')');
   } catch (e) {
     toastError('Network error: ' + e.message);
   }

@@ -247,6 +247,28 @@ CREATE TABLE IF NOT EXISTS finding_notes (
 );
 """
 
+# Threat-intel cache. One row per (ip, source) pair so we can layer in
+# additional providers later (e.g. AlienVault OTX, VirusTotal) without a
+# schema change. `score` is provider-normalized 0–100 confidence-of-abuse;
+# `payload` keeps the raw JSON so the UI can show provider-specific extras
+# without us having to model every field. fetched_at drives TTL — entries
+# older than the configured window are refreshed lazily on next lookup.
+_CREATE_INTEL_CACHE = """
+CREATE TABLE IF NOT EXISTS intel_cache (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address    TEXT    NOT NULL,
+    source        TEXT    NOT NULL DEFAULT 'abuseipdb',
+    score         INTEGER,
+    country       TEXT,
+    isp           TEXT,
+    total_reports INTEGER,
+    last_reported TEXT,
+    payload       TEXT,
+    fetched_at    TEXT    NOT NULL,
+    UNIQUE(ip_address, source)
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -274,6 +296,7 @@ def init_db(db_path):
         _CREATE_FEEDBACK,
         _CREATE_FINDING_NOTES,
         _CREATE_BRANDING,
+        _CREATE_INTEL_CACHE,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;

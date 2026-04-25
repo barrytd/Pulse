@@ -2015,6 +2015,7 @@ def _register_routes(app: FastAPI) -> None:
         email = config.get("email", {}) or {}
         alerts = config.get("alerts", {}) or {}
         webhook = config.get("webhook", {}) or {}
+        intel = config.get("threat_intel", {}) or {}
 
         return {
             "whitelist": {
@@ -2050,6 +2051,16 @@ def _register_routes(app: FastAPI) -> None:
                 "enabled":  bool(webhook.get("enabled", False)),
                 "flavor":   webhook.get("flavor") or "",
                 "url_set":  bool((webhook.get("url") or "").strip()),
+            },
+            # Threat-intel (AbuseIPDB). The API key is a credential, so
+            # only `api_key_set` crosses the wire — never the raw value.
+            # `enabled` defaults to True when a key is set; users can
+            # explicitly toggle off without removing the key.
+            "threat_intel": {
+                "enabled":         intel.get("enabled") is not False
+                                    and bool((intel.get("abuseipdb_api_key") or "").strip()),
+                "api_key_set":     bool((intel.get("abuseipdb_api_key") or "").strip()),
+                "cache_ttl_hours": int(intel.get("cache_ttl_hours", 24) or 24),
             },
             "scheduled_scan": _scheduled_scan_view(config),
         }
@@ -2254,6 +2265,119 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(502, detail="Webhook POST failed. Check the URL and try again.")
 
         return {"status": "sent"}
+
+    # -------------------------------------------------------------------
+    # PUT /api/config/threat_intel — save AbuseIPDB key + toggles
+    # -------------------------------------------------------------------
+    @app.put("/api/config/threat_intel")
+    async def update_threat_intel(request: Request,
+                                  user_id: int = Depends(require_admin)):
+        """Update the threat-intel section of pulse.yaml.
+
+        API-key handling mirrors email.password / webhook.url: an omitted
+        or empty `abuseipdb_api_key` preserves the stored value, so the
+        UI can resave the enabled toggle without forcing the user to
+        repaste their key every time. Sending the literal string "null"
+        clears the key.
+        """
+        body = await request.json()
+        config = _read_config(app.state.config_path)
+        intel = config.get("threat_intel", {}) or {}
+
+        if "enabled" in body:
+            intel["enabled"] = bool(body["enabled"])
+
+        if "cache_ttl_hours" in body:
+            try:
+                ttl = int(body["cache_ttl_hours"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="cache_ttl_hours must be an integer.")
+            if ttl < 1 or ttl > 24 * 30:
+                raise HTTPException(400, detail="cache_ttl_hours must be between 1 and 720.")
+            intel["cache_ttl_hours"] = ttl
+
+        if "abuseipdb_api_key" in body:
+            raw = body.get("abuseipdb_api_key")
+            if raw is None or raw == "" or raw == "null":
+                # Explicit clear: caller sent "null" or empty as a sentinel.
+                if raw == "null":
+                    intel["abuseipdb_api_key"] = None
+                # Empty string just means "leave alone" (UI placeholder).
+            else:
+                key = str(raw).strip()
+                if key:
+                    intel["abuseipdb_api_key"] = key
+
+        config["threat_intel"] = intel
+        _write_config(app.state.config_path, config)
+
+        return {
+            "status":      "ok",
+            "api_key_set": bool((intel.get("abuseipdb_api_key") or "").strip()),
+            "enabled":     intel.get("enabled") is not False
+                           and bool((intel.get("abuseipdb_api_key") or "").strip()),
+        }
+
+    # -------------------------------------------------------------------
+    # GET /api/intel/{ip} — threat-intel lookup for one IP
+    # -------------------------------------------------------------------
+    @app.get("/api/intel/{ip}")
+    def get_intel_for_ip(ip: str, user_id: int = Depends(require_login)):
+        """Return cached or freshly-fetched threat intel for an IP.
+
+        Returns 404 when the IP is private/invalid (nothing to look up),
+        or 400 when no API key is configured AND no cache entry exists.
+        Findings / firewall pages call this on demand to enrich the
+        rows they already render — no eager bulk lookup.
+        """
+        from pulse import intel as intel_mod
+
+        if not intel_mod._is_public_ip(ip):
+            raise HTTPException(404, detail="IP is private, loopback, or invalid.")
+
+        config = _read_config(app.state.config_path) or {}
+        api_key = intel_mod.get_api_key_from_config(config)
+        ttl = intel_mod.get_ttl_hours_from_config(config)
+
+        result = intel_mod.lookup_ip(ip, app.state.db_path,
+                                     api_key=api_key, ttl_hours=ttl)
+        if result is None:
+            raise HTTPException(
+                400,
+                detail="No threat-intel data available. Configure an "
+                       "AbuseIPDB API key under Settings to enable lookups.",
+            )
+
+        # Strip the internal _raw payload before sending — the frontend
+        # only needs the normalized fields.
+        return {k: v for k, v in result.items() if not k.startswith("_")}
+
+    # -------------------------------------------------------------------
+    # POST /api/intel/test — verify the configured API key works
+    # -------------------------------------------------------------------
+    @app.post("/api/intel/test")
+    def test_threat_intel(user_id: int = Depends(require_admin)):
+        """Confirm the saved AbuseIPDB key works by looking up a known
+        public IP (Cloudflare 1.1.1.1 — always responds, score is low).
+        Bypasses the cache so the result reflects live API health.
+        """
+        from pulse import intel as intel_mod
+
+        config = _read_config(app.state.config_path) or {}
+        api_key = intel_mod.get_api_key_from_config(config)
+        if not api_key:
+            raise HTTPException(400, detail="No AbuseIPDB API key configured.")
+
+        # Hit AbuseIPDB directly — skip the cache so a stale entry
+        # doesn't mask a key that's been revoked.
+        result = intel_mod._lookup_via_abuseipdb("1.1.1.1", api_key)
+        if result is None:
+            raise HTTPException(
+                502,
+                detail="Lookup failed. Check the key and try again "
+                       "(AbuseIPDB may also be rate-limiting).",
+            )
+        return {"status": "ok", "score": result.get("score")}
 
     # -------------------------------------------------------------------
     # POST /api/scan/system — one-shot scan of the local Windows event logs

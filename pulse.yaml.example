@@ -68,3 +68,13 @@ scheduled_scan:
   alert_email: true
   alert_slack: false
   alert_discord: false
+
+# Threat-intel enrichment for source IPs surfaced by Pulse. When
+# `enabled: true` AND `abuseipdb_api_key` is set, Pulse looks up each
+# public source IP against AbuseIPDB and caches the result for
+# `cache_ttl_hours`. Free tier of AbuseIPDB allows 1000 lookups/day.
+# Get a key at https://www.abuseipdb.com/account/api.
+threat_intel:
+  enabled: false
+  abuseipdb_api_key: null
+  cache_ttl_hours: 24
