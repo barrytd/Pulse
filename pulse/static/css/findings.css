@@ -1593,12 +1593,12 @@
  * ================================================================== */
 
 .findings-shell {
+  /* Open width = 224px body + 16px collapse strip. Collapsed = strip only. */
   --findings-pane-w: 240px;
   display: flex;
-  position: relative;
   align-items: stretch;
 }
-body.findings-pane-collapsed .findings-shell { --findings-pane-w: 0px; }
+body.findings-pane-collapsed .findings-shell { --findings-pane-w: 16px; }
 
 .findings-filter-pane {
   flex: 0 0 var(--findings-pane-w);
@@ -1609,49 +1609,48 @@ body.findings-pane-collapsed .findings-shell { --findings-pane-w: 0px; }
   border-radius: 8px;
   margin-right: 16px;
   overflow: hidden;
-  transition: flex-basis 180ms ease, margin-right 180ms ease, width 180ms ease;
-}
-body.findings-pane-collapsed .findings-filter-pane {
-  margin-right: 0;
-  border-color: transparent;
+  display: flex;
+  align-items: stretch;
+  transition: flex-basis 180ms ease, width 180ms ease;
 }
 .findings-filter-pane-body {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 10px 12px 16px;
   max-height: calc(100vh - 200px);
   overflow-y: auto;
   overflow-x: hidden;
 }
+body.findings-pane-collapsed .findings-filter-pane-body { display: none; }
 
-/* Edge chevron — sits at the right edge of the pane (or left edge of
-   the content when collapsed). The CSS rotates the SVG 180° in the
-   collapsed state so a single icon serves both directions. */
+/* Collapse strip — pinned to the pane's right edge as a flex sibling
+   of the body (NOT absolute-positioned), so it can never overlap any
+   page content. 16px wide, full pane height, subtle hover background.
+   When the pane is collapsed the body hides and the strip becomes
+   the only visible 16px column — the user clicks it to reopen. */
 .findings-filter-pane-toggle {
-  position: absolute;
-  top: 18px;
-  /* When pane is open: sits at left edge of content area, half on top
-     of pane border. When collapsed: sits flush against the page edge. */
-  left: calc(var(--findings-pane-w) + 4px);
-  width: 22px;
-  height: 38px;
-  border-radius: 0 6px 6px 0;
-  border: 1px solid var(--border);
-  border-left: 0;
-  background: var(--card-bg);
+  flex: 0 0 16px;
+  width: 16px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
   color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 5;
-  transition: left 180ms ease, color 120ms ease, background 120ms ease;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease;
 }
 .findings-filter-pane-toggle:hover {
   background: var(--hover-bg);
   color: var(--text);
 }
+/* When collapsed, no body to separate from, so drop the inner divider. */
+body.findings-pane-collapsed .findings-filter-pane-toggle { border-left: 0; }
 .findings-filter-pane-toggle svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   transition: transform 180ms ease;
 }
 body.findings-pane-collapsed .findings-filter-pane-toggle svg {

@@ -1000,11 +1000,6 @@ export function applyFindingsView() {
     _scansTabsBarHtml() +
     '<div class="findings-shell">' +
       _findingsFilterPaneHtml() +
-      '<button type="button" class="findings-filter-pane-toggle" ' +
-        'data-action="toggleFindingsFilterPane" ' +
-        'aria-label="Toggle filter pane" title="Collapse filters">' +
-        _paneToggleSvg() +
-      '</button>' +
       '<div class="findings-content">' +
         '<div class="findings-top-bar">' +
           '<div class="findings-count">' +
@@ -1166,10 +1161,21 @@ function _findingsFilterPaneHtml() {
     var items = sec.build(s.raw) || [];
     return _findingsSectionHtml(sec, items);
   }).join('');
+  // The collapse strip sits at the pane's right edge as a sibling of
+  // the body. When the pane shrinks to 16px on collapse, the body
+  // hides and the strip is the only thing left visible — the user
+  // clicks it to reopen the pane. Keeping it INSIDE the pane (rather
+  // than absolute-positioned over the content) means it can never
+  // overlap a count, search box, or table cell.
   return '<aside class="findings-filter-pane" aria-label="Findings filters">' +
     '<div class="findings-filter-pane-body">' +
       sections +
     '</div>' +
+    '<button type="button" class="findings-filter-pane-toggle" ' +
+      'data-action="toggleFindingsFilterPane" ' +
+      'aria-label="Toggle filter pane" title="Collapse filters">' +
+      _paneToggleSvg() +
+    '</button>' +
   '</aside>';
 }
 
