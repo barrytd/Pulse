@@ -1583,3 +1583,338 @@
   color: var(--text-muted);
 }
 
+/* ==================================================================
+ * Findings page — left filter pane + chip row + context menu
+ *
+ * The Findings page renders a 2-column shell: a 240px filter pane on
+ * the left and the table on the right. The pane collapses to 0 via a
+ * chevron pinned at the boundary; an `is-pane-collapsed` body class
+ * shrinks --findings-pane-w so .main reacts without JS style writes.
+ * ================================================================== */
+
+.findings-shell {
+  --findings-pane-w: 240px;
+  display: flex;
+  position: relative;
+  align-items: stretch;
+}
+body.findings-pane-collapsed .findings-shell { --findings-pane-w: 0px; }
+
+.findings-filter-pane {
+  flex: 0 0 var(--findings-pane-w);
+  width: var(--findings-pane-w);
+  min-width: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-right: 16px;
+  overflow: hidden;
+  transition: flex-basis 180ms ease, margin-right 180ms ease, width 180ms ease;
+}
+body.findings-pane-collapsed .findings-filter-pane {
+  margin-right: 0;
+  border-color: transparent;
+}
+.findings-filter-pane-body {
+  padding: 10px 12px 16px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Edge chevron — sits at the right edge of the pane (or left edge of
+   the content when collapsed). The CSS rotates the SVG 180° in the
+   collapsed state so a single icon serves both directions. */
+.findings-filter-pane-toggle {
+  position: absolute;
+  top: 18px;
+  /* When pane is open: sits at left edge of content area, half on top
+     of pane border. When collapsed: sits flush against the page edge. */
+  left: calc(var(--findings-pane-w) + 4px);
+  width: 22px;
+  height: 38px;
+  border-radius: 0 6px 6px 0;
+  border: 1px solid var(--border);
+  border-left: 0;
+  background: var(--card-bg);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: left 180ms ease, color 120ms ease, background 120ms ease;
+}
+.findings-filter-pane-toggle:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.findings-filter-pane-toggle svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 180ms ease;
+}
+body.findings-pane-collapsed .findings-filter-pane-toggle svg {
+  transform: rotate(180deg);
+}
+
+.findings-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Top bar — count on the left, search on the right. Replaces the old
+   pills + dropdown row; all that filtering moved into the pane. */
+.findings-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+.findings-count {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.findings-count strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.findings-top-bar .search-box {
+  flex: 1 1 auto;
+  max-width: 480px;
+  margin-left: auto;
+}
+
+/* ----- Pane sections ----- */
+.findings-filter-section {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 4px;
+}
+.findings-filter-section-head {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  text-align: left;
+  border-radius: 4px;
+}
+.findings-filter-section-head:hover {
+  color: var(--text);
+  background: var(--hover-bg);
+}
+.findings-filter-section-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  transition: transform 150ms ease;
+}
+.findings-filter-section.is-collapsed .findings-filter-section-chevron {
+  transform: rotate(-90deg);
+}
+.findings-filter-section-label { flex: 1; }
+.findings-filter-section-badge {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--accent);
+  background: var(--accent-glow, rgba(88, 166, 255, 0.15));
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.findings-filter-list {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.findings-filter-section.is-collapsed .findings-filter-list { display: none; }
+
+.findings-filter-row > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 20px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  transition: background 120ms ease;
+}
+.findings-filter-row > label:hover {
+  background: var(--hover-bg);
+}
+.findings-filter-row.is-excluded > label {
+  /* When a value is on the exclude axis we render the row dimmed +
+     strikethrough so the user sees that "ticking the box" wouldn't be
+     additive — they'd actually be flipping include from exclude. */
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.findings-filter-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+.findings-filter-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 6px;
+}
+.findings-filter-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-body, var(--text));
+}
+.findings-filter-count {
+  font-size: 11px;
+  color: var(--text-dim, var(--text-muted));
+  font-variant-numeric: tabular-nums;
+  padding-left: 6px;
+}
+
+.findings-filter-show-all {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 0 4px 20px;
+  text-align: left;
+}
+.findings-filter-show-all:hover { text-decoration: underline; }
+
+/* ----- Chip row ----- */
+.findings-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.findings-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 11px;
+  font-size: 11px;
+  color: var(--text);
+}
+.findings-filter-chip.is-exclude {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+}
+.findings-filter-chip-dim {
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+}
+.findings-filter-chip-x {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.findings-filter-chip-x:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.findings-filter-clear-all {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  margin-left: 4px;
+  text-decoration: none;
+}
+.findings-filter-clear-all:hover { text-decoration: underline; }
+
+/* ----- Context menu (right-click on a filterable cell) ----- */
+.findings-ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 220px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.findings-ctx-menu[hidden] { display: none; }
+.findings-ctx-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.findings-ctx-item:hover {
+  background: var(--hover-bg);
+}
+.findings-ctx-item-exclude { color: #f85149; }
+.findings-ctx-item-exclude:hover { background: rgba(248, 81, 73, 0.1); }
+
+/* On narrow viewports stack the pane above the table instead of
+   side-by-side — the 240px column eats too much horizontal space. */
+@media (max-width: 1100px) {
+  .findings-shell { flex-direction: column; }
+  .findings-filter-pane {
+    flex: 0 0 auto;
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: 12px;
+  }
+  .findings-filter-pane-toggle { display: none; }
+  body.findings-pane-collapsed .findings-filter-pane { display: none; }
+}
+

@@ -722,40 +722,61 @@ export async function viewScan(scanId, opts) {
 // ---------------------------------------------------------------
 // Findings page
 // ---------------------------------------------------------------
+// --------------------------------------------------------------------
+// Filter shape — every dimension carries an `include` Set ("show only
+// values in this set") and an `exclude` Set ("hide values in this set").
+// A row passes a dimension iff:
+//   (include.size === 0 OR include.has(value)) AND NOT exclude.has(value)
+// The pane checkboxes drive the include axis. The right-click context
+// menu drives both axes ("Filter for this value" → include, "Filter
+// out this value" → exclude). Empty Sets on both axes = no filter.
+// --------------------------------------------------------------------
+function _makeFindingsFilters() {
+  return {
+    severity: { include: new Set(), exclude: new Set() },
+    status:   { include: new Set(), exclude: new Set() },
+    assignee: { include: new Set(), exclude: new Set() },
+    host:     { include: new Set(), exclude: new Set() },
+    rule:     { include: new Set(), exclude: new Set() },
+    mitre:    { include: new Set(), exclude: new Set() },
+    scan:     { include: new Set(), exclude: new Set() },
+  };
+}
+
 export const findingsState = {
   raw:          [],
   sortCol:      'time',
   sortDir:      'desc',
-  sevFilter:    'ALL',
-  reviewFilter: 'ALL', // ALL | OPEN (hide reviewed + fp) | REVIEWED | FP
-  assignFilter: 'ALL', // ALL | ME (only findings assigned to the current user)
   query:        '',
   expanded:     null,
-  // Sidebar multi-select filters (UNION inside a group, INTERSECTION
-  // across groups). Each Set holds the currently-checked ids for that
-  // filter group. Empty set = no filter on that dimension.
-  sidebarSev:      new Set(),
-  sidebarStatus:   new Set(),   // workflow_status values
-  sidebarAssignee: new Set(),   // user ids (stringified)
-  sidebarHost:     new Set(),   // hostnames
+  filters:      _makeFindingsFilters(),
   // Bulk-select state: a Set of finding ids currently checked. Separate
   // from row expansion so toggling the drawer doesn't disturb selection.
   selected:     Object.create(null),
   // The last computed filtered+sorted slice, kept so the bulk bar can
   // offer "Select all matching filter" without redoing the filter math.
   _lastVisible: [],
+  // Per-section UI flags (collapsed / show-all-rules) — session only.
+  _paneSectionCollapsed: new Set(),
+  _ruleSectionExpanded:  false,
 };
 
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 
 // One-shot filter handoff — lets other pages (e.g. the Dashboard "Needs
-// Attention" widget) deep-link into the Findings page with pre-set sev/
-// review filters. renderFindingsPage() consumes and clears it so manual
-// navigation back to the page shows the default (All / All) view.
+// Attention" widget) deep-link into the Findings page with pre-set
+// filters. The shape mirrors `findingsState.filters` — each dim is an
+// `{ include: [...], exclude: [...] }` literal that renderFindingsPage
+// hydrates into Sets.
 var _pendingFindingsFilter = null;
 
 export function openUnreviewedCriticalHigh() {
-  _pendingFindingsFilter = { sev: 'CRITICAL_HIGH', review: 'OPEN' };
+  // Review-status pre-filter is gone (UI no longer offers it); we just
+  // narrow to CRITICAL+HIGH. The label "Unreviewed" lives on the widget
+  // because most attention-window findings are by definition unreviewed.
+  _pendingFindingsFilter = {
+    severity: { include: ['CRITICAL', 'HIGH'] },
+  };
   navigate('findings');
 }
 
@@ -786,25 +807,34 @@ export async function renderFindingsPage() {
     batches.forEach(function (b) { allFindings = allFindings.concat(b); });
   }
 
-  findingsState.raw             = allFindings;
-  findingsState.sortCol         = 'time';
-  findingsState.sortDir         = 'desc';
-  findingsState.sevFilter       = 'ALL';
-  findingsState.reviewFilter    = 'ALL';
-  findingsState.assignFilter    = 'ALL';
-  findingsState.query           = '';
-  findingsState.expanded        = null;
-  findingsState.selected        = Object.create(null);
-  findingsState.sidebarSev      = new Set();
-  findingsState.sidebarStatus   = new Set();
-  findingsState.sidebarAssignee = new Set();
-  findingsState.sidebarHost     = new Set();
+  findingsState.raw     = allFindings;
+  findingsState.sortCol = 'time';
+  findingsState.sortDir = 'desc';
+  findingsState.query   = '';
+  findingsState.expanded = null;
+  findingsState.selected = Object.create(null);
+  findingsState.filters = _makeFindingsFilters();
+  findingsState._paneSectionCollapsed = new Set();
+  findingsState._ruleSectionExpanded  = false;
 
-  // Consume a one-shot pre-set filter handoff (e.g. "Needs Attention"
-  // widget on the Dashboard deep-links into unreviewed CRITICAL+HIGH).
+  // Restore the user's pane-collapsed preference before first paint.
+  // The CSS reads body.findings-pane-collapsed at layout time, so
+  // setting it before the innerHTML write avoids an open→snap-shut flash.
+  try {
+    var collapsed = localStorage.getItem('pulseFindingsPaneCollapsed') === '1';
+    document.body.classList.toggle('findings-pane-collapsed', collapsed);
+  } catch (e) { /* localStorage off — default is expanded */ }
+
+  // Consume a one-shot pre-set filter handoff. Each entry on the pending
+  // object is `{ include: [...], exclude: [...] }` for one dimension.
   if (_pendingFindingsFilter) {
-    if (_pendingFindingsFilter.sev)    findingsState.sevFilter    = _pendingFindingsFilter.sev;
-    if (_pendingFindingsFilter.review) findingsState.reviewFilter = _pendingFindingsFilter.review;
+    Object.keys(_pendingFindingsFilter).forEach(function (dim) {
+      var slot = findingsState.filters[dim];
+      if (!slot) return;
+      var src = _pendingFindingsFilter[dim] || {};
+      (src.include || []).forEach(function (v) { slot.include.add(v); });
+      (src.exclude || []).forEach(function (v) { slot.exclude.add(v); });
+    });
     _pendingFindingsFilter = null;
   }
 
@@ -831,18 +861,6 @@ export function setFindingsSort(col) {
     s.sortCol = col;
     s.sortDir = 'desc';
   }
-  applyFindingsView();
-}
-
-export function setFindingsFilter(sev) {
-  findingsState.sevFilter = sev;
-  findingsState.expanded  = null;
-  applyFindingsView();
-}
-
-export function setFindingsReviewFilter(mode) {
-  findingsState.reviewFilter = mode || 'ALL';
-  findingsState.expanded     = null;
   applyFindingsView();
 }
 
@@ -875,6 +893,42 @@ export function toggleFindingExpand(uid) {
   applyFindingsView();
 }
 
+// Project a finding into the value used for each filter dimension.
+// Centralized so the filter engine, count aggregator, and the right-
+// click context menu all read the same key off a row.
+function _findingDimValue(f, dim) {
+  switch (dim) {
+    case 'severity': return (f.severity || 'LOW').toUpperCase();
+    case 'status':   return (f.workflow_status || 'new').toLowerCase();
+    case 'assignee': return f.assigned_to == null ? 'unassigned' : String(f.assigned_to);
+    case 'host':     return f._scan_host || '-';
+    case 'rule':     return f.rule || 'Unknown';
+    case 'mitre':    return (f.mitre || mitreMap[f.rule] || '') || '—';
+    case 'scan':     return String(f._scan_id == null ? '' : f._scan_id);
+    default:         return null;
+  }
+}
+
+// Test a row against one filter dimension's include + exclude sets.
+function _passesDimension(f, dim, slot) {
+  if (!slot) return true;
+  if (slot.include.size === 0 && slot.exclude.size === 0) return true;
+  var v = _findingDimValue(f, dim);
+  if (v == null) return slot.include.size === 0;
+  if (slot.exclude.has(v)) return false;
+  if (slot.include.size === 0) return true;
+  return slot.include.has(v);
+}
+
+// True when any filter has at least one include or exclude entry.
+function _hasAnyFindingsFilter() {
+  var f = findingsState.filters;
+  for (var k in f) {
+    if (f[k].include.size > 0 || f[k].exclude.size > 0) return true;
+  }
+  return false;
+}
+
 export function applyFindingsView() {
   // Re-rendering the whole content div wipes scroll position, which
   // jerks the user back to the top every time they expand a row, flip
@@ -884,56 +938,14 @@ export function applyFindingsView() {
   var s = findingsState;
   var rows = s.raw.slice();
 
-  if (s.sevFilter !== 'ALL') {
-    rows = rows.filter(function (f) {
-      var sv = (f.severity || 'LOW').toUpperCase();
-      if (s.sevFilter === 'CRITICAL_HIGH') return sv === 'CRITICAL' || sv === 'HIGH';
-      return sv === s.sevFilter;
-    });
-  }
-
-  if (s.reviewFilter && s.reviewFilter !== 'ALL') {
-    rows = rows.filter(function (f) {
-      // Flags are independent, so filters count anything where that
-      // flag is on — a finding marked BOTH reviewed and FP shows up
-      // under both pills.
-      if (s.reviewFilter === 'OPEN')     return !isTouched(f);
-      if (s.reviewFilter === 'REVIEWED') return isReviewed(f);
-      if (s.reviewFilter === 'FP')       return isFalsePositive(f);
-      return true;
-    });
-  }
-
-  if (s.assignFilter === 'ME' && _meCache && _meCache.id) {
-    var myId = Number(_meCache.id);
-    rows = rows.filter(function (f) {
-      return Number(f.assigned_to) === myId;
-    });
-  }
-
-  // Sidebar multi-select filters — each group is a UNION (match any),
-  // groups AND together. Empty sets are no-ops.
-  if (s.sidebarSev && s.sidebarSev.size) {
-    rows = rows.filter(function (f) {
-      return s.sidebarSev.has((f.severity || '').toUpperCase());
-    });
-  }
-  if (s.sidebarStatus && s.sidebarStatus.size) {
-    rows = rows.filter(function (f) {
-      return s.sidebarStatus.has((f.workflow_status || 'new').toLowerCase());
-    });
-  }
-  if (s.sidebarAssignee && s.sidebarAssignee.size) {
-    rows = rows.filter(function (f) {
-      var key = f.assigned_to == null ? 'unassigned' : String(f.assigned_to);
-      return s.sidebarAssignee.has(key);
-    });
-  }
-  if (s.sidebarHost && s.sidebarHost.size) {
-    rows = rows.filter(function (f) {
-      return s.sidebarHost.has(f._scan_host || '-');
-    });
-  }
+  // Pane-driven filters — each dimension carries an include + exclude
+  // axis, and a row must pass every dimension to make it through.
+  var fdims = ['severity','status','assignee','host','rule','mitre','scan'];
+  fdims.forEach(function (dim) {
+    var slot = s.filters[dim];
+    if (!slot || (slot.include.size === 0 && slot.exclude.size === 0)) return;
+    rows = rows.filter(function (f) { return _passesDimension(f, dim, slot); });
+  });
 
   var q = s.query.trim().toLowerCase();
   if (q) {
@@ -970,70 +982,11 @@ export function applyFindingsView() {
     return 0;
   });
 
-  var counts = { ALL: s.raw.length, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-  s.raw.forEach(function (f) {
-    var sv = (f.severity || 'LOW').toUpperCase();
-    if (counts[sv] !== undefined) counts[sv]++;
-  });
-
-  var pills = ['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (sev) {
-    var isActive = s.sevFilter === sev;
-    var cls = 'filter-pill' + (isActive ? ' active' : '');
-    if (isActive && sev !== 'ALL') cls += ' sev-' + sev.toLowerCase();
-    return '<div class="' + cls + '" data-action="setFindingsFilter" data-arg="' + sev + '">' +
-      sev + ' <span style="opacity:0.7;">(' + counts[sev] + ')</span></div>';
-  }).join('') +
-  // "Assigned to me" lives in the same filter row as the severity pills so
-  // all list-level filters read as one horizontal group.
-  '<div class="filter-pill-divider" aria-hidden="true"></div>' +
-  '<div class="filter-pill assigned-to-me-pill' +
-    (s.assignFilter === 'ME' ? ' active' : '') + '" ' +
-    'data-action="toggleAssignedToMeFilter" ' +
-    'aria-pressed="' + (s.assignFilter === 'ME' ? 'true' : 'false') + '" ' +
-    'title="Show only findings assigned to you">' +
-    '<span class="assigned-to-me-dot" aria-hidden="true"></span>' +
-    'Assigned to me' +
-  '</div>';
-
-  var reviewCounts = { ALL: s.raw.length, OPEN: 0, REVIEWED: 0, FP: 0 };
-  s.raw.forEach(function (f) {
-    if (!isTouched(f))       reviewCounts.OPEN++;
-    if (isReviewed(f))       reviewCounts.REVIEWED++;
-    if (isFalsePositive(f))  reviewCounts.FP++;
-  });
-  // Status filter is a dropdown now — one compact control that surfaces the
-  // per-state count next to each label, Defense.com-style.
-  var reviewOptions = [
-    { k: 'ALL',      label: 'All'            },
-    { k: 'OPEN',     label: 'Unreviewed'     },
-    { k: 'REVIEWED', label: 'Reviewed'       },
-    { k: 'FP',       label: 'False Positive' },
-  ].map(function (p) {
-    var sel = s.reviewFilter === p.k ? ' selected' : '';
-    return '<option value="' + p.k + '"' + sel + '>' +
-      escapeHtml(p.label) + ' (' + reviewCounts[p.k] + ')' +
-    '</option>';
-  }).join('');
-  var reviewDropdown =
-    '<div class="status-filter">' +
-      '<label class="status-filter-label" for="findings-status-filter">STATUS</label>' +
-      '<select id="findings-status-filter" class="status-filter-select" data-action-change="setFindingsReviewFilterFromSelect">' +
-        reviewOptions +
-      '</select>' +
-    '</div>';
-
-  // Assigned-to-me toggle now lives in the severity pill row; nothing
-  // extra to render here.
-
-  // Page title + header count — "Findings (32)" when unfiltered,
-  // "Findings (12 of 32)" when filters narrow the view.
-  var total = s.raw.length;
+  // Page title — "Findings (32)" when unfiltered, "(12 of 32)" otherwise.
+  var total   = s.raw.length;
   var visible = rows.length;
-  var filtered = (s.sevFilter !== 'ALL') ||
-                 (s.reviewFilter && s.reviewFilter !== 'ALL') ||
-                 (s.assignFilter === 'ME') ||
-                 !!q;
-  var countLabel = filtered ? (visible + ' of ' + total) : String(total);
+  var anyFilter = _hasAnyFindingsFilter() || !!q;
+  var countLabel = anyFilter ? (visible + ' of ' + total) : String(total);
   var titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'Findings (' + countLabel + ')';
 
@@ -1045,31 +998,456 @@ export function applyFindingsView() {
   var c = document.getElementById('content');
   c.innerHTML =
     _scansTabsBarHtml() +
-    '<div class="page-head">' +
-      '<div class="page-head-title"><strong>' + visible + '</strong> of ' + total + ' findings</div>' +
+    '<div class="findings-shell">' +
+      _findingsFilterPaneHtml() +
+      '<button type="button" class="findings-filter-pane-toggle" ' +
+        'data-action="toggleFindingsFilterPane" ' +
+        'aria-label="Toggle filter pane" title="Collapse filters">' +
+        _paneToggleSvg() +
+      '</button>' +
+      '<div class="findings-content">' +
+        '<div class="findings-top-bar">' +
+          '<div class="findings-count">' +
+            '<strong>' + visible + '</strong> of ' + total + ' findings' +
+          '</div>' +
+          '<input type="search" id="findings-search-box" class="search-box" ' +
+            'placeholder="Search rule, description, or MITRE..." ' +
+            'value="' + escapeHtml(s.query) + '" ' +
+            'data-action-input="setFindingsQueryFromInput" />' +
+        '</div>' +
+        _findingsChipsHtml() +
+        '<div class="card" style="padding:0; overflow:hidden;">' +
+          (rows.length === 0
+            ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings match the current filters.</div>'
+            : _buildFindingsTable(rows)) +
+        '</div>' +
+        _renderBulkBarHtml(visible, total, anyFilter) +
+      '</div>' +
     '</div>' +
-    '<div class="filter-bar">' +
-      '<div class="filter-pills">' + pills + '</div>' +
-      reviewDropdown +
-      '<input type="search" id="findings-search-box" class="search-box" placeholder="Search rule, description, or MITRE..." ' +
-        'value="' + escapeHtml(s.query) + '" data-action-input="setFindingsQueryFromInput" />' +
-    '</div>' +
-    '<div class="card" style="padding:0; overflow:hidden;">' +
-      (rows.length === 0
-        ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No findings match the current filters.</div>'
-        : _buildFindingsTable(rows)) +
-    '</div>' +
-    _renderBulkBarHtml(visible, total, filtered);
+    // Right-click context menu (hidden until a contextmenu event lands
+    // on a cell with data-filter-dim/value). Lives here so each render
+    // re-mounts a fresh node — easier than tracking event-listener
+    // lifetimes across re-renders.
+    '<div class="findings-ctx-menu" id="findings-ctx-menu" hidden></div>';
   _restoreSearchFocus('findings-search-box');
   _mountBulkBarUsers();
+  _mountFindingsContextMenu();
   // Paired with the scrollY capture at the top of this function —
   // `instant` so the page doesn't animate back into place.
   window.scrollTo({ top: _scrollY, left: 0, behavior: 'instant' });
 }
 
-// Delegator wrapper for the status <select> — pulls the live value.
-export function setFindingsReviewFilterFromSelect(arg, target) {
-  setFindingsReviewFilter(target && target.value);
+// ---------------------------------------------------------------
+// Filter pane — accordion sections drive `findingsState.filters`
+// ---------------------------------------------------------------
+
+// Order matters: matches the spec ordering shown in the design doc.
+// Each entry: { id, label, type, build } where build(raw) returns
+// [{ value, label, count, dotColor? }, ...] sorted as the user expects.
+function _findingsFilterPaneSections() {
+  return [
+    { id: 'severity', label: 'Severity',     build: _sectionItemsSeverity },
+    { id: 'status',   label: 'Status',       build: _sectionItemsStatus },
+    { id: 'assignee', label: 'Assignment',   build: _sectionItemsAssignee },
+    { id: 'host',     label: 'Host',         build: _sectionItemsHost },
+    { id: 'rule',     label: 'Rule',         build: _sectionItemsRule },
+    { id: 'mitre',    label: 'MITRE Tactic', build: _sectionItemsMitre },
+    { id: 'scan',     label: 'Scan',         build: _sectionItemsScan },
+  ];
+}
+
+var _SEV_DOT = {
+  CRITICAL: '#f85149',
+  HIGH:     '#f0883e',
+  MEDIUM:   '#d29922',
+  LOW:      '#3fb950',
+};
+
+function _sectionItemsSeverity(raw) {
+  var counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  raw.forEach(function (f) {
+    var sv = (f.severity || 'LOW').toUpperCase();
+    if (counts[sv] !== undefined) counts[sv]++;
+  });
+  return ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (k) {
+    return { value: k, label: k.charAt(0) + k.slice(1).toLowerCase(),
+             count: counts[k], dotColor: _SEV_DOT[k] };
+  });
+}
+
+function _sectionItemsStatus(raw) {
+  var labels = { new: 'New', acknowledged: 'Acknowledged',
+                 investigating: 'Investigating', resolved: 'Resolved' };
+  var counts = { new: 0, acknowledged: 0, investigating: 0, resolved: 0 };
+  raw.forEach(function (f) {
+    var st = (f.workflow_status || 'new').toLowerCase();
+    if (counts[st] !== undefined) counts[st]++;
+  });
+  return Object.keys(labels).map(function (k) {
+    return { value: k, label: labels[k], count: counts[k] };
+  });
+}
+
+function _sectionItemsAssignee(raw) {
+  // Group by user id. Unassigned rows bucket under the literal
+  // 'unassigned' value so the filter and the chip can round-trip.
+  var bucket = {};
+  raw.forEach(function (f) {
+    var key = f.assigned_to == null ? 'unassigned' : String(f.assigned_to);
+    var label = f.assigned_to == null
+      ? 'Unassigned'
+      : (f.assignee_display_name || f.assignee_email || ('user #' + f.assigned_to));
+    if (!bucket[key]) bucket[key] = { value: key, label: label, count: 0 };
+    bucket[key].count++;
+  });
+  // Unassigned always pinned to the top, then named analysts by
+  // descending count.
+  var rest = Object.keys(bucket)
+    .filter(function (k) { return k !== 'unassigned'; })
+    .map(function (k) { return bucket[k]; })
+    .sort(function (a, b) { return b.count - a.count; });
+  var head = bucket.unassigned ? [bucket.unassigned] : [];
+  return head.concat(rest);
+}
+
+function _sectionItemsHost(raw) {
+  var bucket = {};
+  raw.forEach(function (f) {
+    var h = f._scan_host || '-';
+    if (!bucket[h]) bucket[h] = { value: h, label: h, count: 0 };
+    bucket[h].count++;
+  });
+  return Object.values(bucket).sort(function (a, b) { return b.count - a.count; });
+}
+
+function _sectionItemsRule(raw) {
+  var bucket = {};
+  raw.forEach(function (f) {
+    var r = f.rule || 'Unknown';
+    if (!bucket[r]) bucket[r] = { value: r, label: r, count: 0 };
+    bucket[r].count++;
+  });
+  return Object.values(bucket).sort(function (a, b) { return b.count - a.count; });
+}
+
+function _sectionItemsMitre(raw) {
+  var bucket = {};
+  raw.forEach(function (f) {
+    var m = (f.mitre || mitreMap[f.rule] || '') || '—';
+    if (!bucket[m]) bucket[m] = { value: m, label: m, count: 0 };
+    bucket[m].count++;
+  });
+  return Object.values(bucket).sort(function (a, b) { return b.count - a.count; });
+}
+
+function _sectionItemsScan(raw) {
+  // Group by scan id, label as "Scan #N", sort by date desc (newest first).
+  var bucket = {};
+  raw.forEach(function (f) {
+    var key = String(f._scan_id == null ? '' : f._scan_id);
+    if (!bucket[key]) {
+      bucket[key] = {
+        value: key,
+        label: 'Scan #' + (f._scan_number != null ? f._scan_number : f._scan_id),
+        count: 0,
+        _date: f._scan_date || '',
+      };
+    }
+    bucket[key].count++;
+  });
+  return Object.values(bucket).sort(function (a, b) {
+    return (a._date < b._date) ? 1 : (a._date > b._date ? -1 : 0);
+  });
+}
+
+function _findingsFilterPaneHtml() {
+  var s = findingsState;
+  var sections = _findingsFilterPaneSections().map(function (sec) {
+    var items = sec.build(s.raw) || [];
+    return _findingsSectionHtml(sec, items);
+  }).join('');
+  return '<aside class="findings-filter-pane" aria-label="Findings filters">' +
+    '<div class="findings-filter-pane-body">' +
+      sections +
+    '</div>' +
+  '</aside>';
+}
+
+function _findingsSectionHtml(sec, items) {
+  var s = findingsState;
+  var slot = s.filters[sec.id];
+  var collapsed = s._paneSectionCollapsed.has(sec.id);
+  var activeIn  = slot ? slot.include.size : 0;
+  var activeOut = slot ? slot.exclude.size : 0;
+  var badge = (activeIn + activeOut) > 0
+    ? '<span class="findings-filter-section-badge">' + (activeIn + activeOut) + '</span>'
+    : '';
+
+  // Rule section truncates to top 8 by default with a "Show all" toggle —
+  // rule lists can run long and we don't want the pane scrolling forever.
+  var visibleItems = items;
+  var ruleToggle = '';
+  if (sec.id === 'rule' && items.length > 8 && !s._ruleSectionExpanded) {
+    visibleItems = items.slice(0, 8);
+    ruleToggle =
+      '<button type="button" class="findings-filter-show-all" ' +
+        'data-action="findingsRuleShowAll">' +
+        'Show all (' + items.length + ')' +
+      '</button>';
+  } else if (sec.id === 'rule' && items.length > 8 && s._ruleSectionExpanded) {
+    ruleToggle =
+      '<button type="button" class="findings-filter-show-all" ' +
+        'data-action="findingsRuleShowAll">' +
+        'Show fewer' +
+      '</button>';
+  }
+
+  var rows = visibleItems.map(function (it) {
+    var checked = slot && slot.include.has(it.value);
+    var excluded = slot && slot.exclude.has(it.value);
+    var dot = it.dotColor
+      ? '<span class="findings-filter-dot" style="background:' + it.dotColor + '"></span>'
+      : '';
+    var liCls = 'findings-filter-row';
+    if (excluded) liCls += ' is-excluded';
+    return '<li class="' + liCls + '">' +
+      '<label>' +
+        '<input type="checkbox"' + (checked ? ' checked' : '') + ' ' +
+          'data-action-change="toggleFindingsFilter" ' +
+          'data-arg="' + escapeHtml(sec.id) + '|' + escapeHtml(String(it.value)) + '" />' +
+        dot +
+        '<span class="findings-filter-value" title="' + escapeHtml(it.label) + '">' +
+          escapeHtml(it.label) +
+        '</span>' +
+        '<span class="findings-filter-count">' + it.count + '</span>' +
+      '</label>' +
+    '</li>';
+  }).join('');
+
+  return '<div class="findings-filter-section' + (collapsed ? ' is-collapsed' : '') +
+      '" data-section="' + escapeHtml(sec.id) + '">' +
+    '<button type="button" class="findings-filter-section-head" ' +
+      'data-action="toggleFindingsFilterSection" ' +
+      'data-arg="' + escapeHtml(sec.id) + '">' +
+      '<span class="findings-filter-section-chevron" aria-hidden="true">' +
+        '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" ' +
+          'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+          'stroke-linejoin="round"><path d="M3 4.5 L6 7.5 L9 4.5"/></svg>' +
+      '</span>' +
+      '<span class="findings-filter-section-label">' + escapeHtml(sec.label) + '</span>' +
+      badge +
+    '</button>' +
+    '<ul class="findings-filter-list">' + rows + '</ul>' +
+    ruleToggle +
+  '</div>';
+}
+
+// ---------------------------------------------------------------
+// Chip row — every active include/exclude filter renders as a chip
+// above the table. The × on each chip removes that single value;
+// the trailing "Clear all" link wipes every dimension at once.
+// ---------------------------------------------------------------
+
+function _findingsChipsHtml() {
+  var s = findingsState;
+  var chips = [];
+  var sections = _findingsFilterPaneSections();
+  sections.forEach(function (sec) {
+    var slot = s.filters[sec.id];
+    if (!slot) return;
+    // Look up labels through the section builder so a chip shows
+    // "Assigned: Robert" rather than "Assigned: 7" (the raw user id).
+    var items = sec.build(s.raw) || [];
+    var labelByValue = {};
+    items.forEach(function (it) { labelByValue[it.value] = it.label; });
+
+    function chipFor(value, kind) {
+      var lbl = labelByValue[value] || value;
+      var cls = 'findings-filter-chip' + (kind === 'exclude' ? ' is-exclude' : '');
+      var prefix = kind === 'exclude' ? 'NOT ' : '';
+      return '<span class="' + cls + '">' +
+        '<span class="findings-filter-chip-dim">' + escapeHtml(sec.label) + ':</span> ' +
+        escapeHtml(prefix + lbl) +
+        '<button type="button" class="findings-filter-chip-x" ' +
+          'data-action="removeFindingsFilterChip" ' +
+          'data-arg="' + escapeHtml(sec.id) + '|' + kind + '|' + escapeHtml(String(value)) + '" ' +
+          'aria-label="Remove filter">×</button>' +
+      '</span>';
+    }
+
+    slot.include.forEach(function (v) { chips.push(chipFor(v, 'include')); });
+    slot.exclude.forEach(function (v) { chips.push(chipFor(v, 'exclude')); });
+  });
+
+  if (chips.length === 0) return '';
+  return '<div class="findings-filter-chips">' + chips.join('') +
+    '<a class="findings-filter-clear-all" data-action="clearFindingsFilters">Clear all</a>' +
+  '</div>';
+}
+
+// ---------------------------------------------------------------
+// Pane action handlers
+// ---------------------------------------------------------------
+
+export function toggleFindingsFilterPane() {
+  var nowCollapsed = !document.body.classList.contains('findings-pane-collapsed');
+  document.body.classList.toggle('findings-pane-collapsed', nowCollapsed);
+  try {
+    localStorage.setItem('pulseFindingsPaneCollapsed', nowCollapsed ? '1' : '0');
+  } catch (e) { /* localStorage off — session only */ }
+  var btn = document.querySelector('.findings-filter-pane-toggle');
+  if (btn) btn.title = nowCollapsed ? 'Show filters' : 'Collapse filters';
+}
+
+export function toggleFindingsFilterSection(id) {
+  if (!id) return;
+  var s = findingsState;
+  if (s._paneSectionCollapsed.has(id)) s._paneSectionCollapsed.delete(id);
+  else s._paneSectionCollapsed.add(id);
+  // Section state is purely visual — no need to re-run the filter
+  // pipeline, just patch the class on the section node.
+  var section = document.querySelector('.findings-filter-section[data-section="' + id + '"]');
+  if (section) section.classList.toggle('is-collapsed');
+}
+
+// data-arg = "dim|value". Checkbox change toggles include membership.
+// Switching to "include" auto-clears any matching "exclude" entry so
+// the user doesn't have to deal with conflicting state.
+export function toggleFindingsFilter(arg, target) {
+  if (!arg) return;
+  var parts = String(arg).split('|');
+  var dim = parts[0], value = parts.slice(1).join('|');
+  var slot = findingsState.filters[dim];
+  if (!slot) return;
+  var checked = !!(target && target.checked);
+  if (checked) {
+    slot.include.add(value);
+    slot.exclude.delete(value);
+  } else {
+    slot.include.delete(value);
+  }
+  applyFindingsView();
+}
+
+// Chip × — data-arg is "dim|kind|value" (kind is 'include' or 'exclude').
+export function removeFindingsFilterChip(arg) {
+  if (!arg) return;
+  var parts = String(arg).split('|');
+  var dim = parts[0], kind = parts[1], value = parts.slice(2).join('|');
+  var slot = findingsState.filters[dim];
+  if (!slot) return;
+  if (kind === 'exclude') slot.exclude.delete(value);
+  else slot.include.delete(value);
+  applyFindingsView();
+}
+
+export function clearFindingsFilters() {
+  var f = findingsState.filters;
+  Object.keys(f).forEach(function (k) {
+    f[k].include.clear();
+    f[k].exclude.clear();
+  });
+  applyFindingsView();
+}
+
+export function findingsRuleShowAll() {
+  findingsState._ruleSectionExpanded = !findingsState._ruleSectionExpanded;
+  applyFindingsView();
+}
+
+// ---------------------------------------------------------------
+// Right-click context menu
+// ---------------------------------------------------------------
+// Mounts a single contextmenu listener on the findings table area.
+// When a target carries data-filter-dim + data-filter-value, the
+// menu opens with "Filter for / Filter out [value]" actions that
+// dispatch into the same filter slots the pane drives.
+
+function _mountFindingsContextMenu() {
+  var content = document.querySelector('.findings-content');
+  var menu = document.getElementById('findings-ctx-menu');
+  if (!content || !menu) return;
+
+  content.addEventListener('contextmenu', function (e) {
+    var cell = e.target.closest('[data-filter-dim][data-filter-value]');
+    if (!cell) return;
+    e.preventDefault();
+    var dim   = cell.getAttribute('data-filter-dim');
+    var value = cell.getAttribute('data-filter-value');
+    var label = cell.getAttribute('data-filter-label') || value;
+    _openFindingsCtxMenu(menu, e.clientX, e.clientY, dim, value, label);
+  });
+
+  // Click anywhere outside or hit Escape closes the menu.
+  document.addEventListener('click', function (e) {
+    if (menu.hidden) return;
+    if (!menu.contains(e.target)) menu.hidden = true;
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !menu.hidden) menu.hidden = true;
+  });
+}
+
+function _openFindingsCtxMenu(menu, x, y, dim, value, label) {
+  // QRadar-style two-action menu. The action handler reads dim + value
+  // out of data-arg (joined by '|') and toggles the right slot.
+  var arg = dim + '|' + value;
+  menu.innerHTML =
+    '<button type="button" class="findings-ctx-item" ' +
+      'data-action="findingsCtxFilterFor" ' +
+      'data-arg="' + escapeHtml(arg) + '">' +
+      'Filter for &ldquo;' + escapeHtml(label) + '&rdquo;' +
+    '</button>' +
+    '<button type="button" class="findings-ctx-item findings-ctx-item-exclude" ' +
+      'data-action="findingsCtxFilterOut" ' +
+      'data-arg="' + escapeHtml(arg) + '">' +
+      'Filter out &ldquo;' + escapeHtml(label) + '&rdquo;' +
+    '</button>';
+  // Show offscreen first so we can measure, then clamp inside viewport.
+  menu.style.left = '0px';
+  menu.style.top  = '0px';
+  menu.hidden = false;
+  var rect = menu.getBoundingClientRect();
+  var maxX = window.innerWidth - rect.width - 8;
+  var maxY = window.innerHeight - rect.height - 8;
+  menu.style.left = Math.max(8, Math.min(x, maxX)) + 'px';
+  menu.style.top  = Math.max(8, Math.min(y, maxY)) + 'px';
+}
+
+export function findingsCtxFilterFor(arg) {
+  if (!arg) return;
+  var parts = String(arg).split('|');
+  var dim = parts[0], value = parts.slice(1).join('|');
+  var slot = findingsState.filters[dim];
+  if (!slot) return;
+  slot.include.add(value);
+  slot.exclude.delete(value);
+  var menu = document.getElementById('findings-ctx-menu');
+  if (menu) menu.hidden = true;
+  applyFindingsView();
+}
+
+export function findingsCtxFilterOut(arg) {
+  if (!arg) return;
+  var parts = String(arg).split('|');
+  var dim = parts[0], value = parts.slice(1).join('|');
+  var slot = findingsState.filters[dim];
+  if (!slot) return;
+  slot.exclude.add(value);
+  slot.include.delete(value);
+  var menu = document.getElementById('findings-ctx-menu');
+  if (menu) menu.hidden = true;
+  applyFindingsView();
+}
+
+// Chevron used on both the right-edge collapse button (when pane is open)
+// and the left-edge reopen button (when pane is collapsed). CSS rotates it
+// 180deg in the collapsed state so both arrow directions are correct
+// without a second SVG.
+function _paneToggleSvg() {
+  return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+    'aria-hidden="true"><path d="M10 4 L5 8 L10 12"/></svg>';
 }
 
 // ---------------------------------------------------------------
@@ -1364,14 +1742,6 @@ function _updateBulkBar() {
   if (head) head.checked = allSel;
 }
 
-export async function toggleAssignedToMeFilter() {
-  // Need `me.id` before we can filter — load it once on the first flip.
-  await _ensureMe();
-  findingsState.assignFilter = (findingsState.assignFilter === 'ME') ? 'ALL' : 'ME';
-  findingsState.expanded = null;
-  applyFindingsView();
-}
-
 function _sortArrow(col) {
   var s = findingsState;
   var active = (s.sortCol === col);
@@ -1516,12 +1886,20 @@ function _buildFindingsTable(findings) {
           '</td>'
         : '<td class="col-select"></td>';
 
+      // data-filter-dim/value annotations let the right-click context
+      // menu read the cell's filter axis without a second lookup.
+      var assigneeKey = f.assigned_to == null ? 'unassigned' : String(f.assigned_to);
+      var assigneeLabel = f.assigned_to == null
+        ? 'Unassigned'
+        : (f.assignee_display_name || f.assignee_email || ('user #' + f.assigned_to));
       var main = '<tr class="' + rowCls + '"' + fidAttr + ' ' +
                  'data-action="toggleFindingExpand" data-arg="' + f._uid + '">' +
         checkboxCell +
         '<td class="col-time">' + escapeHtml(time) + '</td>' +
-        '<td class="col-severity">' + sevPillHtml(sev) + '</td>' +
-        '<td class="col-rule">' +
+        '<td class="col-severity" data-filter-dim="severity" data-filter-value="' + sev + '" ' +
+          'data-filter-label="' + escapeHtml(sev) + '">' + sevPillHtml(sev) + '</td>' +
+        '<td class="col-rule" data-filter-dim="rule" data-filter-value="' + escapeHtml(rule) + '" ' +
+          'data-filter-label="' + escapeHtml(rule) + '">' +
           '<div class="rule-cell">' +
             '<span class="rule-name">' + escapeHtml(rule) + '</span>' +
             _refIdPill(f) +
@@ -1529,10 +1907,13 @@ function _buildFindingsTable(findings) {
             _notesBadgeInline(f) +
           '</div>' +
         '</td>' +
-        '<td class="col-scan"><a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
+        '<td class="col-scan" data-filter-dim="scan" data-filter-value="' + f._scan_id + '" ' +
+          'data-filter-label="Scan #' + (f._scan_number != null ? f._scan_number : f._scan_id) + '">' +
+          '<a href="#" data-action="viewScanFromLink" data-arg="' + f._scan_id + '" ' +
           'style="color:var(--accent); text-decoration:none; font-size:12px;">#' + (f._scan_number != null ? f._scan_number : f._scan_id) + '</a>' +
           '<div style="font-size:10px; color:var(--text-muted);">' + escapeHtml((f._scan_date || '').split(' ')[0] || '') + '</div></td>' +
-        '<td class="col-assigned">' + _assigneeCellHtml(f) + '</td>' +
+        '<td class="col-assigned" data-filter-dim="assignee" data-filter-value="' + escapeHtml(assigneeKey) + '" ' +
+          'data-filter-label="' + escapeHtml(assigneeLabel) + '">' + _assigneeCellHtml(f) + '</td>' +
         '<td class="col-status" data-status-slot="pill">' + _statusPillHtml(f) + '</td>' +
         '<td class="col-actions">' + _rowActionsHtml(f) + '</td>' +
       '</tr>';
