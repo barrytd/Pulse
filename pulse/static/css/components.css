@@ -1502,21 +1502,79 @@ body.light .admin-banner-close {
 }
 .filter-chip-dd-head {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
 }
 .filter-chip-dd-search {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 28px;
   padding: 0 8px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
+  font-family: inherit;
   outline: none;
 }
 .filter-chip-dd-search:focus { border-color: var(--accent); }
+
+/* Apply / Clear buttons that sit alongside the search input in the head
+   (e.g. the audit IP and finding-ref freeform filters). Themed dark by
+   default so it never falls back to the browser's native button chrome. */
+.filter-chip-dd-apply {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 12px;
+  background: var(--bg-3, var(--card-bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+.filter-chip-dd-apply:hover { border-color: var(--accent); }
+
+/* Defensive backstop — any text-style input or unclassed button rendered
+   inside a filter-chip dropdown picks up dark-theme styling so we never
+   render with white browser chrome even if a caller forgets the explicit
+   class. `:where()` keeps specificity at 0 so explicit classes win. */
+:where(.filter-chip-dd) input:where(
+  [type="text"], [type="search"], [type="email"], [type="number"], [type="url"], [type="tel"]
+) {
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+:where(.filter-chip-dd) input:where(
+  [type="text"], [type="search"], [type="email"], [type="number"], [type="url"], [type="tel"]
+):focus {
+  border-color: var(--accent);
+}
+:where(.filter-chip-dd) button {
+  height: 28px;
+  padding: 0 12px;
+  background: var(--bg-3, var(--card-bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+:where(.filter-chip-dd) button:hover { border-color: var(--accent); }
 .filter-chip-dd-list {
   list-style: none;
   margin: 0;

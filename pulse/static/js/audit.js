@@ -786,9 +786,9 @@ function _auditChipDdContent(dimId) {
     var current = _auditFilters[dimId] || '';
     var ph = dimId === 'ip' ? 'e.g. 203.0.113.42' : 'e.g. PTH-0142';
     return '<div class="filter-chip-dd-head" data-dim="' + dimId + '">' +
-      '<input type="search" placeholder="' + ph + '" ' +
+      '<input type="search" class="filter-chip-dd-search" placeholder="' + ph + '" ' +
         'value="' + escapeHtml(current) + '" autocomplete="off" />' +
-      '<button type="button" class="btn btn-sm" ' +
+      '<button type="button" class="filter-chip-dd-apply" ' +
         'data-action="auditApplyFreeformFilter" data-arg="' + dimId + '">Apply</button>' +
     '</div>';
   }
