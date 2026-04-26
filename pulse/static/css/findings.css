@@ -424,6 +424,9 @@
 }
 
 .review-toggle {
+  /* Same padding / type / radius in every state — the confirmation
+     flash is purely additive (color), so the button never grows or
+     shrinks across states and the row stays still. */
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -436,12 +439,12 @@
   font: inherit;
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, opacity 0.3s ease;
 }
 .review-toggle:hover { background: var(--hover-bg); }
 
-/* The checkbox — an outlined square that fills when the parent toggle
-   is active. ::after draws the checkmark or X depending on which toggle. */
+/* The leading "checkbox" outline — fills with the confirmation color
+   while .is-confirming is set, otherwise stays as a quiet hint. */
 .review-toggle .review-check {
   position: relative;
   width: 16px;
@@ -451,19 +454,33 @@
   background: transparent;
   box-sizing: border-box;
   flex-shrink: 0;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
-/* Reviewed — green */
-.review-toggle-reviewed.active {
+/* ----- 3-second confirmation flash -----
+   Click → .is-confirming applied immediately (filled colour, glyph).
+   3s later → .is-fading added; opacity transitions back to 1 from a
+   subtle dim, and after the 300ms transition both classes are dropped
+   by JS so the button reads as default again. */
+.review-toggle.is-confirming {
+  /* Don't grow on confirmation — the user wanted the flash subtle, not
+     a visual takeover. Border + bg are the only thing that change. */
+}
+.review-toggle.is-fading {
+  opacity: 0.7;
+}
+
+/* Reviewed — green flash */
+.review-toggle-reviewed.is-confirming {
   background: rgba(63, 185, 80, 0.12);
   border-color: #3fb950;
   color: #3fb950;
 }
-.review-toggle-reviewed.active .review-check {
+.review-toggle-reviewed.is-confirming .review-check {
   background: #3fb950;
   border-color: #3fb950;
 }
-.review-toggle-reviewed.active .review-check::after {
+.review-toggle-reviewed.is-confirming .review-check::after {
   content: "";
   position: absolute;
   left: 4px;
@@ -475,18 +492,18 @@
   transform: rotate(45deg);
 }
 
-/* False positive — amber */
-.review-toggle-fp.active {
+/* False positive — amber flash */
+.review-toggle-fp.is-confirming {
   background: rgba(210, 153, 34, 0.12);
   border-color: #d29922;
   color: #d29922;
 }
-.review-toggle-fp.active .review-check {
+.review-toggle-fp.is-confirming .review-check {
   background: #d29922;
   border-color: #d29922;
 }
-.review-toggle-fp.active .review-check::before,
-.review-toggle-fp.active .review-check::after {
+.review-toggle-fp.is-confirming .review-check::before,
+.review-toggle-fp.is-confirming .review-check::after {
   content: "";
   position: absolute;
   left: 6.5px;
@@ -496,8 +513,8 @@
   background: #fff;
   border-radius: 1px;
 }
-.review-toggle-fp.active .review-check::before { transform: rotate(45deg); }
-.review-toggle-fp.active .review-check::after  { transform: rotate(-45deg); }
+.review-toggle-fp.is-confirming .review-check::before { transform: rotate(45deg); }
+.review-toggle-fp.is-confirming .review-check::after  { transform: rotate(-45deg); }
 
 /* Row-level treatments used by every findings surface (full table, compact
    dashboard list, scan-detail table) so reviewed/FP findings fade back. */

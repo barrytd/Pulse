@@ -3427,49 +3427,67 @@ function _renderReviewSection(f) {
       '</div>'
     : '<div class="review-meta-prominent" id="drawer-review-meta" style="display:none;"></div>';
 
+  // The buttons stay in their default visual state across renders.
+  // Clicking either flashes a brief 3s confirmation (.is-confirming)
+  // that fades back via opacity transition — see _flashReviewConfirm.
+  // The persistent "is this finding reviewed?" indicator lives in the
+  // reviewedAtHtml strip above and on the row pill in the table.
   return '<div class="finding-drawer-section">' +
     '<div class="sec-label">Review</div>' +
     reviewedAtHtml +
     '<div class="review-toggles">' +
-      '<button type="button" class="review-toggle review-toggle-reviewed' +
-        (reviewed ? ' active' : '') + '" ' +
+      '<button type="button" class="review-toggle review-toggle-reviewed" ' +
         'data-action="markFindingReviewed" id="btn-review-reviewed" ' +
         'aria-pressed="' + (reviewed ? 'true' : 'false') + '">' +
         '<span class="review-check" aria-hidden="true"></span>' +
-        '<span class="review-label">' +
-          (reviewed ? 'Reviewed' : 'Mark reviewed') +
-        '</span>' +
+        '<span class="review-label">Mark reviewed</span>' +
       '</button>' +
-      '<button type="button" class="review-toggle review-toggle-fp' +
-        (fp ? ' active' : '') + '" ' +
+      '<button type="button" class="review-toggle review-toggle-fp" ' +
         'data-action="markFindingFalsePositive" id="btn-review-fp" ' +
         'aria-pressed="' + (fp ? 'true' : 'false') + '">' +
         '<span class="review-check" aria-hidden="true"></span>' +
-        '<span class="review-label">' +
-          (fp ? 'False Positive' : 'False positive') +
-        '</span>' +
+        '<span class="review-label">False positive</span>' +
       '</button>' +
     '</div>' +
   '</div>';
 }
 
-function _updateReviewButtonStates(f) {
-  var reviewed = document.getElementById('btn-review-reviewed');
-  var fp       = document.getElementById('btn-review-fp');
-  if (reviewed) {
-    var isR = isReviewed(f);
-    reviewed.classList.toggle('active', isR);
-    reviewed.setAttribute('aria-pressed', isR ? 'true' : 'false');
-    var rLabel = reviewed.querySelector('.review-label');
-    if (rLabel) rLabel.textContent = isR ? 'Reviewed' : 'Mark reviewed';
+// Briefly flash the just-clicked button as a confirmation, then fade
+// it back to default. Only the button whose flag was JUST flipped on
+// gets the flash — flipping a flag off (or no change) leaves both
+// buttons in their default state.
+//
+// 3s window matches the toast lifetime; CSS handles the 300ms opacity
+// fade via the .is-confirming class.
+var _reviewFlashTimers = { reviewed: null, fp: null };
+function _flashReviewConfirm(nextReviewed, nextFalsePositive) {
+  function flash(buttonId, key, on) {
+    var btn = document.getElementById(buttonId);
+    if (!btn) return;
+    if (_reviewFlashTimers[key]) {
+      clearTimeout(_reviewFlashTimers[key]);
+      _reviewFlashTimers[key] = null;
+    }
+    if (!on) {
+      btn.classList.remove('is-confirming', 'is-fading');
+      btn.setAttribute('aria-pressed', 'false');
+      return;
+    }
+    btn.classList.remove('is-fading');
+    btn.classList.add('is-confirming');
+    btn.setAttribute('aria-pressed', 'true');
+    _reviewFlashTimers[key] = setTimeout(function () {
+      btn.classList.add('is-fading');
+      // Wait for the 300ms opacity transition to finish, then drop both
+      // classes so the next click starts from a clean slate.
+      _reviewFlashTimers[key] = setTimeout(function () {
+        btn.classList.remove('is-confirming', 'is-fading');
+        _reviewFlashTimers[key] = null;
+      }, 320);
+    }, 3000);
   }
-  if (fp) {
-    var isF = isFalsePositive(f);
-    fp.classList.toggle('active', isF);
-    fp.setAttribute('aria-pressed', isF ? 'true' : 'false');
-    var fLabel = fp.querySelector('.review-label');
-    if (fLabel) fLabel.textContent = isF ? 'False Positive' : 'False positive';
-  }
+  flash('btn-review-reviewed', 'reviewed', !!nextReviewed);
+  flash('btn-review-fp',       'fp',       !!nextFalsePositive);
 }
 
 // Rebuild the prominent "Last reviewed at" line in place so the drawer
@@ -3525,7 +3543,7 @@ async function _submitReview(nextReviewed, nextFalsePositive) {
     if (badgeHtml) sevLine.insertAdjacentHTML('beforeend', badgeHtml);
   }
 
-  _updateReviewButtonStates(_drawerFinding);
+  _flashReviewConfirm(nextReviewed, nextFalsePositive);
   _updateReviewMeta(_drawerFinding.reviewed_at, isTouched(_drawerFinding));
   _notifyFindingStatusChanged(_drawerFinding.id, {
     reviewed: _drawerFinding.reviewed,

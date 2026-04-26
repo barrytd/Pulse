@@ -56,6 +56,11 @@ function _buildPath(page, scanId) {
 export function navigate(page, opts) {
   opts = opts || {};
 
+  // Any open detail flyout belongs to the previous page — close it
+  // before we render the new page so the drawer doesn't persist (e.g.
+  // a finding drawer hanging around when the user clicks Rules).
+  _closeAnyOpenDrawer();
+
   // "Findings" sidebar item is a sub-tab of the Scans page. Translate
   // the click into a Scans route with the All Findings tab active so
   // old /findings bookmarks still resolve correctly.
@@ -147,6 +152,28 @@ function _updateTitle(title) {
 function _titleFor(page, scanId) {
   if (page === 'scans' && scanId) return 'Scan #' + scanId;
   return page.charAt(0).toUpperCase() + page.slice(1);
+}
+
+// Belt-and-braces drawer close — runs at the start of every navigate()
+// call. Any page with a detail flyout (currently just Findings, but the
+// same pattern will apply to Fleet / Rules / Audit when they pick up
+// the Sentinel push-flyout) just needs an `.open` class on a container
+// that lives inside <body>; we sweep them all here so navigation
+// authors don't have to remember which page owns which drawer.
+function _closeAnyOpenDrawer() {
+  // Findings: #finding-drawer + body.flyout-push-open
+  var findingDrawer = document.getElementById('finding-drawer');
+  if (findingDrawer && findingDrawer.classList.contains('open')) {
+    findingDrawer.classList.remove('open');
+    var backdrop = document.getElementById('finding-drawer-backdrop');
+    if (backdrop) backdrop.classList.remove('open');
+  }
+  document.body.classList.remove('flyout-push-open');
+  // Module-level drawer state is reset by closeFindingDrawer; lazy-call
+  // it so other modules don't import navigation.js up the chain.
+  import('./findings.js').then(function (m) {
+    if (m.closeFindingDrawer) m.closeFindingDrawer();
+  }).catch(function () { /* findings module not loaded yet — fine */ });
 }
 
 // ----- back / forward -----------------------------------------------------
