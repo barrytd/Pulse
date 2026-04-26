@@ -1333,31 +1333,50 @@ body.light .admin-banner-close {
 }
 
 /* Dismiss × on secondary chips (MITRE / Scan / anything added via
-   "+ Add filter"). Sits to the right of the dropdown caret and drops
-   the chip back into the +Add filter menu when clicked. Primary
-   chips (Severity / Status / Assignment / Host / Rule) never render
-   one — they're permanent. */
+   "+ Add filter"). Rendered as a SIBLING of the chip (not a child) so
+   the dismiss click is never routed into the chip's own openFilterChip
+   handler. Visually it hugs the chip's right edge — the chip drops its
+   right border-radius (.has-dismiss) and the dismiss button picks it
+   up so the pair reads as one capsule with two halves. */
+.filter-chip.has-dismiss {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 0;
+}
 .filter-chip-dismiss {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-left: 2px;
+  width: 24px;
+  height: 28px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 50%;
-  transition: color 120ms ease, background 120ms ease;
+  padding: 0;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 .filter-chip-dismiss:hover {
   color: var(--text-body, var(--text));
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-bg);
+  border-color: var(--accent);
+}
+.filter-chip.is-active + .filter-chip-dismiss {
+  /* Match the active chip's tinted background so the capsule reads
+     as one cohesive control when the chip is in active state. */
+  background: var(--accent-glow, rgba(88, 166, 255, 0.12));
+  border-color: var(--accent);
 }
 .filter-chip-dismiss i[data-lucide],
 .filter-chip-dismiss svg {
   width: 14px;
   height: 14px;
   stroke-width: 2;
+  color: currentColor;
 }
 .filter-chip-add {
   appearance: none;

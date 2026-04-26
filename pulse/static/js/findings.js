@@ -1365,28 +1365,29 @@ function _filterChipWrapHtml(dim, slot, n) {
   // Primary dims (Severity / Status / Assignment / Host / Rule) are
   // permanent fixtures of the bar — they show a caret (▾) only.
   // Secondary dims (MITRE / Scan) were added via "+ Add filter" and
-  // carry a small × icon to drop them back into that menu.
+  // get a small × button rendered as a SIBLING of the chip (not a
+  // child) so the dismiss click never bubbles into openFilterChip.
   var label = dim.label;
   var cls = 'filter-chip';
   if (n > 0) {
     cls += ' is-active';
     label += ': ' + n + ' selected';
   }
-  var caret = '<span class="filter-chip-caret" aria-hidden="true">▾</span>';
-  var dismissX = !dim.primary
-    ? '<span class="filter-chip-dismiss" ' +
+  if (!dim.primary) cls += ' has-dismiss'; // remove right-rounded corners on the chip
+  var dismissBtn = !dim.primary
+    ? '<button type="button" class="filter-chip-dismiss" ' +
         'data-action="dismissFilterChip" data-arg="' + dim.id + '" ' +
         'aria-label="Remove filter" title="Remove filter">' +
         '<i data-lucide="x"></i>' +
-      '</span>'
+      '</button>'
     : '';
   return '<div class="filter-chip-wrap" data-dim="' + escapeHtml(dim.id) + '">' +
     '<button type="button" class="' + cls + '" ' +
       'data-action="openFilterChip" data-arg="' + dim.id + '">' +
       '<span class="filter-chip-label">' + escapeHtml(label) + '</span>' +
-      caret +
-      dismissX +
+      '<span class="filter-chip-caret" aria-hidden="true">▾</span>' +
     '</button>' +
+    dismissBtn +
     '<div class="filter-chip-dd" hidden></div>' +
   '</div>';
 }
