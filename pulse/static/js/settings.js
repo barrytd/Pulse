@@ -31,6 +31,11 @@ import {
 } from './api.js';
 import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
 import { getTheme } from './theme.js';
+import {
+  getSeverityColors,
+  SEVERITY_DEFAULTS,
+  resetSeverityColors,
+} from './severity-colors.js';
 import { refreshUserMenuAvatar, refreshUserMenuIdentity } from './user-menu.js';
 
 // Map the "Email provider" dropdown back to host+port so users never
@@ -538,6 +543,21 @@ export async function renderSettingsPage() {
     '</div>';
 
   // --- Appearance tab ------------------------------------------------
+  var savedSev = getSeverityColors();
+  var sevDefaults = SEVERITY_DEFAULTS[currentTheme] || SEVERITY_DEFAULTS.dark;
+  function _sevRow(key, label) {
+    var current = savedSev[key] || sevDefaults[key];
+    return '<div class="sev-color-row">' +
+      '<label class="sev-color-label">' +
+        '<span class="sev-color-swatch" style="background:var(--severity-' + key + ');"></span>' +
+        '<span>' + label + '</span>' +
+      '</label>' +
+      '<input type="color" class="sev-color-input" value="' + current + '" ' +
+        'data-action-input="severityColorInput" data-arg="' + key + '" ' +
+        'data-sev-key="' + key + '" />' +
+      '<code class="sev-color-hex" data-sev-hex="' + key + '">' + current.toUpperCase() + '</code>' +
+    '</div>';
+  }
   var appearanceHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Appearance</div>' +
@@ -549,6 +569,23 @@ export async function renderSettingsPage() {
           '<option value="dark"'  + (currentTheme === 'dark'  ? ' selected' : '') + '>Dark (default)</option>' +
           '<option value="light"' + (currentTheme === 'light' ? ' selected' : '') + '>Light</option>' +
         '</select></div>' +
+    '</div>' +
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Severity palette</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Override the four severity hues used throughout the app. Helpful for ' +
+        'color-vision differences or matching an internal style guide. Saved ' +
+        'to this browser only.' +
+      '</p>' +
+      '<div class="sev-color-grid">' +
+        _sevRow('critical', 'Critical') +
+        _sevRow('high',     'High') +
+        _sevRow('medium',   'Medium') +
+        _sevRow('low',      'Low') +
+      '</div>' +
+      '<div style="margin-top:12px;">' +
+        '<button class="btn btn-secondary" type="button" data-action="resetSeverityPaletteAndRender">Reset to defaults</button>' +
+      '</div>' +
     '</div>';
 
   var rulesCardHtml =
@@ -1580,6 +1617,15 @@ function _formatNextRun(iso) {
 // ------------------------------------------------------------------------
 // Profile avatar
 // ------------------------------------------------------------------------
+
+// Wired to the "Reset to defaults" button on the Appearance card. Drops
+// the saved overrides, then re-renders the settings page so the color
+// inputs + hex labels snap back to the theme defaults.
+export function resetSeverityPaletteAndRender() {
+  resetSeverityColors();
+  showToast('Severity palette reset');
+  renderSettingsPage();
+}
 
 export function uploadAvatarClick() {
   var input = document.getElementById('profile-avatar-input');

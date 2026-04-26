@@ -696,6 +696,62 @@ body.light .admin-banner-close {
 
 .password-status.set { color: #3fb950; font-style: normal; }
 
+/* Settings → Appearance → Severity palette                              */
+.sev-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.sev-color-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-3, var(--card-bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sev-color-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.sev-color-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.sev-color-input {
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sev-color-input::-webkit-color-swatch-wrapper { padding: 2px; }
+.sev-color-input::-webkit-color-swatch { border: none; border-radius: 3px; }
+
+.sev-color-hex {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  min-width: 64px;
+  text-align: right;
+}
+
 .category-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
