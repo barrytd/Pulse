@@ -124,11 +124,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] ~~Custom branding~~ — *deferred to Backlog; first pass shipped then reverted on 2026-04-24 because replacing the Pulse brand in the sidebar conflicted with the product identity. The future pass should keep the Pulse logo + "PULSE" title, and surface the org name as a subtitle underneath. The empty `branding` table already exists on current installs so the future sprint can reuse the schema.*
 - [x] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
 - [ ] Dashboard widgets — customizable layout with drag-and-drop panels
-- [ ] Threat intel integration — correlate source IPs with AbuseIPDB / OTX feeds
-- [ ] IOC lookup panel — paste an IP or hash, query intel feeds, cache results locally
-- [x] Weekly threat brief — auto-emailed digest of top findings across the fleet *(on-demand send shipped; auto-schedule deferred)*
-- [x] Public landing page — a clean page explaining what Pulse does with a download link for the CLI and an email signup for updates
-- [x] Email waitlist — store signups in the database, exportable as CSV
+
 - [x] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
 
 ---

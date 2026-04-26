@@ -2776,6 +2776,18 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     # -------------------------------------------------------------------
+    # GET /api/intel/recent — every cached intel lookup, newest-first.
+    # Powers the "Recent lookups" panel on the Threat Intel page so the
+    # analyst can scan their last N lookups without retyping each IP.
+    # -------------------------------------------------------------------
+    @app.get("/api/intel/recent")
+    def get_intel_recent(limit: int = 50, user_id: int = Depends(require_login)):
+        from pulse import intel as intel_mod
+        if limit < 1 or limit > 200:
+            raise HTTPException(400, detail="limit must be between 1 and 200.")
+        return {"rows": intel_mod.list_recent_cache(app.state.db_path, limit=limit)}
+
+    # -------------------------------------------------------------------
     # GET /api/intel/{ip} — threat-intel lookup for one IP
     # -------------------------------------------------------------------
     @app.get("/api/intel/{ip}")

@@ -279,3 +279,74 @@ class TestThreatIntelApi:
         assert body["total_reports"] == 99
         # Internal _raw must not leak through.
         assert "_raw" not in body
+
+
+# ---------------------------------------------------------------------------
+# /api/intel/recent — Threat Intel page recent-lookups panel
+# ---------------------------------------------------------------------------
+
+class TestIntelRecentApi:
+    def test_empty_when_no_lookups(self, client):
+        resp = client.get("/api/intel/recent")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["rows"] == []
+
+    def test_returns_cached_lookups_newest_first(self, client, db_path):
+        # Seed two lookups — direct cache writes so we don't depend on
+        # the HTTP path. The newer entry should sort first.
+        intel._write_cache(db_path, "8.8.8.8", "abuseipdb", {
+            "score": 0, "country": "US", "isp": "Google",
+            "total_reports": 0, "last_reported": None,
+            "fetched_at": "2026-04-25T10:00:00", "_raw": {},
+        })
+        intel._write_cache(db_path, "45.33.32.156", "abuseipdb", {
+            "score": 75, "country": "RU", "isp": "Bad",
+            "total_reports": 99, "last_reported": "2026-04-26T08:00:00",
+            "fetched_at": "2026-04-26T11:00:00", "_raw": {},
+        })
+        # The api fixture uses its own db_path, but client + db_path
+        # share the same tmp_path through the fixtures so the seeds
+        # land in the DB the route reads.
+        resp = client.get("/api/intel/recent")
+        assert resp.status_code == 200
+        body = resp.json()
+        # Two rows, newest first.
+        assert len(body["rows"]) == 2
+        assert body["rows"][0]["ip"] == "45.33.32.156"
+        assert body["rows"][0]["score"] == 75
+        assert body["rows"][1]["ip"] == "8.8.8.8"
+        # _raw payload must not leak — the cache list helper strips it.
+        assert "_raw" not in body["rows"][0]
+
+    def test_limit_param_clamped(self, client):
+        # Out-of-range limits get a clean 400 rather than a runtime crash.
+        resp = client.get("/api/intel/recent?limit=0")
+        assert resp.status_code == 400
+        resp = client.get("/api/intel/recent?limit=99999")
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# list_recent_cache — direct module test (no HTTP)
+# ---------------------------------------------------------------------------
+
+class TestListRecentCache:
+    def test_returns_empty_for_fresh_db(self, db_path):
+        assert intel.list_recent_cache(db_path) == []
+
+    def test_orders_newest_first(self, db_path):
+        intel._write_cache(db_path, "8.8.8.8", "abuseipdb", {
+            "score": 1, "fetched_at": "2026-01-01T00:00:00", "_raw": {},
+        })
+        intel._write_cache(db_path, "1.1.1.1", "abuseipdb", {
+            "score": 2, "fetched_at": "2026-04-26T12:00:00", "_raw": {},
+        })
+        rows = intel.list_recent_cache(db_path, limit=10)
+        assert [r["ip"] for r in rows] == ["1.1.1.1", "8.8.8.8"]
+
+    def test_clamps_limit(self, db_path):
+        # Anything < 1 or > 200 gets clamped, never raises.
+        assert intel.list_recent_cache(db_path, limit=-5) == []
+        assert intel.list_recent_cache(db_path, limit=99999) == []
+        assert intel.list_recent_cache(db_path, limit="bad") == []
