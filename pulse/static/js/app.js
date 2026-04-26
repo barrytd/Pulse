@@ -224,6 +224,12 @@ import {
 } from './user-menu.js';
 import { mountCommandPalette, openCommandPalette } from './command-palette.js';
 import {
+  threatIntelInputChange,
+  threatIntelSubmit,
+  threatIntelLookupRecent,
+  threatIntelRefreshRecent,
+} from './threat-intel.js';
+import {
   openFeedbackModal,
   closeFeedbackModal,
   submitFeedback,
@@ -468,6 +474,12 @@ const actions = {
 
   // command palette
   openCommandPalette,
+
+  // threat intel — IOC lookup page
+  threatIntelInputChange,
+  threatIntelSubmit,
+  threatIntelLookupRecent,
+  threatIntelRefreshRecent,
 };
 
 // Hide the banner for the rest of the session and persist the choice.

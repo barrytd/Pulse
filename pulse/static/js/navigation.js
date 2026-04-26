@@ -23,8 +23,9 @@ import { renderRulesPage } from './rules.js';
 import { renderAuditPage } from './audit.js';
 import { renderCompliancePage } from './compliance.js';
 import { renderTrendsPage } from './trends.js';
+import { renderThreatIntelPage } from './threat-intel.js';
 
-export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings'];
+export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings','intel'];
 
 // Current page — mutable module state. Exposed via getter so other
 // modules can peek (see theme.js).
@@ -109,6 +110,7 @@ export function navigate(page, opts) {
     audit:     renderAuditPage,
     compliance: renderCompliancePage,
     trends:     renderTrendsPage,
+    intel:      renderThreatIntelPage,
   };
   (renderers[page] || renderDashboardPage)();
 }

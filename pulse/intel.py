@@ -188,6 +188,45 @@ def _lookup_via_abuseipdb(ip, api_key):
 # Cache I/O
 # ---------------------------------------------------------------------------
 
+def list_recent_cache(db_path, limit=50, source="abuseipdb"):
+    """Return up to `limit` cache rows newest-first, optionally narrowed
+    to one provider. Powers the "Recent lookups" panel on the IOC page.
+    Returns an empty list on any DB error so the page can still render.
+
+    Each row matches the `lookup_ip` return shape minus the `_raw`
+    payload (kept on the server — the recent panel doesn't need it)."""
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        with database._connect(db_path) as conn:
+            rows = conn.execute(
+                """SELECT ip_address, source, score, country, isp,
+                          total_reports, last_reported, fetched_at
+                   FROM intel_cache
+                   WHERE source = ?
+                   ORDER BY fetched_at DESC
+                   LIMIT ?""",
+                (source, limit),
+            ).fetchall()
+    except Exception:
+        return []
+    out = []
+    for r in rows or []:
+        out.append({
+            "ip":            r[0],
+            "source":        r[1],
+            "score":         r[2],
+            "country":       r[3],
+            "isp":           r[4],
+            "total_reports": r[5],
+            "last_reported": r[6],
+            "fetched_at":    r[7],
+        })
+    return out
+
+
 def _read_cache(db_path, ip, source):
     """Return the cache row as a dict, or None if missing."""
     try:

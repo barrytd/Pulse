@@ -3391,3 +3391,321 @@ tr.pending-flash {
   letter-spacing: 0.4px;
 }
 
+/* ==================================================================
+ * Threat Intel page (IOC lookup)
+ *
+ * Two-column layout: lookup form + result card on the left, recent
+ * lookups list pinned right. Reuses .card / .btn / .page-header /
+ * Sentinel primitives — page-specific bits live here.
+ * ================================================================== */
+
+.ti-page-blurb {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 4px 0 0;
+  max-width: 720px;
+}
+
+.ti-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .ti-grid { grid-template-columns: 1fr; }
+}
+
+.ti-lookup-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ----- Lookup form card ----- */
+.ti-lookup-card { padding: 18px 20px; }
+.ti-lookup-form { display: flex; flex-direction: column; gap: 8px; }
+.ti-lookup-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.ti-lookup-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.ti-lookup-input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.ti-lookup-input:focus { border-color: var(--accent); }
+.ti-lookup-input:disabled { opacity: 0.6; cursor: wait; }
+.ti-spin { animation: ti-spin 1s linear infinite; }
+@keyframes ti-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Configure-prompt banner (shown after a 400 "no key" reply). */
+.ti-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--accent-glow, rgba(88, 166, 255, 0.10));
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  border-radius: 6px;
+}
+.ti-banner i[data-lucide],
+.ti-banner svg { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
+.ti-banner a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.ti-banner a:hover { text-decoration: underline; }
+
+/* ----- Result card ----- */
+.ti-result-card { padding: 20px; }
+.ti-result-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.ti-result-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--hover-row, rgba(255, 255, 255, 0.04));
+  margin-bottom: 12px;
+  color: var(--text-muted);
+}
+.ti-result-empty-icon i[data-lucide],
+.ti-result-empty-icon svg { width: 22px; height: 22px; }
+.ti-result-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.ti-result-empty-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 360px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+
+.ti-result-error {
+  display: flex;
+  gap: 12px;
+  padding: 16px 18px;
+  border-color: rgba(248, 81, 73, 0.4);
+  background: rgba(248, 81, 73, 0.06);
+}
+.ti-result-error i[data-lucide],
+.ti-result-error svg {
+  width: 20px;
+  height: 20px;
+  color: #f85149;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.ti-result-error-head {
+  font-weight: 600;
+  color: #f85149;
+  margin-bottom: 2px;
+}
+.ti-result-error-body {
+  font-size: 13px;
+  color: var(--text-body, var(--text));
+  line-height: 1.5;
+}
+
+/* Score badge + meta grid — same shape as the finding-drawer's intel
+   block but a couple sizes larger since this page is the focused view. */
+.ti-result-head {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.ti-result-score-block {
+  flex: 0 0 110px;
+  border-radius: 8px;
+  padding: 14px 10px;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.ti-result-score {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.ti-result-score-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+.ti-score-high { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.35); color: #f85149; }
+.ti-score-med  { background: rgba(240,136,62,0.12); border-color: rgba(240,136,62,0.35); color: #f0883e; }
+.ti-score-low  { background: rgba(63,185,80,0.12); border-color: rgba(63,185,80,0.35); color: #3fb950; }
+.ti-score-na   { background: var(--hover-row); border-color: var(--border); color: var(--text-muted); }
+
+.ti-result-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ti-result-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 0;
+}
+.ti-result-row:last-child { border-bottom: 0; }
+.ti-result-row .k {
+  flex: 0 0 110px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.ti-result-row .v {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 13px;
+}
+.ti-mono {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.ti-cache-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--hover-row);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.ti-cache-flag-fresh {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.10);
+  border-color: rgba(63, 185, 80, 0.35);
+}
+
+.ti-result-foot {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.ti-result-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.ti-result-link:hover { text-decoration: underline; }
+.ti-result-link i[data-lucide],
+.ti-result-link svg { width: 14px; height: 14px; }
+
+/* ----- Recent lookups column ----- */
+.ti-recent-col { min-width: 0; }
+.ti-recent-card { padding: 14px; }
+.ti-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.ti-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.ti-recent-loading,
+.ti-recent-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 12px 4px;
+  line-height: 1.5;
+}
+
+.ti-recent-row {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 8px 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  transition: background 120ms ease;
+}
+.ti-recent-row:hover { background: var(--hover-bg); }
+.ti-recent-score {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid transparent;
+}
+.ti-recent-ip {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ti-recent-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
