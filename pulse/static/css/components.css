@@ -1242,6 +1242,15 @@ body.light .admin-banner-close {
   flex-wrap: wrap;
 }
 
+/* Each chip + its dropdown live inside a wrap. The wrap is the
+   positioning context for the dropdown — `position: relative` here
+   means the dropdown's `position: absolute; top: 100%; left: 0`
+   anchors directly below the chip with no JS coordinate math. */
+.filter-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .filter-chip {
   appearance: none;
   display: inline-flex;
@@ -1322,12 +1331,16 @@ body.light .admin-banner-close {
 }
 .filter-chip-clear-all:hover { text-decoration: underline; }
 
-/* ----- Filter chip dropdown popover ----- */
+/* ----- Filter chip dropdown popover -----
+   Lives INSIDE its chip's .filter-chip-wrap and positions purely via
+   CSS — top: 100% drops it directly under the chip with a 4px gap
+   from `margin-top`. No JS coordinate math: the layout works whether
+   the chip is left-most, right-most, or anywhere in between. */
 .filter-chip-dd {
-  /* Absolute, anchored to the .filter-bar offsetParent. Top/left are
-     written by JS so the popover lines up with the bottom-left of the
-     triggering chip + a 4px gap, with right-edge flip handled there. */
   position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
   z-index: 1000;
   width: 240px;
   max-height: 320px;
@@ -1341,6 +1354,13 @@ body.light .admin-banner-close {
   overflow-x: hidden;
 }
 .filter-chip-dd[hidden] { display: none; }
+/* Right-edge overflow flip: applied by JS when the dropdown's right
+   edge would extend past the viewport. Swaps `left: 0` for `right: 0`
+   so the dropdown sits flush to the chip's right edge instead. */
+.filter-chip-dd.is-flip-right {
+  left: auto;
+  right: 0;
+}
 .filter-chip-dd-head {
   flex: 0 0 auto;
   padding: 8px;

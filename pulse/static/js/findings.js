@@ -759,6 +759,11 @@ export const findingsState = {
   // Per-section UI flags (collapsed / show-all-rules) — session only.
   _paneSectionCollapsed: new Set(),
   _ruleSectionExpanded:  false,
+  // Secondary dims (mitre, scan) that the user "added" via "+ Add
+  // filter" but hasn't yet picked a value for. Keeps the chip visible
+  // in the bar so the user can either pick a value or click × to drop
+  // it. Cleared when the chip's × is hit or "Clear all" runs.
+  _addedSecondaryDims:   new Set(),
 };
 
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
@@ -814,6 +819,7 @@ export async function renderFindingsPage() {
   findingsState.expanded = null;
   findingsState.selected = Object.create(null);
   findingsState.filters = _makeFindingsFilters();
+  findingsState._addedSecondaryDims = new Set();
   // Stale state from the old left-pane build — keep the keys around so
   // any errant reference is a no-op rather than a crash, but they're
   // unused by the Sentinel-style header.
@@ -1309,28 +1315,33 @@ function _findingsFilterBarHtml() {
   var dims = _findingsFilterDims();
   var active = _hasAnyFindingsFilter();
 
-  // Build a chip per primary dim. Secondary dims (mitre / scan) only
-  // render a chip if they're currently active; otherwise they live
-  // under the "+ Add filter" menu.
+  // Each chip is wrapped in its own .filter-chip-wrap that establishes
+  // the positioning context for the chip's dropdown. Secondary dims
+  // (mitre / scan) only render their wrap once active OR after the
+  // user has explicitly added them via "+ Add filter".
   var chipsHtml = dims.map(function (dim) {
     var slot = s.filters[dim.id];
     var n = slot.include.size + slot.exclude.size;
-    if (!dim.primary && n === 0) return '';
-    return _filterChipHtml(dim, slot, n);
+    if (!dim.primary && n === 0 && !s._addedSecondaryDims.has(dim.id)) return '';
+    return _filterChipWrapHtml(dim, slot, n);
   }).join('');
 
   // "+ Add filter" lists secondary dims that aren't already shown as
-  // an active chip. The popover is rendered on click via JS — the
-  // button just opens the same chip-dd container.
+  // a chip in the bar — same predicate the chip-render rule uses.
   var hidden = dims.filter(function (d) {
     if (d.primary) return false;
+    if (s._addedSecondaryDims.has(d.id)) return false;
     var slot = s.filters[d.id];
     return slot.include.size + slot.exclude.size === 0;
   });
-  var addBtn = hidden.length === 0 ? '' :
-    '<button type="button" class="filter-chip-add" data-action="openAddFilterMenu">' +
-      '<span aria-hidden="true">+</span> Add filter' +
-    '</button>';
+  var addWrap = hidden.length === 0 ? '' :
+    '<div class="filter-chip-wrap filter-chip-wrap-add">' +
+      '<button type="button" class="filter-chip-add" data-action="openAddFilterMenu">' +
+        '<span aria-hidden="true">+</span> Add filter' +
+      '</button>' +
+      // Empty dropdown — populated by openAddFilterMenu when clicked.
+      '<div class="filter-chip-dd" hidden></div>' +
+    '</div>';
 
   var clearAll = active
     ? '<a class="filter-chip-clear-all" data-action="clearFindingsFilters">Clear all</a>'
@@ -1341,78 +1352,102 @@ function _findingsFilterBarHtml() {
       'placeholder="Search rule, description, or MITRE..." ' +
       'value="' + escapeHtml(s.query) + '" ' +
       'data-action-input="setFindingsQueryFromInput" />' +
-    '<div class="filter-bar-chips">' + chipsHtml + addBtn + '</div>' +
+    '<div class="filter-bar-chips">' + chipsHtml + addWrap + '</div>' +
     clearAll +
-    // Chip-dropdown popover lives INSIDE the filter bar so it can
-    // position absolute against that container — its top-left aligns
-    // with the bottom-left of the triggering chip with a 4px gap.
-    '<div class="filter-chip-dd" id="filter-chip-dd" hidden></div>' +
   '</div>';
 }
 
-function _filterChipHtml(dim, slot, n) {
+function _filterChipWrapHtml(dim, slot, n) {
+  // Per-chip wrap — establishes a positioning context for the chip's
+  // own dropdown. The dropdown is rendered empty here and populated
+  // when the user clicks the chip; this keeps the initial render
+  // cheap (we don't build N dropdowns just to leave them hidden).
   var label = dim.label;
   var cls = 'filter-chip';
   if (n > 0) {
     cls += ' is-active';
     label += ': ' + n + ' selected';
   }
-  return '<button type="button" class="' + cls + '" ' +
-    'data-action="openFilterChip" data-arg="' + dim.id + '">' +
-    '<span class="filter-chip-label">' + escapeHtml(label) + '</span>' +
-    (n > 0
-      ? '<span class="filter-chip-x" data-action="clearFilterChip" ' +
-          'data-arg="' + dim.id + '" aria-label="Clear">×</span>'
-      : '<span class="filter-chip-caret" aria-hidden="true">▾</span>') +
-  '</button>';
+  return '<div class="filter-chip-wrap" data-dim="' + escapeHtml(dim.id) + '">' +
+    '<button type="button" class="' + cls + '" ' +
+      'data-action="openFilterChip" data-arg="' + dim.id + '">' +
+      '<span class="filter-chip-label">' + escapeHtml(label) + '</span>' +
+      (n > 0
+        ? '<span class="filter-chip-x" data-action="clearFilterChip" ' +
+            'data-arg="' + dim.id + '" aria-label="Clear">×</span>'
+        : '<span class="filter-chip-caret" aria-hidden="true">▾</span>') +
+    '</button>' +
+    '<div class="filter-chip-dd" hidden></div>' +
+  '</div>';
 }
 
 // ---------------------------------------------------------------
-// Filter chip dropdown popover — opens below the clicked chip with
-// a checkbox list of dimension values. Live filtering on every
-// toggle (no Apply button); click outside / Escape closes.
+// Filter chip dropdown — populated inside the chip's own .filter-chip-
+// wrap. Positioning is pure CSS: position: absolute, top: 100%, left: 0
+// against the wrap. Right-edge flip is a single class toggle. No
+// JS coordinate math, no document.body insertion, no offsetParent
+// surprises.
 // ---------------------------------------------------------------
 
 function _mountFilterChipDropdown() {
-  var dd = document.getElementById('filter-chip-dd');
-  if (!dd) return;
-  // Outside-click + Escape close. We listen at document level so the
-  // popover catches clicks anywhere on the page that aren't its own.
-  document.addEventListener('click', function (e) {
-    if (dd.hidden) return;
-    if (dd.contains(e.target)) return;
-    var trigger = e.target.closest('[data-action="openFilterChip"], [data-action="openAddFilterMenu"]');
-    if (trigger) return; // the trigger handler will reposition / re-render
+  var bar = document.querySelector('.filter-bar');
+  if (!bar) return;
+  // Outside-click and Escape close. Document-level listeners are
+  // re-registered every applyFindingsView; the named functions below
+  // dedupe so we never end up with N listeners from N renders.
+  document.removeEventListener('click', _filterChipOutsideClick);
+  document.addEventListener('click', _filterChipOutsideClick);
+  document.removeEventListener('keydown', _filterChipEscapeClose);
+  document.addEventListener('keydown', _filterChipEscapeClose);
+}
+
+function _filterChipOutsideClick(e) {
+  // A click on a trigger button is handled by its own action handler;
+  // skip the close pass so the same click doesn't both open and close.
+  var trigger = e.target.closest('[data-action="openFilterChip"], [data-action="openAddFilterMenu"]');
+  if (trigger) return;
+  // Click inside any open dropdown — let it through.
+  if (e.target.closest('.filter-chip-dd')) return;
+  _closeAllFilterChipDropdowns();
+}
+
+function _filterChipEscapeClose(e) {
+  if (e.key !== 'Escape') return;
+  _closeAllFilterChipDropdowns();
+}
+
+function _closeAllFilterChipDropdowns() {
+  document.querySelectorAll('.filter-chip-dd').forEach(function (dd) {
     dd.hidden = true;
-    dd.removeAttribute('data-anchor');
-  });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !dd.hidden) {
-      dd.hidden = true;
-      dd.removeAttribute('data-anchor');
-    }
+    dd.classList.remove('is-flip-right');
+    dd.innerHTML = ''; // free the contents so the next open is clean
   });
 }
 
-// data-arg = filter dim id. Anchors below the clicked chip and
-// renders a checkbox list backed by the dim's count helper.
+// data-arg = dim id. Renders the checkbox list into the dropdown
+// living inside this chip's own .filter-chip-wrap. CSS handles the
+// "directly below the chip" placement.
 export function openFilterChip(dimId, target) {
   if (!dimId) return;
-  var dd = document.getElementById('filter-chip-dd');
+  // Find the wrap that owns this dim. When called from inside the
+  // +Add filter menu (target is an .add-item button), we look up the
+  // wrap by the dim attribute instead of walking up from the click.
+  var wrap = (target && target.closest && target.closest('.filter-chip-wrap[data-dim="' + dimId + '"]')) ||
+             document.querySelector('.filter-chip-wrap[data-dim="' + dimId + '"]');
+  if (!wrap) return;
+  var dd = wrap.querySelector('.filter-chip-dd');
   if (!dd) return;
+
   // Toggle off if the same chip is clicked twice.
-  if (!dd.hidden && dd.getAttribute('data-anchor') === dimId) {
-    dd.hidden = true;
-    dd.removeAttribute('data-anchor');
-    return;
-  }
+  var alreadyOpen = !dd.hidden;
+  _closeAllFilterChipDropdowns();
+  if (alreadyOpen) return;
+
   var dim = _findingsFilterDims().find(function (d) { return d.id === dimId; });
   if (!dim) return;
   var items = dim.build(findingsState.raw) || [];
   var slot = findingsState.filters[dim.id];
 
-  // Top "find filter" search inside the popover narrows the visible
-  // checkbox rows by substring — useful when a host fleet is large.
   dd.innerHTML =
     '<div class="filter-chip-dd-head">' +
       '<input type="search" class="filter-chip-dd-search" ' +
@@ -1440,88 +1475,86 @@ export function openFilterChip(dimId, target) {
       }).join('') +
     '</ul>';
 
-  dd.setAttribute('data-anchor', dim.id);
-  // Anchor below the chip the user clicked. Falls back to the bottom
-  // of the filter bar when target is missing (keyboard / programmatic).
-  var anchor = target || document.querySelector('[data-action="openFilterChip"][data-arg="' + dimId + '"]');
-  _positionChipDropdown(dd, anchor);
+  dd.hidden = false;
+  _maybeFlipRight(dd, wrap);
+  var firstInput = dd.querySelector('input');
+  if (firstInput) firstInput.focus();
 }
 
-// "+ Add filter" → render a mini menu listing inactive secondary dims.
-// Clicking one swaps the popover into its full chip dropdown view.
+// "+ Add filter" → render a mini menu in the +Add wrap's local dropdown
+// listing inactive secondary dims. Clicking one closes this menu and
+// opens that dim's chip dropdown via openFilterChip.
 export function openAddFilterMenu(_arg, target) {
-  var dd = document.getElementById('filter-chip-dd');
+  var wrap = target && target.closest
+    ? target.closest('.filter-chip-wrap-add')
+    : document.querySelector('.filter-chip-wrap-add');
+  if (!wrap) return;
+  var dd = wrap.querySelector('.filter-chip-dd');
   if (!dd) return;
-  if (!dd.hidden && dd.getAttribute('data-anchor') === '__add__') {
-    dd.hidden = true;
-    dd.removeAttribute('data-anchor');
-    return;
-  }
+
+  var alreadyOpen = !dd.hidden;
+  _closeAllFilterChipDropdowns();
+  if (alreadyOpen) return;
+
+  var s = findingsState;
   var dims = _findingsFilterDims().filter(function (d) {
     if (d.primary) return false;
-    var slot = findingsState.filters[d.id];
+    if (s._addedSecondaryDims.has(d.id)) return false;
+    var slot = s.filters[d.id];
     return slot.include.size + slot.exclude.size === 0;
   });
-  if (dims.length === 0) {
-    dd.hidden = true;
-    return;
-  }
+  if (dims.length === 0) return;
+
   dd.innerHTML =
     '<div class="filter-chip-dd-add-list">' +
       dims.map(function (d) {
+        // Once chosen, addFilterDim re-renders the bar so the chip
+        // appears, then opens its dropdown. Going through addFilterDim
+        // (rather than openFilterChip directly) means the secondary
+        // chip exists in the DOM by the time we try to open it.
         return '<button type="button" class="filter-chip-dd-add-item" ' +
-          'data-action="openFilterChip" data-arg="' + escapeHtml(d.id) + '">' +
+          'data-action="addFilterDim" data-arg="' + escapeHtml(d.id) + '">' +
           escapeHtml(d.label) +
         '</button>';
       }).join('') +
     '</div>';
-  dd.setAttribute('data-anchor', '__add__');
-  _positionChipDropdown(dd, target);
+
+  dd.hidden = false;
+  _maybeFlipRight(dd, wrap);
 }
 
-function _positionChipDropdown(dd, anchor) {
-  dd.hidden = false;
-  if (!anchor) return;
+// Surface a secondary dim as a chip in the bar (initially with no
+// active selections), then open its dropdown so the user can pick one.
+export function addFilterDim(dimId) {
+  var slot = findingsState.filters[dimId];
+  if (!slot) return;
+  // Mark the dim as "added" so applyFindingsView's render rule keeps
+  // its chip visible even before the user selects a value. Clearing
+  // the chip via × removes the dim from this set, sending it back
+  // under the "+ Add filter" menu.
+  findingsState._addedSecondaryDims.add(dimId);
+  applyFindingsView();
+  // Now the chip wrap exists; open its dropdown anchored to it.
+  setTimeout(function () { openFilterChip(dimId, null); }, 0);
+}
 
-  // The dropdown is now position: absolute inside the filter bar, so we
-  // compute coordinates relative to its offsetParent (the filter bar).
-  // Using getBoundingClientRect on both and subtracting keeps the math
-  // robust against scrolled / transformed ancestors.
-  var parent = dd.offsetParent || dd.parentElement;
-  if (!parent) return;
-  var triggerRect = anchor.getBoundingClientRect();
-  var parentRect  = parent.getBoundingClientRect();
-  var ddWidth = 240; // matches CSS — used for the right-edge flip check
-
-  // Default: top-left of dropdown aligns with bottom-left of the
-  // triggering chip, with a 4px breathing-room gap. Coordinates are
-  // expressed relative to the offsetParent.
-  var top  = (triggerRect.bottom - parentRect.top) + 4;
-  var left = triggerRect.left - parentRect.left;
-
-  // Right-edge overflow: if the dropdown's right edge would land past
-  // the viewport (minus 8px gutter), flip it to align its right edge
-  // with the right edge of the triggering chip instead.
-  if (triggerRect.left + ddWidth > window.innerWidth - 8) {
-    left = triggerRect.right - parentRect.left - ddWidth;
+// Right-edge overflow check: if the dropdown's right edge would land
+// past the viewport (minus 8px gutter), flip it via .is-flip-right
+// (CSS swaps left:0 → right:0).
+function _maybeFlipRight(dd, wrap) {
+  dd.classList.remove('is-flip-right');
+  var ddRect   = dd.getBoundingClientRect();
+  if (ddRect.right > window.innerWidth - 8) {
+    dd.classList.add('is-flip-right');
   }
-  // Final guardrail: never let the dropdown push past the parent's left
-  // edge (chips on the leftmost column should still be reachable).
-  if (left < 0) left = 0;
-
-  dd.style.left = left + 'px';
-  dd.style.top  = top + 'px';
-  // Focus the first interactive thing for keyboard users.
-  var firstInput = dd.querySelector('input, button');
-  if (firstInput) firstInput.focus();
 }
 
 // "Find filter..." input inside the popover — narrows the visible
 // rows by label substring. Same UX as the old pane's find-filter.
 export function filterChipDdFind(_arg, target) {
-  var needle = String((target && target.value) || '').trim().toLowerCase();
-  var dd = document.getElementById('filter-chip-dd');
+  var dd = target && target.closest('.filter-chip-dd');
   if (!dd) return;
+  var needle = String((target && target.value) || '').trim().toLowerCase();
   dd.querySelectorAll('.filter-chip-dd-list li').forEach(function (li) {
     var label = (li.querySelector('.filter-chip-dd-value') || {}).textContent || '';
     li.style.display = !needle || label.toLowerCase().indexOf(needle) >= 0 ? '' : 'none';
@@ -1535,6 +1568,9 @@ export function clearFilterChip(dimId, _target, ev) {
   if (!slot) return;
   slot.include.clear();
   slot.exclude.clear();
+  // Drop from the "user added me" set so secondary chips disappear
+  // back into the +Add filter menu when their × is hit.
+  findingsState._addedSecondaryDims.delete(dimId);
   applyFindingsView();
 }
 
@@ -1627,6 +1663,11 @@ export function toggleFindingsFilter(arg, target) {
     slot.include.delete(value);
   }
   applyFindingsView();
+  // Multi-select UX: reopen the same chip's dropdown after the
+  // re-render so the user can keep ticking boxes in one motion.
+  // Without this the dropdown closes after every click, making
+  // the popover effectively single-select.
+  setTimeout(function () { openFilterChip(dim, null); }, 0);
 }
 
 // Chip × — data-arg is "dim|kind|value" (kind is 'include' or 'exclude').
@@ -1647,6 +1688,7 @@ export function clearFindingsFilters() {
     f[k].include.clear();
     f[k].exclude.clear();
   });
+  findingsState._addedSecondaryDims.clear();
   applyFindingsView();
 }
 
