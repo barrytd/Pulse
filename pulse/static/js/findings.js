@@ -2977,7 +2977,11 @@ export function openFindingDrawer(f) {
 
     _renderReviewSection(f);
 
-  _updateReviewButtonStates(f);
+  // (Previously called _updateReviewButtonStates here — that helper was
+  // removed when the review buttons stopped persisting an .active state.
+  // The buttons render in their default visual state on every drawer
+  // open; the brief 3s confirmation flash is fired by _flashReviewConfirm
+  // from inside _submitReview, not on drawer mount.)
 
   document.getElementById('finding-drawer').classList.add('open');
   // Push layout: the table stays interactive (clicking another row
