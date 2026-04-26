@@ -1374,11 +1374,20 @@ function _filterChipWrapHtml(dim, slot, n) {
     label += ': ' + n + ' selected';
   }
   if (!dim.primary) cls += ' has-dismiss'; // remove right-rounded corners on the chip
+  // Inline SVG (not Lucide) so the icon paints synchronously on first
+  // render, and pointer-events:none on the svg + the .filter-chip-x-svg
+  // <line>s guarantees every click on the button area lands on the
+  // <button> itself — closest('[data-action]') always returns it.
   var dismissBtn = !dim.primary
     ? '<button type="button" class="filter-chip-dismiss" ' +
         'data-action="dismissFilterChip" data-arg="' + dim.id + '" ' +
         'aria-label="Remove filter" title="Remove filter">' +
-        '<i data-lucide="x"></i>' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+          'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" ' +
+          'class="filter-chip-x-svg" aria-hidden="true">' +
+          '<line x1="18" y1="6" x2="6" y2="18"></line>' +
+          '<line x1="6" y1="6" x2="18" y2="18"></line>' +
+        '</svg>' +
       '</button>'
     : '';
   return '<div class="filter-chip-wrap" data-dim="' + escapeHtml(dim.id) + '">' +

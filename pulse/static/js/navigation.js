@@ -161,19 +161,19 @@ function _titleFor(page, scanId) {
 // that lives inside <body>; we sweep them all here so navigation
 // authors don't have to remember which page owns which drawer.
 function _closeAnyOpenDrawer() {
-  // Findings: #finding-drawer + body.flyout-push-open
+  // Synchronous DOM-level close. We deliberately do NOT lazy-import
+  // findings.js here: the import resolves asynchronously, which used
+  // to race with a user opening a drawer right after page load (boot
+  // navigate → queued close → user clicks row → drawer opens →
+  // queued close finally resolves and strips .open). The drawer's
+  // `.open` class is the only thing the user sees; module-level
+  // _drawerFinding state is recovered by the next openFindingDrawer.
   var findingDrawer = document.getElementById('finding-drawer');
-  if (findingDrawer && findingDrawer.classList.contains('open')) {
-    findingDrawer.classList.remove('open');
-    var backdrop = document.getElementById('finding-drawer-backdrop');
-    if (backdrop) backdrop.classList.remove('open');
-  }
+  if (!findingDrawer || !findingDrawer.classList.contains('open')) return;
+  findingDrawer.classList.remove('open');
+  var backdrop = document.getElementById('finding-drawer-backdrop');
+  if (backdrop) backdrop.classList.remove('open');
   document.body.classList.remove('flyout-push-open');
-  // Module-level drawer state is reset by closeFindingDrawer; lazy-call
-  // it so other modules don't import navigation.js up the chain.
-  import('./findings.js').then(function (m) {
-    if (m.closeFindingDrawer) m.closeFindingDrawer();
-  }).catch(function () { /* findings module not loaded yet — fine */ });
 }
 
 // ----- back / forward -----------------------------------------------------

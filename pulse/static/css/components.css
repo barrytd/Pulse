@@ -1377,7 +1377,15 @@ body.light .admin-banner-close {
   height: 14px;
   stroke-width: 2;
   color: currentColor;
+  /* Critical: clicks on the X glyph must land on the <button>, not on
+     the <svg> or its <line>s — otherwise some browsers route the
+     click target to the inner element and the action delegator's
+     closest() walk grabs the wrong ancestor. Belt-and-braces, since
+     we already use closest('[data-action]') correctly. */
+  pointer-events: none;
 }
+.filter-chip-x-svg,
+.filter-chip-x-svg * { pointer-events: none; }
 .filter-chip-add {
   appearance: none;
   display: inline-flex;
