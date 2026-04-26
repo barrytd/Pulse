@@ -333,6 +333,34 @@ body.light .admin-banner-close {
   height: 18px;
 }
 
+/* Generic "icon + label" button utility — apply to any .btn (or
+   .btn-compact / .btn-small / .live-btn) that carries a leading
+   <i data-lucide> child. 16px icon, 6px gap, icon inherits text
+   color. Lets the action buttons across the app stay visually
+   consistent without per-page overrides. */
+.btn-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-with-icon i[data-lucide],
+.btn-with-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+  flex-shrink: 0;
+  /* Inherit the surrounding text color so primary/danger/secondary
+     buttons all paint their icon to match the label automatically. */
+  color: currentColor;
+}
+/* When a .btn-compact also gets the icon utility, prefer the larger
+   16px size from .btn-with-icon over the .btn-compact default 14px. */
+.btn-compact.btn-with-icon i[data-lucide],
+.btn-compact.btn-with-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
 .topbar-divider {
   width: 1px;
   height: 20px;
@@ -1302,6 +1330,34 @@ body.light .admin-banner-close {
 .filter-chip-x:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text);
+}
+
+/* Dismiss × on secondary chips (MITRE / Scan / anything added via
+   "+ Add filter"). Sits to the right of the dropdown caret and drops
+   the chip back into the +Add filter menu when clicked. Primary
+   chips (Severity / Status / Assignment / Host / Rule) never render
+   one — they're permanent. */
+.filter-chip-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: color 120ms ease, background 120ms ease;
+}
+.filter-chip-dismiss:hover {
+  color: var(--text-body, var(--text));
+  background: rgba(255, 255, 255, 0.08);
+}
+.filter-chip-dismiss i[data-lucide],
+.filter-chip-dismiss svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
 }
 .filter-chip-add {
   appearance: none;

@@ -122,7 +122,7 @@ export async function renderFleetPage() {
         '<div class="empty-icon">&#128187;</div>' +
         '<h3>No hosts yet</h3>' +
         '<p>Run a scan or upload a .evtx file — hosts will appear here once Pulse has tagged findings with a Computer name.</p>' +
-        '<button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal"><i data-lucide="upload"></i><span>Upload .evtx</span></button>' +
       '</div>';
     return;
   }
@@ -135,7 +135,7 @@ export async function renderFleetPage() {
       '<div class="page-head-title"><strong>' + _fleetCache.length + '</strong> host' +
         (_fleetCache.length === 1 ? '' : 's') + ' tracked</div>' +
       '<div class="page-head-actions">' +
-        '<button class="btn btn-secondary" data-action="exportFleetCsv">Export CSV</button>' +
+        '<button class="btn btn-secondary btn-with-icon" data-action="exportFleetCsv"><i data-lucide="download"></i><span>Export CSV</span></button>' +
       '</div>' +
     '</div>' +
     '<div id="fleet-kpi-strip-wrap">' + _kpiStripHtml(kpis) + '</div>' +

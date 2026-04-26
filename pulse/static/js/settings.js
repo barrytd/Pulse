@@ -285,7 +285,7 @@ export async function renderSettingsPage() {
       '<div style="display:flex; align-items:center; gap:18px;">' +
         avatarImg +
         '<div style="display:flex; flex-direction:column; gap:6px;">' +
-          '<button class="btn btn-secondary" data-action="uploadAvatarClick" type="button">Upload Avatar</button>' +
+          '<button class="btn btn-secondary btn-with-icon" data-action="uploadAvatarClick" type="button"><i data-lucide="upload"></i><span>Upload Avatar</span></button>' +
           '<span style="color:var(--text-muted); font-size:12px;">Max size 2MB. Formats: JPG, PNG.</span>' +
         '</div>' +
         '<input type="file" id="profile-avatar-input" accept="image/png,image/jpeg" style="display:none;" data-action-change="onAvatarFileSelected"/>' +
@@ -328,8 +328,8 @@ export async function renderSettingsPage() {
       '<div class="form-row"><label>Current password</label>' +
         '<input type="password" id="account-current-password" placeholder="required to change email or password" autocomplete="current-password"/></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveAccount">Save account changes</button>' +
-        '<button class="btn" data-action="signOut">Sign out</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveAccount"><i data-lucide="save"></i><span>Save account changes</span></button>' +
+        '<button class="btn btn-with-icon" data-action="signOut"><i data-lucide="log-out"></i><span>Sign out</span></button>' +
       '</div>' +
     '</div>';
 
@@ -356,7 +356,7 @@ export async function renderSettingsPage() {
         '<input type="password" id="email-password" placeholder="' + (em.password_set ? 'leave blank to keep current' : '16-character app password') + '" autocomplete="new-password"/></div>' +
       '<div class="form-row"><span></span><span>' + pwStatus + ' <a id="email-help-link" href="#" target="_blank" style="color:var(--accent); text-decoration:none; margin-left:12px; display:none;">How do I get an app password?</a></span></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveEmailSettings">Save email settings</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveEmailSettings"><i data-lucide="save"></i><span>Save email settings</span></button>' +
       '</div>' +
     '</div>';
 
@@ -376,8 +376,8 @@ export async function renderSettingsPage() {
       '<div class="form-row"><label>Cooldown (min)</label>' +
         '<input type="number" id="alert-cooldown" value="' + (al.cooldown_minutes != null ? al.cooldown_minutes : 60) + '" min="0"/></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
-        '<button class="btn" data-action="sendTestAlert">Send test alert</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveAlertSettings"><i data-lucide="save"></i><span>Save alert settings</span></button>' +
+        '<button class="btn btn-with-icon" data-action="sendTestAlert"><i data-lucide="send"></i><span>Send test alert</span></button>' +
       '</div>' +
     '</div>';
 
@@ -394,7 +394,7 @@ export async function renderSettingsPage() {
       '<div class="form-row"><label>Email interval</label>' +
         '<select id="alert-monitor-interval">' + intervalOpts + '</select></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveAlertSettings"><i data-lucide="save"></i><span>Save alert settings</span></button>' +
       '</div>' +
     '</div>';
 
@@ -457,8 +457,8 @@ export async function renderSettingsPage() {
         '</span></div>' +
 
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveScheduleSettings"' +
-          (schedSupported ? '' : ' disabled') + '>Save schedule</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveScheduleSettings"' +
+          (schedSupported ? '' : ' disabled') + '><i data-lucide="save"></i><span>Save schedule</span></button>' +
       '</div>' +
     '</div>';
 
@@ -478,8 +478,8 @@ export async function renderSettingsPage() {
         '<input type="password" id="webhook-url" placeholder="' + (wh.url_set ? 'leave blank to keep current' : 'https://hooks.slack.com/...') + '" autocomplete="new-password"/></div>' +
       '<div class="form-row"><span></span><span>' + whUrlStatus + '</span></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveWebhookSettings">Save webhook settings</button>' +
-        '<button class="btn" data-action="sendTestWebhook">Send test notification</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveWebhookSettings"><i data-lucide="save"></i><span>Save webhook settings</span></button>' +
+        '<button class="btn btn-with-icon" data-action="sendTestWebhook"><i data-lucide="send"></i><span>Send test notification</span></button>' +
       '</div>' +
     '</div>';
 
@@ -514,9 +514,9 @@ export async function renderSettingsPage() {
           (ti.cache_ttl_hours || 24) + '"/></div>' +
       '<div class="form-row"><span></span><span>' + tiKeyStatus + '</span></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveThreatIntelSettings">Save threat-intel settings</button>' +
-        '<button class="btn" data-action="testThreatIntelKey"' +
-          (ti.api_key_set ? '' : ' disabled') + '>Test key</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveThreatIntelSettings"><i data-lucide="save"></i><span>Save threat-intel settings</span></button>' +
+        '<button class="btn btn-with-icon" data-action="testThreatIntelKey"' +
+          (ti.api_key_set ? '' : ' disabled') + '><i data-lucide="zap"></i><span>Test key</span></button>' +
       '</div>' +
     '</div>';
 
@@ -775,7 +775,7 @@ function _renderUsersPanel(me, users) {
           '<option value="admin">Admin (full access)</option>' +
         '</select></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="createUser">Create user</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="createUser"><i data-lucide="user-plus"></i><span>Create user</span></button>' +
       '</div>' +
     '</div>' +
     '<div class="card">' +
@@ -828,7 +828,7 @@ function _renderTokensPanel(tokens) {
       '<div class="form-row"><label>Name</label>' +
         '<input type="text" id="new-token-name" placeholder="e.g. Jenkins prod" autocomplete="off" maxlength="64"/></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="createToken">Create Token</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="createToken"><i data-lucide="key"></i><span>Create Token</span></button>' +
       '</div>' +
     '</div>' +
     '<div class="card">' +

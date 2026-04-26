@@ -40,7 +40,7 @@ export async function renderHistoryPage() {
         '<div class="empty-icon">&#128200;</div>' +
         '<h3>No history yet</h3>' +
         '<p>Run your first scan to start tracking your security posture over time.</p>' +
-        '<button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal"><i data-lucide="upload"></i><span>Upload .evtx</span></button>' +
       '</div>';
     return;
   }
@@ -119,7 +119,7 @@ function _buildComparePanel(scans) {
       '<select id="cmp-a" class="dash-filter-select" style="min-width:260px;">' + options.replace('value="' + defaultA + '"', 'value="' + defaultA + '" selected') + '</select>' +
       '<label style="font-size:11px; text-transform:uppercase; letter-spacing:0.7px; color:var(--text-muted);">After</label>' +
       '<select id="cmp-b" class="dash-filter-select" style="min-width:260px;">' + options.replace('value="' + defaultB + '"', 'value="' + defaultB + '" selected') + '</select>' +
-      '<button class="btn btn-primary" data-action="runHistoryCompare">Compare</button>' +
+      '<button class="btn btn-primary btn-with-icon" data-action="runHistoryCompare"><i data-lucide="git-compare"></i><span>Compare</span></button>' +
     '</div>' +
     '<div id="cmp-results" style="margin-top:14px;"></div>' +
   '</div>';

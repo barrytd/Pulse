@@ -165,7 +165,7 @@ export async function renderScansPage() {
         '<div class="empty-icon">&#128269;</div>' +
         '<h3>No scans yet</h3>' +
         '<p>Upload a .evtx file to get started.</p>' +
-        '<button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal"><i data-lucide="upload"></i><span>Upload .evtx</span></button>' +
       '</div>';
     return;
   }
@@ -524,9 +524,9 @@ function _scansFilterBarHtml(allRows) {
     '<input type="date" class="scans-filter-date" value="' + escapeHtml(s.dateTo) + '" ' +
       'data-action-change="setScansDateTo" aria-label="To date" />' +
     '<div class="scans-filter-spacer"></div>' +
-    '<button class="btn btn-primary" data-action="openUploadModal">' +
-      '<i data-lucide="upload" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px;"></i>' +
-      'Upload .evtx' +
+    '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal">' +
+      '<i data-lucide="upload"></i>' +
+      '<span>Upload .evtx</span>' +
     '</button>' +
   '</div>';
 }
@@ -708,9 +708,9 @@ export async function viewScan(scanId, opts) {
       '<div class="card-title" style="justify-content:space-between;">' +
         '<span>Findings \u2014 ' + escapeHtml(fname) + '</span>' +
         '<div style="display:flex; gap:8px;">' +
-          '<button class="btn-small" data-action="downloadReport" data-arg="' + scanId + '" data-format="html">Export HTML</button>' +
-          '<button class="btn-small" data-action="downloadReport" data-arg="' + scanId + '" data-format="pdf" style="background:var(--border); color:var(--text);">Export PDF</button>' +
-          '<button class="btn-small" data-action="downloadReport" data-arg="' + scanId + '" data-format="json" style="background:var(--border); color:var(--text);">Export JSON</button>' +
+          '<button class="btn-small btn-with-icon" data-action="downloadReport" data-arg="' + scanId + '" data-format="html"><i data-lucide="download"></i><span>Export HTML</span></button>' +
+          '<button class="btn-small btn-with-icon" data-action="downloadReport" data-arg="' + scanId + '" data-format="pdf" style="background:var(--border); color:var(--text);"><i data-lucide="download"></i><span>Export PDF</span></button>' +
+          '<button class="btn-small btn-with-icon" data-action="downloadReport" data-arg="' + scanId + '" data-format="json" style="background:var(--border); color:var(--text);"><i data-lucide="download"></i><span>Export JSON</span></button>' +
         '</div>' +
       '</div>' +
       (findings.length > 0
@@ -850,7 +850,7 @@ export async function renderFindingsPage() {
         '<div class="empty-icon">&#10003;</div>' +
         '<h3>No findings</h3>' +
         '<p>Every scan is clean so far. Upload a new log to check again.</p>' +
-        '<button class="btn btn-primary" data-action="openUploadModal">Upload .evtx</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal"><i data-lucide="upload"></i><span>Upload .evtx</span></button>' +
       '</div>';
     return;
   }
@@ -1204,13 +1204,12 @@ function _findingsTitleBlockHtml(total, visible) {
         '<span class="toggle-switch-track" aria-hidden="true"></span>' +
         '<span class="toggle-switch-label">Auto-refresh</span>' +
       '</label>' +
-      '<button class="btn btn-compact' + refreshing + '" data-action="refreshFindings" ' +
-        'title="Refresh now"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i>' +
-        '<span>Refresh</span></button>' +
-      '<button class="btn btn-compact" data-action="exportFindingsCsv" ' +
+      '<button class="btn btn-compact btn-with-icon' + refreshing + '" ' +
+        'data-action="refreshFindings" title="Refresh now">' +
+        '<i data-lucide="refresh-cw"></i><span>Refresh</span></button>' +
+      '<button class="btn btn-compact btn-with-icon" data-action="exportFindingsCsv" ' +
         'title="Download all findings as CSV">' +
-        '<i data-lucide="download" style="width:14px;height:14px;"></i>' +
-        '<span>Export CSV</span></button>' +
+        '<i data-lucide="download"></i><span>Export CSV</span></button>' +
     '</div>' +
   '</div>';
 }
@@ -1362,20 +1361,31 @@ function _filterChipWrapHtml(dim, slot, n) {
   // own dropdown. The dropdown is rendered empty here and populated
   // when the user clicks the chip; this keeps the initial render
   // cheap (we don't build N dropdowns just to leave them hidden).
+  //
+  // Primary dims (Severity / Status / Assignment / Host / Rule) are
+  // permanent fixtures of the bar — they show a caret (▾) only.
+  // Secondary dims (MITRE / Scan) were added via "+ Add filter" and
+  // carry a small × icon to drop them back into that menu.
   var label = dim.label;
   var cls = 'filter-chip';
   if (n > 0) {
     cls += ' is-active';
     label += ': ' + n + ' selected';
   }
+  var caret = '<span class="filter-chip-caret" aria-hidden="true">▾</span>';
+  var dismissX = !dim.primary
+    ? '<span class="filter-chip-dismiss" ' +
+        'data-action="dismissFilterChip" data-arg="' + dim.id + '" ' +
+        'aria-label="Remove filter" title="Remove filter">' +
+        '<i data-lucide="x"></i>' +
+      '</span>'
+    : '';
   return '<div class="filter-chip-wrap" data-dim="' + escapeHtml(dim.id) + '">' +
     '<button type="button" class="' + cls + '" ' +
       'data-action="openFilterChip" data-arg="' + dim.id + '">' +
       '<span class="filter-chip-label">' + escapeHtml(label) + '</span>' +
-      (n > 0
-        ? '<span class="filter-chip-x" data-action="clearFilterChip" ' +
-            'data-arg="' + dim.id + '" aria-label="Clear">×</span>'
-        : '<span class="filter-chip-caret" aria-hidden="true">▾</span>') +
+      caret +
+      dismissX +
     '</button>' +
     '<div class="filter-chip-dd" hidden></div>' +
   '</div>';
@@ -1570,6 +1580,20 @@ export function clearFilterChip(dimId, _target, ev) {
   slot.exclude.clear();
   // Drop from the "user added me" set so secondary chips disappear
   // back into the +Add filter menu when their × is hit.
+  findingsState._addedSecondaryDims.delete(dimId);
+  applyFindingsView();
+}
+
+// Same effect as clearFilterChip but only fires from the small × icon
+// rendered on secondary chips (MITRE / Scan). The two paths are kept
+// separate so the chip's main click target (open dropdown) and the
+// dismiss target are unambiguous in the action registry.
+export function dismissFilterChip(dimId, _target, ev) {
+  if (ev) ev.stopPropagation();
+  var slot = findingsState.filters[dimId];
+  if (!slot) return;
+  slot.include.clear();
+  slot.exclude.clear();
   findingsState._addedSecondaryDims.delete(dimId);
   applyFindingsView();
 }
@@ -1857,8 +1881,9 @@ function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
       // from pulse-design.md. Menu floats above the trigger because the
       // bulk bar itself is docked at the bottom of the viewport.
       '<div class="bulk-bar-assign">' +
-        '<button type="button" class="btn btn-secondary btn-sm" data-action="toggleBulkAssignMenu" ' +
-          'aria-haspopup="menu" aria-expanded="false">Assign to…</button>' +
+        '<button type="button" class="btn btn-secondary btn-sm btn-with-icon" data-action="toggleBulkAssignMenu" ' +
+          'aria-haspopup="menu" aria-expanded="false">' +
+          '<i data-lucide="user-plus"></i><span>Assign to…</span></button>' +
         '<div id="bulk-bar-assign-menu" class="pulse-dropdown bulk-bar-assign-menu" hidden>' +
           '<div class="pulse-dropdown-section" id="bulk-bar-assign-list">' +
             '<div style="padding:4px 10px; color:var(--text-muted); font-size:12px;">' +
@@ -1867,10 +1892,10 @@ function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
           '</div>' +
         '</div>' +
       '</div>' +
-      '<button class="btn btn-secondary btn-sm" data-action="bulkAssignToMe">Assign to me</button>' +
-      '<button class="btn btn-secondary btn-sm" data-action="bulkUnassign">Unassign</button>' +
+      '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkAssignToMe"><i data-lucide="user-check"></i><span>Assign to me</span></button>' +
+      '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkUnassign"><i data-lucide="user-x"></i><span>Unassign</span></button>' +
       '<span class="bulk-bar-divider" aria-hidden="true"></span>' +
-      '<button class="btn btn-secondary btn-sm" data-action="bulkMarkReviewed">Mark reviewed</button>' +
+      '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkMarkReviewed"><i data-lucide="check-circle-2"></i><span>Mark reviewed</span></button>' +
       '<a class="bulk-bar-clear" data-action="clearFindingSelection">Clear selection</a>' +
     '</div>'
   );
@@ -3094,7 +3119,7 @@ async function _loadDrawerAssign(f) {
   var assignedAt = f.assigned_at ? '<div class="assign-meta">Assigned <strong>' +
     escapeHtml(f.assigned_at) + '</strong></div>' : '';
   var meBtn = (me && me.id && current !== String(me.id))
-    ? '<button type="button" class="btn-link-sm" data-action="assignFindingToMe">Assign to me</button>'
+    ? '<button type="button" class="btn-link-sm btn-with-icon" data-action="assignFindingToMe"><i data-lucide="user-check"></i><span>Assign to me</span></button>'
     : '';
 
   // Options are display_name primary, email secondary (muted) so a team
@@ -3267,7 +3292,7 @@ function _renderNotesSection(f) {
         'placeholder="Add a note — what you saw, what you did, what\'s next..."></textarea>' +
       '<div class="notes-compose-actions">' +
         '<span class="notes-compose-count"><span id="drawer-note-count">0</span> / 4000</span>' +
-        '<button type="button" class="btn btn-primary btn-sm" data-action="submitFindingNote">Post note</button>' +
+        '<button type="button" class="btn btn-primary btn-sm btn-with-icon" data-action="submitFindingNote"><i data-lucide="send"></i><span>Post note</span></button>' +
       '</div>' +
     '</div>' +
   '</div>';

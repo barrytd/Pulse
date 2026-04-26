@@ -55,6 +55,7 @@ import {
   addFilterDim,
   filterChipDdFind,
   clearFilterChip,
+  dismissFilterChip,
   findingsKpiClick,
   toggleFindingsAutoRefresh,
   refreshFindings,
@@ -273,6 +274,7 @@ const actions = {
   addFilterDim,
   filterChipDdFind,
   clearFilterChip,
+  dismissFilterChip,
   findingsKpiClick,
   toggleFindingsAutoRefresh,
   refreshFindings,
@@ -528,14 +530,31 @@ function _boot() {
   monitorClient.init();
   mountNavLiveIndicator();
 
-  // Hydrate Lucide icons once at startup. Sidebar nav, topbar user
-  // menu, and the monitor gear dropdown all render from static markup
-  // (or boot-time render) so a single pass covers them.
-  try {
-    if (window.lucide && typeof window.lucide.createIcons === 'function') {
-      window.lucide.createIcons();
-    }
-  } catch (e) {}
+  // Hydrate Lucide icons at startup AND auto-hydrate on every render
+  // afterward. A MutationObserver on #content catches every page render
+  // (which always swaps innerHTML) and a coalesced rAF call replaces
+  // any newly-injected `<i data-lucide="...">` placeholders. This means
+  // page renderers don't need to remember to call createIcons themselves.
+  function _hydrateLucide() {
+    try {
+      if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+      }
+    } catch (e) {}
+  }
+  _hydrateLucide();
+  var contentEl = document.getElementById('content');
+  if (contentEl && typeof MutationObserver === 'function') {
+    var pending = false;
+    new MutationObserver(function () {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function () {
+        pending = false;
+        _hydrateLucide();
+      });
+    }).observe(contentEl, { childList: true, subtree: true });
+  }
 
   // Populate the topbar avatar with the signed-in user's initials.
   mountUserMenu();

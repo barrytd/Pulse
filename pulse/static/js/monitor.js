@@ -481,9 +481,9 @@ function _liveUnifiedHeaderHtml(status) {
     : '';
 
   var controls = active
-    ? '<button class="live-btn" data-action="sendMonitorTestAlert">Test Alert</button>' +
-      '<button class="live-btn stop" data-action="stopMonitor">Stop</button>'
-    : '<button class="live-btn start" data-action="startMonitor">Start Monitoring</button>';
+    ? '<button class="live-btn btn-with-icon" data-action="sendMonitorTestAlert"><i data-lucide="send"></i><span>Test Alert</span></button>' +
+      '<button class="live-btn stop btn-with-icon" data-action="stopMonitor"><i data-lucide="square"></i><span>Stop</span></button>'
+    : '<button class="live-btn start btn-with-icon" data-action="startMonitor"><i data-lucide="play"></i><span>Start Monitoring</span></button>';
 
   var gear =
     '<div class="mon-gear-wrap" data-mon-gear>' +
@@ -1307,8 +1307,8 @@ function _monFeedCardHtml(feed, active) {
   }
 
   var controls = active
-    ? '<button class="live-btn stop" data-action="stopMonitor">Stop</button>'
-    : '<button class="live-btn start" data-action="startMonitor">Start Monitoring</button>';
+    ? '<button class="live-btn stop btn-with-icon" data-action="stopMonitor"><i data-lucide="square"></i><span>Stop</span></button>'
+    : '<button class="live-btn start btn-with-icon" data-action="startMonitor"><i data-lucide="play"></i><span>Start Monitoring</span></button>';
   var gear =
     '<div class="mon-gear-wrap" data-mon-gear>' +
       '<button class="live-btn gear" data-action="toggleMonGearDropdown" ' +
