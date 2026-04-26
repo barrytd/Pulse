@@ -195,7 +195,23 @@ import {
   rulesClearFilter,
   filterByTechnique,
 } from './rules.js';
-import { openAuditDrawer, openAuditFinding } from './audit.js';
+import {
+  openAuditDrawer,
+  openAuditFinding,
+  openAuditFindingByRef,
+  auditSetQuery,
+  auditClearFilters,
+  auditDismissChip,
+  auditToggleTimeFmt,
+  auditOpenChip,
+  auditOpenAddFilter,
+  auditAddFilterDim,
+  auditToggleFilter,
+  auditPickTimeWindow,
+  auditApplyFreeformFilter,
+  auditExportToggle,
+  auditExportRun,
+} from './audit.js';
 import {
   mountUserMenu,
   toggleUserMenu,
@@ -418,6 +434,19 @@ const actions = {
   // audit log
   openAuditDrawer,
   openAuditFinding,
+  openAuditFindingByRef,
+  auditSetQuery,
+  auditClearFilters,
+  auditDismissChip,
+  auditToggleTimeFmt,
+  auditOpenChip,
+  auditOpenAddFilter,
+  auditAddFilterDim,
+  auditToggleFilter,
+  auditPickTimeWindow,
+  auditApplyFreeformFilter,
+  auditExportToggle,
+  auditExportRun,
 
   // user menu
   toggleUserMenu,

@@ -3255,3 +3255,139 @@ tr.pending-flash {
   margin-left: 6px;
 }
 
+/* ==================================================================
+ * Audit Log — Sentinel-style additions
+ *
+ * The action-distribution bar reuses .sev-bar / .sev-bar-legend from
+ * components.css. The pieces below are audit-specific (lock indicator,
+ * relative-time toggle, ref-id chips, export menu).
+ * ================================================================== */
+
+/* Append-only "lock" indicator next to the page title. Subtle by
+   default; tooltip carries the integrity claim for auditors. */
+.audit-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--hover-row, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  vertical-align: middle;
+  cursor: help;
+}
+.audit-lock svg { color: currentColor; }
+.audit-lock-text {
+  letter-spacing: 0.3px;
+}
+
+/* Relative-vs-absolute time toggle in the Time column header. Sits
+   right of the "Time" label — clicking flips both the column and
+   future renders for the session. */
+.audit-time-header {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+}
+.audit-time-toggle {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.audit-time-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+.audit-time-rel {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Ref-id chips inside the audit drawer's "Affected findings" row. */
+.audit-refid-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.audit-refid-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.30);
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.audit-refid-chip:hover {
+  background: rgba(88, 166, 255, 0.22);
+  color: var(--text-high, var(--text));
+}
+
+/* Export dropdown anchored to the title-block "Export" button. Same
+   visual language as .pulse-dropdown but standalone — the title bar
+   doesn't have a stable `.pulse-dropdown` parent for absolute
+   positioning, so we use position:fixed and place via JS. */
+.audit-export-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 220px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.audit-export-menu[hidden] { display: none; }
+.audit-export-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.audit-export-item:hover { background: var(--hover-bg); }
+.audit-export-item i[data-lucide],
+.audit-export-item svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.audit-export-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
