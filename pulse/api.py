@@ -2501,6 +2501,74 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     # -------------------------------------------------------------------
+    # GET /api/weekly-brief — JSON preview of the rolling weekly digest
+    # -------------------------------------------------------------------
+    @app.get("/api/weekly-brief")
+    def get_weekly_brief(days: int = 7,
+                         user_id: int = Depends(require_login)):
+        """Return the composed weekly brief as JSON.
+
+        Used by the Settings page to render a preview before the operator
+        commits to scheduling or sending it. ``days`` is clamped to
+        [1, 365] inside the composer so requesting an absurd window
+        gracefully degrades to the cap rather than 400-ing.
+        """
+        from pulse.alerts.weekly_brief import compose_weekly_brief
+        if days < 1 or days > 365:
+            raise HTTPException(400, detail="days must be between 1 and 365.")
+        return compose_weekly_brief(app.state.db_path, days=days)
+
+    # -------------------------------------------------------------------
+    # POST /api/weekly-brief/send — email the brief to the alert recipient
+    # -------------------------------------------------------------------
+    @app.post("/api/weekly-brief/send")
+    async def send_weekly_brief_now(request: Request,
+                                    user_id: int = Depends(require_admin)):
+        """Compose + email the weekly brief immediately.
+
+        Reuses the same SMTP credentials as alerts. Recipient resolution
+        mirrors `send_alert`: ``alerts.recipient`` first, ``email.recipient``
+        second. Returns 400 with an actionable message when SMTP isn't
+        wired up — matches the test-alert endpoint's failure shape.
+        """
+        from pulse.alerts.weekly_brief import (
+            compose_weekly_brief,
+            send_weekly_brief,
+        )
+
+        # Optional ?days override (max 365). Default 7 for "weekly".
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            days = int((body or {}).get("days") or 7)
+        except (TypeError, ValueError):
+            days = 7
+
+        config = _read_config(app.state.config_path)
+        email_cfg  = config.get("email", {}) or {}
+        alerts_cfg = config.get("alerts", {}) or {}
+
+        if not email_cfg.get("password"):
+            raise HTTPException(400, detail="No SMTP password configured. Save your email settings first.")
+        recipient = alerts_cfg.get("recipient") or email_cfg.get("recipient")
+        if not recipient:
+            raise HTTPException(400, detail="No recipient configured for alerts.")
+
+        brief = compose_weekly_brief(app.state.db_path, days=days)
+        ok = send_weekly_brief(email_cfg, recipient, brief)
+        if not ok:
+            raise HTTPException(502, detail="SMTP send failed. Check the server logs for details.")
+
+        return {
+            "status":         "sent",
+            "recipient":      recipient,
+            "period_days":    brief["period_days"],
+            "findings_total": brief["findings_total"],
+        }
+
+    # -------------------------------------------------------------------
     # PUT /api/config/webhook — update Slack/Discord webhook settings
     # -------------------------------------------------------------------
     @app.put("/api/config/webhook")

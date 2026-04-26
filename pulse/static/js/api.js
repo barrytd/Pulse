@@ -428,6 +428,23 @@ export async function apiSendTestAlert() {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+export async function apiGetWeeklyBrief(days) {
+  var qs = days ? ('?days=' + encodeURIComponent(days)) : '';
+  var resp = await fetch('/api/weekly-brief' + qs);
+  var data = await resp.json();
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
+export async function apiSendWeeklyBrief(days) {
+  var resp = await fetch('/api/weekly-brief/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ days: days || 7 }),
+  });
+  var data = await resp.json();
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 export async function apiSaveWebhookConfig(body) {
   return fetch('/api/config/webhook', {
     method: 'PUT',

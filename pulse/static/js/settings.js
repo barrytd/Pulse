@@ -19,6 +19,8 @@ import {
   apiSaveEmailConfig,
   apiSaveAlertsConfig,
   apiSendTestAlert,
+  apiGetWeeklyBrief,
+  apiSendWeeklyBrief,
   apiSaveWebhookConfig,
   apiSendTestWebhook,
   apiSaveSchedulerConfig,
@@ -525,6 +527,30 @@ export async function renderSettingsPage() {
       '</div>' +
     '</div>';
 
+  // Weekly threat brief — on-demand digest. The recipient is the same
+  // address used for threshold alerts; no separate field.
+  var briefRecipient = (al.recipient || em.recipient || '').trim();
+  var briefStatus = briefRecipient
+    ? '<span class="password-status set">✓ Will send to ' + escapeHtml(briefRecipient) + '</span>'
+    : '<span class="password-status">Set an alerts recipient first</span>';
+  var briefDisabled = (em.password_set && briefRecipient) ? '' : ' disabled';
+  var weeklyBriefHtml =
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Weekly Threat Brief</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'A summary of every scan, finding, top rule, and score-trend over the ' +
+        'last 7 days, e-mailed to your alerts recipient. Sent on demand for ' +
+        'now — use it as the Monday-morning recap.' +
+      '</p>' +
+      '<div class="form-row"><span></span><span>' + briefStatus + '</span></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="sendWeeklyBriefNow"' + briefDisabled +
+          '><i data-lucide="send"></i><span>Send brief now</span></button>' +
+        '<button class="btn btn-with-icon" data-action="previewWeeklyBrief">' +
+          '<i data-lucide="eye"></i><span>Preview as JSON</span></button>' +
+      '</div>' +
+    '</div>';
+
   // --- Advanced tab --------------------------------------------------
   var scanDefaultsHtml =
     '<div class="card" style="margin-bottom:16px;">' +
@@ -618,7 +644,7 @@ export async function renderSettingsPage() {
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
-    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml + threatIntelHtml,
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
@@ -1617,6 +1643,39 @@ function _formatNextRun(iso) {
 // ------------------------------------------------------------------------
 // Profile avatar
 // ------------------------------------------------------------------------
+
+// Settings → Notifications → Weekly threat brief — fires the digest now.
+export async function sendWeeklyBriefNow() {
+  if (!window.confirm('Send the weekly threat brief to your alerts recipient now?')) return;
+  try {
+    var r = await apiSendWeeklyBrief(7);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Send failed.');
+      return;
+    }
+    showToast('Weekly brief sent to ' + (r.data.recipient || 'recipient'));
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+// Same panel — opens a fresh tab with the JSON brief so the operator can
+// inspect what would land in the email without hitting SMTP.
+export async function previewWeeklyBrief() {
+  try {
+    var r = await apiGetWeeklyBrief(7);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Preview failed.');
+      return;
+    }
+    var blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
 
 // Wired to the "Reset to defaults" button on the Appearance card. Drops
 // the saved overrides, then re-renders the settings page so the color
