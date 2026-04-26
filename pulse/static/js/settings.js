@@ -29,6 +29,8 @@ import {
   apiCreateToken,
   apiRevokeToken,
   apiListFeedback,
+  apiListWaitlist,
+  apiDeleteWaitlistSignup,
   apiListAllNotes,
 } from './api.js';
 import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
@@ -60,6 +62,7 @@ const SETTINGS_TABS = [
   { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
   { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
   { id: 'feedback',      label: 'Feedback',        icon: 'message-square', adminOnly: true },
+  { id: 'waitlist',      label: 'Waitlist',        icon: 'mail', adminOnly: true },
   { id: 'notes',         label: 'Notes',           icon: 'sticky-note', adminOnly: true },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
@@ -161,6 +164,15 @@ export async function renderSettingsPage() {
       var nl = await apiListAllNotes(500);
       notesRows = (nl && nl.notes) || [];
     } catch (e) { notesRows = []; }
+  }
+
+  // Admin-only marketing waitlist signups (from /welcome landing page).
+  var waitlistRows = [];
+  if (isAdmin) {
+    try {
+      var wl = await apiListWaitlist(500);
+      waitlistRows = (wl && wl.data && wl.data.rows) || [];
+    } catch (e) { waitlistRows = []; }
   }
 
   // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
@@ -637,6 +649,7 @@ export async function renderSettingsPage() {
   var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
   var feedbackHtml = isAdmin ? _renderFeedbackPanel(feedbackRows) : '';
   var notesHtml = isAdmin ? _renderNotesAdminPanel(notesRows) : '';
+  var waitlistHtml = isAdmin ? _renderWaitlistPanel(waitlistRows) : '';
 
   // --- API tokens tab -----------------------------------------------
   var tokensHtml = _renderTokensPanel(tokensList);
@@ -650,6 +663,7 @@ export async function renderSettingsPage() {
     tokens:        tokensHtml,
     users:         usersHtml,
     feedback:      feedbackHtml,
+    waitlist:      waitlistHtml,
     notes:         notesHtml,
     // SMTP is powerful but noisy — tucked behind a <details> so the
     // Advanced tab reads as a configuration inventory, not a form wall.
@@ -991,6 +1005,110 @@ function _renderFeedbackPanel(rows) {
       '</table></div>' +
     '</div>'
   );
+}
+
+// Admin-only Waitlist tab — signups from the /welcome landing page.
+// Mirrors _renderFeedbackPanel: KPI strip + table, with a download CSV
+// button instead of the message expand UX.
+function _renderWaitlistPanel(rows) {
+  var total = rows.length;
+  var sources = {};
+  rows.forEach(function (r) {
+    var s = (r.source || 'direct').trim() || 'direct';
+    sources[s] = (sources[s] || 0) + 1;
+  });
+  var topSource = Object.keys(sources).sort(function (a, b) {
+    return sources[b] - sources[a];
+  })[0] || '—';
+
+  function _tile(label, value) {
+    return '<div class="feedback-kpi">' +
+      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
+      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    '</div>';
+  }
+
+  var kpiHtml =
+    '<div class="feedback-kpi-strip">' +
+      _tile('Total signups', total) +
+      _tile('Top source', topSource) +
+    '</div>';
+
+  var actionsHtml =
+    '<div style="display:flex; gap:8px; margin-bottom:14px;">' +
+      '<a class="btn btn-primary btn-with-icon" href="/api/waitlist/export.csv" download>' +
+        '<i data-lucide="download"></i><span>Export CSV</span>' +
+      '</a>' +
+      '<a class="btn btn-with-icon" href="/welcome" target="_blank" rel="noopener">' +
+        '<i data-lucide="external-link"></i><span>View landing page</span>' +
+      '</a>' +
+    '</div>';
+
+  if (total === 0) {
+    return (
+      '<div class="card" style="margin-bottom:16px;">' +
+        '<div class="section-label">Waitlist</div>' +
+        '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
+          'Email signups from the public landing page at ' +
+          '<a href="/welcome" target="_blank" rel="noopener" style="color:var(--accent);">/welcome</a>. ' +
+          'Nothing yet — once someone joins, they’ll show up here with an exportable CSV.' +
+        '</p>' +
+        kpiHtml +
+        actionsHtml +
+      '</div>'
+    );
+  }
+
+  var rowsHtml = rows.map(function (r) {
+    var when = r.created_at || '';
+    var rel = formatRelativeTime(when);
+    var src = (r.source || '').trim() || '—';
+    return (
+      '<tr>' +
+        '<td class="feedback-when" title="' + escapeHtml(when) + '">' + escapeHtml(rel) + '</td>' +
+        '<td class="mono">' + escapeHtml(r.email || '') + '</td>' +
+        '<td>' + escapeHtml(src) + '</td>' +
+        '<td style="text-align:right;">' +
+          '<button class="btn-icon" type="button" title="Remove" ' +
+            'data-action="deleteWaitlistSignup" data-arg="' + escapeHtml(String(r.id)) + '">' +
+            '<i data-lucide="trash-2"></i>' +
+          '</button>' +
+        '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  return (
+    kpiHtml +
+    actionsHtml +
+    '<div class="card" style="padding:0; overflow:hidden;">' +
+      '<div class="section-label" style="padding:16px 20px 8px;">' +
+        'Signups (' + total + ')' +
+      '</div>' +
+      '<div class="table-wrap"><table class="data-table">' +
+        '<thead><tr>' +
+          '<th>When</th><th>Email</th><th>Source</th><th></th>' +
+        '</tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>' +
+    '</div>'
+  );
+}
+
+export async function deleteWaitlistSignup(id) {
+  if (!id) return;
+  if (!window.confirm('Remove this waitlist signup? This cannot be undone.')) return;
+  try {
+    var r = await apiDeleteWaitlistSignup(id);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Delete failed.');
+      return;
+    }
+    showToast('Signup removed');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
 }
 
 // Click a row to expand the full message. Re-click collapses.

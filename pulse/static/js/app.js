@@ -189,6 +189,7 @@ import {
   revokeTokenConfirm,
   toggleFeedbackRow,
   toggleNoteAdminRow,
+  deleteWaitlistSignup,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -430,6 +431,7 @@ const actions = {
   revokeTokenConfirm,
   toggleFeedbackRow,
   toggleNoteAdminRow,
+  deleteWaitlistSignup,
 
   // reports
   setReportsQueryFromInput,
