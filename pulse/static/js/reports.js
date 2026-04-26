@@ -111,8 +111,8 @@ function _renderTable() {
       '<td><span class="fmt-badge ' + _formatBadgeClass(r.format) + '">' + escapeHtml((r.format || '?').toUpperCase()) + '</span></td>' +
       '<td class="mono num">' + _formatBytes(r.size_bytes || 0) + '</td>' +
       '<td class="col-actions">' +
-        '<a class="btn btn-sm" href="' + href + '" data-default="allow" download>Download</a> ' +
-        '<button class="btn btn-sm btn-danger" data-action="deleteReport" data-arg="' + fnAttr + '">Delete</button>' +
+        '<a class="btn btn-sm btn-with-icon" href="' + href + '" data-default="allow" download><i data-lucide="download"></i><span>Download</span></a> ' +
+        '<button class="btn btn-sm btn-danger btn-with-icon" data-action="deleteReport" data-arg="' + fnAttr + '"><i data-lucide="trash-2"></i><span>Delete</span></button>' +
       '</td>' +
     '</tr>';
   }).join('');

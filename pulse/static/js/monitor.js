@@ -480,6 +480,9 @@ function _liveUnifiedHeaderHtml(status) {
       '</div>'
     : '';
 
+  // Live-panel buttons stay text-only — they sit in a tight flex
+  // header with .live-btn's custom padding + margin-left:auto, and
+  // adding flex-icon children was breaking the click target.
   var controls = active
     ? '<button class="live-btn" data-action="sendMonitorTestAlert">Test Alert</button>' +
       '<button class="live-btn stop" data-action="stopMonitor">Stop</button>'

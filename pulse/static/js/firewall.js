@@ -87,9 +87,9 @@ function _renderBlockListTab() {
           ' — IPs staged but not yet pushed to Windows Firewall.' +
         '</div>' +
         '<div class="pending-banner-actions">' +
-          '<button class="btn btn-sm" data-action="firewallReviewPending">Review</button>' +
-          '<button class="btn btn-sm btn-primary" data-action="firewallPushAll">Push now</button>' +
-          '<button class="btn btn-sm btn-danger" data-action="firewallDiscardPending">Discard</button>' +
+          '<button class="btn btn-sm btn-with-icon" data-action="firewallReviewPending"><i data-lucide="eye"></i><span>Review</span></button>' +
+          '<button class="btn btn-sm btn-primary btn-with-icon" data-action="firewallPushAll"><i data-lucide="send"></i><span>Push now</span></button>' +
+          '<button class="btn btn-sm btn-danger btn-with-icon" data-action="firewallDiscardPending"><i data-lucide="trash-2"></i><span>Discard</span></button>' +
         '</div>' +
       '</div>';
   }
@@ -116,7 +116,7 @@ function _renderBlockListTab() {
       '<div class="page-head-actions">' +
         '<button class="btn" data-action="firewallPushAll"' +
           (pending === 0 ? ' disabled' : '') + '>Push all pending</button>' +
-        '<button class="btn btn-primary" data-action="openAddBlockModal">Add IP manually</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openAddBlockModal"><i data-lucide="plus"></i><span>Add IP manually</span></button>' +
       '</div>' +
     '</div>' +
     pendingBanner +
@@ -146,7 +146,7 @@ function _renderBlockListEmpty() {
     '<div class="firewall-empty-icon"><i data-lucide="shield-off"></i></div>' +
     '<h3>No IPs blocked</h3>' +
     '<p>Block source IPs from the finding detail drawer or add them manually.</p>' +
-    '<button class="btn btn-primary" data-action="openAddBlockModal">Add IP manually</button>' +
+    '<button class="btn btn-primary btn-with-icon" data-action="openAddBlockModal"><i data-lucide="plus"></i><span>Add IP manually</span></button>' +
   '</div>' + _renderAddBlockModal();
 }
 
@@ -309,9 +309,9 @@ function _renderAddBlockModal() {
         '<span>Push immediately (admin required)</span>' +
       '</label>' +
       '<div class="modal-actions">' +
-        '<button class="btn" data-action="closeAddBlockModal">Cancel</button>' +
-        '<button class="btn btn-primary" id="add-block-submit" ' +
-          'data-action="submitAddBlock" disabled>Stage block</button>' +
+        '<button class="btn btn-with-icon" data-action="closeAddBlockModal"><i data-lucide="x"></i><span>Cancel</span></button>' +
+        '<button class="btn btn-primary btn-with-icon" id="add-block-submit" ' +
+          'data-action="submitAddBlock" disabled><i data-lucide="shield-plus"></i><span>Stage block</span></button>' +
       '</div>' +
     '</div>' +
   '</div>';

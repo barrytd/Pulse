@@ -144,7 +144,7 @@ export async function renderWhitelistPage() {
         '</select>' +
         '<input type="text" id="wl-add-value" class="search-box" style="flex:1;" placeholder="Value (e.g. service name, account, IP)" ' +
           'data-action-keydown="whitelistAddValueKey" />' +
-        '<button class="btn btn-primary" data-action="addWhitelistEntry">Add</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="addWhitelistEntry"><i data-lucide="plus"></i><span>Add</span></button>' +
       '</div>' +
       '<p style="font-size:11px; color:var(--text-muted); margin-top:8px;">' +
         'Changes save to <span class="mono" style="color:var(--accent);">pulse.yaml</span> immediately. Built-in entries are always active and cannot be removed.' +

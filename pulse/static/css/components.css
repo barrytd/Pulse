@@ -1,19 +1,15 @@
 /* ------------------------------------------------------------------ */
-/* Top bar                                                             */
-/* ------------------------------------------------------------------ */
-/* ------------------------------------------------------------------ */
-/* Full-width app chrome topbar                                        */
+/* App topbar                                                          */
 /*                                                                    */
-/* QRadar-style header: hamburger on the far left, PULSE brand next,  */
-/* current page title as a crumb, then user/live/action buttons on    */
-/* the far right. Spans the entire viewport — sidebar sits BELOW      */
-/* this bar at top: 48px. Fixed position + body padding on .app       */
-/* keeps it pinned without jumping on scroll.                         */
+/* Sentinel-style header: the sidebar owns the top-left corner, so    */
+/* the topbar shifts right to begin after the 200px sidebar. Holds    */
+/* just the page breadcrumb (left) and the utility cluster (right).   */
+/* Fixed position + .app padding-top keeps it pinned on scroll.       */
 /* ------------------------------------------------------------------ */
 .app-topbar {
   position: fixed;
   top: 0;
-  left: 0;
+  left: var(--sidebar-w, 200px);
   right: 0;
   z-index: 110;
   height: 48px;
@@ -26,78 +22,20 @@
   gap: 16px;
 }
 
-.hamburger-btn {
-  appearance: none;
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-muted, #9ca3af);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-.hamburger-btn:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.06);
-}
-
-.app-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-  color: var(--text);
-  line-height: 1;
-  transition: opacity 120ms ease;
-}
-.app-brand:hover { opacity: 0.85; }
-
-.app-brand-mark {
-  color: #3fb950;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.app-brand-name {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-  color: var(--text-high, #f3f4f6);
-}
-.app-brand-sep {
-  color: var(--text-light, rgba(255, 255, 255, 0.15));
-  font-weight: 300;
-  padding: 0 2px;
-}
-.app-brand-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  letter-spacing: 0.3px;
-}
-
-/* Current-page crumb in the middle of the topbar — replaces the old
-   full-height h2. Flex-grows into whatever space is left between the
-   brand and the right-side action cluster. */
+/* Current-page crumb — left edge of the topbar. Flex-grows into
+   whatever space is left before the right-side action cluster. */
 .app-page-crumb {
   flex: 1;
-  margin: 0 0 0 12px;
+  margin: 0;
   font-size: 14px;
-  font-weight: 500;
-  color: var(--text-muted);
+  font-weight: 600;
+  color: var(--text-high, #f3f4f6);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Topbar actions live on the right edge — reuses existing rules
-   below for .topbar-actions positioning / button styling. */
+/* Topbar actions live on the right edge. */
 .app-topbar .topbar-actions {
   margin-left: auto;
 }
@@ -393,6 +331,34 @@ body.light .admin-banner-close {
 .btn-compact.btn-icon-only svg {
   width: 18px;
   height: 18px;
+}
+
+/* Generic "icon + label" button utility — apply to any .btn (or
+   .btn-compact / .btn-small / .live-btn) that carries a leading
+   <i data-lucide> child. 16px icon, 6px gap, icon inherits text
+   color. Lets the action buttons across the app stay visually
+   consistent without per-page overrides. */
+.btn-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-with-icon i[data-lucide],
+.btn-with-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+  flex-shrink: 0;
+  /* Inherit the surrounding text color so primary/danger/secondary
+     buttons all paint their icon to match the label automatically. */
+  color: currentColor;
+}
+/* When a .btn-compact also gets the icon utility, prefer the larger
+   16px size from .btn-with-icon over the .btn-compact default 14px. */
+.btn-compact.btn-with-icon i[data-lucide],
+.btn-compact.btn-with-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .topbar-divider {
@@ -1088,4 +1054,522 @@ body.light .admin-banner-close {
 
 /* Utility: muted mono text */
 .mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
+
+/* ==================================================================
+ * SENTINEL PRIMITIVES
+ *
+ * Reusable list-page chrome. Pulled out here so any list page can
+ * adopt the same patterns by composing these classes — see the
+ * Findings page for the canonical example.
+ *
+ *   .page-header              outer wrapper for the five header zones
+ *   .page-breadcrumb          breadcrumb row (Pulse > Section > Page)
+ *   .page-title-block         title text left, action buttons right
+ *   .kpi-row + .kpi-tile      4–6 numeric tiles above the filter bar
+ *   .sev-bar-wrap + .sev-bar  6px stacked horizontal severity bar
+ *   .filter-bar               sticky filter row with search + chips
+ *   .filter-chip              the multi-select chip dropdown trigger
+ *   .filter-chip-dd           the popover the chip opens
+ *   .toggle-switch            iOS-style on/off switch (auto-refresh)
+ * ================================================================== */
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ----- Breadcrumb row ----- */
+.page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  height: 24px;
+}
+.page-breadcrumb-item {
+  color: var(--text-muted);
+}
+.page-breadcrumb-current {
+  color: var(--text);
+  font-weight: 500;
+}
+.page-breadcrumb-sep {
+  color: var(--text-light, var(--text-muted));
+  opacity: 0.6;
+  padding: 0 2px;
+}
+
+/* ----- Title block ----- */
+.page-title-block {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+}
+.page-title {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-high, var(--text));
+  letter-spacing: -0.1px;
+  margin: 0;
+}
+.page-title-count {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 18px;
+  margin-left: 4px;
+}
+.page-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-compact.is-busy {
+  /* Light spin animation on the leading icon while a refresh is in
+     flight. Doesn't block clicks — the handler debounces itself. */
+  pointer-events: none;
+}
+.btn-compact.is-busy svg {
+  animation: pulse-spin 0.9s linear infinite;
+}
+@keyframes pulse-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ----- KPI tiles ----- */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.kpi-tile {
+  appearance: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: 8px;
+  padding: 14px 18px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+  color: var(--text);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.kpi-tile:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent);
+}
+.kpi-tile.is-active {
+  border-left-color: var(--accent);
+  background: var(--accent-glow, rgba(88, 166, 255, 0.08));
+}
+.kpi-tile-number {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.kpi-tile-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.kpi-tile-sub {
+  font-size: 11px;
+  color: var(--text-light, var(--text-muted));
+  opacity: 0.75;
+}
+
+@media (max-width: 960px) {
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ----- Severity bar ----- */
+.sev-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sev-bar-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sev-bar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sev-bar-legend-item strong {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+}
+.sev-bar-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.sev-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border);
+}
+.sev-bar-seg {
+  height: 100%;
+}
+
+/* ----- Sticky filter bar ----- */
+.filter-bar {
+  /* `position: sticky` already establishes a containing block for
+     absolute-positioned descendants — the chip-dropdown popover
+     anchors against this bar without needing an extra `position:
+     relative` rule. */
+  position: sticky;
+  top: 48px; /* under the 48px topbar */
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.filter-bar-search {
+  flex: 0 0 240px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.filter-bar-search:focus { border-color: var(--accent); }
+.filter-bar-chips {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Each chip + its dropdown live inside a wrap. The wrap is the
+   positioning context for the dropdown — `position: relative` here
+   means the dropdown's `position: absolute; top: 100%; left: 0`
+   anchors directly below the chip with no JS coordinate math. */
+.filter-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.filter-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.filter-chip:hover {
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+.filter-chip.is-active {
+  background: var(--accent-glow, rgba(88, 166, 255, 0.12));
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-chip-label { line-height: 1; }
+.filter-chip-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-left: 2px;
+}
+.filter-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.filter-chip-x:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+/* Dismiss × on secondary chips (MITRE / Scan / anything added via
+   "+ Add filter"). Rendered as a SIBLING of the chip (not a child) so
+   the dismiss click is never routed into the chip's own openFilterChip
+   handler. Visually it hugs the chip's right edge — the chip drops its
+   right border-radius (.has-dismiss) and the dismiss button picks it
+   up so the pair reads as one capsule with two halves. */
+.filter-chip.has-dismiss {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 0;
+}
+.filter-chip-dismiss {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.filter-chip-dismiss:hover {
+  color: var(--text-body, var(--text));
+  background: var(--hover-bg);
+  border-color: var(--accent);
+}
+.filter-chip.is-active + .filter-chip-dismiss {
+  /* Match the active chip's tinted background so the capsule reads
+     as one cohesive control when the chip is in active state. */
+  background: var(--accent-glow, rgba(88, 166, 255, 0.12));
+  border-color: var(--accent);
+}
+.filter-chip-dismiss i[data-lucide],
+.filter-chip-dismiss svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+  color: currentColor;
+  /* Critical: clicks on the X glyph must land on the <button>, not on
+     the <svg> or its <line>s — otherwise some browsers route the
+     click target to the inner element and the action delegator's
+     closest() walk grabs the wrong ancestor. Belt-and-braces, since
+     we already use closest('[data-action]') correctly. */
+  pointer-events: none;
+}
+.filter-chip-x-svg,
+.filter-chip-x-svg * { pointer-events: none; }
+.filter-chip-add {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.filter-chip-add:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-chip-clear-all {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  margin-left: auto;
+  padding: 0 4px;
+}
+.filter-chip-clear-all:hover { text-decoration: underline; }
+
+/* ----- Filter chip dropdown popover -----
+   Lives INSIDE its chip's .filter-chip-wrap and positions purely via
+   CSS — top: 100% drops it directly under the chip with a 4px gap
+   from `margin-top`. No JS coordinate math: the layout works whether
+   the chip is left-most, right-most, or anywhere in between. */
+.filter-chip-dd {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 1000;
+  width: 240px;
+  max-height: 320px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.filter-chip-dd[hidden] { display: none; }
+/* Right-edge overflow flip: applied by JS when the dropdown's right
+   edge would extend past the viewport. Swaps `left: 0` for `right: 0`
+   so the dropdown sits flush to the chip's right edge instead. */
+.filter-chip-dd.is-flip-right {
+  left: auto;
+  right: 0;
+}
+.filter-chip-dd-head {
+  flex: 0 0 auto;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.filter-chip-dd-search {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.filter-chip-dd-search:focus { border-color: var(--accent); }
+.filter-chip-dd-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  flex: 1;
+  overflow-y: auto;
+}
+.filter-chip-dd-list > li > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-chip-dd-list > li > label:hover { background: var(--hover-bg); }
+.filter-chip-dd-list input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+.filter-chip-dd-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.filter-chip-dd-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+.filter-chip-dd-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.filter-chip-dd-add-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+.filter-chip-dd-add-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.filter-chip-dd-add-item:hover { background: var(--hover-bg); }
+
+/* ----- Toggle switch (iOS-style rocker) ----- */
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-switch input {
+  /* Visually hidden but still focusable for keyboard/AT users. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.toggle-switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  background: var(--border);
+  border-radius: 9px;
+  transition: background 150ms ease;
+  flex-shrink: 0;
+}
+.toggle-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 150ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.toggle-switch input:checked + .toggle-switch-track {
+  background: var(--accent);
+}
+.toggle-switch input:checked + .toggle-switch-track::after {
+  transform: translateX(14px);
+}
+.toggle-switch input:focus-visible + .toggle-switch-track {
+  box-shadow: 0 0 0 3px var(--accent-glow, rgba(88, 166, 255, 0.25));
+}
+.toggle-switch:hover .toggle-switch-label { color: var(--text); }
+.toggle-switch-label { transition: color 120ms ease; }
 

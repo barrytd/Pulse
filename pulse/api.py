@@ -413,13 +413,23 @@ def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_pa
 def _audit_finding_action(app, user_id, action, *, finding_id=None, detail=None):
     """Record a finding-level action (review / workflow / notes / assign)
     in the audit_log table. Wrapped like _audit_scan_delete so a logging
-    failure never breaks the primary request."""
+    failure never breaks the primary request.
+
+    `detail` may be a free-form string (legacy callers) or a dict — when
+    a dict is passed we JSON-encode it so the audit drawer's formatter
+    can parse it back out into structured fields (before/after state,
+    bulk finding ids, etc.)."""
     try:
         from pulse.firewall import blocker
         from pulse.database import get_user_by_id as _get_user_by_id
         user_row = _get_user_by_id(app.state.db_path, user_id) if user_id else None
         email = (user_row or {}).get("email") if user_row else None
         target = f"finding:{finding_id}" if finding_id is not None else None
+        if isinstance(detail, dict):
+            try:
+                detail = json.dumps(detail, separators=(",", ":"))
+            except (TypeError, ValueError):
+                detail = str(detail)
         blocker.log_audit(
             app.state.db_path,
             action=action,
@@ -430,6 +440,34 @@ def _audit_finding_action(app, user_id, action, *, finding_id=None, detail=None)
         )
     except Exception:
         pass
+
+
+def _ref_ids_for_findings(db_path, finding_ids):
+    """Look up the short reference IDs (e.g., 'PTH-0142') for a list of
+    finding row ids. Returns a list of ref_ids in the same order findings
+    come back from the DB — capped at 200 to keep audit details bounded.
+    Empty list on error."""
+    if not finding_ids:
+        return []
+    try:
+        from pulse import db_backend
+        capped = list(finding_ids)[:200]
+        placeholders = ",".join("?" for _ in capped)
+        with db_backend.connect(db_path) as conn:
+            rows = conn.execute(
+                "SELECT id, ref_id FROM findings WHERE id IN (" + placeholders + ")",
+                tuple(int(x) for x in capped),
+            ).fetchall()
+        # Preserve the caller's order so the audit detail reads chronologically.
+        idx = {}
+        for r in rows or []:
+            rid = r[0] if not isinstance(r, dict) else r.get("id")
+            ref = r[1] if not isinstance(r, dict) else r.get("ref_id")
+            if ref:
+                idx[int(rid)] = ref
+        return [idx[int(x)] for x in capped if int(x) in idx]
+    except Exception:
+        return []
 
 
 def _attach_note_counts(app, findings):
@@ -1185,6 +1223,140 @@ def _register_routes(app: FastAPI) -> None:
         return {"rows": blocker.get_audit_log(app.state.db_path, limit=limit)}
 
     # -------------------------------------------------------------------
+    # Audit export — CSV / JSON / NDJSON. Each respects the same
+    # filter query params the dashboard sends so what you download
+    # matches what you see. Filters are applied here (server-side) so
+    # exporting a 30-day window doesn't pull 1000 rows just to drop
+    # most of them client-side.
+    # -------------------------------------------------------------------
+    def _audit_apply_filters(rows, *, actions=None, users=None,
+                             target_types=None, time_window=None,
+                             ip=None, finding_ref=None):
+        """Apply the audit-page filter chips server-side. Each filter is
+        a Set of strings (CSV from the query string). `time_window` is one
+        of '24h' / '7d' / '30d' / '90d' / 'all'."""
+        from datetime import timedelta
+        out = rows or []
+
+        if actions:
+            wanted = {a.strip().lower() for a in actions if a}
+            out = [r for r in out if (r.get("action") or "").lower() in wanted]
+        if users:
+            wanted = {u.strip().lower() for u in users if u}
+            out = [
+                r for r in out
+                if ((r.get("user_display_name") or r.get("user") or "").lower() in wanted)
+            ]
+        if target_types:
+            wanted = {t.strip().lower() for t in target_types if t}
+            def _ttype(r):
+                # comment looks like "finding:42" / target_type derived from the action.
+                c = (r.get("comment") or "").lower()
+                if c.startswith("finding:"): return "finding"
+                a = (r.get("action") or "").lower()
+                if "scan" in a: return "scan"
+                if r.get("ip_address"): return "ip"
+                if "user" in a: return "user"
+                if "rule" in a: return "rule"
+                return "other"
+            out = [r for r in out if _ttype(r) in wanted]
+        if time_window and time_window != "all":
+            sizes = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
+            days = sizes.get(time_window)
+            if days:
+                cutoff = datetime.now() - timedelta(days=days)
+                def _is_fresh(r):
+                    try:
+                        ts = datetime.strptime((r.get("ts") or "").strip(),
+                                               "%Y-%m-%d %H:%M:%S")
+                        return ts >= cutoff
+                    except Exception:
+                        return False
+                out = [r for r in out if _is_fresh(r)]
+        if ip:
+            out = [r for r in out if (r.get("ip_address") or "") == ip]
+        if finding_ref:
+            ref = finding_ref.lower()
+            out = [r for r in out if ref in (r.get("detail") or "").lower()]
+        return out
+
+    def _audit_filter_params(request: Request):
+        """Pull the dashboard's filter chips off the query string. CSV
+        for multi-select, single string for the time window. All filters
+        are optional — missing means "no filter on that axis"."""
+        qp = request.query_params
+        def _csv(key):
+            v = qp.get(key)
+            if not v: return None
+            return [x for x in v.split(",") if x]
+        return {
+            "actions":      _csv("actions"),
+            "users":        _csv("users"),
+            "target_types": _csv("target_types"),
+            "time_window":  qp.get("time_window") or None,
+            "ip":           qp.get("ip") or None,
+            "finding_ref":  qp.get("finding_ref") or None,
+        }
+
+    @app.get("/api/audit/export.csv")
+    def audit_export_csv(request: Request, user_id: int = Depends(require_admin)):
+        import csv
+        import io
+        from pulse.firewall import blocker
+        rows = blocker.get_audit_log(app.state.db_path, limit=1000)
+        rows = _audit_apply_filters(rows, **_audit_filter_params(request))
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["timestamp", "action", "user", "ip", "target", "source", "detail"])
+        for r in rows:
+            w.writerow([
+                r.get("ts", "") or "",
+                r.get("action", "") or "",
+                r.get("user_display_name") or r.get("user") or "",
+                r.get("ip_address", "") or "",
+                r.get("comment", "") or "",
+                r.get("source", "") or "",
+                (r.get("detail") or "").replace("\n", " ").replace("\r", " "),
+            ])
+        filename = f"pulse-audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/audit/export.json")
+    def audit_export_json(request: Request, user_id: int = Depends(require_admin)):
+        from pulse.firewall import blocker
+        rows = blocker.get_audit_log(app.state.db_path, limit=1000)
+        rows = _audit_apply_filters(rows, **_audit_filter_params(request))
+        body = json.dumps({"exported_at": datetime.now().isoformat(),
+                           "count": len(rows), "rows": rows}, indent=2)
+        filename = f"pulse-audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/audit/export.ndjson")
+    def audit_export_ndjson(request: Request, user_id: int = Depends(require_admin)):
+        """Newline-delimited JSON — one event per line. Friendly to
+        SIEM ingest (Splunk, ELK, Sentinel) and grep-style ad-hoc
+        analysis. Same filter respect as the other two formats."""
+        from pulse.firewall import blocker
+        rows = blocker.get_audit_log(app.state.db_path, limit=1000)
+        rows = _audit_apply_filters(rows, **_audit_filter_params(request))
+        body = "\n".join(json.dumps(r, separators=(",", ":")) for r in rows)
+        if rows: body += "\n"
+        filename = f"pulse-audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}.ndjson"
+        return Response(
+            content=body,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # -------------------------------------------------------------------
     # GET /api/fleet/export.csv — downloadable one-row-per-host summary
     # -------------------------------------------------------------------
     @app.get("/api/fleet/export.csv")
@@ -1218,6 +1390,62 @@ def _register_routes(app: FastAPI) -> None:
                 r.get("worst_severity", "") or "",
             ])
         filename = f"pulse-fleet-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # -------------------------------------------------------------------
+    # GET /api/findings/export.csv — full findings list as one CSV
+    # -------------------------------------------------------------------
+    @app.get("/api/findings/export.csv")
+    def findings_export_csv(user_id: int = Depends(require_login)):
+        """Stream every finding the caller can see as CSV. Column order
+        mirrors what the dashboard table shows so the file maps 1:1 to
+        the on-screen view (timestamp, severity, rule, scan, host,
+        assignee, workflow status, MITRE, description)."""
+        import csv
+        import io
+        from pulse.database import get_history, get_scan_findings
+
+        scope = _scan_scope_for(app, user_id)
+        scans = get_history(app.state.db_path, limit=200, user_id=scope)
+        scan_meta = {s["id"]: s for s in scans}
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "timestamp",
+            "severity",
+            "rule",
+            "scan_number",
+            "scan_id",
+            "host",
+            "assigned_to",
+            "workflow_status",
+            "reviewed",
+            "false_positive",
+            "mitre",
+            "description",
+        ])
+        for s in scans:
+            for f in get_scan_findings(app.state.db_path, s["id"], user_id=scope) or []:
+                writer.writerow([
+                    f.get("timestamp", "") or "",
+                    (f.get("severity") or "").upper(),
+                    f.get("rule", "") or "",
+                    s.get("number", "") or "",
+                    s.get("id", "") or "",
+                    s.get("hostname", "") or s.get("filename", "") or "",
+                    f.get("assignee_display_name") or f.get("assignee_email") or "",
+                    f.get("workflow_status", "") or "new",
+                    1 if f.get("reviewed") else 0,
+                    1 if f.get("false_positive") else 0,
+                    f.get("mitre", "") or "",
+                    (f.get("description") or "").replace("\n", " ").replace("\r", " "),
+                ])
+        filename = f"pulse-findings-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
         return Response(
             content=buf.getvalue(),
             media_type="text/csv",
@@ -1469,7 +1697,10 @@ def _register_routes(app: FastAPI) -> None:
         _audit_finding_action(
             app, user_id, "review_finding",
             finding_id=finding_id,
-            detail=f"reviewed={int(reviewed)} false_positive={int(false_positive)}",
+            detail={
+                "reviewed":       bool(reviewed),
+                "false_positive": bool(false_positive),
+            },
         )
         return updated
 
@@ -1512,6 +1743,23 @@ def _register_routes(app: FastAPI) -> None:
             owner = row[0] if not isinstance(row, dict) else row.get("user_id")
             if owner is not None and int(owner) != int(scope):
                 raise HTTPException(404, detail="Finding not found.")
+        # Capture the previous workflow_status so the audit drawer can
+        # render "Status changed from New to Acknowledged" instead of
+        # just the new value. Falls back to 'new' for old findings that
+        # predate the workflow_status column.
+        prev_state = None
+        try:
+            from pulse import db_backend
+            with db_backend.connect(app.state.db_path) as conn:
+                row = conn.execute(
+                    "SELECT workflow_status FROM findings WHERE id = ?",
+                    (int(finding_id),),
+                ).fetchone()
+            if row:
+                prev_state = (row[0] if not isinstance(row, dict) else row.get("workflow_status")) or "new"
+        except Exception:
+            prev_state = None
+
         try:
             updated = set_finding_workflow(app.state.db_path, finding_id, state)
         except ValueError as exc:
@@ -1521,7 +1769,7 @@ def _register_routes(app: FastAPI) -> None:
         _audit_finding_action(
             app, user_id, "set_workflow_state",
             finding_id=finding_id,
-            detail=f"workflow_status={state}",
+            detail={"to": state, "from": prev_state},
         )
         return updated
 
@@ -1579,34 +1827,57 @@ def _register_routes(app: FastAPI) -> None:
                 or assignee_row.get("email")
                 or f"user #{assignee}"
             )
+            ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
                 app, user_id, "bulk_assign_findings",
-                detail=f"count={result['updated']} assigned to {assignee_label}",
+                detail={
+                    "count":   int(result["updated"]),
+                    "to":      {"id": int(assignee), "name": assignee_label},
+                    "ref_ids": ref_ids,
+                    "ids":     [int(x) for x in finding_ids[:200]],
+                },
             )
         elif op == "unassign":
             result = batch_set_finding_assignee(
                 app.state.db_path, finding_ids, None, scope,
             )
+            ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
                 app, user_id, "bulk_unassign_findings",
-                detail=f"count={result['updated']}",
+                detail={
+                    "count":   int(result["updated"]),
+                    "ref_ids": ref_ids,
+                    "ids":     [int(x) for x in finding_ids[:200]],
+                },
             )
         elif op == "review":
             # One-click "Mark reviewed" — sets reviewed=True, false_positive=False.
             result = batch_set_finding_review(
                 app.state.db_path, finding_ids, True, False, scope,
             )
+            ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
                 app, user_id, "bulk_review_findings",
-                detail=f"count={result['updated']}",
+                detail={
+                    "count":    int(result["updated"]),
+                    "reviewed": True,
+                    "ref_ids":  ref_ids,
+                    "ids":      [int(x) for x in finding_ids[:200]],
+                },
             )
         elif op == "unreview":
             result = batch_set_finding_review(
                 app.state.db_path, finding_ids, False, False, scope,
             )
+            ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
                 app, user_id, "bulk_unreview_findings",
-                detail=f"count={result['updated']}",
+                detail={
+                    "count":    int(result["updated"]),
+                    "reviewed": False,
+                    "ref_ids":  ref_ids,
+                    "ids":      [int(x) for x in finding_ids[:200]],
+                },
             )
         else:
             raise HTTPException(400, detail="op must be assign, unassign, review, or unreview.")
@@ -1717,6 +1988,33 @@ def _register_routes(app: FastAPI) -> None:
                 assignee = int(raw)
             except (TypeError, ValueError):
                 raise HTTPException(400, detail="assignee_user_id must be an integer or null.")
+        # Capture the prior assignee BEFORE we update so the audit drawer
+        # can render "Reassigned from Kwame Asante to Robert" rather than
+        # just the new name. Both id + display name are stored so the
+        # drawer can deep-link to the user.
+        prev_assignee = None
+        try:
+            from pulse import db_backend
+            with db_backend.connect(app.state.db_path) as conn:
+                row = conn.execute(
+                    "SELECT findings.assigned_to AS uid, "
+                    "       users.display_name AS name, users.email AS email "
+                    "FROM findings LEFT JOIN users ON users.id = findings.assigned_to "
+                    "WHERE findings.id = ?",
+                    (int(finding_id),),
+                ).fetchone()
+            if row is not None:
+                uid = row[0] if not isinstance(row, dict) else row.get("uid")
+                if uid is not None:
+                    name  = row[1] if not isinstance(row, dict) else row.get("name")
+                    email = row[2] if not isinstance(row, dict) else row.get("email")
+                    prev_assignee = {
+                        "id":   int(uid),
+                        "name": (name or "").strip() or email or f"user #{uid}",
+                    }
+        except Exception:
+            prev_assignee = None
+
         try:
             updated = set_finding_assignee(app.state.db_path, finding_id, assignee)
         except ValueError as exc:
@@ -1726,10 +2024,19 @@ def _register_routes(app: FastAPI) -> None:
         assignee_label = (updated.get("assignee_display_name")
                           or updated.get("assignee_email")
                           or f"user #{assignee}")
+        if assignee is not None:
+            audit_detail = {
+                "to":   {"id": int(assignee), "name": assignee_label},
+                "from": prev_assignee,  # null on first-time assignments
+            }
+            audit_action = "assign_finding"
+        else:
+            audit_detail = {"from": prev_assignee}
+            audit_action = "unassign_finding"
         _audit_finding_action(
-            app, user_id, "assign_finding" if assignee is not None else "unassign_finding",
+            app, user_id, audit_action,
             finding_id=finding_id,
-            detail=(f"assigned to {assignee_label}" if assignee is not None else "cleared"),
+            detail=audit_detail,
         )
         return updated
 
@@ -2015,6 +2322,7 @@ def _register_routes(app: FastAPI) -> None:
         email = config.get("email", {}) or {}
         alerts = config.get("alerts", {}) or {}
         webhook = config.get("webhook", {}) or {}
+        intel = config.get("threat_intel", {}) or {}
 
         return {
             "whitelist": {
@@ -2050,6 +2358,16 @@ def _register_routes(app: FastAPI) -> None:
                 "enabled":  bool(webhook.get("enabled", False)),
                 "flavor":   webhook.get("flavor") or "",
                 "url_set":  bool((webhook.get("url") or "").strip()),
+            },
+            # Threat-intel (AbuseIPDB). The API key is a credential, so
+            # only `api_key_set` crosses the wire — never the raw value.
+            # `enabled` defaults to True when a key is set; users can
+            # explicitly toggle off without removing the key.
+            "threat_intel": {
+                "enabled":         intel.get("enabled") is not False
+                                    and bool((intel.get("abuseipdb_api_key") or "").strip()),
+                "api_key_set":     bool((intel.get("abuseipdb_api_key") or "").strip()),
+                "cache_ttl_hours": int(intel.get("cache_ttl_hours", 24) or 24),
             },
             "scheduled_scan": _scheduled_scan_view(config),
         }
@@ -2254,6 +2572,119 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(502, detail="Webhook POST failed. Check the URL and try again.")
 
         return {"status": "sent"}
+
+    # -------------------------------------------------------------------
+    # PUT /api/config/threat_intel — save AbuseIPDB key + toggles
+    # -------------------------------------------------------------------
+    @app.put("/api/config/threat_intel")
+    async def update_threat_intel(request: Request,
+                                  user_id: int = Depends(require_admin)):
+        """Update the threat-intel section of pulse.yaml.
+
+        API-key handling mirrors email.password / webhook.url: an omitted
+        or empty `abuseipdb_api_key` preserves the stored value, so the
+        UI can resave the enabled toggle without forcing the user to
+        repaste their key every time. Sending the literal string "null"
+        clears the key.
+        """
+        body = await request.json()
+        config = _read_config(app.state.config_path)
+        intel = config.get("threat_intel", {}) or {}
+
+        if "enabled" in body:
+            intel["enabled"] = bool(body["enabled"])
+
+        if "cache_ttl_hours" in body:
+            try:
+                ttl = int(body["cache_ttl_hours"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="cache_ttl_hours must be an integer.")
+            if ttl < 1 or ttl > 24 * 30:
+                raise HTTPException(400, detail="cache_ttl_hours must be between 1 and 720.")
+            intel["cache_ttl_hours"] = ttl
+
+        if "abuseipdb_api_key" in body:
+            raw = body.get("abuseipdb_api_key")
+            if raw is None or raw == "" or raw == "null":
+                # Explicit clear: caller sent "null" or empty as a sentinel.
+                if raw == "null":
+                    intel["abuseipdb_api_key"] = None
+                # Empty string just means "leave alone" (UI placeholder).
+            else:
+                key = str(raw).strip()
+                if key:
+                    intel["abuseipdb_api_key"] = key
+
+        config["threat_intel"] = intel
+        _write_config(app.state.config_path, config)
+
+        return {
+            "status":      "ok",
+            "api_key_set": bool((intel.get("abuseipdb_api_key") or "").strip()),
+            "enabled":     intel.get("enabled") is not False
+                           and bool((intel.get("abuseipdb_api_key") or "").strip()),
+        }
+
+    # -------------------------------------------------------------------
+    # GET /api/intel/{ip} — threat-intel lookup for one IP
+    # -------------------------------------------------------------------
+    @app.get("/api/intel/{ip}")
+    def get_intel_for_ip(ip: str, user_id: int = Depends(require_login)):
+        """Return cached or freshly-fetched threat intel for an IP.
+
+        Returns 404 when the IP is private/invalid (nothing to look up),
+        or 400 when no API key is configured AND no cache entry exists.
+        Findings / firewall pages call this on demand to enrich the
+        rows they already render — no eager bulk lookup.
+        """
+        from pulse import intel as intel_mod
+
+        if not intel_mod._is_public_ip(ip):
+            raise HTTPException(404, detail="IP is private, loopback, or invalid.")
+
+        config = _read_config(app.state.config_path) or {}
+        api_key = intel_mod.get_api_key_from_config(config)
+        ttl = intel_mod.get_ttl_hours_from_config(config)
+
+        result = intel_mod.lookup_ip(ip, app.state.db_path,
+                                     api_key=api_key, ttl_hours=ttl)
+        if result is None:
+            raise HTTPException(
+                400,
+                detail="No threat-intel data available. Configure an "
+                       "AbuseIPDB API key under Settings to enable lookups.",
+            )
+
+        # Strip the internal _raw payload before sending — the frontend
+        # only needs the normalized fields.
+        return {k: v for k, v in result.items() if not k.startswith("_")}
+
+    # -------------------------------------------------------------------
+    # POST /api/intel/test — verify the configured API key works
+    # -------------------------------------------------------------------
+    @app.post("/api/intel/test")
+    def test_threat_intel(user_id: int = Depends(require_admin)):
+        """Confirm the saved AbuseIPDB key works by looking up a known
+        public IP (Cloudflare 1.1.1.1 — always responds, score is low).
+        Bypasses the cache so the result reflects live API health.
+        """
+        from pulse import intel as intel_mod
+
+        config = _read_config(app.state.config_path) or {}
+        api_key = intel_mod.get_api_key_from_config(config)
+        if not api_key:
+            raise HTTPException(400, detail="No AbuseIPDB API key configured.")
+
+        # Hit AbuseIPDB directly — skip the cache so a stale entry
+        # doesn't mask a key that's been revoked.
+        result = intel_mod._lookup_via_abuseipdb("1.1.1.1", api_key)
+        if result is None:
+            raise HTTPException(
+                502,
+                detail="Lookup failed. Check the key and try again "
+                       "(AbuseIPDB may also be rate-limiting).",
+            )
+        return {"status": "ok", "score": result.get("score")}
 
     # -------------------------------------------------------------------
     # POST /api/scan/system — one-shot scan of the local Windows event logs

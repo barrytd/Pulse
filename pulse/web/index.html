@@ -15,51 +15,13 @@
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
-  <!-- Restore sidebar collapsed state before first paint so the page
-       doesn't flash between expanded and collapsed on reload. -->
-  <script>
-    (function () {
-      try {
-        if (localStorage.getItem('pulseSidebarCollapsed') === '1') {
-          document.body.classList.add('sidebar-collapsed');
-        }
-      } catch (e) { /* localStorage disabled — default to expanded */ }
-    })();
-  </script>
-
   <!-- ============================================================= -->
-  <!-- FULL-WIDTH APP TOPBAR                                           -->
-  <!-- Hamburger (toggles the sidebar) → PULSE brand → current page   -->
-  <!-- crumb → live indicator + action buttons + user avatar on right. -->
+  <!-- APP TOPBAR                                                      -->
+  <!-- Sits to the right of the sidebar (starts at left: 200px).       -->
+  <!-- Just a page breadcrumb + utility cluster — brand lives inside   -->
+  <!-- the sidebar's top block (Sentinel-style).                      -->
   <!-- ============================================================= -->
   <header class="app-topbar">
-    <button class="hamburger-btn" type="button"
-            data-action="toggleSidebar"
-            aria-label="Toggle navigation sidebar"
-            title="Toggle sidebar">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
-           stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <line x1="3" y1="6"  x2="21" y2="6"/>
-        <line x1="3" y1="12" x2="21" y2="12"/>
-        <line x1="3" y1="18" x2="21" y2="18"/>
-      </svg>
-    </button>
-
-    <a class="app-brand" data-action="navigate" data-arg="dashboard"
-       title="Dashboard home">
-      <span class="app-brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 28 28" width="22" height="22" fill="none"
-             stroke="currentColor" stroke-width="2"
-             stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 14 L11 14 L14 5 L17 14 L25 14"/>
-        </svg>
-      </span>
-      <span class="app-brand-name">PULSE</span>
-      <span class="app-brand-sep" aria-hidden="true">|</span>
-      <span class="app-brand-sub">Threat Detection</span>
-    </a>
-
     <h2 class="app-page-crumb" id="page-title">Dashboard</h2>
 
     <div class="topbar-actions">
@@ -123,203 +85,128 @@
   </header>
 
   <!-- ============================================================= -->
-  <!-- APP BODY: SIDEBAR + MAIN CONTENT                                -->
+  <!-- SIDEBAR — Microsoft Sentinel-style persistent left navigation   -->
+  <!-- 200px fixed, always visible. Brand block at top, four labeled  -->
+  <!-- nav groups in the middle, Settings + Feedback pinned at bottom. -->
   <!-- ============================================================= -->
-  <div class="app">
-    <aside class="sidebar">
-      <!-- =========================================================
-           DASHBOARD FILTER PANEL — primary sidebar content (top).
-           Nav moves below the divider. QRadar layout: filters are the
-           tool, nav is the chrome, so filters get the visual weight.
-           ========================================================= -->
-      <div class="sidebar-page-filters" id="dash-sidebar-filters">
+  <aside class="sidebar" aria-label="Primary navigation">
+    <a class="sidebar-brand" data-action="navigate" data-arg="dashboard"
+       title="Dashboard home">
+      <span class="sidebar-brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 28 28" width="20" height="20" fill="none"
+             stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 14 L11 14 L14 5 L17 14 L25 14"/>
+        </svg>
+      </span>
+      <span class="sidebar-brand-name">PULSE</span>
+      <span class="sidebar-brand-sep" aria-hidden="true">|</span>
+      <span class="sidebar-brand-sub">Threat Detection</span>
+    </a>
 
-        <!-- Header row: "Filters" label left, "Clear" link right. The
-             Clear link is hidden until at least one checkbox is on. -->
-        <div class="sidebar-filter-header">
-          <span class="sidebar-filter-heading">Filters</span>
-          <a class="sidebar-filter-clear"
-             id="dash-filter-clear"
-             data-action="dashSidebarClear"
-             hidden>Clear</a>
-        </div>
+    <div class="sidebar-scroll">
+      <!-- Command-palette launcher. This is a button-styled-as-input —
+           clicking it (or Ctrl+K anywhere) opens the existing fuzzy
+           launcher modal. Rendering as a <button> instead of a real
+           <input> keeps keyboard focus + accessibility obvious and
+           avoids a double-input (this one + the palette's real one). -->
+      <button type="button" class="sidebar-search"
+              data-action="openCommandPalette"
+              aria-label="Open command palette">
+        <svg class="sidebar-search-icon" viewBox="0 0 16 16" fill="none"
+             stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5"/>
+          <path d="M10.5 10.5L14 14"/>
+        </svg>
+        <span class="sidebar-search-placeholder">Search (Ctrl+K)</span>
+      </button>
 
-        <!-- Find-filter input — narrows the visible rows by label
-             substring match as the user types. JS handler lives in
-             dashboard.js and talks to data-action-input="dashSidebarSearch". -->
-        <input type="search"
-               class="sidebar-filter-search"
-               id="dash-filter-search"
-               placeholder="Find filter..."
-               data-action-input="dashSidebarSearch"
-               autocomplete="off" />
-
-        <div class="sidebar-filter-group" data-group="status">
-          <button type="button" class="sidebar-filter-group-head"
-                  data-action="dashSidebarToggleGroup" data-arg="status">
-            <span class="sidebar-filter-chevron" aria-hidden="true">
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none"
-                   stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 4.5 L6 7.5 L9 4.5"/>
-              </svg>
-            </span>
-            <span class="sidebar-filter-group-label">Status</span>
-          </button>
-          <ul class="sidebar-filter-list" id="dash-filter-status">
-            <li data-group="status" data-item="new">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="status|new" />
-                <span class="sidebar-filter-label">New</span>
-                <span class="sidebar-filter-count" data-count-for="status|new">0</span>
-              </label>
-            </li>
-            <li data-group="status" data-item="acknowledged">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="status|acknowledged" />
-                <span class="sidebar-filter-label">Acknowledged</span>
-                <span class="sidebar-filter-count" data-count-for="status|acknowledged">0</span>
-              </label>
-            </li>
-            <li data-group="status" data-item="investigating">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="status|investigating" />
-                <span class="sidebar-filter-label">Investigating</span>
-                <span class="sidebar-filter-count" data-count-for="status|investigating">0</span>
-              </label>
-            </li>
-            <li data-group="status" data-item="resolved">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="status|resolved" />
-                <span class="sidebar-filter-label">Resolved</span>
-                <span class="sidebar-filter-count" data-count-for="status|resolved">0</span>
-              </label>
-            </li>
-          </ul>
-        </div>
-
-        <div class="sidebar-filter-group" data-group="severity">
-          <button type="button" class="sidebar-filter-group-head"
-                  data-action="dashSidebarToggleGroup" data-arg="severity">
-            <span class="sidebar-filter-chevron" aria-hidden="true">
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none"
-                   stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 4.5 L6 7.5 L9 4.5"/>
-              </svg>
-            </span>
-            <span class="sidebar-filter-group-label">Severity</span>
-          </button>
-          <ul class="sidebar-filter-list" id="dash-filter-severity">
-            <li data-group="severity" data-item="CRITICAL">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="severity|CRITICAL" />
-                <span class="sidebar-filter-dot" style="background:#f85149"></span>
-                <span class="sidebar-filter-label">Critical</span>
-                <span class="sidebar-filter-count" data-count-for="severity|CRITICAL">0</span>
-              </label>
-            </li>
-            <li data-group="severity" data-item="HIGH">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="severity|HIGH" />
-                <span class="sidebar-filter-dot" style="background:#f0883e"></span>
-                <span class="sidebar-filter-label">High</span>
-                <span class="sidebar-filter-count" data-count-for="severity|HIGH">0</span>
-              </label>
-            </li>
-            <li data-group="severity" data-item="MEDIUM">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="severity|MEDIUM" />
-                <span class="sidebar-filter-dot" style="background:#d29922"></span>
-                <span class="sidebar-filter-label">Medium</span>
-                <span class="sidebar-filter-count" data-count-for="severity|MEDIUM">0</span>
-              </label>
-            </li>
-            <li data-group="severity" data-item="LOW">
-              <label>
-                <input type="checkbox" data-action-change="dashSidebarToggleItem"
-                       data-arg="severity|LOW" />
-                <span class="sidebar-filter-dot" style="background:#3fb950"></span>
-                <span class="sidebar-filter-label">Low</span>
-                <span class="sidebar-filter-count" data-count-for="severity|LOW">0</span>
-              </label>
-            </li>
-          </ul>
-        </div>
+      <div class="sidebar-group">
+        <span class="sidebar-group-label">General</span>
+        <a class="sidebar-nav" data-action="navigate" data-arg="dashboard">
+          <i data-lucide="layout-dashboard" class="icon"></i>
+          <span>Dashboard</span>
+        </a>
+        <a class="sidebar-nav" data-action="navigate" data-arg="monitor">
+          <i data-lucide="activity" class="icon"></i>
+          <span>Monitor</span>
+        </a>
       </div>
 
-      <!-- Horizontal divider separates the filter panel (primary
-           content) from the nav list (secondary, always-visible). -->
-      <div class="sidebar-divider" aria-hidden="true"></div>
-
-      <!-- Flat nav list — icons + labels. Label span so CSS can hide
-           text when the sidebar collapses to icons-only; title attrs
-           surface native browser tooltips in the collapsed state. -->
-      <nav class="sidebar-nav">
-        <a class="active" data-action="navigate" data-arg="dashboard" title="Dashboard">
-          <i data-lucide="layout-dashboard" class="icon"></i>
-          <span class="sidebar-nav-label">Dashboard</span>
-        </a>
-        <a data-action="navigate" data-arg="monitor" title="Monitor">
-          <i data-lucide="activity" class="icon"></i>
-          <span class="sidebar-nav-label">Monitor</span>
-        </a>
-        <a data-action="navigate" data-arg="scans" title="Scans">
+      <div class="sidebar-group">
+        <span class="sidebar-group-label">Threat management</span>
+        <a class="sidebar-nav" data-action="navigate" data-arg="scans">
           <i data-lucide="file-search" class="icon"></i>
-          <span class="sidebar-nav-label">Scans</span>
+          <span>Scans</span>
         </a>
-        <a data-action="navigate" data-arg="reports" title="Reports">
+        <a class="sidebar-nav" data-action="navigate" data-arg="findings">
+          <i data-lucide="alert-triangle" class="icon"></i>
+          <span>Findings</span>
+        </a>
+        <a class="sidebar-nav" data-action="navigate" data-arg="reports">
           <i data-lucide="file-text" class="icon"></i>
-          <span class="sidebar-nav-label">Reports</span>
+          <span>Reports</span>
         </a>
-        <a data-action="navigate" data-arg="history" title="History">
+        <a class="sidebar-nav" data-action="navigate" data-arg="history">
           <i data-lucide="clock" class="icon"></i>
-          <span class="sidebar-nav-label">History</span>
+          <span>History</span>
         </a>
-        <a data-action="navigate" data-arg="fleet" title="Fleet">
+      </div>
+
+      <div class="sidebar-group">
+        <span class="sidebar-group-label">Assets &amp; defense</span>
+        <a class="sidebar-nav" data-action="navigate" data-arg="fleet">
           <i data-lucide="server" class="icon"></i>
-          <span class="sidebar-nav-label">Fleet</span>
+          <span>Fleet</span>
         </a>
-        <a data-action="navigate" data-arg="firewall" title="Firewall">
+        <a class="sidebar-nav" data-action="navigate" data-arg="firewall">
           <i data-lucide="brick-wall" class="icon"></i>
-          <span class="sidebar-nav-label">Firewall</span>
+          <span>Firewall</span>
         </a>
-        <a data-action="navigate" data-arg="whitelist" title="Whitelist">
+        <a class="sidebar-nav" data-action="navigate" data-arg="whitelist">
           <i data-lucide="shield" class="icon"></i>
-          <span class="sidebar-nav-label">Whitelist</span>
+          <span>Whitelist</span>
         </a>
-        <a data-action="navigate" data-arg="rules" title="Rules">
+      </div>
+
+      <div class="sidebar-group">
+        <span class="sidebar-group-label">Configuration</span>
+        <a class="sidebar-nav" data-action="navigate" data-arg="rules">
           <i data-lucide="list-checks" class="icon"></i>
-          <span class="sidebar-nav-label">Rules</span>
+          <span>Rules</span>
         </a>
-        <a data-action="navigate" data-arg="audit" title="Audit Log">
+        <a class="sidebar-nav" data-action="navigate" data-arg="audit">
           <i data-lucide="clipboard-list" class="icon"></i>
-          <span class="sidebar-nav-label">Audit Log</span>
+          <span>Audit Log</span>
         </a>
-        <a data-action="navigate" data-arg="compliance" title="Compliance">
+        <a class="sidebar-nav" data-action="navigate" data-arg="compliance">
           <i data-lucide="shield-check" class="icon"></i>
-          <span class="sidebar-nav-label">Compliance</span>
+          <span>Compliance</span>
         </a>
-        <a data-action="navigate" data-arg="trends" title="Trends">
+        <a class="sidebar-nav" data-action="navigate" data-arg="trends">
           <i data-lucide="trending-up" class="icon"></i>
-          <span class="sidebar-nav-label">Trends</span>
+          <span>Trends</span>
         </a>
-      </nav>
+      </div>
+    </div>
 
-      <!-- Legacy dynamic filter panel (sidebar-filters.js) — still
-           drives the Findings tab on Scans. Kept separate so the
-           inline Dashboard panel at the top doesn't collide with it.
-           On pages other than Scans/Findings this stays hidden. -->
-      <div class="sidebar-filters" id="sidebar-filters" hidden></div>
-    </aside>
+    <div class="sidebar-footer">
+      <a class="sidebar-nav" data-action="navigate" data-arg="settings">
+        <i data-lucide="settings" class="icon"></i>
+        <span>Settings</span>
+      </a>
+      <a class="sidebar-nav" data-action="openFeedback">
+        <i data-lucide="message-square" class="icon"></i>
+        <span>Feedback</span>
+      </a>
+    </div>
+  </aside>
 
+  <!-- ============================================================= -->
+  <!-- APP BODY                                                        -->
+  <!-- ============================================================= -->
+  <div class="app">
     <div class="main">
       <!-- Admin privilege banner — only rendered by JS on Windows when
            the process is not elevated. Dismissal is per-session in
@@ -361,8 +248,8 @@
       <div class="upload-status" id="upload-status"></div>
 
       <div class="modal-actions">
-        <button class="btn" data-action="closeUploadModal">Cancel</button>
-        <button class="btn btn-primary" id="scan-btn" data-action="uploadAndScan" disabled>Scan</button>
+        <button class="btn btn-with-icon" data-action="closeUploadModal"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-primary btn-with-icon" id="scan-btn" data-action="uploadAndScan" disabled><i data-lucide="play"></i><span>Scan</span></button>
       </div>
     </div>
   </div>
@@ -408,8 +295,8 @@
       <div class="upload-status" id="sys-scan-status"></div>
 
       <div class="modal-actions">
-        <button class="btn" data-action="closeSystemScanModal">Cancel</button>
-        <button class="btn btn-primary" id="sys-scan-run" data-action="runSystemScan">Run Scan</button>
+        <button class="btn btn-with-icon" data-action="closeSystemScanModal"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-primary btn-with-icon" id="sys-scan-run" data-action="runSystemScan"><i data-lucide="play"></i><span>Run Scan</span></button>
       </div>
     </div>
   </div>
@@ -513,7 +400,7 @@
       </div>
 
       <div class="modal-actions">
-        <button class="btn btn-primary" data-action="closeTutorialModal">Got it</button>
+        <button class="btn btn-primary btn-with-icon" data-action="closeTutorialModal"><i data-lucide="check"></i><span>Got it</span></button>
       </div>
     </div>
   </div>
@@ -563,9 +450,9 @@
              autocomplete="off" spellcheck="false"
              data-action-input="forceBlockInputCheck" />
       <div class="modal-actions">
-        <button class="btn" data-action="closeForceBlockModal">Cancel</button>
-        <button class="btn btn-danger" id="force-block-confirm-btn"
-                data-action="confirmForceBlock" disabled>Block anyway</button>
+        <button class="btn btn-with-icon" data-action="closeForceBlockModal"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-danger btn-with-icon" id="force-block-confirm-btn"
+                data-action="confirmForceBlock" disabled><i data-lucide="shield-alert"></i><span>Block anyway</span></button>
       </div>
     </div>
   </div>
@@ -616,8 +503,8 @@
       </p>
 
       <div class="modal-actions feedback-actions">
-        <button class="btn" data-action="closeFeedbackModal">Cancel</button>
-        <button class="btn btn-primary" id="feedback-submit-btn" data-action="submitFeedback">Send Feedback</button>
+        <button class="btn btn-with-icon" data-action="closeFeedbackModal"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-primary btn-with-icon" id="feedback-submit-btn" data-action="submitFeedback"><i data-lucide="send"></i><span>Send Feedback</span></button>
       </div>
     </div>
   </div>

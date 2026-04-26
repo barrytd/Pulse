@@ -424,6 +424,9 @@
 }
 
 .review-toggle {
+  /* Same padding / type / radius in every state — the confirmation
+     flash is purely additive (color), so the button never grows or
+     shrinks across states and the row stays still. */
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -436,12 +439,12 @@
   font: inherit;
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, opacity 0.3s ease;
 }
 .review-toggle:hover { background: var(--hover-bg); }
 
-/* The checkbox — an outlined square that fills when the parent toggle
-   is active. ::after draws the checkmark or X depending on which toggle. */
+/* The leading "checkbox" outline — fills with the confirmation color
+   while .is-confirming is set, otherwise stays as a quiet hint. */
 .review-toggle .review-check {
   position: relative;
   width: 16px;
@@ -451,19 +454,33 @@
   background: transparent;
   box-sizing: border-box;
   flex-shrink: 0;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
-/* Reviewed — green */
-.review-toggle-reviewed.active {
+/* ----- 3-second confirmation flash -----
+   Click → .is-confirming applied immediately (filled colour, glyph).
+   3s later → .is-fading added; opacity transitions back to 1 from a
+   subtle dim, and after the 300ms transition both classes are dropped
+   by JS so the button reads as default again. */
+.review-toggle.is-confirming {
+  /* Don't grow on confirmation — the user wanted the flash subtle, not
+     a visual takeover. Border + bg are the only thing that change. */
+}
+.review-toggle.is-fading {
+  opacity: 0.7;
+}
+
+/* Reviewed — green flash */
+.review-toggle-reviewed.is-confirming {
   background: rgba(63, 185, 80, 0.12);
   border-color: #3fb950;
   color: #3fb950;
 }
-.review-toggle-reviewed.active .review-check {
+.review-toggle-reviewed.is-confirming .review-check {
   background: #3fb950;
   border-color: #3fb950;
 }
-.review-toggle-reviewed.active .review-check::after {
+.review-toggle-reviewed.is-confirming .review-check::after {
   content: "";
   position: absolute;
   left: 4px;
@@ -475,18 +492,18 @@
   transform: rotate(45deg);
 }
 
-/* False positive — amber */
-.review-toggle-fp.active {
+/* False positive — amber flash */
+.review-toggle-fp.is-confirming {
   background: rgba(210, 153, 34, 0.12);
   border-color: #d29922;
   color: #d29922;
 }
-.review-toggle-fp.active .review-check {
+.review-toggle-fp.is-confirming .review-check {
   background: #d29922;
   border-color: #d29922;
 }
-.review-toggle-fp.active .review-check::before,
-.review-toggle-fp.active .review-check::after {
+.review-toggle-fp.is-confirming .review-check::before,
+.review-toggle-fp.is-confirming .review-check::after {
   content: "";
   position: absolute;
   left: 6.5px;
@@ -496,8 +513,8 @@
   background: #fff;
   border-radius: 1px;
 }
-.review-toggle-fp.active .review-check::before { transform: rotate(45deg); }
-.review-toggle-fp.active .review-check::after  { transform: rotate(-45deg); }
+.review-toggle-fp.is-confirming .review-check::before { transform: rotate(45deg); }
+.review-toggle-fp.is-confirming .review-check::after  { transform: rotate(-45deg); }
 
 /* Row-level treatments used by every findings surface (full table, compact
    dashboard list, scan-detail table) so reviewed/FP findings fade back. */
@@ -1256,3 +1273,394 @@
 }
 .notes-chip svg { display: block; }
 .notes-chip-count { line-height: 1; }
+
+/* ==================================================================
+ * Scans page — KPI strip, filter bar, severity mix pills, hover actions
+ * ================================================================== */
+
+/* KPI strip — 4 compact cards above the filter bar. Reuses the
+   universal hover-lift pattern from pulse-design.md. */
+.scans-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0 0 16px;
+}
+.scans-kpi {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.scans-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.scans-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scans-kpi-grade {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+.scans-kpi-grade.grade-A { color: #fff; background: #3fb950; }
+.scans-kpi-grade.grade-B { color: #fff; background: #58a6ff; }
+.scans-kpi-grade.grade-C { color: #fff; background: #d29922; }
+.scans-kpi-grade.grade-D { color: #fff; background: #f0883e; }
+.scans-kpi-grade.grade-F { color: #fff; background: #f85149; }
+.scans-kpi-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scans-kpi-delta {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  display: inline-block;
+}
+.scans-kpi-delta.delta-up   { color: #f85149; background: rgba(248, 81, 73, 0.14); }
+.scans-kpi-delta.delta-down { color: #3fb950; background: rgba(63, 185, 80, 0.14); }
+.scans-kpi-delta.delta-flat { color: var(--text-muted); background: rgba(139,148,158,0.14); }
+
+@media (max-width: 960px) {
+  .scans-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Top filter bar — search input + dropdowns + date range + Upload button */
+.scans-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.scans-filter-bar .search-box {
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+.scans-filter-select {
+  height: 32px;
+  padding: 0 28px 0 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  min-width: 120px;
+}
+.scans-filter-select:focus { border-color: var(--accent); }
+.scans-filter-date {
+  height: 32px;
+  padding: 0 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+  width: 135px;
+}
+.scans-filter-date:focus { border-color: var(--accent); }
+.scans-filter-date-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 0 2px;
+}
+.scans-filter-spacer { flex: 1 1 auto; }
+.scans-filter-bar .btn { flex: 0 0 auto; }
+
+/* Scan type icon — leads the subtitle in the Date/Time cell (replaces
+   the old "System Scan -" prefix). 14px Lucide-or-SVG glyph, muted. */
+.scan-type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.scan-type-icon svg { width: 14px; height: 14px; }
+
+.scan-when-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Severity mix mini pills — rendered inline in the Findings cell.
+   Compact "2C 4H 6M 1L" signature so the mix reads at a glance. */
+.sev-mix {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.sev-mix-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+}
+.sev-mix-pill.sev-c { color: #f85149; background: rgba(248,81,73,0.14); }
+.sev-mix-pill.sev-h { color: #f0883e; background: rgba(240,136,62,0.14); }
+.sev-mix-pill.sev-m { color: #d29922; background: rgba(210,153,34,0.14); }
+.sev-mix-pill.sev-l { color: #3fb950; background: rgba(63,185,80,0.14); }
+
+/* Duration cell — tabular numerals so "1m 24s" stays aligned row-to-row */
+.scan-duration { font-variant-numeric: tabular-nums; color: var(--text-body); }
+
+/* Hover action buttons — right-aligned in the row. Hidden until the row
+   is hovered so the default view stays clean. */
+.scans-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.data-table tbody tr:hover .scans-row-actions,
+.data-table tbody tr:focus-within .scans-row-actions {
+  opacity: 1;
+}
+.scans-row-action {
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.scans-row-action:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+.scans-row-action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.scans-row-action svg { width: 14px; height: 14px; }
+
+/* ==================================================================
+ * Threat-intel block — finding drawer "Threat Intelligence" section.
+ * Renders an AbuseIPDB confidence-of-abuse badge alongside a small
+ * key/value grid (country, ISP, report count, last report).
+ * ================================================================== */
+
+.intel-loading,
+.intel-empty,
+.intel-error {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.intel-error { color: #f85149; }
+
+.intel-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.intel-score-block {
+  flex: 0 0 80px;
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.intel-score {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.intel-score-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+/* Score buckets: 75+ malicious, 25-74 suspicious, <25 clean. The
+   colors echo the row-accent severity palette so the drawer reads
+   coherent against everything else. */
+.intel-score-high {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: #f85149;
+}
+.intel-score-med {
+  background: rgba(240, 136, 62, 0.12);
+  border-color: rgba(240, 136, 62, 0.35);
+  color: #f0883e;
+}
+.intel-score-low {
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.35);
+  color: #3fb950;
+}
+.intel-score-na {
+  background: var(--hover-row);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.intel-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.intel-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+}
+.intel-meta-row:last-child { border-bottom: 0; }
+.intel-meta-row .k {
+  flex: 0 0 110px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.intel-meta-row .v {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.intel-mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+.intel-cache-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--hover-row);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.intel-footer {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ==================================================================
+ * Findings page — Sentinel-style header (breadcrumb / title / KPIs /
+ * severity bar / sticky filter bar) + push-flyout layout. Reusable
+ * primitives (.page-header, .page-breadcrumb, .page-title-block,
+ * .kpi-row + .kpi-tile, .sev-bar, .filter-bar, .filter-chip,
+ * .filter-chip-dd, .toggle-switch) live in components.css so other
+ * list pages can adopt them.
+ * ================================================================== */
+
+.findings-page {
+  /* When the detail flyout opens, body.flyout-push-open shifts the
+     page right-padding by the flyout width so the table compresses
+     instead of being overlaid. The transition matches the drawer's
+     own slide so chrome and content move together. */
+  padding-right: 0;
+  transition: padding-right 250ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+body.flyout-push-open .findings-page { padding-right: 460px; }
+
+.findings-page-body {
+  margin-top: 16px;
+}
+
+/* ==================================================================
+ * Right-click context menu — re-rendered each applyFindingsView pass
+ * so we don't have to track listener lifetimes across re-renders.
+ * ================================================================== */
+.findings-ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 220px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.findings-ctx-menu[hidden] { display: none; }
+.findings-ctx-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.findings-ctx-item:hover { background: var(--hover-bg); }
+.findings-ctx-item-exclude { color: #f85149; }
+.findings-ctx-item-exclude:hover { background: rgba(248, 81, 73, 0.1); }
+
+/* ==================================================================
+ * Detail flyout — push layout. The drawer's own slide animation
+ * stays as-is (translateX 100%→0 in findings.css base rules); we
+ * just stop the backdrop from showing and let .findings-page
+ * reflow via padding-right above.
+ * ================================================================== */
+body.flyout-push-open .finding-drawer-backdrop { display: none; }
+body.flyout-push-open .finding-drawer { box-shadow: none; }

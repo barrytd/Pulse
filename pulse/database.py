@@ -247,6 +247,28 @@ CREATE TABLE IF NOT EXISTS finding_notes (
 );
 """
 
+# Threat-intel cache. One row per (ip, source) pair so we can layer in
+# additional providers later (e.g. AlienVault OTX, VirusTotal) without a
+# schema change. `score` is provider-normalized 0–100 confidence-of-abuse;
+# `payload` keeps the raw JSON so the UI can show provider-specific extras
+# without us having to model every field. fetched_at drives TTL — entries
+# older than the configured window are refreshed lazily on next lookup.
+_CREATE_INTEL_CACHE = """
+CREATE TABLE IF NOT EXISTS intel_cache (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address    TEXT    NOT NULL,
+    source        TEXT    NOT NULL DEFAULT 'abuseipdb',
+    score         INTEGER,
+    country       TEXT,
+    isp           TEXT,
+    total_reports INTEGER,
+    last_reported TEXT,
+    payload       TEXT,
+    fetched_at    TEXT    NOT NULL,
+    UNIQUE(ip_address, source)
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -274,6 +296,7 @@ def init_db(db_path):
         _CREATE_FEEDBACK,
         _CREATE_FINDING_NOTES,
         _CREATE_BRANDING,
+        _CREATE_INTEL_CACHE,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -460,13 +483,24 @@ def get_history(db_path, limit=20, user_id=None):
                 where_outer = " WHERE s.user_id = ?"
                 where_inner = " AND s2.user_id = ?"
                 params = (int(user_id), int(user_id))
+            # LEFT JOIN findings + GROUP BY lets us compute the per-scan
+            # severity breakdown in the same round trip, so the Scans page
+            # can render a sev-mix badge row without fetching every scan's
+            # findings individually. The aggregate is cheap because the
+            # findings table is indexed on scan_id.
             cursor = conn.execute(
                 f"""SELECT s.id, s.scanned_at, s.hostname, s.files_scanned,
                           s.total_events, s.total_findings, s.score, s.score_label,
                           s.filename, s.scope, s.duration_sec,
                           (SELECT COUNT(*) FROM scans s2
-                           WHERE s2.id <= s.id{where_inner}) AS number
-                   FROM scans s{where_outer}
+                           WHERE s2.id <= s.id{where_inner}) AS number,
+                          COALESCE(SUM(CASE WHEN f.severity='CRITICAL' THEN 1 ELSE 0 END), 0) AS sev_critical,
+                          COALESCE(SUM(CASE WHEN f.severity='HIGH'     THEN 1 ELSE 0 END), 0) AS sev_high,
+                          COALESCE(SUM(CASE WHEN f.severity='MEDIUM'   THEN 1 ELSE 0 END), 0) AS sev_medium,
+                          COALESCE(SUM(CASE WHEN f.severity='LOW'      THEN 1 ELSE 0 END), 0) AS sev_low
+                   FROM scans s
+                   LEFT JOIN findings f ON f.scan_id = s.id{where_outer}
+                   GROUP BY s.id
                    ORDER BY s.id DESC
                    LIMIT ?""",
                 params + (limit,)

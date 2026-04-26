@@ -168,6 +168,7 @@ export async function renderSettingsPage() {
   var em = config.email || {};
   var al = config.alerts || {};
   var wh = config.webhook || {};
+  var ti = config.threat_intel || {};
   var scanDefaults = config.settings || {};
   var whFlavor = wh.flavor || '';
   var flavorOpts = [
@@ -284,7 +285,7 @@ export async function renderSettingsPage() {
       '<div style="display:flex; align-items:center; gap:18px;">' +
         avatarImg +
         '<div style="display:flex; flex-direction:column; gap:6px;">' +
-          '<button class="btn btn-secondary" data-action="uploadAvatarClick" type="button">Upload Avatar</button>' +
+          '<button class="btn btn-secondary btn-with-icon" data-action="uploadAvatarClick" type="button"><i data-lucide="upload"></i><span>Upload Avatar</span></button>' +
           '<span style="color:var(--text-muted); font-size:12px;">Max size 2MB. Formats: JPG, PNG.</span>' +
         '</div>' +
         '<input type="file" id="profile-avatar-input" accept="image/png,image/jpeg" style="display:none;" data-action-change="onAvatarFileSelected"/>' +
@@ -327,8 +328,8 @@ export async function renderSettingsPage() {
       '<div class="form-row"><label>Current password</label>' +
         '<input type="password" id="account-current-password" placeholder="required to change email or password" autocomplete="current-password"/></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveAccount">Save account changes</button>' +
-        '<button class="btn" data-action="signOut">Sign out</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveAccount"><i data-lucide="save"></i><span>Save account changes</span></button>' +
+        '<button class="btn btn-with-icon" data-action="signOut"><i data-lucide="log-out"></i><span>Sign out</span></button>' +
       '</div>' +
     '</div>';
 
@@ -355,7 +356,7 @@ export async function renderSettingsPage() {
         '<input type="password" id="email-password" placeholder="' + (em.password_set ? 'leave blank to keep current' : '16-character app password') + '" autocomplete="new-password"/></div>' +
       '<div class="form-row"><span></span><span>' + pwStatus + ' <a id="email-help-link" href="#" target="_blank" style="color:var(--accent); text-decoration:none; margin-left:12px; display:none;">How do I get an app password?</a></span></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveEmailSettings">Save email settings</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveEmailSettings"><i data-lucide="save"></i><span>Save email settings</span></button>' +
       '</div>' +
     '</div>';
 
@@ -375,8 +376,8 @@ export async function renderSettingsPage() {
       '<div class="form-row"><label>Cooldown (min)</label>' +
         '<input type="number" id="alert-cooldown" value="' + (al.cooldown_minutes != null ? al.cooldown_minutes : 60) + '" min="0"/></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
-        '<button class="btn" data-action="sendTestAlert">Send test alert</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveAlertSettings"><i data-lucide="save"></i><span>Save alert settings</span></button>' +
+        '<button class="btn btn-with-icon" data-action="sendTestAlert"><i data-lucide="send"></i><span>Send test alert</span></button>' +
       '</div>' +
     '</div>';
 
@@ -393,7 +394,7 @@ export async function renderSettingsPage() {
       '<div class="form-row"><label>Email interval</label>' +
         '<select id="alert-monitor-interval">' + intervalOpts + '</select></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveAlertSettings">Save alert settings</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveAlertSettings"><i data-lucide="save"></i><span>Save alert settings</span></button>' +
       '</div>' +
     '</div>';
 
@@ -456,8 +457,8 @@ export async function renderSettingsPage() {
         '</span></div>' +
 
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveScheduleSettings"' +
-          (schedSupported ? '' : ' disabled') + '>Save schedule</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveScheduleSettings"' +
+          (schedSupported ? '' : ' disabled') + '><i data-lucide="save"></i><span>Save schedule</span></button>' +
       '</div>' +
     '</div>';
 
@@ -477,8 +478,45 @@ export async function renderSettingsPage() {
         '<input type="password" id="webhook-url" placeholder="' + (wh.url_set ? 'leave blank to keep current' : 'https://hooks.slack.com/...') + '" autocomplete="new-password"/></div>' +
       '<div class="form-row"><span></span><span>' + whUrlStatus + '</span></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="saveWebhookSettings">Save webhook settings</button>' +
-        '<button class="btn" data-action="sendTestWebhook">Send test notification</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveWebhookSettings"><i data-lucide="save"></i><span>Save webhook settings</span></button>' +
+        '<button class="btn btn-with-icon" data-action="sendTestWebhook"><i data-lucide="send"></i><span>Send test notification</span></button>' +
+      '</div>' +
+    '</div>';
+
+  // ----- Threat-intel (AbuseIPDB) ------------------------------------
+  // Once a key is saved, the dashboard can enrich findings + firewall
+  // rows with abuse confidence scores. Same secret-handling rules as
+  // the webhook URL: the raw key never leaves the server, the input
+  // shows a "leave blank to keep current" placeholder when one is set.
+  var tiKeyStatus = ti.api_key_set
+    ? '<span class="password-status set">\u2713 AbuseIPDB key saved</span>'
+    : '<span class="password-status">No AbuseIPDB key saved yet</span>';
+  var threatIntelHtml =
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Threat Intelligence</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Enrich source IPs with AbuseIPDB reputation data \u2014 every finding ' +
+        'or blocked IP gets a 0\u2013100 confidence-of-abuse score, country, ISP, ' +
+        'and recent-report count. Lookups are cached for 24 hours so a ' +
+        'noisy host doesn\u2019t burn quota. ' +
+        '<a href="https://www.abuseipdb.com/account/api" target="_blank" data-default="allow" ' +
+          'style="color:var(--accent); text-decoration:none;">Get a free API key \u2192</a>' +
+      '</p>' +
+      '<div class="form-row"><label>Enable lookups</label>' +
+        '<label class="form-checkbox"><input type="checkbox" id="ti-enabled"' +
+          (ti.enabled ? ' checked' : '') + '/> Look up source IPs against AbuseIPDB</label></div>' +
+      '<div class="form-row"><label>API key</label>' +
+        '<input type="password" id="ti-api-key" placeholder="' +
+          (ti.api_key_set ? 'leave blank to keep current' : 'paste AbuseIPDB API key') +
+          '" autocomplete="new-password"/></div>' +
+      '<div class="form-row"><label>Cache TTL (hours)</label>' +
+        '<input type="number" id="ti-cache-ttl" min="1" max="720" value="' +
+          (ti.cache_ttl_hours || 24) + '"/></div>' +
+      '<div class="form-row"><span></span><span>' + tiKeyStatus + '</span></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="saveThreatIntelSettings"><i data-lucide="save"></i><span>Save threat-intel settings</span></button>' +
+        '<button class="btn btn-with-icon" data-action="testThreatIntelKey"' +
+          (ti.api_key_set ? '' : ' disabled') + '><i data-lucide="zap"></i><span>Test key</span></button>' +
       '</div>' +
     '</div>';
 
@@ -543,7 +581,7 @@ export async function renderSettingsPage() {
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
-    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml,
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml + threatIntelHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
@@ -737,7 +775,7 @@ function _renderUsersPanel(me, users) {
           '<option value="admin">Admin (full access)</option>' +
         '</select></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="createUser">Create user</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="createUser"><i data-lucide="user-plus"></i><span>Create user</span></button>' +
       '</div>' +
     '</div>' +
     '<div class="card">' +
@@ -790,7 +828,7 @@ function _renderTokensPanel(tokens) {
       '<div class="form-row"><label>Name</label>' +
         '<input type="text" id="new-token-name" placeholder="e.g. Jenkins prod" autocomplete="off" maxlength="64"/></div>' +
       '<div class="form-actions">' +
-        '<button class="btn btn-primary" data-action="createToken">Create Token</button>' +
+        '<button class="btn btn-primary btn-with-icon" data-action="createToken"><i data-lucide="key"></i><span>Create Token</span></button>' +
       '</div>' +
     '</div>' +
     '<div class="card">' +
@@ -1421,6 +1459,51 @@ export async function sendTestWebhook() {
       return;
     }
     showToast('Test notification posted');
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+// Threat-intel (AbuseIPDB) settings — same secret-handling rules as the
+// webhook URL: an empty input means "leave alone", so saving the toggle
+// without retyping the key works.
+export async function saveThreatIntelSettings() {
+  var keyInput = document.getElementById('ti-api-key');
+  var ttlInput = document.getElementById('ti-cache-ttl');
+  var body = {
+    enabled:         document.getElementById('ti-enabled').checked,
+    abuseipdb_api_key: (keyInput && keyInput.value) || '',
+    cache_ttl_hours: parseInt((ttlInput && ttlInput.value) || '24', 10) || 24,
+  };
+  try {
+    var r = await fetch('/api/config/threat_intel', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Save failed.');
+      return;
+    }
+    showToast('Threat-intel settings saved');
+    if (keyInput) keyInput.value = '';
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+export async function testThreatIntelKey() {
+  showToast('Testing AbuseIPDB key...');
+  try {
+    var r = await fetch('/api/intel/test', { method: 'POST' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      toastError(data.detail || 'Lookup failed.');
+      return;
+    }
+    showToast('AbuseIPDB key works (1.1.1.1 score: ' + (data.score == null ? 'n/a' : data.score) + ')');
   } catch (e) {
     toastError('Network error: ' + e.message);
   }

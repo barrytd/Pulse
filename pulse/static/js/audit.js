@@ -29,6 +29,23 @@ var _auditQuery = '';
 var _drawerIdx = -1;      // index within _filteredRows while drawer is open
 var _jkHandler = null;    // keyboard listener installed while drawer is open
 
+// Sentinel-style filter chips state. Multi-select dimensions are Sets
+// of selected values; time_window is a single radio-style value.
+var _auditFilters = {
+  actions:      new Set(),  // action strings
+  users:        new Set(),  // display name (or email when no display name)
+  target_types: new Set(),  // 'finding' | 'ip' | 'host' | 'user' | 'scan' | 'rule'
+  time_window:  'all',      // '24h' | '7d' | '30d' | '90d' | 'all'
+  ip:           '',         // free-text IP filter (via "+ Add filter")
+  finding_ref:  '',         // ref-id substring filter (via "+ Add filter")
+};
+// Tracks secondary filter dims the user revealed via "+ Add filter" so
+// we don't lose the chip when its value momentarily clears.
+var _auditAddedDims = new Set();
+// Time format toggle for the Time column. 'relative' = "3h ago",
+// 'absolute' = full timestamp. Persisted across re-renders only.
+var _auditTimeFmt = 'relative';
+
 // { userId: displayName|email } — populated on mount for name resolution
 // in legacy audit rows that stored assignee_user_id before we switched
 // to writing the name directly on the server.
@@ -55,19 +72,40 @@ function _userName(userId) {
 
 // Action classification → color scheme.  See .claude/skills/pulse-design.md:
 // the row-accent severity set is used for left borders and for chip fills.
-//   blue   — scan, review, scan-adjacent reads
-//   amber  — stage / stage_forced / push (staging mutations)
-//   red    — unblock / any delete_ / *_failed (destructive / error)
-//   green  — create / user_create / token_create (additive)
+//   blue   — read actions: scan, review, *_failed reads
+//   amber  — write actions: assign, stage, push, set_workflow_state
+//   red    — destructive: delete*, unblock, revoke, deactivate, *_failed
+//   green  — create / additive: add_note, create_user, create_token, signup
 function _actionTone(action) {
   var a = (action || '').toLowerCase();
   if (!a) return 'neutral';
-  if (a === 'scan' || a === 'review' || a.indexOf('review_') === 0) return 'blue';
-  if (a === 'stage' || a === 'stage_forced' || a === 'push') return 'amber';
+  // Destructive — checked first so '*_failed' beats blue/amber matchers.
   if (a === 'unblock' || a.indexOf('delete') === 0 || a.indexOf('_failed') >= 0 ||
       a.indexOf('deactivate') >= 0 || a === 'revoke' || a.indexOf('revoke_') === 0) return 'red';
-  if (a.indexOf('create') >= 0 || a === 'signup' || a === 'register') return 'green';
+  // Create / additive
+  if (a.indexOf('create') >= 0 || a === 'signup' || a === 'register' ||
+      a === 'add_note' || a === 'submit_feedback') return 'green';
+  // Reads
+  if (a === 'scan' || a === 'review' || a === 'review_finding' ||
+      a.indexOf('review_') === 0) return 'blue';
+  // Writes (everything else that mutates state lands here)
+  if (a === 'stage' || a === 'stage_forced' || a === 'push' ||
+      a === 'assign_finding' || a === 'unassign_finding' ||
+      a.indexOf('bulk_') === 0 ||
+      a === 'set_workflow_state' ||
+      a.indexOf('update_user') === 0) return 'amber';
   return 'neutral';
+}
+
+// Category labels for the distribution-bar legend + drawer header chip.
+function _toneLabel(tone) {
+  switch (tone) {
+    case 'blue':  return 'Read';
+    case 'amber': return 'Write';
+    case 'red':   return 'Destructive';
+    case 'green': return 'Create';
+    default:      return 'Other';
+  }
 }
 
 // Humanised action title for the drawer header.  The raw action string
@@ -106,29 +144,283 @@ export async function renderAuditPage() {
   _auditCache = await auditP;
   await usersP;
 
+  _renderAuditShell();
+}
+
+// Re-render the page shell (header zones + table). Filter handlers call
+// this after every chip toggle so the KPIs / distribution bar / table
+// all reflect the current filtered slice consistently.
+function _renderAuditShell() {
+  var c = document.getElementById('content');
+  if (!c) return;
   c.innerHTML =
-    '<div class="page-head">' +
-      '<div class="page-head-title"><strong>' + _auditCache.length + '</strong> entr' +
-        (_auditCache.length === 1 ? 'y' : 'ies') + '</div>' +
-      '<div class="page-head-actions">' +
-        '<input type="text" class="search-input" placeholder="Filter action, user, detail..." ' +
-               'oninput="window.__auditFilter(this.value)" ' +
-               'value="' + escapeHtml(_auditQuery) + '">' +
+    '<div class="findings-page">' +
+      _auditPageHeaderHtml() +
+      '<div class="findings-page-body">' +
+        '<div id="audit-bulk-bar"></div>' +
+        '<div class="card" style="padding:0; overflow:hidden;">' +
+          '<div id="audit-table-wrap">' + _renderTable() + '</div>' +
+        '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="card" style="padding:0; overflow:hidden;">' +
-      '<div id="audit-table-wrap">' + _renderTable() + '</div>' +
-    '</div>';
+    '<div class="filter-chip-dd" id="filter-chip-dd" hidden></div>' +
+    '<div class="audit-export-menu" id="audit-export-menu" hidden></div>';
+  _mountAuditFilterDropdown();
+  _mountAuditExportMenu();
+}
 
-  window.__auditFilter = function (q) {
-    _auditQuery = q || '';
-    var wrap = document.getElementById('audit-table-wrap');
-    if (wrap) wrap.innerHTML = _renderTable();
+// ---------------------------------------------------------------------------
+// Page header — Sentinel-style: breadcrumb / title-block / KPIs /
+// action-distribution bar / sticky filter bar. Reuses the primitives in
+// components.css that the Findings rebuild established.
+// ---------------------------------------------------------------------------
+
+function _auditPageHeaderHtml() {
+  var filtered = _filterAuditRows(_auditCache);
+  return '<div class="page-header">' +
+    _auditBreadcrumbHtml() +
+    _auditTitleBlockHtml(filtered.length, _auditCache.length) +
+    _auditKpiRowHtml(filtered) +
+    _auditDistributionBarHtml(filtered) +
+    _auditFilterBarHtml() +
+  '</div>';
+}
+
+function _auditBreadcrumbHtml() {
+  return '<nav class="page-breadcrumb" aria-label="Breadcrumb">' +
+    '<span class="page-breadcrumb-item">Pulse</span>' +
+    '<span class="page-breadcrumb-sep" aria-hidden="true">›</span>' +
+    '<span class="page-breadcrumb-item">Configuration</span>' +
+    '<span class="page-breadcrumb-sep" aria-hidden="true">›</span>' +
+    '<span class="page-breadcrumb-current">Audit Log</span>' +
+  '</nav>';
+}
+
+function _auditTitleBlockHtml(visible, total) {
+  // Lock indicator next to the title — signals to auditors that the
+  // log is integrity-protected. Pure visual marker; the backend
+  // doesn't expose any mutation endpoints either way.
+  var anyFilter = _auditAnyFilterActive();
+  var countLabel = anyFilter ? (visible + ' of ' + total) : String(total);
+  return '<div class="page-title-block">' +
+    '<h1 class="page-title">Audit Log <span class="page-title-count">(' + countLabel + ')</span>' +
+      '<span class="audit-lock" title="This log is append-only and cannot be modified or deleted">' +
+        '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
+          'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<rect x="3" y="7" width="10" height="7" rx="1.4"/>' +
+          '<path d="M5.5 7V4.5a2.5 2.5 0 0 1 5 0V7"/>' +
+        '</svg>' +
+        '<span class="audit-lock-text">Append-only log</span>' +
+      '</span>' +
+    '</h1>' +
+    '<div class="page-title-actions">' +
+      '<button class="btn btn-compact btn-with-icon" data-action="auditExportToggle" ' +
+        'title="Export current view">' +
+        '<i data-lucide="download"></i><span>Export</span>' +
+        '<i data-lucide="chevron-down" style="margin-left:2px;"></i>' +
+      '</button>' +
+    '</div>' +
+  '</div>';
+}
+
+// ---------------------------------------------------------------------------
+// KPI tiles
+// ---------------------------------------------------------------------------
+
+function _auditKpiRowHtml(filtered) {
+  var now = Date.now();
+  var DAY_MS = 86400000;
+  var last24h = 0, failed = 0;
+  var users = new Set(), targets = new Set();
+  filtered.forEach(function (r) {
+    var t = Date.parse((r.ts || '').replace(' ', 'T'));
+    if (!isNaN(t) && (now - t) <= DAY_MS) last24h++;
+    var a = (r.action || '').toLowerCase();
+    if (a.indexOf('_failed') >= 0 || a.indexOf('denied') >= 0) failed++;
+    var u = (r.user_display_name || r.user || r.source || '').trim();
+    if (u) users.add(u);
+    if (r.ip_address) targets.add('ip:' + r.ip_address);
+    if (r.comment)    targets.add(r.comment);
+  });
+  function tile(label, n, sub) {
+    return '<div class="kpi-tile" style="cursor:default;">' +
+      '<div class="kpi-tile-number">' + n.toLocaleString() + '</div>' +
+      '<div class="kpi-tile-label">' + escapeHtml(label) + '</div>' +
+      '<div class="kpi-tile-sub">' + escapeHtml(sub) + '</div>' +
+    '</div>';
+  }
+  return '<div class="kpi-row">' +
+    tile('Events last 24h',  last24h, 'inside the current view') +
+    tile('Failed actions',   failed,  'denials / errors') +
+    tile('Distinct users',   users.size,   'unique actors') +
+    tile('Distinct targets', targets.size, 'IPs / hosts / findings') +
+  '</div>';
+}
+
+// ---------------------------------------------------------------------------
+// Action-type distribution bar — same shape as the findings severity bar
+// but split four ways instead of by severity.
+// ---------------------------------------------------------------------------
+
+function _auditDistributionBarHtml(filtered) {
+  var counts = { blue: 0, amber: 0, red: 0, green: 0, neutral: 0 };
+  filtered.forEach(function (r) { counts[_actionTone(r.action)] = (counts[_actionTone(r.action)] || 0) + 1; });
+  var total = counts.blue + counts.amber + counts.red + counts.green + counts.neutral;
+  if (total === 0) return '';
+
+  var TONE = {
+    blue:  '#58a6ff',
+    amber: '#f0883e',
+    red:   '#f85149',
+    green: '#3fb950',
+    neutral: '#6b7280',
   };
+
+  function dot(tone, label) {
+    if (!counts[tone]) return '';
+    return '<span class="sev-bar-legend-item">' +
+      '<span class="sev-bar-legend-dot" style="background:' + TONE[tone] + '"></span>' +
+      label + ' <strong>' + counts[tone] + '</strong>' +
+    '</span>';
+  }
+  function seg(tone) {
+    if (!counts[tone]) return '';
+    return '<div class="sev-bar-seg" style="flex:' + counts[tone] +
+      '; background:' + TONE[tone] + '" title="' + _toneLabel(tone) + ': ' + counts[tone] + '"></div>';
+  }
+  return '<div class="sev-bar-wrap">' +
+    '<div class="sev-bar-legend">' +
+      dot('blue',    'Reads') +
+      dot('amber',   'Writes') +
+      dot('red',     'Destructive') +
+      dot('green',   'Creates') +
+      dot('neutral', 'Other') +
+    '</div>' +
+    '<div class="sev-bar" role="img" aria-label="Activity by category">' +
+      seg('blue') + seg('amber') + seg('red') + seg('green') + seg('neutral') +
+    '</div>' +
+  '</div>';
+}
+
+// ---------------------------------------------------------------------------
+// Filter bar — multi-select chips for Action / User / Target Type and a
+// radio-style chip for Time Range. + Add filter exposes IP and ref-ID
+// freeform filters.
+// ---------------------------------------------------------------------------
+
+function _auditFilterDims() {
+  return [
+    { id: 'actions',      label: 'Action',      primary: true,  multi: true,  source: 'actions' },
+    { id: 'users',        label: 'User',        primary: true,  multi: true,  source: 'users' },
+    { id: 'target_types', label: 'Target',      primary: true,  multi: true,  source: 'targets' },
+    { id: 'time_window',  label: 'Time range',  primary: true,  multi: false, source: 'time' },
+    { id: 'ip',           label: 'IP',          primary: false, multi: false, source: 'ip' },
+    { id: 'finding_ref',  label: 'Finding ID',  primary: false, multi: false, source: 'finding_ref' },
+  ];
+}
+
+function _auditAnyFilterActive() {
+  if (_auditFilters.actions.size) return true;
+  if (_auditFilters.users.size) return true;
+  if (_auditFilters.target_types.size) return true;
+  if (_auditFilters.time_window && _auditFilters.time_window !== 'all') return true;
+  if (_auditFilters.ip) return true;
+  if (_auditFilters.finding_ref) return true;
+  if (_auditQuery) return true;
+  return false;
+}
+
+function _auditFilterBarHtml() {
+  var dims = _auditFilterDims();
+  var chips = dims.map(function (d) {
+    var n = _auditChipCount(d.id);
+    if (!d.primary && !n && !_auditAddedDims.has(d.id)) return '';
+    return _auditChipWrapHtml(d, n);
+  }).join('');
+  var hidden = dims.filter(function (d) {
+    if (d.primary) return false;
+    if (_auditAddedDims.has(d.id)) return false;
+    return _auditChipCount(d.id) === 0;
+  });
+  var addBtn = hidden.length === 0 ? '' :
+    '<div class="filter-chip-wrap filter-chip-wrap-add">' +
+      '<button type="button" class="filter-chip-add" data-action="auditOpenAddFilter">' +
+        '<span aria-hidden="true">+</span> Add filter' +
+      '</button>' +
+      '<div class="filter-chip-dd" hidden></div>' +
+    '</div>';
+  var clearAll = _auditAnyFilterActive()
+    ? '<a class="filter-chip-clear-all" data-action="auditClearFilters">Clear all</a>'
+    : '';
+  return '<div class="filter-bar">' +
+    '<input type="search" id="audit-search-box" class="filter-bar-search" ' +
+      'placeholder="Search action, user, detail..." ' +
+      'value="' + escapeHtml(_auditQuery) + '" ' +
+      'data-action-input="auditSetQuery" />' +
+    '<div class="filter-bar-chips">' + chips + addBtn + '</div>' +
+    clearAll +
+  '</div>';
+}
+
+function _auditChipCount(dimId) {
+  if (dimId === 'time_window') {
+    return (_auditFilters.time_window && _auditFilters.time_window !== 'all') ? 1 : 0;
+  }
+  if (dimId === 'ip')          return _auditFilters.ip ? 1 : 0;
+  if (dimId === 'finding_ref') return _auditFilters.finding_ref ? 1 : 0;
+  var slot = _auditFilters[dimId];
+  return slot && slot.size ? slot.size : 0;
+}
+
+function _auditChipWrapHtml(dim, n) {
+  var label = dim.label;
+  var cls = 'filter-chip';
+  if (n > 0) {
+    cls += ' is-active';
+    if (dim.id === 'time_window') {
+      label += ': ' + _timeWindowLabel(_auditFilters.time_window);
+    } else if (dim.id === 'ip') {
+      label += ': ' + _auditFilters.ip;
+    } else if (dim.id === 'finding_ref') {
+      label += ': ' + _auditFilters.finding_ref;
+    } else {
+      label += ': ' + n + ' selected';
+    }
+  }
+  if (!dim.primary) cls += ' has-dismiss';
+  var dismissBtn = !dim.primary
+    ? '<button type="button" class="filter-chip-dismiss" ' +
+        'data-action="auditDismissChip" data-arg="' + dim.id + '" ' +
+        'aria-label="Remove filter" title="Remove filter">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
+          'stroke-linecap="round" stroke-linejoin="round" class="filter-chip-x-svg" aria-hidden="true">' +
+          '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>' +
+        '</svg>' +
+      '</button>'
+    : '';
+  return '<div class="filter-chip-wrap" data-dim="' + escapeHtml(dim.id) + '">' +
+    '<button type="button" class="' + cls + '" ' +
+      'data-action="auditOpenChip" data-arg="' + dim.id + '">' +
+      '<span class="filter-chip-label">' + escapeHtml(label) + '</span>' +
+      '<span class="filter-chip-caret" aria-hidden="true">▾</span>' +
+    '</button>' +
+    dismissBtn +
+    '<div class="filter-chip-dd" hidden></div>' +
+  '</div>';
+}
+
+function _timeWindowLabel(v) {
+  switch (v) {
+    case '24h': return 'Last 24h';
+    case '7d':  return 'Last 7 days';
+    case '30d': return 'Last 30 days';
+    case '90d': return 'Last 90 days';
+    default:    return 'All time';
+  }
 }
 
 function _renderTable() {
-  _filteredRows = _applyQuery(_auditCache, _auditQuery);
+  _filteredRows = _filterAuditRows(_auditCache);
   if (!_filteredRows.length) {
     return '<div style="padding:48px 20px; text-align:center; color:var(--text-muted);">' +
              'No audit entries match.' +
@@ -136,9 +428,10 @@ function _renderTable() {
   }
   var body = _filteredRows.map(function (r) {
     var tone = _actionTone(r.action);
+    var tsCell = _renderTimeCell(r.ts);
     return '<tr class="clickable audit-row audit-edge-' + tone + '" ' +
                'data-action="openAuditDrawer" data-arg="' + escapeHtml(String(r.id)) + '">' +
-      '<td><code>' + escapeHtml(r.ts || '') + '</code></td>' +
+      '<td>' + tsCell + '</td>' +
       '<td>' + _actionChip(r.action, tone) + '</td>' +
       '<td>' + _actorCell(r) + '</td>' +
       '<td>' + (r.ip_address ? '<code>' + escapeHtml(r.ip_address) + '</code>' : '') + '</td>' +
@@ -149,9 +442,92 @@ function _renderTable() {
       '</td>' +
       '</tr>';
   }).join('');
+  // Time column header gets a small toggle: relative ↔ absolute. Click
+  // re-renders just the table without re-running the filter pipeline.
+  var timeHeader =
+    '<th class="audit-time-header">' +
+      '<span>Time</span>' +
+      '<button type="button" class="audit-time-toggle" data-action="auditToggleTimeFmt" ' +
+        'title="Toggle between relative and absolute timestamps" ' +
+        'aria-label="Toggle time format">' +
+        (_auditTimeFmt === 'relative' ? 'rel' : 'abs') +
+      '</button>' +
+    '</th>';
   return '<table class="findings-table"><thead><tr>' +
-           '<th>Time</th><th>Action</th><th>User / Source</th><th>IP</th><th>Detail</th>' +
+           timeHeader +
+           '<th>Action</th><th>User / Source</th><th>IP</th><th>Detail</th>' +
          '</tr></thead><tbody>' + body + '</tbody></table>';
+}
+
+// Apply every audit filter chip + the search query + drop everything
+// that doesn't match. Returns the filtered list.
+function _filterAuditRows(rows) {
+  var f = _auditFilters;
+  var out = rows || [];
+  if (f.actions.size) {
+    out = out.filter(function (r) { return f.actions.has((r.action || '').toLowerCase()); });
+  }
+  if (f.users.size) {
+    out = out.filter(function (r) {
+      var u = (r.user_display_name || r.user || r.source || '').trim().toLowerCase();
+      return f.users.has(u);
+    });
+  }
+  if (f.target_types.size) {
+    out = out.filter(function (r) { return f.target_types.has(_targetType(r)); });
+  }
+  if (f.time_window && f.time_window !== 'all') {
+    var sizes = { '24h': 1, '7d': 7, '30d': 30, '90d': 90 };
+    var days = sizes[f.time_window];
+    if (days) {
+      var cutoff = Date.now() - days * 86400000;
+      out = out.filter(function (r) {
+        var t = Date.parse((r.ts || '').replace(' ', 'T'));
+        return !isNaN(t) && t >= cutoff;
+      });
+    }
+  }
+  if (f.ip)          out = out.filter(function (r) { return (r.ip_address || '') === f.ip; });
+  if (f.finding_ref) {
+    var ref = f.finding_ref.toLowerCase();
+    out = out.filter(function (r) { return (r.detail || '').toLowerCase().indexOf(ref) >= 0; });
+  }
+  if (_auditQuery) out = _applyQuery(out, _auditQuery);
+  return out;
+}
+
+function _targetType(r) {
+  var c = (r.comment || '').toLowerCase();
+  if (c.indexOf('finding:') === 0) return 'finding';
+  var a = (r.action || '').toLowerCase();
+  if (a.indexOf('scan') >= 0)  return 'scan';
+  if (r.ip_address) return 'ip';
+  if (a.indexOf('user') >= 0)  return 'user';
+  if (a.indexOf('rule') >= 0)  return 'rule';
+  return 'other';
+}
+
+function _renderTimeCell(ts) {
+  if (!ts) return '<code class="muted">—</code>';
+  var d = new Date(String(ts).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '<code>' + escapeHtml(ts) + '</code>';
+  var abs = d.toLocaleString();
+  if (_auditTimeFmt === 'absolute') {
+    return '<code title="' + escapeHtml(abs) + '">' + escapeHtml(ts) + '</code>';
+  }
+  // Relative formatter — "3h ago" / "yesterday" / "2025-04-22".
+  var diff = Math.max(0, Date.now() - d.getTime());
+  var s = Math.floor(diff / 1000);
+  var label;
+  if (s < 60)        label = 'just now';
+  else if (s < 3600) label = Math.floor(s / 60) + 'm ago';
+  else if (s < 86400) label = Math.floor(s / 3600) + 'h ago';
+  else if (s < 172800) label = 'yesterday';
+  else if (s < 604800) label = Math.floor(s / 86400) + 'd ago';
+  else label = d.toISOString().slice(0, 10);
+  return '<span class="audit-time-rel" title="' + escapeHtml(abs) + '">' +
+           escapeHtml(label) +
+         '</span>';
 }
 
 function _applyQuery(rows, q) {
@@ -223,6 +599,317 @@ export async function openAuditFinding(findingId) {
       clearInterval(timer);
     }
   }, 100);
+}
+
+// Open one finding by its short ref-id (e.g., "PTH-0142") — used by the
+// clickable ref-id chips in the audit drawer's bulk-action breakdown.
+export async function openAuditFindingByRef(refId) {
+  if (!refId) return;
+  var ref = String(refId).trim();
+  // Look up the underlying numeric id by ref so we can reuse the
+  // existing openAuditFinding flow (which polls the findings cache).
+  try {
+    var resp = await fetch('/api/audit?limit=1');
+    if (!resp.ok) return;
+  } catch (e) { /* offline — fall through */ }
+  // Fast path: search the current findingsState cache by ref_id.
+  var findings = await import('./findings.js');
+  var cache = (findings.findingsState && findings.findingsState.raw) || [];
+  var f = cache.find(function (x) { return x && x.ref_id === ref; });
+  if (f) {
+    var nav = await import('./navigation.js');
+    var ud = document.getElementById('drawer-root');
+    if (ud) ud.setAttribute('hidden', '');
+    nav.navigateWithHistory('findings');
+    setTimeout(function () { findings.openFindingDrawer(f); }, 200);
+    return;
+  }
+  // Slow path: navigate to findings, then poll for the row.
+  var nav2 = await import('./navigation.js');
+  var ud2 = document.getElementById('drawer-root');
+  if (ud2) ud2.setAttribute('hidden', '');
+  nav2.navigateWithHistory('findings');
+  var attempts = 0;
+  var timer = setInterval(function () {
+    attempts++;
+    var c = (findings.findingsState && findings.findingsState.raw) || [];
+    var hit = c.find(function (x) { return x && x.ref_id === ref; });
+    if (hit) {
+      clearInterval(timer);
+      findings.openFindingDrawer(hit);
+    } else if (attempts > 40) {
+      clearInterval(timer);
+    }
+  }, 100);
+}
+
+// ---------------------------------------------------------------------------
+// Filter-bar action handlers (Sentinel-style chip dropdowns)
+// ---------------------------------------------------------------------------
+
+export function auditSetQuery(_arg, target) {
+  _auditQuery = (target && target.value) || '';
+  _renderAuditShell();
+}
+
+export function auditClearFilters() {
+  _auditFilters.actions.clear();
+  _auditFilters.users.clear();
+  _auditFilters.target_types.clear();
+  _auditFilters.time_window = 'all';
+  _auditFilters.ip = '';
+  _auditFilters.finding_ref = '';
+  _auditAddedDims.clear();
+  _auditQuery = '';
+  _renderAuditShell();
+}
+
+export function auditDismissChip(dimId) {
+  if (dimId === 'ip')          _auditFilters.ip = '';
+  else if (dimId === 'finding_ref') _auditFilters.finding_ref = '';
+  else if (dimId === 'time_window') _auditFilters.time_window = 'all';
+  else if (_auditFilters[dimId] && _auditFilters[dimId].clear) _auditFilters[dimId].clear();
+  _auditAddedDims.delete(dimId);
+  _renderAuditShell();
+}
+
+export function auditToggleTimeFmt() {
+  _auditTimeFmt = (_auditTimeFmt === 'relative') ? 'absolute' : 'relative';
+  // Only the time column changed — re-render just the table to keep
+  // the page header / KPIs / filter bar steady.
+  var wrap = document.getElementById('audit-table-wrap');
+  if (wrap) wrap.innerHTML = _renderTable();
+}
+
+// Open the chip dropdown for a given dim. Populates the dropdown's
+// inner content + reveals it; the .filter-chip-wrap that contains the
+// chip + dropdown establishes the absolute-positioning context (see
+// findings.js for the same pattern).
+export function auditOpenChip(dimId, target) {
+  if (!dimId) return;
+  _auditCloseAllChipDropdowns();
+  var wrap = (target && target.closest && target.closest('.filter-chip-wrap[data-dim="' + dimId + '"]')) ||
+             document.querySelector('.filter-chip-wrap[data-dim="' + dimId + '"]');
+  if (!wrap) return;
+  var dd = wrap.querySelector('.filter-chip-dd');
+  if (!dd) return;
+  dd.innerHTML = _auditChipDdContent(dimId);
+  dd.hidden = false;
+  // Right-edge flip — same logic the findings filter chips use.
+  dd.classList.remove('is-flip-right');
+  var rect = dd.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 8) dd.classList.add('is-flip-right');
+  var first = dd.querySelector('input,button');
+  if (first) first.focus();
+}
+
+export function auditOpenAddFilter(_arg, target) {
+  _auditCloseAllChipDropdowns();
+  var wrap = (target && target.closest && target.closest('.filter-chip-wrap-add')) ||
+             document.querySelector('.filter-chip-wrap-add');
+  if (!wrap) return;
+  var dd = wrap.querySelector('.filter-chip-dd');
+  if (!dd) return;
+  var dims = _auditFilterDims().filter(function (d) {
+    if (d.primary) return false;
+    if (_auditAddedDims.has(d.id)) return false;
+    return _auditChipCount(d.id) === 0;
+  });
+  if (!dims.length) return;
+  dd.innerHTML = '<div class="filter-chip-dd-add-list">' +
+    dims.map(function (d) {
+      return '<button type="button" class="filter-chip-dd-add-item" ' +
+        'data-action="auditAddFilterDim" data-arg="' + escapeHtml(d.id) + '">' +
+        escapeHtml(d.label) +
+      '</button>';
+    }).join('') +
+  '</div>';
+  dd.hidden = false;
+  var rect = dd.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 8) dd.classList.add('is-flip-right');
+}
+
+export function auditAddFilterDim(dimId) {
+  if (!dimId) return;
+  _auditAddedDims.add(dimId);
+  _renderAuditShell();
+  setTimeout(function () { auditOpenChip(dimId, null); }, 0);
+}
+
+// Toggle a value in a multi-select dim. Re-renders the page so KPIs +
+// distribution bar pick up the change. data-arg = "dim|value".
+export function auditToggleFilter(arg, target) {
+  if (!arg) return;
+  var parts = String(arg).split('|');
+  var dim = parts[0], value = parts.slice(1).join('|');
+  var slot = _auditFilters[dim];
+  if (!slot || !slot.add) return;
+  var checked = !!(target && target.checked);
+  if (checked) slot.add(value); else slot.delete(value);
+  _renderAuditShell();
+  setTimeout(function () { auditOpenChip(dim, null); }, 0);
+}
+
+export function auditPickTimeWindow(arg) {
+  _auditFilters.time_window = arg || 'all';
+  _renderAuditShell();
+}
+
+export function auditApplyFreeformFilter(_arg, target) {
+  // Used by IP / finding_ref chips. The triggering button carries
+  // data-arg="<dim>" and the dropdown's input carries the value.
+  var dd = target && target.closest && target.closest('.filter-chip-dd');
+  if (!dd) return;
+  var input = dd.querySelector('input[type="text"], input[type="search"]');
+  var dim   = dd.getAttribute('data-dim') || target.getAttribute('data-arg');
+  if (!dim || !input) return;
+  _auditFilters[dim] = (input.value || '').trim();
+  if (_auditFilters[dim]) _auditAddedDims.add(dim);
+  _renderAuditShell();
+}
+
+function _auditChipDdContent(dimId) {
+  if (dimId === 'time_window') {
+    var values = ['24h', '7d', '30d', '90d', 'all'];
+    return '<ul class="filter-chip-dd-list">' +
+      values.map(function (v) {
+        var checked = (_auditFilters.time_window === v) ? ' checked' : '';
+        return '<li><label>' +
+          '<input type="radio" name="audit-time-window"' + checked + ' ' +
+            'data-action-change="auditPickTimeWindow" data-arg="' + v + '" />' +
+          '<span class="filter-chip-dd-value">' + _timeWindowLabel(v) + '</span>' +
+        '</label></li>';
+      }).join('') +
+    '</ul>';
+  }
+  if (dimId === 'ip' || dimId === 'finding_ref') {
+    var current = _auditFilters[dimId] || '';
+    var ph = dimId === 'ip' ? 'e.g. 203.0.113.42' : 'e.g. PTH-0142';
+    return '<div class="filter-chip-dd-head" data-dim="' + dimId + '">' +
+      '<input type="search" placeholder="' + ph + '" ' +
+        'value="' + escapeHtml(current) + '" autocomplete="off" />' +
+      '<button type="button" class="btn btn-sm" ' +
+        'data-action="auditApplyFreeformFilter" data-arg="' + dimId + '">Apply</button>' +
+    '</div>';
+  }
+  // Multi-select with counts. Items come from the unfiltered cache so
+  // toggling one value doesn't hide the others.
+  var dim = _auditFilterDims().find(function (d) { return d.id === dimId; });
+  if (!dim) return '';
+  var bucket = {};
+  _auditCache.forEach(function (r) {
+    var v;
+    if (dim.id === 'actions')      v = (r.action || '').toLowerCase();
+    else if (dim.id === 'users')   v = (r.user_display_name || r.user || r.source || '').trim().toLowerCase();
+    else if (dim.id === 'target_types') v = _targetType(r);
+    if (!v) return;
+    bucket[v] = (bucket[v] || 0) + 1;
+  });
+  var items = Object.keys(bucket).sort(function (a, b) { return bucket[b] - bucket[a]; });
+  var slot = _auditFilters[dim.id];
+  return '<ul class="filter-chip-dd-list">' +
+    items.map(function (v) {
+      var checked = slot.has(v) ? ' checked' : '';
+      return '<li><label>' +
+        '<input type="checkbox"' + checked + ' ' +
+          'data-action-change="auditToggleFilter" ' +
+          'data-arg="' + escapeHtml(dim.id) + '|' + escapeHtml(v) + '" />' +
+        '<span class="filter-chip-dd-value" title="' + escapeHtml(v) + '">' + escapeHtml(v) + '</span>' +
+        '<span class="filter-chip-dd-count">' + bucket[v] + '</span>' +
+      '</label></li>';
+    }).join('') +
+  '</ul>';
+}
+
+function _auditCloseAllChipDropdowns() {
+  document.querySelectorAll('.filter-chip-wrap .filter-chip-dd').forEach(function (dd) {
+    dd.hidden = true;
+    dd.classList.remove('is-flip-right');
+    dd.innerHTML = '';
+  });
+}
+
+function _mountAuditFilterDropdown() {
+  // Outside-click + Escape close. Uses named handlers so re-renders
+  // don't stack listeners.
+  document.removeEventListener('click', _auditChipOutsideClick);
+  document.addEventListener('click', _auditChipOutsideClick);
+  document.removeEventListener('keydown', _auditChipEscape);
+  document.addEventListener('keydown', _auditChipEscape);
+}
+function _auditChipOutsideClick(e) {
+  var trigger = e.target.closest('[data-action="auditOpenChip"], [data-action="auditOpenAddFilter"]');
+  if (trigger) return;
+  if (e.target.closest('.filter-chip-dd')) return;
+  _auditCloseAllChipDropdowns();
+}
+function _auditChipEscape(e) {
+  if (e.key === 'Escape') _auditCloseAllChipDropdowns();
+}
+
+// ---------------------------------------------------------------------------
+// Export dropdown — CSV / JSON / NDJSON, all server-side filtered.
+// ---------------------------------------------------------------------------
+
+function _mountAuditExportMenu() {
+  document.removeEventListener('click', _auditExportOutsideClick);
+  document.addEventListener('click', _auditExportOutsideClick);
+}
+function _auditExportOutsideClick(e) {
+  var menu = document.getElementById('audit-export-menu');
+  if (!menu || menu.hidden) return;
+  if (e.target.closest('[data-action="auditExportToggle"]')) return;
+  if (menu.contains(e.target)) return;
+  menu.hidden = true;
+}
+
+export function auditExportToggle(_arg, target) {
+  var menu = document.getElementById('audit-export-menu');
+  if (!menu) return;
+  if (!menu.hidden) { menu.hidden = true; return; }
+  menu.innerHTML =
+    '<button type="button" class="audit-export-item" data-action="auditExportRun" data-arg="csv">' +
+      '<i data-lucide="file-spreadsheet"></i><span>Export as CSV</span>' +
+    '</button>' +
+    '<button type="button" class="audit-export-item" data-action="auditExportRun" data-arg="json">' +
+      '<i data-lucide="file-json"></i><span>Export as JSON</span>' +
+    '</button>' +
+    '<button type="button" class="audit-export-item" data-action="auditExportRun" data-arg="ndjson">' +
+      '<i data-lucide="file-text"></i><span>Export as NDJSON</span>' +
+      '<span class="audit-export-hint">SIEM-friendly</span>' +
+    '</button>';
+  // Anchor to the trigger button — bottom-right alignment.
+  var rect = (target || document.querySelector('[data-action="auditExportToggle"]')).getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top  = (rect.bottom + 6) + 'px';
+  menu.style.left = Math.max(8, rect.right - 220) + 'px';
+  menu.hidden = false;
+}
+
+export function auditExportRun(format) {
+  if (!format) return;
+  var qs = _auditExportQueryString();
+  var url = '/api/audit/export.' + format + (qs ? ('?' + qs) : '');
+  var menu = document.getElementById('audit-export-menu');
+  if (menu) menu.hidden = true;
+  // Same-window navigation triggers Content-Disposition: attachment.
+  window.location.href = url;
+}
+
+function _auditExportQueryString() {
+  var f = _auditFilters;
+  var params = [];
+  function add(key, value) {
+    if (!value) return;
+    params.push(encodeURIComponent(key) + '=' + encodeURIComponent(value));
+  }
+  if (f.actions.size)      add('actions',      Array.from(f.actions).join(','));
+  if (f.users.size)        add('users',        Array.from(f.users).join(','));
+  if (f.target_types.size) add('target_types', Array.from(f.target_types).join(','));
+  if (f.time_window && f.time_window !== 'all') add('time_window', f.time_window);
+  if (f.ip)          add('ip',          f.ip);
+  if (f.finding_ref) add('finding_ref', f.finding_ref);
+  return params.join('&');
 }
 
 function _actorCell(r) {
@@ -373,6 +1060,43 @@ function _sectionEventDetails(row) {
 function _sectionDetailBreakdown(row) {
   var detail = row.detail || '';
   if (!detail) return '<div class="muted">No structured detail recorded.</div>';
+
+  // Newer audit writes store structured JSON. Render the meaningful
+  // fields as a key/value grid with clickable ref-IDs for bulk actions.
+  var jd = _parseJsonDetail(detail);
+  if (jd && typeof jd === 'object') {
+    var rows = [];
+    if (jd.from || jd.to) {
+      function _stateLabel(v) {
+        if (v == null) return '<span class="muted">—</span>';
+        if (typeof v === 'object') return escapeHtml(v.name || ('user #' + v.id));
+        return escapeHtml(String(v));
+      }
+      if (jd.from !== undefined) rows.push(['From', _stateLabel(jd.from)]);
+      if (jd.to   !== undefined) rows.push(['To',   _stateLabel(jd.to)]);
+    }
+    if (jd.count != null) rows.push(['Count', String(jd.count)]);
+    if (jd.reviewed != null)       rows.push(['Reviewed',       jd.reviewed       ? 'yes' : 'no']);
+    if (jd.false_positive != null) rows.push(['False positive', jd.false_positive ? 'yes' : 'no']);
+    if (Array.isArray(jd.ref_ids) && jd.ref_ids.length) {
+      var chips = jd.ref_ids.map(function (ref) {
+        return '<a class="audit-refid-chip" data-action="openAuditFindingByRef" ' +
+                  'data-arg="' + escapeHtml(ref) + '" data-default="allow" ' +
+                  'title="Open finding ' + escapeHtml(ref) + '">' +
+          escapeHtml(ref) +
+        '</a>';
+      }).join(' ');
+      rows.push(['Affected findings', '<div class="audit-refid-chips">' + chips + '</div>']);
+    }
+    if (rows.length) {
+      return '<div class="kv">' + rows.map(function (p) {
+        return '<div class="k">' + escapeHtml(p[0]) + '</div>' +
+               '<div class="v">' + p[1] + '</div>';
+      }).join('') + '</div>';
+    }
+    // JSON parsed but had no recognized fields — fall through.
+  }
+
   var parsed = _parseDetail(row.action, detail);
   if (!parsed.length) {
     return '<div class="kv"><div class="k">Detail</div>' +
@@ -395,44 +1119,101 @@ function _sectionDetailBreakdown(row) {
 // sentence ("Assigned 5 findings to Robert") and falls back to the
 // raw detail when no mapping applies. The raw string is always still
 // available in the drawer's Detail Breakdown + Raw JSON sections.
+// Try to parse the detail field as JSON. Newer audit writes use a
+// structured JSON shape so the formatter can surface before/after state
+// and bulk ref_ids. Older rows (key=value or freeform) return null and
+// fall through to the legacy parsers below.
+function _parseJsonDetail(detail) {
+  if (!detail || typeof detail !== 'string') return null;
+  var s = detail.trim();
+  if (!s.startsWith('{') && !s.startsWith('[')) return null;
+  try { return JSON.parse(s); } catch (e) { return null; }
+}
+
+// Format a list of ref_ids for the table cell. Up to `head` IDs are
+// listed inline; more than that gets a "and N more" suffix that opens
+// in the drawer's full breakdown.
+function _formatRefIdsInline(refIds, head) {
+  if (!refIds || !refIds.length) return '';
+  head = head || 5;
+  if (refIds.length <= head) return refIds.join(', ');
+  return refIds.slice(0, head).join(', ') +
+    ', and ' + (refIds.length - head) + ' more';
+}
+
 function _formatAuditDetail(row) {
   var action = (row.action || '').toLowerCase();
   var detail = row.detail || '';
   var comment = row.comment || '';
-  var kv = _kvPairs(detail);
+  var jd = _parseJsonDetail(detail);
+  var kv = jd ? null : _kvPairs(detail);
 
   // Bulk assign / unassign ----------------------------------------------
   if (action === 'bulk_assign_findings') {
+    if (jd) {
+      var name = (jd.to && jd.to.name) || 'user';
+      var noun = 'finding' + (jd.count === 1 ? '' : 's');
+      var refs = _formatRefIdsInline(jd.ref_ids, 5);
+      var base = 'Assigned ' + jd.count + ' ' + noun + ' to ' + name;
+      return refs ? base + ': ' + refs : base;
+    }
     var n = _kvNum(kv, 'count');
-    // Server now writes "assigned to <name>" directly; legacy rows have
-    // "assignee_user_id=<id>" and we resolve via the user cache.
-    var name = _extractAssignee(detail, kv);
-    var noun = 'finding' + (n === 1 ? '' : 's');
-    return 'Assigned ' + n + ' ' + noun + ' to ' + name;
+    var legacyName = _extractAssignee(detail, kv);
+    return 'Assigned ' + n + ' finding' + (n === 1 ? '' : 's') + ' to ' + legacyName;
   }
   if (action === 'bulk_unassign_findings') {
+    if (jd) {
+      var refsU = _formatRefIdsInline(jd.ref_ids, 5);
+      var baseU = 'Unassigned ' + jd.count + ' finding' + (jd.count === 1 ? '' : 's');
+      return refsU ? baseU + ': ' + refsU : baseU;
+    }
     var un = _kvNum(kv, 'count');
     return 'Unassigned ' + un + ' finding' + (un === 1 ? '' : 's');
   }
   if (action === 'bulk_review_findings') {
+    if (jd) {
+      var refsR = _formatRefIdsInline(jd.ref_ids, 5);
+      var baseR = 'Marked ' + jd.count + ' finding' + (jd.count === 1 ? '' : 's') + ' as reviewed';
+      return refsR ? baseR + ': ' + refsR : baseR;
+    }
     var rn = _kvNum(kv, 'count');
     return 'Marked ' + rn + ' finding' + (rn === 1 ? '' : 's') + ' reviewed';
   }
   if (action === 'bulk_unreview_findings') {
+    if (jd) {
+      var refsRu = _formatRefIdsInline(jd.ref_ids, 5);
+      var baseRu = 'Cleared review on ' + jd.count + ' finding' + (jd.count === 1 ? '' : 's');
+      return refsRu ? baseRu + ': ' + refsRu : baseRu;
+    }
     var un2 = _kvNum(kv, 'count');
     return 'Cleared review on ' + un2 + ' finding' + (un2 === 1 ? '' : 's');
   }
 
   // Per-finding assign / unassign ---------------------------------------
   if (action === 'assign_finding') {
+    if (jd && jd.to) {
+      var to = jd.to.name || 'user';
+      if (jd.from && jd.from.name) {
+        return 'Reassigned from ' + jd.from.name + ' to ' + to;
+      }
+      return 'Assigned to ' + to + ' (was unassigned)';
+    }
     return 'Assigned to ' + _extractAssignee(detail, kv);
   }
   if (action === 'unassign_finding') {
+    if (jd && jd.from && jd.from.name) {
+      return 'Unassigned (was ' + jd.from.name + ')';
+    }
     return 'Unassigned';
   }
 
   // Review toggle -------------------------------------------------------
   if (action === 'review_finding') {
+    if (jd) {
+      if (jd.false_positive) return 'Marked as false positive';
+      if (jd.reviewed)       return 'Marked as reviewed';
+      return 'Cleared review flags';
+    }
     var rev = _kvBool(kv, 'reviewed');
     var fp  = _kvBool(kv, 'false_positive');
     if (fp)  return 'Marked as false positive';
@@ -442,7 +1223,14 @@ function _formatAuditDetail(row) {
 
   // Workflow state ------------------------------------------------------
   if (action === 'set_workflow_state') {
-    var ws = kv.workflow_status || '';
+    if (jd && jd.to) {
+      var fromState = jd.from ? _titleCase(jd.from) : null;
+      var toState   = _titleCase(jd.to);
+      return fromState
+        ? 'Status changed from ' + fromState + ' to ' + toState
+        : 'Status changed to ' + toState;
+    }
+    var ws = (kv && kv.workflow_status) || '';
     return 'Status changed to ' + _titleCase(ws || 'new');
   }
 

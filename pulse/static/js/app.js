@@ -4,8 +4,7 @@
 'use strict';
 
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
-import { navigate, validPages, parsePath, toggleSidebar } from './navigation.js';
-import { toggleSidebarFilterGroup, clearSidebarFilters } from './sidebar-filters.js';
+import { navigate, validPages, parsePath } from './navigation.js';
 import {
   openUploadModal,
   closeUploadModal,
@@ -28,10 +27,6 @@ import {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
-  dashSidebarToggleItem,
-  dashSidebarToggleGroup,
-  dashSidebarClear,
-  dashSidebarSearch,
 } from './dashboard.js';
 import {
   toggleScanSelect,
@@ -40,13 +35,31 @@ import {
   setScansSort,
   setScansQueryFromInput,
   setScansPageTab,
+  setScansHostFilter,
+  setScansGradeFilter,
+  setScansScopeFilter,
+  setScansDateFrom,
+  setScansDateTo,
+  viewScanReport,
+  compareScanWithPrevious,
   viewScan,
   setFindingsSort,
-  setFindingsFilter,
-  setFindingsReviewFilter,
-  setFindingsReviewFilterFromSelect,
-  toggleAssignedToMeFilter,
   setFindingsQueryFromInput,
+  toggleFindingsFilter,
+  removeFindingsFilterChip,
+  clearFindingsFilters,
+  findingsCtxFilterFor,
+  findingsCtxFilterOut,
+  openFilterChip,
+  openAddFilterMenu,
+  addFilterDim,
+  filterChipDdFind,
+  clearFilterChip,
+  dismissFilterChip,
+  findingsKpiClick,
+  toggleFindingsAutoRefresh,
+  refreshFindings,
+  exportFindingsCsv,
   toggleReviewedFromRow,
   toggleFindingSelect,
   toggleFindingSelectAll,
@@ -150,6 +163,8 @@ import {
   sendTestAlert,
   saveWebhookSettings,
   sendTestWebhook,
+  saveThreatIntelSettings,
+  testThreatIntelKey,
   onScheduleKindChange,
   saveScheduleSettings,
   switchSettingsTab,
@@ -180,7 +195,23 @@ import {
   rulesClearFilter,
   filterByTechnique,
 } from './rules.js';
-import { openAuditDrawer, openAuditFinding } from './audit.js';
+import {
+  openAuditDrawer,
+  openAuditFinding,
+  openAuditFindingByRef,
+  auditSetQuery,
+  auditClearFilters,
+  auditDismissChip,
+  auditToggleTimeFmt,
+  auditOpenChip,
+  auditOpenAddFilter,
+  auditAddFilterDim,
+  auditToggleFilter,
+  auditPickTimeWindow,
+  auditApplyFreeformFilter,
+  auditExportToggle,
+  auditExportRun,
+} from './audit.js';
 import {
   mountUserMenu,
   toggleUserMenu,
@@ -205,9 +236,6 @@ import {
 const actions = {
   // theme + navigation
   navigate,
-  toggleSidebar,
-  toggleSidebarFilterGroup,
-  clearSidebarFilters,
   toggleTheme,
   setThemeFromSelect,
 
@@ -233,10 +261,6 @@ const actions = {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
-  dashSidebarToggleItem,
-  dashSidebarToggleGroup,
-  dashSidebarClear,
-  dashSidebarSearch,
   openUnreviewedCriticalHigh,
 
   // scans + findings
@@ -246,13 +270,31 @@ const actions = {
   setScansSort,
   setScansQueryFromInput,
   setScansPageTab,
+  setScansHostFilter,
+  setScansGradeFilter,
+  setScansScopeFilter,
+  setScansDateFrom,
+  setScansDateTo,
+  viewScanReport,
+  compareScanWithPrevious,
   viewScan,
   setFindingsSort,
-  setFindingsFilter,
-  setFindingsReviewFilter,
-  setFindingsReviewFilterFromSelect,
-  toggleAssignedToMeFilter,
   setFindingsQueryFromInput,
+  toggleFindingsFilter,
+  removeFindingsFilterChip,
+  clearFindingsFilters,
+  findingsCtxFilterFor,
+  findingsCtxFilterOut,
+  openFilterChip,
+  openAddFilterMenu,
+  addFilterDim,
+  filterChipDdFind,
+  clearFilterChip,
+  dismissFilterChip,
+  findingsKpiClick,
+  toggleFindingsAutoRefresh,
+  refreshFindings,
+  exportFindingsCsv,
   toggleReviewedFromRow,
   toggleFindingSelect,
   toggleFindingSelectAll,
@@ -357,6 +399,8 @@ const actions = {
   sendTestAlert,
   saveWebhookSettings,
   sendTestWebhook,
+  saveThreatIntelSettings,
+  testThreatIntelKey,
   onScheduleKindChange,
   saveScheduleSettings,
   switchSettingsTab,
@@ -390,6 +434,19 @@ const actions = {
   // audit log
   openAuditDrawer,
   openAuditFinding,
+  openAuditFindingByRef,
+  auditSetQuery,
+  auditClearFilters,
+  auditDismissChip,
+  auditToggleTimeFmt,
+  auditOpenChip,
+  auditOpenAddFilter,
+  auditAddFilterDim,
+  auditToggleFilter,
+  auditPickTimeWindow,
+  auditApplyFreeformFilter,
+  auditExportToggle,
+  auditExportRun,
 
   // user menu
   toggleUserMenu,
@@ -502,14 +559,31 @@ function _boot() {
   monitorClient.init();
   mountNavLiveIndicator();
 
-  // Hydrate Lucide icons once at startup. Sidebar nav, topbar user
-  // menu, and the monitor gear dropdown all render from static markup
-  // (or boot-time render) so a single pass covers them.
-  try {
-    if (window.lucide && typeof window.lucide.createIcons === 'function') {
-      window.lucide.createIcons();
-    }
-  } catch (e) {}
+  // Hydrate Lucide icons at startup AND auto-hydrate on every render
+  // afterward. A MutationObserver on #content catches every page render
+  // (which always swaps innerHTML) and a coalesced rAF call replaces
+  // any newly-injected `<i data-lucide="...">` placeholders. This means
+  // page renderers don't need to remember to call createIcons themselves.
+  function _hydrateLucide() {
+    try {
+      if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+      }
+    } catch (e) {}
+  }
+  _hydrateLucide();
+  var contentEl = document.getElementById('content');
+  if (contentEl && typeof MutationObserver === 'function') {
+    var pending = false;
+    new MutationObserver(function () {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function () {
+        pending = false;
+        _hydrateLucide();
+      });
+    }).observe(contentEl, { childList: true, subtree: true });
+  }
 
   // Populate the topbar avatar with the signed-in user's initials.
   mountUserMenu();

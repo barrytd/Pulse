@@ -130,6 +130,39 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ------------------------------------------------------------------ */
+/* Global dark-theme scrollbars                                       */
+/*                                                                    */
+/* Subtle, blends into the dark surface — every scrollable element    */
+/* (tables, dropdowns, drawers, modals, .filter-chip-dd, .findings-   */
+/* filter-pane-body, etc.) inherits this without any per-component    */
+/* styling.                                                           */
+/*                                                                    */
+/* Firefox uses scrollbar-width / scrollbar-color (no pseudo-elements */
+/* available). WebKit / Blink uses the ::-webkit-scrollbar tree.      */
+/* ------------------------------------------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Global tabular-nums + slashed zero on numeric / monospace content.
    IPs, hashes, timestamps, counts, and KPI digits align perfectly in
    tables without each page having to opt in. Applies wherever the
@@ -168,8 +201,8 @@ code, pre, kbd, samp, .mono, [class*="mono"] {
 }
 
 @media (max-width: 768px) {
-  .sidebar     { display: none; }
-  .main        { margin-left: 0; }
+  /* Nav rail + filter pane handle their own mobile hiding in sidebar.css;
+     .main gets margin-left: 0 there. Here we only collapse grids. */
   .stat-row    { grid-template-columns: 1fr; }
   .summary-row { grid-template-columns: 1fr; }
 }

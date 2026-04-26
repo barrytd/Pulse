@@ -1,7 +1,13 @@
-// navigation.js — swaps #content between pages and keeps the browser
-// URL + history in sync using the History API. Every top-level page has
-// its own path (/dashboard, /monitor, ...) so back / forward / refresh
-// all behave the way a user expects from a normal website.
+// navigation.js — single source of truth for the app's top-level page
+// router + sidebar highlight. Every page change flows through navigate():
+//   1. URL is synced (pushState / replaceState)
+//   2. body.dataset.page is updated (CSS hooks per page)
+//   3. Active link in the sidebar is highlighted
+//   4. The page's renderer runs
+//
+// Filters live inside each page's content area (top filter bars), so
+// this module has no filter-pane awareness. There's no collapse state
+// to manage either — the sidebar is always visible at 200px.
 'use strict';
 
 import { renderDashboardPage } from './dashboard.js';
@@ -18,8 +24,6 @@ import { renderAuditPage } from './audit.js';
 import { renderCompliancePage } from './compliance.js';
 import { renderTrendsPage } from './trends.js';
 
-// "findings" is no longer a top-level page — it's a tab on Scans. Still
-// in validPages so old /findings bookmarks and back-entries land right.
 export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings'];
 
 // Current page — mutable module state. Exposed via getter so other
@@ -49,25 +53,26 @@ function _buildPath(page, scanId) {
 }
 
 // ----- navigate -----------------------------------------------------------
-// opts:
-//   push    (default true) — write a new history entry. Set false when
-//            responding to popstate so we don't recurse into history.
-//   replace — write history.replaceState instead of pushState. Used on
-//            first-load so there's a valid state object attached to the
-//            initial entry (otherwise back from entry #2 returns to a
-//            null-state entry #1 and popstate has nothing to read).
-//   scanId  — sub-page parameter for /scans/{id}.
 export function navigate(page, opts) {
   opts = opts || {};
-  // "findings" legacy hash → Scans page with the All Findings tab active.
+
+  // Any open detail flyout belongs to the previous page — close it
+  // before we render the new page so the drawer doesn't persist (e.g.
+  // a finding drawer hanging around when the user clicks Rules).
+  _closeAnyOpenDrawer();
+
+  // "Findings" sidebar item is a sub-tab of the Scans page. Translate
+  // the click into a Scans route with the All Findings tab active so
+  // old /findings bookmarks still resolve correctly.
   if (page === 'findings') {
-    _syncUrl('scans', null, opts);
-    _currentPage = 'scans';
-    _updateSidebarHighlight('scans');
-    _updateTitle('Scans');
-    document.body.dataset.page = 'scans';
+    _syncUrl('findings', null, opts);
+    _currentPage = 'findings';
+    _updateSidebarHighlight('findings');
+    _updateTitle('Findings');
+    document.body.dataset.page = 'findings';
+    // renderScansPage will read scansPageTab = 'findings' and draw the
+    // All Findings view inside the Scans shell.
     setScansPageTab('findings');
-    _refreshSidebarFilters();
     return;
   }
 
@@ -75,8 +80,6 @@ export function navigate(page, opts) {
   _currentPage = page;
   _updateSidebarHighlight(page);
   _updateTitle(_titleFor(page, opts.scanId));
-  // Expose the current page via body[data-page] so page-specific
-  // sidebar panels (inline filter panels) can show / hide via CSS.
   document.body.dataset.page = page;
 
   // Scan detail is a sub-page of Scans: show Scans highlighted in the
@@ -86,8 +89,8 @@ export function navigate(page, opts) {
     return;
   }
 
-  // When the user clicks Scans in the sidebar, reset to the Scans tab
-  // so they don't land on All Findings by accident.
+  // Clicking "Scans" in the sidebar resets to the list tab — don't
+  // resume from whichever sub-tab was last visited.
   if (page === 'scans') {
     setScansPageTab('scans');
     return;
@@ -108,44 +111,27 @@ export function navigate(page, opts) {
     trends:     renderTrendsPage,
   };
   (renderers[page] || renderDashboardPage)();
-  _refreshSidebarFilters();
 }
 
-// Lazy-imported to break the sidebar-filters → navigation cycle at
-// module load time. Fires after every page change so the sidebar's
-// contextual filter panel matches the new page.
-function _refreshSidebarFilters() {
-  import('./sidebar-filters.js').then(function (m) {
-    if (m.updateSidebarFilters) m.updateSidebarFilters();
-  }).catch(function () { /* module not yet loaded; next nav will retry */ });
-}
-
-// Keep a thin back-compat shim — older callers pass a second arg meaning
-// "push a history entry". navigate() already pushes by default, so the
-// two end up identical. Left as an exported symbol in case anything
-// downstream imports it.
-export function navigateWithHistory(page) {
-  navigate(page);
-}
+// Back-compat shim — older callers pass a second arg meaning "push a
+// history entry". navigate() already pushes by default.
+export function navigateWithHistory(page) { navigate(page); }
 
 function _syncUrl(page, scanId, opts) {
   var path = _buildPath(page, scanId);
   // Preserve the existing query string — dashboard filters write to
   // ?time=... via a separate replaceState, and we don't want to clobber
-  // that when we navigate between pages that share the same URL (e.g.
-  // going from a filtered dashboard view to settings and back).
+  // that when navigating between pages that share the same URL.
   var full = path + (location.search || '');
   var state = { page: page };
   if (scanId) state.scanId = scanId;
 
-  if (opts.push === false) return; // responding to popstate; do nothing
+  if (opts.push === false) return;
   if (opts.replace) {
     history.replaceState(state, '', full);
     return;
   }
-  if (location.pathname + (scanId ? '' : '') === path) {
-    // Same path — replace rather than push so duplicate clicks on a
-    // sidebar item don't stack history entries.
+  if (location.pathname === path) {
     history.replaceState(state, '', full);
     return;
   }
@@ -153,8 +139,8 @@ function _syncUrl(page, scanId, opts) {
 }
 
 function _updateSidebarHighlight(page) {
-  document.querySelectorAll('.sidebar-nav a').forEach(function (a) { a.classList.remove('active'); });
-  var a = document.querySelector('.sidebar-nav a[data-arg="' + page + '"]');
+  document.querySelectorAll('.sidebar-nav').forEach(function (a) { a.classList.remove('active'); });
+  var a = document.querySelector('.sidebar-nav[data-arg="' + page + '"]');
   if (a) a.classList.add('active');
 }
 
@@ -168,11 +154,29 @@ function _titleFor(page, scanId) {
   return page.charAt(0).toUpperCase() + page.slice(1);
 }
 
+// Belt-and-braces drawer close — runs at the start of every navigate()
+// call. Any page with a detail flyout (currently just Findings, but the
+// same pattern will apply to Fleet / Rules / Audit when they pick up
+// the Sentinel push-flyout) just needs an `.open` class on a container
+// that lives inside <body>; we sweep them all here so navigation
+// authors don't have to remember which page owns which drawer.
+function _closeAnyOpenDrawer() {
+  // Synchronous DOM-level close. We deliberately do NOT lazy-import
+  // findings.js here: the import resolves asynchronously, which used
+  // to race with a user opening a drawer right after page load (boot
+  // navigate → queued close → user clicks row → drawer opens →
+  // queued close finally resolves and strips .open). The drawer's
+  // `.open` class is the only thing the user sees; module-level
+  // _drawerFinding state is recovered by the next openFindingDrawer.
+  var findingDrawer = document.getElementById('finding-drawer');
+  if (!findingDrawer || !findingDrawer.classList.contains('open')) return;
+  findingDrawer.classList.remove('open');
+  var backdrop = document.getElementById('finding-drawer-backdrop');
+  if (backdrop) backdrop.classList.remove('open');
+  document.body.classList.remove('flyout-push-open');
+}
+
 // ----- back / forward -----------------------------------------------------
-// popstate fires on browser back / forward. We trust state.page when
-// present (set by our own push/replaceState) and fall back to parsing
-// the URL for history entries that predate this session (e.g. another
-// tab's entry promoted into this window).
 window.addEventListener('popstate', function (event) {
   var st = event.state;
   var page, scanId;
@@ -186,18 +190,3 @@ window.addEventListener('popstate', function (event) {
   }
   navigate(page, { push: false, scanId: scanId });
 });
-
-// ---------------------------------------------------------------
-// Sidebar collapse/expand
-// ---------------------------------------------------------------
-// Toggles body.sidebar-collapsed and persists the state. The inline
-// boot script in index.html restores the class before first paint
-// so the choice sticks across reloads without a visible flash.
-export function toggleSidebar() {
-  var body = document.body;
-  var nowCollapsed = !body.classList.contains('sidebar-collapsed');
-  body.classList.toggle('sidebar-collapsed', nowCollapsed);
-  try {
-    localStorage.setItem('pulseSidebarCollapsed', nowCollapsed ? '1' : '0');
-  } catch (e) { /* localStorage disabled — state is session-only */ }
-}
