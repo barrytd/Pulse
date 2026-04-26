@@ -51,16 +51,22 @@
  * ================================================================== */
 
 .sidebar-brand {
+  /* Fixed 48px tall (matches the topbar) and vertically centred so
+     the PULSE icon, name, separator, and tagline all share one line.
+     gap:0 — the only intentional space lives between the icon and
+     the rest of the brand (set on .sidebar-brand-mark below). */
   flex: 0 0 48px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   padding: 0 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--text-high, #f3f4f6);
   text-decoration: none;
   cursor: pointer;
   transition: opacity 120ms ease;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .sidebar-brand:hover { opacity: 0.85; }
 
@@ -70,24 +76,34 @@
   justify-content: center;
   color: #3fb950; /* pulse/ECG green */
   flex: 0 0 auto;
+  /* The 8px breathing room between the icon and the text group. */
+  margin-right: 8px;
 }
 .sidebar-brand-name {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 600;
-  letter-spacing: 1.2px;
+  /* Tighter tracking — the prior 1.2px pushed "PULSE" too far from
+     the separator and made the whole brand feel airy. */
+  letter-spacing: 0.8px;
   color: var(--text-high, #f3f4f6);
+  line-height: 1;
 }
 .sidebar-brand-sep {
-  color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.22);
   font-weight: 300;
-  padding: 0 1px;
+  /* Symmetric 6px breathing room either side of the pipe so the
+     separator reads as part of the same compact lockup, not a stand-
+     alone divider. */
+  margin: 0 6px;
+  line-height: 1;
 }
 .sidebar-brand-sub {
   font-size: 10px;
   color: var(--text-muted, #8b949e);
   letter-spacing: 0.3px;
   white-space: nowrap;
+  line-height: 1;
 }
 
 /* ==================================================================

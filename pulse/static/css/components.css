@@ -1206,6 +1206,10 @@ body.light .admin-banner-close {
 
 /* ----- Sticky filter bar ----- */
 .filter-bar {
+  /* `position: sticky` already establishes a containing block for
+     absolute-positioned descendants — the chip-dropdown popover
+     anchors against this bar without needing an extra `position:
+     relative` rule. */
   position: sticky;
   top: 48px; /* under the 48px topbar */
   z-index: 8;
@@ -1320,18 +1324,21 @@ body.light .admin-banner-close {
 
 /* ----- Filter chip dropdown popover ----- */
 .filter-chip-dd {
-  position: fixed;
+  /* Absolute, anchored to the .filter-bar offsetParent. Top/left are
+     written by JS so the popover lines up with the bottom-left of the
+     triggering chip + a 4px gap, with right-edge flip handled there. */
+  position: absolute;
   z-index: 1000;
-  min-width: 240px;
-  max-width: 320px;
-  max-height: 400px;
+  width: 240px;
+  max-height: 320px;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .filter-chip-dd[hidden] { display: none; }
 .filter-chip-dd-head {

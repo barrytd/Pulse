@@ -1015,9 +1015,9 @@ export function applyFindingsView() {
       '</div>' +
     '</div>' +
     // Right-click context menu — fresh node per render avoids leaking
-    // listeners. The chip-dropdown popover uses the same approach.
-    '<div class="findings-ctx-menu" id="findings-ctx-menu" hidden></div>' +
-    '<div class="filter-chip-dd" id="filter-chip-dd" hidden></div>';
+    // listeners. (The chip-dropdown popover lives INSIDE the filter
+    // bar so it can position absolute relative to that container.)
+    '<div class="findings-ctx-menu" id="findings-ctx-menu" hidden></div>';
 
   _restoreSearchFocus('findings-search-box');
   _mountBulkBarUsers();
@@ -1343,6 +1343,10 @@ function _findingsFilterBarHtml() {
       'data-action-input="setFindingsQueryFromInput" />' +
     '<div class="filter-bar-chips">' + chipsHtml + addBtn + '</div>' +
     clearAll +
+    // Chip-dropdown popover lives INSIDE the filter bar so it can
+    // position absolute against that container — its top-left aligns
+    // with the bottom-left of the triggering chip with a 4px gap.
+    '<div class="filter-chip-dd" id="filter-chip-dd" hidden></div>' +
   '</div>';
 }
 
@@ -1478,18 +1482,35 @@ export function openAddFilterMenu(_arg, target) {
 function _positionChipDropdown(dd, anchor) {
   dd.hidden = false;
   if (!anchor) return;
-  var rect = anchor.getBoundingClientRect();
-  dd.style.left = '0px';
-  dd.style.top  = '0px';
-  var ddRect = dd.getBoundingClientRect();
-  var x = rect.left;
-  var y = rect.bottom + 4;
-  // Clamp inside the viewport so a chip near the right edge doesn't
-  // cause a horizontal scrollbar.
-  x = Math.max(8, Math.min(x, window.innerWidth - ddRect.width - 8));
-  y = Math.max(8, Math.min(y, window.innerHeight - ddRect.height - 8));
-  dd.style.left = x + 'px';
-  dd.style.top  = y + 'px';
+
+  // The dropdown is now position: absolute inside the filter bar, so we
+  // compute coordinates relative to its offsetParent (the filter bar).
+  // Using getBoundingClientRect on both and subtracting keeps the math
+  // robust against scrolled / transformed ancestors.
+  var parent = dd.offsetParent || dd.parentElement;
+  if (!parent) return;
+  var triggerRect = anchor.getBoundingClientRect();
+  var parentRect  = parent.getBoundingClientRect();
+  var ddWidth = 240; // matches CSS — used for the right-edge flip check
+
+  // Default: top-left of dropdown aligns with bottom-left of the
+  // triggering chip, with a 4px breathing-room gap. Coordinates are
+  // expressed relative to the offsetParent.
+  var top  = (triggerRect.bottom - parentRect.top) + 4;
+  var left = triggerRect.left - parentRect.left;
+
+  // Right-edge overflow: if the dropdown's right edge would land past
+  // the viewport (minus 8px gutter), flip it to align its right edge
+  // with the right edge of the triggering chip instead.
+  if (triggerRect.left + ddWidth > window.innerWidth - 8) {
+    left = triggerRect.right - parentRect.left - ddWidth;
+  }
+  // Final guardrail: never let the dropdown push past the parent's left
+  // edge (chips on the leftmost column should still be reachable).
+  if (left < 0) left = 0;
+
+  dd.style.left = left + 'px';
+  dd.style.top  = top + 'px';
   // Focus the first interactive thing for keyboard users.
   var firstInput = dd.querySelector('input, button');
   if (firstInput) firstInput.focus();
