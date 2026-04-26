@@ -1027,3 +1027,439 @@ body.light .admin-banner-close {
 /* Utility: muted mono text */
 .mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
 
+/* ==================================================================
+ * SENTINEL PRIMITIVES
+ *
+ * Reusable list-page chrome. Pulled out here so any list page can
+ * adopt the same patterns by composing these classes — see the
+ * Findings page for the canonical example.
+ *
+ *   .page-header              outer wrapper for the five header zones
+ *   .page-breadcrumb          breadcrumb row (Pulse > Section > Page)
+ *   .page-title-block         title text left, action buttons right
+ *   .kpi-row + .kpi-tile      4–6 numeric tiles above the filter bar
+ *   .sev-bar-wrap + .sev-bar  6px stacked horizontal severity bar
+ *   .filter-bar               sticky filter row with search + chips
+ *   .filter-chip              the multi-select chip dropdown trigger
+ *   .filter-chip-dd           the popover the chip opens
+ *   .toggle-switch            iOS-style on/off switch (auto-refresh)
+ * ================================================================== */
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ----- Breadcrumb row ----- */
+.page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  height: 24px;
+}
+.page-breadcrumb-item {
+  color: var(--text-muted);
+}
+.page-breadcrumb-current {
+  color: var(--text);
+  font-weight: 500;
+}
+.page-breadcrumb-sep {
+  color: var(--text-light, var(--text-muted));
+  opacity: 0.6;
+  padding: 0 2px;
+}
+
+/* ----- Title block ----- */
+.page-title-block {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+}
+.page-title {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-high, var(--text));
+  letter-spacing: -0.1px;
+  margin: 0;
+}
+.page-title-count {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 18px;
+  margin-left: 4px;
+}
+.page-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-compact.is-busy {
+  /* Light spin animation on the leading icon while a refresh is in
+     flight. Doesn't block clicks — the handler debounces itself. */
+  pointer-events: none;
+}
+.btn-compact.is-busy svg {
+  animation: pulse-spin 0.9s linear infinite;
+}
+@keyframes pulse-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ----- KPI tiles ----- */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.kpi-tile {
+  appearance: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: 8px;
+  padding: 14px 18px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+  color: var(--text);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.kpi-tile:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent);
+}
+.kpi-tile.is-active {
+  border-left-color: var(--accent);
+  background: var(--accent-glow, rgba(88, 166, 255, 0.08));
+}
+.kpi-tile-number {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.kpi-tile-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.kpi-tile-sub {
+  font-size: 11px;
+  color: var(--text-light, var(--text-muted));
+  opacity: 0.75;
+}
+
+@media (max-width: 960px) {
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ----- Severity bar ----- */
+.sev-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sev-bar-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sev-bar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sev-bar-legend-item strong {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+}
+.sev-bar-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.sev-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border);
+}
+.sev-bar-seg {
+  height: 100%;
+}
+
+/* ----- Sticky filter bar ----- */
+.filter-bar {
+  position: sticky;
+  top: 48px; /* under the 48px topbar */
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.filter-bar-search {
+  flex: 0 0 240px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.filter-bar-search:focus { border-color: var(--accent); }
+.filter-bar-chips {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.filter-chip:hover {
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+.filter-chip.is-active {
+  background: var(--accent-glow, rgba(88, 166, 255, 0.12));
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-chip-label { line-height: 1; }
+.filter-chip-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-left: 2px;
+}
+.filter-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.filter-chip-x:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.filter-chip-add {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.filter-chip-add:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-chip-clear-all {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  margin-left: auto;
+  padding: 0 4px;
+}
+.filter-chip-clear-all:hover { text-decoration: underline; }
+
+/* ----- Filter chip dropdown popover ----- */
+.filter-chip-dd {
+  position: fixed;
+  z-index: 1000;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 400px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.filter-chip-dd[hidden] { display: none; }
+.filter-chip-dd-head {
+  flex: 0 0 auto;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.filter-chip-dd-search {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.filter-chip-dd-search:focus { border-color: var(--accent); }
+.filter-chip-dd-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  flex: 1;
+  overflow-y: auto;
+}
+.filter-chip-dd-list > li > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-chip-dd-list > li > label:hover { background: var(--hover-bg); }
+.filter-chip-dd-list input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+.filter-chip-dd-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.filter-chip-dd-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+.filter-chip-dd-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.filter-chip-dd-add-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+.filter-chip-dd-add-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.filter-chip-dd-add-item:hover { background: var(--hover-bg); }
+
+/* ----- Toggle switch (iOS-style rocker) ----- */
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-switch input {
+  /* Visually hidden but still focusable for keyboard/AT users. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.toggle-switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  background: var(--border);
+  border-radius: 9px;
+  transition: background 150ms ease;
+  flex-shrink: 0;
+}
+.toggle-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 150ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.toggle-switch input:checked + .toggle-switch-track {
+  background: var(--accent);
+}
+.toggle-switch input:checked + .toggle-switch-track::after {
+  transform: translateX(14px);
+}
+.toggle-switch input:focus-visible + .toggle-switch-track {
+  box-shadow: 0 0 0 3px var(--accent-glow, rgba(88, 166, 255, 0.25));
+}
+.toggle-switch:hover .toggle-switch-label { color: var(--text); }
+.toggle-switch-label { transition: color 120ms ease; }
+

@@ -1225,6 +1225,62 @@ def _register_routes(app: FastAPI) -> None:
         )
 
     # -------------------------------------------------------------------
+    # GET /api/findings/export.csv — full findings list as one CSV
+    # -------------------------------------------------------------------
+    @app.get("/api/findings/export.csv")
+    def findings_export_csv(user_id: int = Depends(require_login)):
+        """Stream every finding the caller can see as CSV. Column order
+        mirrors what the dashboard table shows so the file maps 1:1 to
+        the on-screen view (timestamp, severity, rule, scan, host,
+        assignee, workflow status, MITRE, description)."""
+        import csv
+        import io
+        from pulse.database import get_history, get_scan_findings
+
+        scope = _scan_scope_for(app, user_id)
+        scans = get_history(app.state.db_path, limit=200, user_id=scope)
+        scan_meta = {s["id"]: s for s in scans}
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "timestamp",
+            "severity",
+            "rule",
+            "scan_number",
+            "scan_id",
+            "host",
+            "assigned_to",
+            "workflow_status",
+            "reviewed",
+            "false_positive",
+            "mitre",
+            "description",
+        ])
+        for s in scans:
+            for f in get_scan_findings(app.state.db_path, s["id"], user_id=scope) or []:
+                writer.writerow([
+                    f.get("timestamp", "") or "",
+                    (f.get("severity") or "").upper(),
+                    f.get("rule", "") or "",
+                    s.get("number", "") or "",
+                    s.get("id", "") or "",
+                    s.get("hostname", "") or s.get("filename", "") or "",
+                    f.get("assignee_display_name") or f.get("assignee_email") or "",
+                    f.get("workflow_status", "") or "new",
+                    1 if f.get("reviewed") else 0,
+                    1 if f.get("false_positive") else 0,
+                    f.get("mitre", "") or "",
+                    (f.get("description") or "").replace("\n", " ").replace("\r", " "),
+                ])
+        filename = f"pulse-findings-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # -------------------------------------------------------------------
     # Block list — stage / list / push / unblock
     # -------------------------------------------------------------------
     @app.get("/api/block-list")
