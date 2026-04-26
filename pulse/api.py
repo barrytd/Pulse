@@ -24,9 +24,12 @@
 #   parameters, example requests, and a "Try it out" button — all for free.
 
 import asyncio
+import csv
 import functools
+import io
 import json
 import os
+import re
 import tempfile
 from datetime import datetime
 from typing import Optional
@@ -67,6 +70,8 @@ from pulse.database import (
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
     count_finding_notes, list_all_notes,
+    add_waitlist_signup, list_waitlist_signups,
+    count_waitlist_signups, delete_waitlist_signup,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -534,6 +539,7 @@ def _register_routes(app: FastAPI) -> None:
     _web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
     _dashboard_path = os.path.join(_web_dir, "index.html")
     _login_path     = os.path.join(_web_dir, "login.html")
+    _landing_path   = os.path.join(_web_dir, "landing.html")
 
     # -------------------------------------------------------------------
     # GET / — Web dashboard (requires login)
@@ -585,6 +591,13 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/login", include_in_schema=False)
     def login_page():
         return FileResponse(_login_path, media_type="text/html")
+
+    # -------------------------------------------------------------------
+    # GET /welcome — public marketing landing page (no auth required)
+    # -------------------------------------------------------------------
+    @app.get("/welcome", include_in_schema=False)
+    def landing_page():
+        return FileResponse(_landing_path, media_type="text/html")
 
     # -------------------------------------------------------------------
     # Auth endpoints (all public — these are how you get a session)
@@ -1027,6 +1040,75 @@ def _register_routes(app: FastAPI) -> None:
         if limit < 1 or limit > 1000:
             raise HTTPException(400, detail="limit must be between 1 and 1000.")
         return {"rows": list_feedback(app.state.db_path, limit=limit)}
+
+    # -------------------------------------------------------------------
+    # POST /api/waitlist  — public sign-up from the marketing landing page
+    # GET  /api/waitlist  — admin list view
+    # GET  /api/waitlist/export.csv — admin CSV export
+    # DELETE /api/waitlist/{id} — admin remove
+    # -------------------------------------------------------------------
+    _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+    @app.post("/api/waitlist")
+    async def api_join_waitlist(request: Request):
+        """Public endpoint — no auth required. The whole point is for
+        unauthenticated visitors to leave their email. Rate-limited per IP
+        so the table can't be filled with throwaway addresses by a bot
+        running locally; the cap is generous enough for a real human
+        retry-pattern (typo → resubmit) to fit comfortably under it."""
+        rate_limit.hit(request, "waitlist", window_sec=3600, max_hits=20)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        email = str(body.get("email") or "").strip().lower()
+        source = str(body.get("source") or "").strip() or None
+        if not email:
+            raise HTTPException(400, detail="Email is required.")
+        if len(email) > 254 or not _EMAIL_RE.match(email):
+            raise HTTPException(400, detail="That doesn't look like a valid email.")
+        if source and len(source) > 120:
+            source = source[:120]
+        new_id = add_waitlist_signup(app.state.db_path, email, source=source)
+        return {"status": "ok", "id": new_id}
+
+    @app.get("/api/waitlist")
+    def api_list_waitlist(limit: int = 500,
+                          user_id: int = Depends(require_admin)):
+        if limit < 1 or limit > 5000:
+            raise HTTPException(400, detail="limit must be between 1 and 5000.")
+        return {
+            "count": count_waitlist_signups(app.state.db_path),
+            "rows":  list_waitlist_signups(app.state.db_path, limit=limit),
+        }
+
+    @app.get("/api/waitlist/export.csv")
+    def api_export_waitlist_csv(user_id: int = Depends(require_admin)):
+        rows = list_waitlist_signups(app.state.db_path, limit=5000)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["id", "email", "source", "created_at"])
+        for r in rows:
+            writer.writerow([r.get("id"), r.get("email"),
+                             r.get("source") or "", r.get("created_at") or ""])
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="pulse-waitlist-{ts}.csv"',
+            },
+        )
+
+    @app.delete("/api/waitlist/{signup_id}")
+    def api_delete_waitlist(signup_id: int,
+                            user_id: int = Depends(require_admin)):
+        ok = delete_waitlist_signup(app.state.db_path, signup_id)
+        if not ok:
+            raise HTTPException(404, detail="Signup not found.")
+        return {"status": "deleted", "id": signup_id}
 
     # -------------------------------------------------------------------
     # GET /api/health
@@ -2498,6 +2580,74 @@ def _register_routes(app: FastAPI) -> None:
         return {
             "status":    "sent",
             "recipient": alerts_cfg.get("recipient") or email_cfg.get("recipient"),
+        }
+
+    # -------------------------------------------------------------------
+    # GET /api/weekly-brief — JSON preview of the rolling weekly digest
+    # -------------------------------------------------------------------
+    @app.get("/api/weekly-brief")
+    def get_weekly_brief(days: int = 7,
+                         user_id: int = Depends(require_login)):
+        """Return the composed weekly brief as JSON.
+
+        Used by the Settings page to render a preview before the operator
+        commits to scheduling or sending it. ``days`` is clamped to
+        [1, 365] inside the composer so requesting an absurd window
+        gracefully degrades to the cap rather than 400-ing.
+        """
+        from pulse.alerts.weekly_brief import compose_weekly_brief
+        if days < 1 or days > 365:
+            raise HTTPException(400, detail="days must be between 1 and 365.")
+        return compose_weekly_brief(app.state.db_path, days=days)
+
+    # -------------------------------------------------------------------
+    # POST /api/weekly-brief/send — email the brief to the alert recipient
+    # -------------------------------------------------------------------
+    @app.post("/api/weekly-brief/send")
+    async def send_weekly_brief_now(request: Request,
+                                    user_id: int = Depends(require_admin)):
+        """Compose + email the weekly brief immediately.
+
+        Reuses the same SMTP credentials as alerts. Recipient resolution
+        mirrors `send_alert`: ``alerts.recipient`` first, ``email.recipient``
+        second. Returns 400 with an actionable message when SMTP isn't
+        wired up — matches the test-alert endpoint's failure shape.
+        """
+        from pulse.alerts.weekly_brief import (
+            compose_weekly_brief,
+            send_weekly_brief,
+        )
+
+        # Optional ?days override (max 365). Default 7 for "weekly".
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            days = int((body or {}).get("days") or 7)
+        except (TypeError, ValueError):
+            days = 7
+
+        config = _read_config(app.state.config_path)
+        email_cfg  = config.get("email", {}) or {}
+        alerts_cfg = config.get("alerts", {}) or {}
+
+        if not email_cfg.get("password"):
+            raise HTTPException(400, detail="No SMTP password configured. Save your email settings first.")
+        recipient = alerts_cfg.get("recipient") or email_cfg.get("recipient")
+        if not recipient:
+            raise HTTPException(400, detail="No recipient configured for alerts.")
+
+        brief = compose_weekly_brief(app.state.db_path, days=days)
+        ok = send_weekly_brief(email_cfg, recipient, brief)
+        if not ok:
+            raise HTTPException(502, detail="SMTP send failed. Check the server logs for details.")
+
+        return {
+            "status":         "sent",
+            "recipient":      recipient,
+            "period_days":    brief["period_days"],
+            "findings_total": brief["findings_total"],
         }
 
     # -------------------------------------------------------------------

@@ -270,6 +270,20 @@ CREATE TABLE IF NOT EXISTS intel_cache (
 """
 
 
+# Email waitlist — public sign-ups from the marketing landing page.
+# Stored even when SMTP isn't wired so a future sprint can run an export
+# + bulk announce. UNIQUE(email) keeps re-submissions idempotent so a
+# refresh-spam doesn't pile up duplicate rows.
+_CREATE_WAITLIST = """
+CREATE TABLE IF NOT EXISTS waitlist_signups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    email       TEXT    NOT NULL UNIQUE,
+    source      TEXT,
+    created_at  TEXT    NOT NULL
+);
+"""
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -297,6 +311,7 @@ def init_db(db_path):
         _CREATE_FINDING_NOTES,
         _CREATE_BRANDING,
         _CREATE_INTEL_CACHE,
+        _CREATE_WAITLIST,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -1917,6 +1932,77 @@ def count_finding_notes(db_path, finding_ids):
             return {int(row[0]): int(row[1]) for row in cursor.fetchall()}
     except Exception:
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Email waitlist
+# ---------------------------------------------------------------------------
+
+def add_waitlist_signup(db_path, email, source=None):
+    """Insert one waitlist signup. Idempotent on email — re-submitting the
+    same address returns the existing row's id instead of erroring, so a
+    user double-tapping the form doesn't see a "duplicate" failure.
+
+    Returns the row id on success, ``None`` if the email is empty.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    src = (source or "").strip() or None
+    with _connect(db_path) as conn:
+        try:
+            cursor = conn.execute(
+                "INSERT INTO waitlist_signups (email, source, created_at) VALUES (?, ?, ?)",
+                (email, src, created_at),
+            )
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            existing = conn.execute(
+                "SELECT id FROM waitlist_signups WHERE email = ?", (email,)
+            ).fetchone()
+            return int(existing[0]) if existing else None
+
+
+def list_waitlist_signups(db_path, limit=500):
+    """Return waitlist rows newest-first. Used by the admin Settings page
+    and by the CSV export endpoint. ``limit`` clamped to [1, 5000]."""
+    try:
+        n = max(1, min(int(limit), 5000))
+    except (TypeError, ValueError):
+        n = 500
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                "SELECT id, email, source, created_at "
+                "FROM waitlist_signups ORDER BY id DESC LIMIT ?",
+                (n,),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
+def count_waitlist_signups(db_path):
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM waitlist_signups").fetchone()
+            return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+def delete_waitlist_signup(db_path, signup_id):
+    """Remove one waitlist row. Returns True if a row was deleted."""
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM waitlist_signups WHERE id = ?", (int(signup_id),)
+            )
+            return (cursor.rowcount or 0) > 0
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------

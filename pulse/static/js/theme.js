@@ -35,9 +35,11 @@ export function setThemeFromSelect(theme, target) {
   localStorage.setItem('pulse-theme', theme);
   applyTheme(theme);
   showToast('Theme updated');
-  // Rebuild any chart that's currently visible to pick up new colors.
+  // Rebuild any page whose contents depend on theme: charts read CSS
+  // variables at draw time, and the Settings → Severity palette card
+  // pre-fills its color inputs from the active theme's defaults.
   var page = getCurrentPage();
-  if (page === 'dashboard' || page === 'history') {
+  if (page === 'dashboard' || page === 'history' || page === 'settings') {
     navigate(page);
   }
 }

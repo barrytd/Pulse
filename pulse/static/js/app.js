@@ -4,6 +4,11 @@
 'use strict';
 
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
+import {
+  applySeverityColors,
+  severityColorInput,
+  resetSeverityColors,
+} from './severity-colors.js';
 import { navigate, validPages, parsePath } from './navigation.js';
 import {
   openUploadModal,
@@ -161,6 +166,8 @@ import {
   saveEmailSettings,
   saveAlertSettings,
   sendTestAlert,
+  sendWeeklyBriefNow,
+  previewWeeklyBrief,
   saveWebhookSettings,
   sendTestWebhook,
   saveThreatIntelSettings,
@@ -168,6 +175,7 @@ import {
   onScheduleKindChange,
   saveScheduleSettings,
   switchSettingsTab,
+  resetSeverityPaletteAndRender,
   createUser,
   toggleUserRole,
   toggleUserActive,
@@ -181,6 +189,7 @@ import {
   revokeTokenConfirm,
   toggleFeedbackRow,
   toggleNoteAdminRow,
+  deleteWaitlistSignup,
 } from './settings.js';
 import {
   setReportsQueryFromInput,
@@ -244,6 +253,8 @@ const actions = {
   navigate,
   toggleTheme,
   setThemeFromSelect,
+  severityColorInput,
+  resetSeverityColors,
 
   // upload + tutorial
   openUploadModal,
@@ -403,6 +414,8 @@ const actions = {
   saveEmailSettings,
   saveAlertSettings,
   sendTestAlert,
+  sendWeeklyBriefNow,
+  previewWeeklyBrief,
   saveWebhookSettings,
   sendTestWebhook,
   saveThreatIntelSettings,
@@ -410,6 +423,7 @@ const actions = {
   onScheduleKindChange,
   saveScheduleSettings,
   switchSettingsTab,
+  resetSeverityPaletteAndRender,
   createUser,
   toggleUserRole,
   toggleUserActive,
@@ -423,6 +437,7 @@ const actions = {
   revokeTokenConfirm,
   toggleFeedbackRow,
   toggleNoteAdminRow,
+  deleteWaitlistSignup,
 
   // reports
   setReportsQueryFromInput,
@@ -551,6 +566,10 @@ function _installDelegator(eventName) {
 function _boot() {
   // Theme first so the UI doesn't flash.
   initTheme();
+  // Severity-color overrides ride on top of the theme block, so apply
+  // them immediately after initTheme() to avoid a brief flash of the
+  // default palette before the user's saved colors take effect.
+  applySeverityColors();
 
   // Resolve starting page from the URL pathname. Back-compat: older
   // bookmarks used "#scans" style hashes — honour them by translating

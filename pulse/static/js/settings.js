@@ -19,6 +19,8 @@ import {
   apiSaveEmailConfig,
   apiSaveAlertsConfig,
   apiSendTestAlert,
+  apiGetWeeklyBrief,
+  apiSendWeeklyBrief,
   apiSaveWebhookConfig,
   apiSendTestWebhook,
   apiSaveSchedulerConfig,
@@ -27,10 +29,17 @@ import {
   apiCreateToken,
   apiRevokeToken,
   apiListFeedback,
+  apiListWaitlist,
+  apiDeleteWaitlistSignup,
   apiListAllNotes,
 } from './api.js';
 import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
 import { getTheme } from './theme.js';
+import {
+  getSeverityColors,
+  SEVERITY_DEFAULTS,
+  resetSeverityColors,
+} from './severity-colors.js';
 import { refreshUserMenuAvatar, refreshUserMenuIdentity } from './user-menu.js';
 
 // Map the "Email provider" dropdown back to host+port so users never
@@ -53,6 +62,7 @@ const SETTINGS_TABS = [
   { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
   { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
   { id: 'feedback',      label: 'Feedback',        icon: 'message-square', adminOnly: true },
+  { id: 'waitlist',      label: 'Waitlist',        icon: 'mail', adminOnly: true },
   { id: 'notes',         label: 'Notes',           icon: 'sticky-note', adminOnly: true },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
 ];
@@ -154,6 +164,15 @@ export async function renderSettingsPage() {
       var nl = await apiListAllNotes(500);
       notesRows = (nl && nl.notes) || [];
     } catch (e) { notesRows = []; }
+  }
+
+  // Admin-only marketing waitlist signups (from /welcome landing page).
+  var waitlistRows = [];
+  if (isAdmin) {
+    try {
+      var wl = await apiListWaitlist(500);
+      waitlistRows = (wl && wl.data && wl.data.rows) || [];
+    } catch (e) { waitlistRows = []; }
   }
 
   // Filter tabs by role. If a viewer somehow lands on the Users tab (e.g.
@@ -520,6 +539,30 @@ export async function renderSettingsPage() {
       '</div>' +
     '</div>';
 
+  // Weekly threat brief — on-demand digest. The recipient is the same
+  // address used for threshold alerts; no separate field.
+  var briefRecipient = (al.recipient || em.recipient || '').trim();
+  var briefStatus = briefRecipient
+    ? '<span class="password-status set">✓ Will send to ' + escapeHtml(briefRecipient) + '</span>'
+    : '<span class="password-status">Set an alerts recipient first</span>';
+  var briefDisabled = (em.password_set && briefRecipient) ? '' : ' disabled';
+  var weeklyBriefHtml =
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Weekly Threat Brief</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'A summary of every scan, finding, top rule, and score-trend over the ' +
+        'last 7 days, e-mailed to your alerts recipient. Sent on demand for ' +
+        'now — use it as the Monday-morning recap.' +
+      '</p>' +
+      '<div class="form-row"><span></span><span>' + briefStatus + '</span></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="sendWeeklyBriefNow"' + briefDisabled +
+          '><i data-lucide="send"></i><span>Send brief now</span></button>' +
+        '<button class="btn btn-with-icon" data-action="previewWeeklyBrief">' +
+          '<i data-lucide="eye"></i><span>Preview as JSON</span></button>' +
+      '</div>' +
+    '</div>';
+
   // --- Advanced tab --------------------------------------------------
   var scanDefaultsHtml =
     '<div class="card" style="margin-bottom:16px;">' +
@@ -538,6 +581,21 @@ export async function renderSettingsPage() {
     '</div>';
 
   // --- Appearance tab ------------------------------------------------
+  var savedSev = getSeverityColors();
+  var sevDefaults = SEVERITY_DEFAULTS[currentTheme] || SEVERITY_DEFAULTS.dark;
+  function _sevRow(key, label) {
+    var current = savedSev[key] || sevDefaults[key];
+    return '<div class="sev-color-row">' +
+      '<label class="sev-color-label">' +
+        '<span class="sev-color-swatch" style="background:var(--severity-' + key + ');"></span>' +
+        '<span>' + label + '</span>' +
+      '</label>' +
+      '<input type="color" class="sev-color-input" value="' + current + '" ' +
+        'data-action-input="severityColorInput" data-arg="' + key + '" ' +
+        'data-sev-key="' + key + '" />' +
+      '<code class="sev-color-hex" data-sev-hex="' + key + '">' + current.toUpperCase() + '</code>' +
+    '</div>';
+  }
   var appearanceHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Appearance</div>' +
@@ -549,6 +607,23 @@ export async function renderSettingsPage() {
           '<option value="dark"'  + (currentTheme === 'dark'  ? ' selected' : '') + '>Dark (default)</option>' +
           '<option value="light"' + (currentTheme === 'light' ? ' selected' : '') + '>Light</option>' +
         '</select></div>' +
+    '</div>' +
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Severity palette</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Override the four severity hues used throughout the app. Helpful for ' +
+        'color-vision differences or matching an internal style guide. Saved ' +
+        'to this browser only.' +
+      '</p>' +
+      '<div class="sev-color-grid">' +
+        _sevRow('critical', 'Critical') +
+        _sevRow('high',     'High') +
+        _sevRow('medium',   'Medium') +
+        _sevRow('low',      'Low') +
+      '</div>' +
+      '<div style="margin-top:12px;">' +
+        '<button class="btn btn-secondary" type="button" data-action="resetSeverityPaletteAndRender">Reset to defaults</button>' +
+      '</div>' +
     '</div>';
 
   var rulesCardHtml =
@@ -574,6 +649,7 @@ export async function renderSettingsPage() {
   var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
   var feedbackHtml = isAdmin ? _renderFeedbackPanel(feedbackRows) : '';
   var notesHtml = isAdmin ? _renderNotesAdminPanel(notesRows) : '';
+  var waitlistHtml = isAdmin ? _renderWaitlistPanel(waitlistRows) : '';
 
   // --- API tokens tab -----------------------------------------------
   var tokensHtml = _renderTokensPanel(tokensList);
@@ -581,12 +657,13 @@ export async function renderSettingsPage() {
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
-    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + webhookHtml + threatIntelHtml,
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
     users:         usersHtml,
     feedback:      feedbackHtml,
+    waitlist:      waitlistHtml,
     notes:         notesHtml,
     // SMTP is powerful but noisy — tucked behind a <details> so the
     // Advanced tab reads as a configuration inventory, not a form wall.
@@ -928,6 +1005,110 @@ function _renderFeedbackPanel(rows) {
       '</table></div>' +
     '</div>'
   );
+}
+
+// Admin-only Waitlist tab — signups from the /welcome landing page.
+// Mirrors _renderFeedbackPanel: KPI strip + table, with a download CSV
+// button instead of the message expand UX.
+function _renderWaitlistPanel(rows) {
+  var total = rows.length;
+  var sources = {};
+  rows.forEach(function (r) {
+    var s = (r.source || 'direct').trim() || 'direct';
+    sources[s] = (sources[s] || 0) + 1;
+  });
+  var topSource = Object.keys(sources).sort(function (a, b) {
+    return sources[b] - sources[a];
+  })[0] || '—';
+
+  function _tile(label, value) {
+    return '<div class="feedback-kpi">' +
+      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
+      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    '</div>';
+  }
+
+  var kpiHtml =
+    '<div class="feedback-kpi-strip">' +
+      _tile('Total signups', total) +
+      _tile('Top source', topSource) +
+    '</div>';
+
+  var actionsHtml =
+    '<div style="display:flex; gap:8px; margin-bottom:14px;">' +
+      '<a class="btn btn-primary btn-with-icon" href="/api/waitlist/export.csv" download>' +
+        '<i data-lucide="download"></i><span>Export CSV</span>' +
+      '</a>' +
+      '<a class="btn btn-with-icon" href="/welcome" target="_blank" rel="noopener">' +
+        '<i data-lucide="external-link"></i><span>View landing page</span>' +
+      '</a>' +
+    '</div>';
+
+  if (total === 0) {
+    return (
+      '<div class="card" style="margin-bottom:16px;">' +
+        '<div class="section-label">Waitlist</div>' +
+        '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
+          'Email signups from the public landing page at ' +
+          '<a href="/welcome" target="_blank" rel="noopener" style="color:var(--accent);">/welcome</a>. ' +
+          'Nothing yet — once someone joins, they’ll show up here with an exportable CSV.' +
+        '</p>' +
+        kpiHtml +
+        actionsHtml +
+      '</div>'
+    );
+  }
+
+  var rowsHtml = rows.map(function (r) {
+    var when = r.created_at || '';
+    var rel = formatRelativeTime(when);
+    var src = (r.source || '').trim() || '—';
+    return (
+      '<tr>' +
+        '<td class="feedback-when" title="' + escapeHtml(when) + '">' + escapeHtml(rel) + '</td>' +
+        '<td class="mono">' + escapeHtml(r.email || '') + '</td>' +
+        '<td>' + escapeHtml(src) + '</td>' +
+        '<td style="text-align:right;">' +
+          '<button class="btn-icon" type="button" title="Remove" ' +
+            'data-action="deleteWaitlistSignup" data-arg="' + escapeHtml(String(r.id)) + '">' +
+            '<i data-lucide="trash-2"></i>' +
+          '</button>' +
+        '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  return (
+    kpiHtml +
+    actionsHtml +
+    '<div class="card" style="padding:0; overflow:hidden;">' +
+      '<div class="section-label" style="padding:16px 20px 8px;">' +
+        'Signups (' + total + ')' +
+      '</div>' +
+      '<div class="table-wrap"><table class="data-table">' +
+        '<thead><tr>' +
+          '<th>When</th><th>Email</th><th>Source</th><th></th>' +
+        '</tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>' +
+    '</div>'
+  );
+}
+
+export async function deleteWaitlistSignup(id) {
+  if (!id) return;
+  if (!window.confirm('Remove this waitlist signup? This cannot be undone.')) return;
+  try {
+    var r = await apiDeleteWaitlistSignup(id);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Delete failed.');
+      return;
+    }
+    showToast('Signup removed');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
 }
 
 // Click a row to expand the full message. Re-click collapses.
@@ -1580,6 +1761,48 @@ function _formatNextRun(iso) {
 // ------------------------------------------------------------------------
 // Profile avatar
 // ------------------------------------------------------------------------
+
+// Settings → Notifications → Weekly threat brief — fires the digest now.
+export async function sendWeeklyBriefNow() {
+  if (!window.confirm('Send the weekly threat brief to your alerts recipient now?')) return;
+  try {
+    var r = await apiSendWeeklyBrief(7);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Send failed.');
+      return;
+    }
+    showToast('Weekly brief sent to ' + (r.data.recipient || 'recipient'));
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+// Same panel — opens a fresh tab with the JSON brief so the operator can
+// inspect what would land in the email without hitting SMTP.
+export async function previewWeeklyBrief() {
+  try {
+    var r = await apiGetWeeklyBrief(7);
+    if (!r.ok) {
+      toastError((r.data && r.data.detail) || 'Preview failed.');
+      return;
+    }
+    var blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+// Wired to the "Reset to defaults" button on the Appearance card. Drops
+// the saved overrides, then re-renders the settings page so the color
+// inputs + hex labels snap back to the theme defaults.
+export function resetSeverityPaletteAndRender() {
+  resetSeverityColors();
+  showToast('Severity palette reset');
+  renderSettingsPage();
+}
 
 export function uploadAvatarClick() {
   var input = document.getElementById('profile-avatar-input');
