@@ -1422,6 +1422,11 @@ function _mountFilterChipDropdown() {
 }
 
 function _filterChipOutsideClick(e) {
+  // Stale listener from a previous render of this page: if the user
+  // has navigated to a different page (Audit, Dashboard, ...), this
+  // handler must not act on chips that belong to that new page —
+  // otherwise it'd close them right after they opened.
+  if (document.body.dataset.page !== 'findings') return;
   // A click on a trigger button is handled by its own action handler;
   // skip the close pass so the same click doesn't both open and close.
   var trigger = e.target.closest('[data-action="openFilterChip"], [data-action="openAddFilterMenu"]');
@@ -1433,6 +1438,7 @@ function _filterChipOutsideClick(e) {
 
 function _filterChipEscapeClose(e) {
   if (e.key !== 'Escape') return;
+  if (document.body.dataset.page !== 'findings') return;
   _closeAllFilterChipDropdowns();
 }
 

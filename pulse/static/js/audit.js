@@ -16,7 +16,7 @@
 'use strict';
 
 import { fetchAudit, apiListUsers } from './api.js';
-import { escapeHtml } from './dashboard.js';
+import { escapeHtml, _restoreSearchFocus } from './dashboard.js';
 import { openDrawer, closeDrawer, isDrawerOpen } from './drawer.js';
 
 // Newest-first cache of every audit row the API returned last refresh.
@@ -167,6 +167,11 @@ function _renderAuditShell() {
     '<div class="audit-export-menu" id="audit-export-menu" hidden></div>';
   _mountAuditFilterDropdown();
   _mountAuditExportMenu();
+  // Auto-focus the search input on entry — mirrors the Findings / Scans
+  // pages so the user can start typing immediately. _restoreSearchFocus
+  // is also focus-safe across re-renders, preserving the caret position
+  // when chip toggles trigger _renderAuditShell().
+  _restoreSearchFocus('audit-search-box');
 }
 
 // ---------------------------------------------------------------------------
@@ -687,12 +692,16 @@ export function auditToggleTimeFmt() {
 // findings.js for the same pattern).
 export function auditOpenChip(dimId, target) {
   if (!dimId) return;
-  _auditCloseAllChipDropdowns();
   var wrap = (target && target.closest && target.closest('.filter-chip-wrap[data-dim="' + dimId + '"]')) ||
              document.querySelector('.filter-chip-wrap[data-dim="' + dimId + '"]');
   if (!wrap) return;
   var dd = wrap.querySelector('.filter-chip-dd');
   if (!dd) return;
+  // Toggle: clicking the same chip while its dropdown is open closes it.
+  // Mirrors the Findings page's openFilterChip behaviour.
+  var alreadyOpen = !dd.hidden;
+  _auditCloseAllChipDropdowns();
+  if (alreadyOpen) return;
   dd.innerHTML = _auditChipDdContent(dimId);
   dd.hidden = false;
   // Right-edge flip — same logic the findings filter chips use.
@@ -704,12 +713,15 @@ export function auditOpenChip(dimId, target) {
 }
 
 export function auditOpenAddFilter(_arg, target) {
-  _auditCloseAllChipDropdowns();
   var wrap = (target && target.closest && target.closest('.filter-chip-wrap-add')) ||
              document.querySelector('.filter-chip-wrap-add');
   if (!wrap) return;
   var dd = wrap.querySelector('.filter-chip-dd');
   if (!dd) return;
+  // Toggle: re-clicking +Add filter while the menu is open closes it.
+  var alreadyOpen = !dd.hidden;
+  _auditCloseAllChipDropdowns();
+  if (alreadyOpen) return;
   var dims = _auditFilterDims().filter(function (d) {
     if (d.primary) return false;
     if (_auditAddedDims.has(d.id)) return false;
@@ -838,13 +850,19 @@ function _mountAuditFilterDropdown() {
   document.addEventListener('keydown', _auditChipEscape);
 }
 function _auditChipOutsideClick(e) {
+  // Listener stays attached after a navigate() — guard so we don't
+  // close findings / dashboard chips with a handler that doesn't know
+  // about their triggers. (Each page has its own scoped listener.)
+  if (document.body.dataset.page !== 'audit') return;
   var trigger = e.target.closest('[data-action="auditOpenChip"], [data-action="auditOpenAddFilter"]');
   if (trigger) return;
   if (e.target.closest('.filter-chip-dd')) return;
   _auditCloseAllChipDropdowns();
 }
 function _auditChipEscape(e) {
-  if (e.key === 'Escape') _auditCloseAllChipDropdowns();
+  if (e.key !== 'Escape') return;
+  if (document.body.dataset.page !== 'audit') return;
+  _auditCloseAllChipDropdowns();
 }
 
 // ---------------------------------------------------------------------------
