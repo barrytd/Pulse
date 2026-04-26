@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Pulse — Real-time Windows threat detection</title>
+  <meta name="description" content="Pulse is a self-hosted Windows threat-detection dashboard. Parse .evtx logs, surface MITRE-mapped findings, and run continuous detections from a single page."/>
+  <style>
+    :root {
+      --bg:         #0b0f17;
+      --panel:      #141a24;
+      --panel-2:    #1a2130;
+      --border:     #232c3b;
+      --text:       #e6edf7;
+      --text-mute:  #8a94a6;
+      --accent:     #3b82f6;
+      --accent-hv:  #2563eb;
+      --green:      #10b981;
+      --orange:     #f97316;
+      --red:        #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.12), transparent 60%),
+        radial-gradient(900px 500px at 110% 110%, rgba(16,185,129,0.08), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      font-size: 14px;
+    }
+    .brand-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 12px rgba(16,185,129,0.6);
+    }
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+      font-size: 14px;
+      color: var(--text-mute);
+    }
+    .nav-links a { color: var(--text-mute); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s, transform 0.05s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #ffffff;
+    }
+    .btn-primary:hover { background: var(--accent-hv); text-decoration: none; }
+    .btn-primary:active { transform: translateY(1px); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover {
+      background: var(--panel);
+      text-decoration: none;
+    }
+
+    .hero {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 72px 32px 48px;
+      text-align: center;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.12);
+      border: 1px solid rgba(59,130,246,0.30);
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.15;
+      margin: 0 0 16px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .hero-sub {
+      max-width: 720px;
+      margin: 0 auto 28px;
+      font-size: 17px;
+      color: var(--text-mute);
+    }
+    .hero-actions {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .features {
+      max-width: 1120px;
+      margin: 24px auto;
+      padding: 32px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .feature {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .feature-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      background: rgba(59,130,246,0.15);
+      color: var(--accent);
+      margin-bottom: 14px;
+      font-size: 18px;
+    }
+    .feature h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .feature p {
+      margin: 0;
+      color: var(--text-mute);
+      font-size: 14px;
+    }
+
+    .waitlist {
+      max-width: 720px;
+      margin: 32px auto 64px;
+      padding: 36px 32px;
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      text-align: center;
+    }
+    .waitlist h2 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .waitlist p {
+      margin: 0 0 20px;
+      color: var(--text-mute);
+    }
+    .waitlist-form {
+      display: flex;
+      gap: 8px;
+      max-width: 460px;
+      margin: 0 auto;
+      flex-wrap: wrap;
+    }
+    .waitlist-form input {
+      flex: 1;
+      min-width: 220px;
+      padding: 12px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .waitlist-form input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .waitlist-form button {
+      padding: 12px 20px;
+    }
+    .form-msg {
+      margin-top: 14px;
+      font-size: 13px;
+      min-height: 18px;
+    }
+    .form-msg.ok { color: var(--green); }
+    .form-msg.err { color: var(--red); }
+
+    .footer {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 32px 40px;
+      border-top: 1px solid var(--border);
+      color: var(--text-mute);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .footer a { color: var(--text-mute); }
+    .footer a:hover { color: var(--text); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>PULSE</span>
+    </div>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="https://github.com/barrytd/Pulse" target="_blank" rel="noopener">GitHub</a>
+      <a href="/login" class="btn btn-ghost">Sign in</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <span class="pill">Self-hosted &middot; Open source</span>
+    <h1>Real-time Windows threat detection,<br/>without the SIEM bill.</h1>
+    <p class="hero-sub">
+      Pulse parses Windows Event Logs, runs MITRE-mapped detections, and surfaces
+      findings in a single dashboard. Run it on your laptop, drop it on a server,
+      or hand it to your SOC — same code, same UI, same database.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/barrytd/Pulse" target="_blank" rel="noopener" class="btn btn-primary">
+        <span>Get the CLI</span>
+        <span aria-hidden="true">&rarr;</span>
+      </a>
+      <a href="#waitlist" class="btn btn-ghost">Join the waitlist</a>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="feature">
+      <div class="feature-icon">&#9889;</div>
+      <h3>Live monitoring</h3>
+      <p>Stream Event Log entries through detections in real time. Findings light up the dashboard the moment they happen — no batch lag.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">&#9881;</div>
+      <h3>MITRE-mapped rules</h3>
+      <p>Every finding ties back to a specific ATT&amp;CK technique. Reviewers see what happened, why it matters, and where it fits the kill chain.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">&#128202;</div>
+      <h3>Score &amp; trend over time</h3>
+      <p>A single 0-100 security score per scan, plus a daily history line. Catch regressions before they become incidents.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">&#128737;</div>
+      <h3>One-click firewall</h3>
+      <p>Block a malicious source IP straight from the finding drawer. Pulse pushes the rule to Windows Firewall in one round-trip.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">&#128231;</div>
+      <h3>Email + Slack + Discord alerts</h3>
+      <p>Threshold-tripped findings fan out to your channels of choice with a configurable cooldown so the queue stays signal, not noise.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">&#128269;</div>
+      <h3>AbuseIPDB enrichment</h3>
+      <p>Source IPs come back with confidence-of-abuse scores, country, and ISP — cached for 24 hours so a noisy host doesn’t burn quota.</p>
+    </div>
+  </section>
+
+  <section class="waitlist" id="waitlist">
+    <h2>Be the first to know.</h2>
+    <p>Drop your email and we’ll send a note when the next major release ships. No spam, unsubscribe anytime.</p>
+    <form class="waitlist-form" id="waitlist-form">
+      <input type="email" id="waitlist-email" placeholder="you@example.com" required autocomplete="email"/>
+      <button type="submit" class="btn btn-primary">Join waitlist</button>
+    </form>
+    <div class="form-msg" id="waitlist-msg" role="status" aria-live="polite"></div>
+  </section>
+
+  <footer class="footer">
+    <div>&copy; Pulse · Self-hosted threat detection</div>
+    <div>
+      <a href="/login">Sign in</a>
+      &middot;
+      <a href="https://github.com/barrytd/Pulse" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var form = document.getElementById('waitlist-form');
+      var input = document.getElementById('waitlist-email');
+      var msg   = document.getElementById('waitlist-msg');
+      if (!form) return;
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var email = (input.value || '').trim();
+        msg.className = 'form-msg';
+        msg.textContent = 'Submitting...';
+        fetch('/api/waitlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, source: 'landing' })
+        }).then(function (resp) {
+          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        }).then(function (r) {
+          if (!r.ok) {
+            msg.className = 'form-msg err';
+            msg.textContent = (r.data && r.data.detail) || 'Something went wrong. Try again.';
+            return;
+          }
+          msg.className = 'form-msg ok';
+          msg.textContent = 'Thanks — you’re on the list. We’ll be in touch.';
+          form.reset();
+        }).catch(function () {
+          msg.className = 'form-msg err';
+          msg.textContent = 'Network error. Try again.';
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

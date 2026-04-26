@@ -127,8 +127,8 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [ ] Threat intel integration — correlate source IPs with AbuseIPDB / OTX feeds
 - [ ] IOC lookup panel — paste an IP or hash, query intel feeds, cache results locally
 - [x] Weekly threat brief — auto-emailed digest of top findings across the fleet *(on-demand send shipped; auto-schedule deferred)*
-- [ ] Public landing page — a clean page explaining what Pulse does with a download link for the CLI and an email signup for updates
-- [ ] Email waitlist — store signups in the database, exportable as CSV
+- [x] Public landing page — a clean page explaining what Pulse does with a download link for the CLI and an email signup for updates
+- [x] Email waitlist — store signups in the database, exportable as CSV
 - [x] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
 
 ---

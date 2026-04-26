@@ -435,6 +435,19 @@ export async function apiGetWeeklyBrief(days) {
   return { ok: resp.ok, status: resp.status, data: data };
 }
 
+export async function apiListWaitlist(limit) {
+  var qs = limit ? ('?limit=' + encodeURIComponent(limit)) : '';
+  var resp = await fetch('/api/waitlist' + qs);
+  var data = await resp.json();
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
+export async function apiDeleteWaitlistSignup(id) {
+  var resp = await fetch('/api/waitlist/' + encodeURIComponent(id), { method: 'DELETE' });
+  var data = await resp.json().catch(function () { return {}; });
+  return { ok: resp.ok, status: resp.status, data: data };
+}
+
 export async function apiSendWeeklyBrief(days) {
   var resp = await fetch('/api/weekly-brief/send', {
     method: 'POST',
