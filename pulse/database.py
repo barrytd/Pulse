@@ -402,6 +402,12 @@ def init_db(db_path):
         # agent's id so the UI can show provenance and an admin can audit
         # which host the data came from. NULL = manual upload / live monitor.
         "ALTER TABLE scans ADD COLUMN agent_id INTEGER",
+        # Onboarding checklist (Sprint 6 polish) — Dashboard surfaces a
+        # five-step "Getting Started" card until the user dismisses it
+        # or completes every step. Both columns NULL until the user
+        # actually does the thing.
+        "ALTER TABLE users ADD COLUMN onboarding_dismissed_at TEXT",
+        "ALTER TABLE users ADD COLUMN first_finding_viewed_at TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -1599,7 +1605,10 @@ def count_users(db_path):
         return int(row[0]) if row else 0
 
 
-_USER_COLS = "id, email, password_hash, created_at, role, active, avatar_mime, display_name"
+_USER_COLS = (
+    "id, email, password_hash, created_at, role, active, avatar_mime, "
+    "display_name, onboarding_dismissed_at, first_finding_viewed_at"
+)
 
 
 def _row_to_user(row):
@@ -1614,7 +1623,53 @@ def _row_to_user(row):
         "active": bool(row[5]) if row[5] is not None else True,
         "avatar_mime": row[6] if len(row) > 6 else None,
         "display_name": row[7] if len(row) > 7 else None,
+        "onboarding_dismissed_at": row[8] if len(row) > 8 else None,
+        "first_finding_viewed_at": row[9] if len(row) > 9 else None,
     }
+
+
+def mark_onboarding_dismissed(db_path, user_id):
+    """Stamp the user's onboarding-dismissed timestamp so the Dashboard
+    checklist stops appearing. Idempotent — re-calling is a no-op once
+    the column is set."""
+    if user_id is None:
+        return False
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET onboarding_dismissed_at = COALESCE(onboarding_dismissed_at, ?)"
+            " WHERE id = ?",
+            (now, int(user_id)),
+        )
+        return cursor.rowcount > 0
+
+
+def mark_first_finding_viewed(db_path, user_id):
+    """Stamp the user's first-finding-viewed timestamp the first time
+    they open a finding drawer. Used by the onboarding checklist's
+    'Review a finding' step. Idempotent."""
+    if user_id is None:
+        return False
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET first_finding_viewed_at = COALESCE(first_finding_viewed_at, ?)"
+            " WHERE id = ?",
+            (now, int(user_id)),
+        )
+        return cursor.rowcount > 0
+
+
+def count_user_scans(db_path, user_id):
+    """Number of scans owned by this user. Used by the onboarding card."""
+    if user_id is None:
+        return 0
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM scans WHERE user_id = ?",
+            (int(user_id),),
+        ).fetchone()
+    return int(row[0]) if row else 0
 
 
 def update_user_display_name(db_path, user_id, display_name):

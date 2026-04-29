@@ -32,6 +32,8 @@ import {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
+  dismissOnboarding,
+  navigateOnboarding,
 } from './dashboard.js';
 import {
   viewScan,
@@ -145,6 +147,8 @@ import {
   toggleWhitelistSelect,
   toggleWhitelistSelectAll,
   deleteSelectedWhitelist,
+  focusWhitelistAddInput,
+  toggleWhitelistLearnMore,
 } from './whitelist.js';
 import {
   saveAccount,
@@ -276,6 +280,8 @@ const actions = {
   openAttentionFinding,
   clickStatCard,
   openUnreviewedCriticalHigh,
+  dismissOnboarding,
+  navigateOnboarding,
 
   // findings + scan-detail
   viewScan,
@@ -390,6 +396,8 @@ const actions = {
   toggleWhitelistSelect,
   toggleWhitelistSelectAll,
   deleteSelectedWhitelist,
+  focusWhitelistAddInput,
+  toggleWhitelistLearnMore,
 
   // settings
   saveAccount,

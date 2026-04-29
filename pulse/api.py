@@ -62,6 +62,7 @@ from pulse.database import (
     get_user_avatar, get_user_by_email, get_user_by_id, init_db,
     insert_feedback, list_api_tokens, list_feedback,
     insert_notification, list_notifications, mark_notifications_read,
+    mark_onboarding_dismissed, mark_first_finding_viewed, count_user_scans,
     list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
     set_finding_assignee, set_user_avatar,
@@ -736,6 +737,77 @@ def _register_routes(app: FastAPI) -> None:
             "has_avatar": bool(user.get("avatar_mime")),
             "display_name": user.get("display_name"),
         }
+
+    # -------------------------------------------------------------------
+    # GET  /api/me/onboarding              — checklist completion state
+    # POST /api/me/onboarding/dismiss      — hide the card permanently
+    # POST /api/me/onboarding/finding-viewed — mark step 2 complete
+    # -------------------------------------------------------------------
+    @app.get("/api/me/onboarding")
+    def api_me_onboarding(user_id: int = Depends(require_login)):
+        """Five-step Getting Started state for the Dashboard checklist.
+
+        Each completion flag is computed server-side so the frontend
+        doesn't have to fan out to five different endpoints. `dismissed`
+        is a per-user persistent flag (`users.onboarding_dismissed_at`).
+        """
+        if not app.state.auth_required:
+            # Single-user / CLI mode never shows the checklist.
+            return {
+                "dismissed": True,
+                "complete": {
+                    "scans": True, "finding_viewed": True, "smtp": True,
+                    "users": True, "whitelist": True,
+                },
+            }
+        user = get_user_by_id(app.state.db_path, user_id) or {}
+
+        # Step 1 — at least one scan exists for this user.
+        scans_done = count_user_scans(app.state.db_path, user_id) > 0
+
+        # Step 2 — first-finding-viewed timestamp set.
+        finding_done = bool(user.get("first_finding_viewed_at"))
+
+        # Step 3 — SMTP host + recipient saved in pulse.yaml. We don't
+        # require password_set because environments like Render mount
+        # SMTP creds via env vars; the host+from is the strongest signal
+        # that a human has filled the SMTP form on the Settings page.
+        cfg = _read_config(app.state.config_path) or {}
+        em = cfg.get("email") or {}
+        smtp_done = bool((em.get("host") or "").strip())
+
+        # Step 4 — more than one user (someone has been invited).
+        users_done = (count_users(app.state.db_path) or 0) > 1
+
+        # Step 5 — at least one custom whitelist entry across types.
+        wl = (cfg.get("whitelist") or {})
+        wl_total = sum(len(wl.get(k) or []) for k in ("accounts", "services", "ips", "rules"))
+        wl_done = wl_total > 0
+
+        return {
+            "dismissed": bool(user.get("onboarding_dismissed_at")),
+            "complete": {
+                "scans": scans_done,
+                "finding_viewed": finding_done,
+                "smtp": smtp_done,
+                "users": users_done,
+                "whitelist": wl_done,
+            },
+        }
+
+    @app.post("/api/me/onboarding/dismiss")
+    def api_me_onboarding_dismiss(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"status": "ok"}
+        mark_onboarding_dismissed(app.state.db_path, user_id)
+        return {"status": "ok"}
+
+    @app.post("/api/me/onboarding/finding-viewed")
+    def api_me_onboarding_finding_viewed(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"status": "ok"}
+        mark_first_finding_viewed(app.state.db_path, user_id)
+        return {"status": "ok"}
 
     # -------------------------------------------------------------------
     # Profile avatar — store the image as a BLOB on the users row so it

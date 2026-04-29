@@ -11,6 +11,8 @@ import {
   apiDailyScores,
   apiExportUrl,
   invalidateScansCache,
+  apiGetOnboarding,
+  apiDismissOnboarding,
 } from './api.js';
 import {
   openFindingDrawer,
@@ -1016,6 +1018,14 @@ export async function renderDashboardPage() {
   var dailyResp = await apiDailyScores(90);
   var allDaily  = dailyResp.daily_scores || [];
 
+  // Onboarding checklist — best-effort fetch. Failure leaves the card
+  // hidden; everything else on the page still renders.
+  try {
+    _onboardingState = await apiGetOnboarding();
+  } catch (e) {
+    _onboardingState = null;
+  }
+
   var scans       = filterScansByDashState(allScans);
   var dailyScores = filterDailyByDashState(allDaily);
   var sourceList  = _dashSources(allScans);
@@ -1252,7 +1262,10 @@ export async function renderDashboardPage() {
         ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
         : '');
 
+  var onboardingHtml = _onboardingCardHtml(_onboardingState);
+
   c.innerHTML =
+    onboardingHtml +
     dashMetaHtml +
     filterBarHtml +
     emptyBannerHtml +
@@ -1265,6 +1278,153 @@ export async function renderDashboardPage() {
 
   _initScoreLineChart(dailyScores);
   _startDashUpdatedTimer(updatedIso);
+}
+
+// ---------------------------------------------------------------
+// Getting Started checklist — Dashboard onboarding card
+// ---------------------------------------------------------------
+//
+// Five-step path the user walks the first few times they sign in. Card
+// hides once every step is complete OR the user clicks Dismiss (which
+// stamps `users.onboarding_dismissed_at`). Each uncompleted step is a
+// link straight to the relevant page so the user can act, return, and
+// see the row tick. Completed steps are inert with a green checkmark.
+//
+// The five items (kept in this order in the UI):
+//   1) Upload your first .evtx        -> /history (where Upload now lives)
+//   2) Review a finding               -> /findings (drawer-open marks done)
+//   3) Set up email alerts            -> /settings#notifications
+//   4) Invite a team member           -> /settings#users
+//   5) Configure your first whitelist -> /whitelist
+
+const ONBOARDING_STEPS = [
+  {
+    key:   'scans',
+    title: 'Upload your first .evtx file',
+    page:  'history',
+  },
+  {
+    key:   'finding_viewed',
+    title: 'Review a finding',
+    page:  'findings',
+  },
+  {
+    key:   'smtp',
+    title: 'Set up email alerts',
+    page:  'settings',
+    tab:   'notifications',
+  },
+  {
+    key:   'users',
+    title: 'Invite a team member',
+    page:  'settings',
+    tab:   'users',
+  },
+  {
+    key:   'whitelist',
+    title: 'Configure your first whitelist entry',
+    page:  'whitelist',
+  },
+];
+
+function _onboardingCardHtml(state) {
+  if (!state || state.dismissed) return '';
+  var complete = state.complete || {};
+  var doneCount = ONBOARDING_STEPS.reduce(function (n, s) {
+    return n + (complete[s.key] ? 1 : 0);
+  }, 0);
+  // Only render when there's still something for the user to do — once
+  // all five tick the card disappears on the next render.
+  if (doneCount >= ONBOARDING_STEPS.length) return '';
+
+  var pct = Math.round((doneCount / ONBOARDING_STEPS.length) * 100);
+  var rows = ONBOARDING_STEPS.map(function (step) {
+    var done = !!complete[step.key];
+    var rowCls = 'onboard-step' + (done ? ' is-done' : '');
+    var icon = done
+      // Filled green check.
+      ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+          'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+          'aria-hidden="true">' +
+          '<circle cx="8" cy="8" r="7" fill="currentColor" stroke="none"/>' +
+          '<polyline points="4.5,8 7,10.5 11.5,5.5" stroke="#0d1117"/>' +
+        '</svg>'
+      // Empty ring.
+      : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+          'stroke-width="1.5" aria-hidden="true">' +
+          '<circle cx="8" cy="8" r="6.5"/>' +
+        '</svg>';
+    var label;
+    if (done) {
+      label = '<span class="onboard-step-label">' + escapeHtml(step.title) + '</span>';
+    } else {
+      // Clickable for uncompleted steps. The settings tab is encoded in
+      // data-arg so the click runs through the existing navigate action
+      // and the Settings page reads ?tab=… on render.
+      var arg = step.tab
+        ? (step.page + ':' + step.tab)
+        : step.page;
+      label = '<a class="onboard-step-link" ' +
+                'data-action="navigateOnboarding" data-arg="' + escapeHtml(arg) + '">' +
+                escapeHtml(step.title) +
+              '</a>';
+    }
+    return '<li class="' + rowCls + '">' +
+      '<span class="onboard-step-icon" aria-hidden="true">' + icon + '</span>' +
+      label +
+    '</li>';
+  }).join('');
+
+  return '<div class="card onboard-card">' +
+    '<div class="onboard-head">' +
+      '<div class="onboard-head-text">' +
+        '<div class="onboard-title">Getting started</div>' +
+        '<div class="onboard-progress-line">' +
+          '<strong>' + doneCount + ' of ' + ONBOARDING_STEPS.length + '</strong> complete' +
+        '</div>' +
+      '</div>' +
+      '<a class="onboard-dismiss" data-action="dismissOnboarding">Dismiss</a>' +
+    '</div>' +
+    '<div class="onboard-progress-bar" role="progressbar" ' +
+        'aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '">' +
+      '<span class="onboard-progress-fill" style="width:' + pct + '%;"></span>' +
+    '</div>' +
+    '<ul class="onboard-list">' + rows + '</ul>' +
+  '</div>';
+}
+
+// Module-level cache of the latest onboarding state. Lets the Dismiss
+// click swap to "dismissed" without an extra round trip. Cleared on
+// every full Dashboard render (see renderDashboardPage).
+let _onboardingState = null;
+
+export async function dismissOnboarding() {
+  if (_onboardingState) _onboardingState.dismissed = true;
+  // Optimistic — re-render now, then fire the POST.
+  var card = document.querySelector('.onboard-card');
+  if (card && card.parentElement) card.parentElement.removeChild(card);
+  apiDismissOnboarding();
+}
+
+// Click handler for an onboarding row — accepts "page" or "page:tab"
+// in data-arg. The Settings tab name is plumbed through query string;
+// the rest just navigate to the page directly.
+export function navigateOnboarding(arg) {
+  var raw = String(arg || '');
+  var parts = raw.split(':');
+  var page = parts[0];
+  if (!page) return;
+  // Lazy-import navigation to avoid a circular module load between
+  // dashboard.js and navigation.js (navigation already imports from
+  // dashboard for its renderer dispatch).
+  import('./navigation.js').then(function (m) {
+    if (parts[1] && page === 'settings') {
+      // Stash the tab in localStorage for the Settings renderer to
+      // pick up on its next render. setActiveSettingsTab reads it.
+      try { localStorage.setItem('pulseSettingsActiveTab', parts[1]); } catch (e) {}
+    }
+    m.navigateWithHistory(page);
+  });
 }
 
 // ---------------------------------------------------------------

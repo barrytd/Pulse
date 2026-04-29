@@ -159,11 +159,83 @@ export async function renderWhitelistPage() {
       '<a class="bulk-bar-clear" data-action="toggleWhitelistSelectAll" data-arg="false">Clear selection</a>' +
     '</div>' +
 
-    '<div class="card" style="padding:0; overflow:hidden;">' +
-      (rows.length === 0
-        ? '<div style="text-align:center; padding:32px; color:var(--text-muted);">No whitelist entries yet.</div>'
-        : _buildWhitelistTable(rows, customRows)) +
-    '</div>';
+    (customRows.length === 0
+      // Empty state — shown when the user has no custom entries. The
+      // table card still appears below if the operator has toggled
+      // "Show built-in entries" on, so they can browse the 100+ rows
+      // of always-on services without losing the onboarding panel.
+      ? _whitelistEmptyStateHtml(builtin.length) +
+        (whitelistState.showBuiltin && builtinRows.length > 0
+          ? '<div class="card" style="padding:0; overflow:hidden; margin-top:16px;">' +
+              _buildWhitelistTable(builtinRows, customRows) +
+            '</div>'
+          : '')
+      : '<div class="card" style="padding:0; overflow:hidden;">' +
+          _buildWhitelistTable(rows, customRows) +
+        '</div>');
+}
+
+// First-run / cleared-out empty state for the Whitelist page. Reads as
+// "here's what this is for and why you'd add one" — the old single-line
+// "No whitelist entries yet." gave operators no on-ramp.
+function _whitelistEmptyStateHtml(builtinCount) {
+  // Inline SVG instead of Lucide — Lucide is reserved for sidebar nav,
+  // user-avatar dropdown, and Settings tab nav (per project convention).
+  // Filter-funnel glyph reads as "suppress" without leaning on a brand.
+  var iconSvg =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ' +
+      'aria-hidden="true">' +
+      '<path d="M3 5h18l-7 9v6l-4-2v-4z"/>' +
+    '</svg>';
+  // Built-in count is dynamic — the constant 137 in the spec was a
+  // representative figure; this stays accurate as KNOWN_GOOD_SERVICES
+  // grows. The note hides the literal number when something has gone
+  // wrong fetching built-ins so we don't show "0 built-in entries".
+  var builtinLine = builtinCount > 0
+    ? '<p class="wl-empty-builtin">' +
+        '<strong>' + builtinCount + ' built-in entries</strong> are always active. ' +
+        'Toggle <em>Show built-in entries</em> to see them.' +
+      '</p>'
+    : '';
+  return '<div class="wl-empty">' +
+    '<div class="wl-empty-icon">' + iconSvg + '</div>' +
+    '<h3 class="wl-empty-title">No custom whitelist entries yet</h3>' +
+    '<p class="wl-empty-subtitle">' +
+      'Suppress known-good activity that triggers false positives. For example, ' +
+      'whitelist a service account like <code>SYSTEM</code> or a backup agent IP ' +
+      'that triggers <em>Scheduled Task Created</em> or <em>Brute Force</em> rules.' +
+    '</p>' +
+    '<div class="wl-empty-actions">' +
+      '<button class="btn btn-primary" data-action="focusWhitelistAddInput">' +
+        'Add your first entry' +
+      '</button>' +
+      '<button class="btn btn-secondary" data-action="toggleWhitelistLearnMore" ' +
+        'aria-expanded="false" aria-controls="wl-learn-more">' +
+        'Learn more' +
+      '</button>' +
+    '</div>' +
+    '<div id="wl-learn-more" class="wl-empty-learn" hidden>' +
+      '<dl>' +
+        '<dt>Account</dt>' +
+        '<dd>A Windows user or service account name (e.g. <code>SYSTEM</code>, ' +
+          '<code>backup-svc$</code>). Suppresses findings whose <em>Account</em> ' +
+          'field matches.</dd>' +
+        '<dt>Service</dt>' +
+        '<dd>A Windows service name (e.g. <code>WinDefend</code>). Suppresses ' +
+          '<em>Service Installed</em> findings for that service.</dd>' +
+        '<dt>IP</dt>' +
+        '<dd>An IPv4 address or CIDR. Suppresses authentication and lateral-' +
+          'movement findings whose source IP matches — useful for backup agents ' +
+          'and scanners.</dd>' +
+        '<dt>Rule</dt>' +
+        '<dd>A detection rule name (e.g. <code>Scheduled Task Created</code>). ' +
+          'Disables that rule entirely. Use sparingly — the more targeted ' +
+          'Account / Service / IP forms are usually a better fit.</dd>' +
+      '</dl>' +
+    '</div>' +
+    builtinLine +
+  '</div>';
 }
 
 function _buildWhitelistTable(rows, customRows) {
@@ -282,6 +354,30 @@ export async function deleteSelectedWhitelist() {
   showToast('Removed ' + deleted + ' entr' + (deleted === 1 ? 'y' : 'ies'), 'success');
   whitelistState.selected = {};
   renderWhitelistPage();
+}
+
+// Empty-state CTA: scroll to the Add Entry card and put focus inside the
+// value input so the user can start typing immediately.
+export function focusWhitelistAddInput() {
+  var input = document.getElementById('wl-add-value');
+  if (!input) return;
+  input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Defer one frame so the smooth-scroll doesn't fight the focus-jump.
+  requestAnimationFrame(function () {
+    try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+  });
+}
+
+// Empty-state CTA: toggle the inline "Account / Service / IP / Rule"
+// reference block under the empty state. Avoids navigating away to docs
+// — the explanation lives next to the form so it's there when the user
+// is actively deciding what to add.
+export function toggleWhitelistLearnMore(arg, target) {
+  var box = document.getElementById('wl-learn-more');
+  if (!box) return;
+  var open = !box.hidden;
+  box.hidden = open;
+  if (target) target.setAttribute('aria-expanded', open ? 'false' : 'true');
 }
 
 // Wired via data-action-change on the type <select>.

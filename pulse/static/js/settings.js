@@ -95,6 +95,18 @@ export async function renderSettingsPage() {
   var c = document.getElementById('content');
   c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading...</div>';
 
+  // One-shot deep-link: `localStorage.pulseSettingsActiveTab` is set by
+  // the dashboard onboarding-checklist's "Set up email alerts" / "Invite
+  // a team member" links so this page lands on the right tab instead of
+  // Profile. Read + clear so a later visit doesn't keep getting hijacked.
+  try {
+    var deepTab = localStorage.getItem('pulseSettingsActiveTab');
+    if (deepTab) {
+      setActiveSettingsTab(deepTab);
+      localStorage.removeItem('pulseSettingsActiveTab');
+    }
+  } catch (e) { /* private mode — ignore */ }
+
   // Fetch every endpoint in parallel with its own catch so one slow /
   // failing endpoint can't leave the whole page stuck on "Loading...".
   // Each result falls back to a safe default shape the renderer accepts.

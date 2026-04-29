@@ -2624,6 +2624,113 @@ tr.pending-flash {
 }
 
 /* ------------------------------------------------------------------ */
+/* Whitelist empty state — first-run / cleared-out onboarding panel    */
+/* ------------------------------------------------------------------ */
+.wl-empty {
+  text-align: center;
+  padding: 48px 24px;
+  background: var(--card-bg, #161b22);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.wl-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(139, 148, 158, 0.08);
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+.wl-empty-icon svg { width: 28px; height: 28px; }
+.wl-empty-title {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.wl-empty-subtitle {
+  margin: 0 0 20px 0;
+  max-width: 540px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.wl-empty-subtitle code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  color: var(--text);
+}
+.wl-empty-subtitle em {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 500;
+}
+.wl-empty-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Inline reference block under the CTAs — toggled by "Learn more". */
+.wl-empty-learn {
+  margin-top: 20px;
+  padding: 16px 20px;
+  width: 100%;
+  max-width: 560px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  text-align: left;
+}
+.wl-empty-learn[hidden] { display: none; }
+.wl-empty-learn dl {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  column-gap: 14px;
+  row-gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.wl-empty-learn dt {
+  color: var(--text);
+  font-weight: 600;
+}
+.wl-empty-learn dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+.wl-empty-learn code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 11.5px;
+}
+.wl-empty-learn em {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.wl-empty-builtin {
+  margin: 20px 0 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.wl-empty-builtin strong { color: var(--text); font-weight: 600; }
+.wl-empty-builtin em     { color: var(--text); font-style: normal; font-weight: 500; }
+
+/* ------------------------------------------------------------------ */
 /* Dashboard standup row — funnel + repeat offenders                   */
 /* ------------------------------------------------------------------ */
 .standup-row {
@@ -2803,6 +2910,141 @@ tr.pending-flash {
   .compliance-hero { flex-direction: column; align-items: flex-start; }
   .compliance-gauge { flex: 0 0 auto; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Compliance — Coverage Gaps KPI tile + the actionable card below     */
+/* ------------------------------------------------------------------ */
+.compliance-gap-kpi {
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--card-bg, #161b22);
+}
+.compliance-gap-kpi.tone-warn {
+  border-left-color: #f0883e;
+  background: linear-gradient(90deg, rgba(240, 136, 62, 0.08), rgba(240, 136, 62, 0));
+}
+.compliance-gap-kpi.tone-ok {
+  border-left-color: #3fb950;
+}
+.compliance-gap-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.compliance-gap-kpi-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.compliance-gap-kpi.tone-warn .compliance-gap-kpi-value { color: #f0883e; }
+.compliance-gap-kpi.tone-ok   .compliance-gap-kpi-value { color: #3fb950; }
+.compliance-gap-kpi-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Three stacked gap blocks inside the Coverage Gaps card. Each block has
+   its own header (title + count chip), a one-line hint, and a list. */
+.gap-block {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.gap-block:first-of-type { border-top: 0; padding-top: 0; }
+.gap-block-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.gap-block-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.gap-block-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 0 7px;
+  height: 18px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.gap-block-count-warn {
+  background: rgba(240, 136, 62, 0.18);
+  color: #f0883e;
+}
+.gap-block-count-ok {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+}
+.gap-block-hint {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.gap-block-empty {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.gap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gap-list li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 12.5px;
+}
+.gap-tech-id {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.gap-tech-sample {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.gap-rule-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text);
+}
+.gap-rule-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.gap-fp-rate {
+  color: #f0883e;
+  font-weight: 600;
+}
+.gap-rule-meta .muted { color: var(--text-dim, #8b949e); }
 
 /* --- Audit Log: row-edge tint, action chip, drawer helpers ------------- */
 /* Color map matches _actionTone() in audit.js:                            */
@@ -3634,6 +3876,106 @@ tr.pending-flash {
   word-break: break-all;
   margin-bottom: 10px;
   user-select: all;
+}
+
+/* -------------------------------------------------------------------
+   Getting Started checklist — Dashboard onboarding card.
+   Subtle elevated card with a 3px accent left border so it reads as a
+   suggestion rather than a regular Dashboard panel.
+------------------------------------------------------------------- */
+.onboard-card {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-left: 3px solid var(--accent, #58a6ff);
+  background: linear-gradient(90deg, rgba(88, 166, 255, 0.06), rgba(88, 166, 255, 0));
+}
+.onboard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.onboard-head-text { display: flex; flex-direction: column; gap: 2px; }
+.onboard-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.onboard-progress-line {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.onboard-progress-line strong { color: var(--text); font-weight: 600; }
+.onboard-dismiss {
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+.onboard-dismiss:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.onboard-progress-bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.onboard-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent, #58a6ff);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.onboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.onboard-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+.onboard-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+.onboard-step.is-done .onboard-step-icon { color: #3fb950; }
+.onboard-step-icon svg { width: 16px; height: 16px; }
+.onboard-step-link {
+  color: var(--accent, #58a6ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+.onboard-step-link:hover { text-decoration: underline; }
+.onboard-step.is-done .onboard-step-label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-dim, #6e7681);
 }
 
 /* Wrapped relative-time span. Default look matches surrounding muted

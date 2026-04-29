@@ -17,6 +17,7 @@ import {
   apiCreateFindingNote,
   apiDeleteFindingNote,
   apiFetchIntel,
+  apiMarkFirstFindingViewed,
   invalidateScansCache,
   invalidateFindingsCache,
 } from './api.js';
@@ -2285,9 +2286,18 @@ export async function confirmForceBlock() {
   }
 }
 
+// Beacon flag — only fire the first-finding-viewed POST once per page
+// load. The endpoint itself is idempotent (the DB column uses COALESCE)
+// but skipping the redundant network call keeps the dev tools quiet.
+let _firstFindingViewBeaconed = false;
+
 export function openFindingDrawer(f) {
   if (!f) return;
   _drawerFinding = f;
+  if (!_firstFindingViewBeaconed) {
+    _firstFindingViewBeaconed = true;
+    apiMarkFirstFindingViewed();
+  }
   var sev  = (f.severity || 'LOW').toUpperCase();
   var rule = f.rule || 'Unknown';
   var mitre = f.mitre || mitreMap[rule] || '';

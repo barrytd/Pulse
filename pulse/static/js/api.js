@@ -193,6 +193,14 @@ export async function apiGetRules() {
   return resp.json();
 }
 
+// Per-rule rows with hits/fp/tp counts + MITRE/CSF/ISO tags. Used by
+// the Rules page table and the Compliance page's Coverage Gaps section.
+export async function apiGetRulesDetails() {
+  var resp = await fetch('/api/rules/details');
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+
 // Threat-intel lookup for one IP. Backend returns 404 for private/
 // invalid IPs and 400 when no API key is configured; the envelope below
 // lets the caller distinguish "no key" from "lookup failed" without
@@ -377,6 +385,27 @@ export async function apiSetAgentPaused(id, paused) {
     throw new Error(msg);
   }
   return true;
+}
+
+// --- Onboarding checklist (Getting Started card on Dashboard) --------
+
+export async function apiGetOnboarding() {
+  var resp = await fetch('/api/me/onboarding');
+  if (!resp.ok) return null;
+  return resp.json();
+}
+
+export async function apiDismissOnboarding() {
+  var resp = await fetch('/api/me/onboarding/dismiss', { method: 'POST' });
+  return resp.ok;
+}
+
+// Best-effort beacon — fired the first time a user opens any finding
+// drawer so the onboarding "Review a finding" step ticks. Never throws.
+export async function apiMarkFirstFindingViewed() {
+  try {
+    await fetch('/api/me/onboarding/finding-viewed', { method: 'POST' });
+  } catch (e) { /* swallow */ }
 }
 
 // --- Notifications (bell-icon feed) ----------------------------------

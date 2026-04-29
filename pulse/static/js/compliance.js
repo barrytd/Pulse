@@ -4,16 +4,32 @@
 // analyst can see which Pulse rules back each control.
 'use strict';
 
-import { apiGetCompliance } from './api.js';
+import { apiGetCompliance, apiGetRulesDetails } from './api.js';
 import { escapeHtml } from './dashboard.js';
+
+// Thresholds for the Coverage Gaps panel. Tuned for an install that's
+// been running long enough to have meaningful counts; small installs
+// where every rule has 0–2 hits will read as "all silent" — that's
+// accurate, the operator just hasn't accumulated signal yet.
+const NOISY_MIN_HITS  = 20;   // rule must fire this often to count as noisy
+const NOISY_MIN_FP_RATE = 0.4; // and have at least 40% of reviewed hits be FPs
 
 export async function renderCompliancePage() {
   var c = document.getElementById('content');
   c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading...</div>';
 
-  var data;
+  var data, ruleDetails;
   try {
-    data = await apiGetCompliance();
+    var settled = await Promise.allSettled([apiGetCompliance(), apiGetRulesDetails()]);
+    if (settled[0].status !== 'fulfilled') throw settled[0].reason;
+    data = settled[0].value;
+    // Rule-details enriches the page with hits / FP counts so the
+    // Coverage Gaps section can flag silent and noisy rules. If it
+    // fails we still render the rest of the page \u2014 gaps just degrades
+    // to "MITRE uncovered only".
+    ruleDetails = settled[1].status === 'fulfilled'
+      ? (settled[1].value.rules || [])
+      : [];
   } catch (e) {
     c.innerHTML =
       '<div class="card" style="border-color:var(--severity-high, #e67e22);">' +
@@ -29,11 +45,15 @@ export async function renderCompliancePage() {
   var isoCards  = _renderIsoCards(data.iso_27001 || {});
   var rulesTable = _renderRulesTable(data.rules || []);
   var hero = _renderHero(data.rules || []);
+  var gaps = _computeCoverageGaps(ruleDetails.length ? ruleDetails : (data.rules || []));
+  var gapKpi = _renderGapKpi(gaps);
+  var gapsCard = _renderCoverageGaps(gaps);
 
   c.innerHTML =
     '<div class="page-head">' +
       '<div class="page-head-title">Coverage across compliance frameworks</div>' +
     '</div>' +
+    gapKpi +
     hero +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">NIST Cybersecurity Framework</div>' +
@@ -56,10 +76,236 @@ export async function renderCompliancePage() {
         isoCards +
       '</div>' +
     '</div>' +
+    gapsCard +
     '<div class="card" style="padding:0; overflow:hidden;">' +
       '<div class="section-label" style="padding:16px 20px 8px;">Per-rule mappings</div>' +
       rulesTable +
     '</div>';
+}
+
+// ---------------------------------------------------------------
+// Coverage Gaps \u2014 the actionable companion to the static framework cards
+// ---------------------------------------------------------------
+//
+// Three signals, all derived from the rule catalog itself:
+//   1. Uncovered MITRE techniques \u2014 techniques referenced by any rule
+//      in the catalog but not by any *enabled* rule. The fix is to
+//      re-enable a rule, not to write new detection code.
+//   2. Silent rules \u2014 enabled rules that have never fired across the
+//      visible scan history. Either truly nothing matches or the rule's
+//      pattern is wrong; either way the operator should review it.
+//   3. Noisy rules \u2014 enabled rules with high hit count AND high FP rate.
+//      The detection is firing but analysts keep marking it false-positive,
+//      which usually means the threshold needs tuning or a whitelist
+//      entry would suppress the noise more cleanly.
+
+function _computeCoverageGaps(rules) {
+  // Build the set of MITRE techniques present in the catalog vs covered
+  // by an enabled rule. Rules with no mitre tag at all are skipped \u2014 they
+  // can't contribute to coverage either way.
+  var allTechniques = {};   // technique id -> { rule_count, name (best-effort) }
+  var coveredTechniques = {}; // technique id -> true
+  rules.forEach(function (r) {
+    var tech = (r.mitre || '').trim();
+    if (!tech) return;
+    if (!allTechniques[tech]) allTechniques[tech] = { rule_count: 0, sample_rule: r.name };
+    allTechniques[tech].rule_count += 1;
+    if (r.enabled) coveredTechniques[tech] = true;
+  });
+  var uncovered = Object.keys(allTechniques)
+    .filter(function (t) { return !coveredTechniques[t]; })
+    .sort()
+    .map(function (t) {
+      return { id: t, sample_rule: allTechniques[t].sample_rule };
+    });
+
+  // Silent + noisy use rule_details fields. If hits_total / fp_count are
+  // missing (unenriched fallback), all rules will look silent \u2014 that's
+  // OK, the table will just say "no hit data available" downstream.
+  var silent = rules
+    .filter(function (r) { return r.enabled && (r.hits_total || 0) === 0; })
+    .map(function (r) { return { name: r.name, last_fired: r.last_fired || null }; })
+    .sort(function (a, b) { return a.name.localeCompare(b.name); });
+
+  var noisy = rules
+    .filter(function (r) {
+      if (!r.enabled) return false;
+      var hits = r.hits_total || 0;
+      if (hits < NOISY_MIN_HITS) return false;
+      var fp = r.fp_count || 0;
+      var tp = r.tp_count || 0;
+      var reviewed = fp + tp;
+      // Need at least a few reviewed findings before we can call the
+      // FP rate meaningful \u2014 otherwise a single FP on a 30-hit rule
+      // would register as 100% noise.
+      if (reviewed < 3) return false;
+      var rate = fp / reviewed;
+      return rate >= NOISY_MIN_FP_RATE;
+    })
+    .map(function (r) {
+      var fp = r.fp_count || 0;
+      var tp = r.tp_count || 0;
+      var reviewed = fp + tp;
+      return {
+        name: r.name,
+        hits: r.hits_total || 0,
+        fp: fp,
+        reviewed: reviewed,
+        fp_rate: reviewed > 0 ? (fp / reviewed) : 0,
+      };
+    })
+    .sort(function (a, b) { return b.fp_rate - a.fp_rate; });
+
+  return {
+    uncovered: uncovered,
+    silent:    silent,
+    noisy:     noisy,
+    have_hit_data: rules.some(function (r) { return r.hits_total !== undefined; }),
+  };
+}
+
+function _renderGapKpi(gaps) {
+  var n = gaps.uncovered.length;
+  var label = n + ' technique' + (n === 1 ? '' : 's') + ' uncovered';
+  var sub = n === 0
+    ? 'Every catalog technique is backed by at least one enabled rule.'
+    : 'Re-enable a rule below or write a new detection to close the gap.';
+  // Amber/orange when there are gaps; muted neutral when fully covered.
+  var tone = n > 0 ? 'tone-warn' : 'tone-ok';
+  return '<div class="compliance-gap-kpi ' + tone + '">' +
+    '<div class="compliance-gap-kpi-label">Coverage gaps</div>' +
+    '<div class="compliance-gap-kpi-value">' + escapeHtml(label) + '</div>' +
+    '<div class="compliance-gap-kpi-sub">' + escapeHtml(sub) + '</div>' +
+  '</div>';
+}
+
+function _renderCoverageGaps(gaps) {
+  // Three sub-panels stacked. Each renders its own empty-state copy so a
+  // clean install (zero of any kind) reads as "you're good" rather than
+  // an unexplained absence of content.
+  return '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="section-label">Coverage gaps</div>' +
+    '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
+      'Three signals worth reviewing. Compliance percentages above only count ' +
+      '<em>mapped</em> rules \u2014 these lists tell you whether those rules are ' +
+      'actually doing the job.' +
+    '</p>' +
+    _renderUncoveredTechniques(gaps.uncovered) +
+    _renderSilentRules(gaps.silent, gaps.have_hit_data) +
+    _renderNoisyRules(gaps.noisy, gaps.have_hit_data) +
+  '</div>';
+}
+
+function _renderUncoveredTechniques(uncovered) {
+  if (uncovered.length === 0) {
+    return '<div class="gap-block">' +
+      '<div class="gap-block-head">' +
+        '<span class="gap-block-title">Uncovered techniques</span>' +
+        '<span class="gap-block-count gap-block-count-ok">0</span>' +
+      '</div>' +
+      '<p class="gap-block-empty">' +
+        'Every MITRE technique referenced by a rule in the catalog is backed ' +
+        'by at least one enabled rule.' +
+      '</p>' +
+    '</div>';
+  }
+  var rows = uncovered.map(function (u) {
+    return '<li>' +
+      '<code class="gap-tech-id">' + escapeHtml(u.id) + '</code> ' +
+      '<span class="gap-tech-sample">disabled rule: ' +
+        escapeHtml(u.sample_rule || '\u2014') +
+      '</span>' +
+    '</li>';
+  }).join('');
+  return '<div class="gap-block">' +
+    '<div class="gap-block-head">' +
+      '<span class="gap-block-title">Uncovered techniques</span>' +
+      '<span class="gap-block-count gap-block-count-warn">' + uncovered.length + '</span>' +
+    '</div>' +
+    '<p class="gap-block-hint">' +
+      'These MITRE ATT&amp;CK techniques have a rule in the catalog but no <em>enabled</em> ' +
+      'rule covering them. Re-enable a rule from the Rules page to close each gap.' +
+    '</p>' +
+    '<ul class="gap-list">' + rows + '</ul>' +
+  '</div>';
+}
+
+function _renderSilentRules(silent, have_hit_data) {
+  if (!have_hit_data) {
+    return '<div class="gap-block">' +
+      '<div class="gap-block-head">' +
+        '<span class="gap-block-title">Silent rules</span>' +
+      '</div>' +
+      '<p class="gap-block-empty">No hit data available.</p>' +
+    '</div>';
+  }
+  if (silent.length === 0) {
+    return '<div class="gap-block">' +
+      '<div class="gap-block-head">' +
+        '<span class="gap-block-title">Silent rules</span>' +
+        '<span class="gap-block-count gap-block-count-ok">0</span>' +
+      '</div>' +
+      '<p class="gap-block-empty">' +
+        'Every enabled rule has fired at least once across the recorded scans.' +
+      '</p>' +
+    '</div>';
+  }
+  var rows = silent.map(function (r) {
+    return '<li>' +
+      '<span class="gap-rule-name">' + escapeHtml(r.name) + '</span>' +
+      '<span class="gap-rule-meta">No hits across recorded scans</span>' +
+    '</li>';
+  }).join('');
+  return '<div class="gap-block">' +
+    '<div class="gap-block-head">' +
+      '<span class="gap-block-title">Silent rules, may need configuration review</span>' +
+      '<span class="gap-block-count gap-block-count-warn">' + silent.length + '</span>' +
+    '</div>' +
+    '<p class="gap-block-hint">' +
+      'Enabled rules that have never matched. Either nothing in your environment ' +
+      'triggers them (fine) or the rule\u2019s pattern needs review.' +
+    '</p>' +
+    '<ul class="gap-list">' + rows + '</ul>' +
+  '</div>';
+}
+
+function _renderNoisyRules(noisy, have_hit_data) {
+  if (!have_hit_data) return '';
+  if (noisy.length === 0) {
+    return '<div class="gap-block">' +
+      '<div class="gap-block-head">' +
+        '<span class="gap-block-title">Noisy rules</span>' +
+        '<span class="gap-block-count gap-block-count-ok">0</span>' +
+      '</div>' +
+      '<p class="gap-block-empty">' +
+        'No rule has hit the noisy threshold (' + NOISY_MIN_HITS +
+        '+ hits and \u2265' + Math.round(NOISY_MIN_FP_RATE * 100) + '% false-positive rate).' +
+      '</p>' +
+    '</div>';
+  }
+  var rows = noisy.map(function (r) {
+    var pct = Math.round(r.fp_rate * 100);
+    return '<li>' +
+      '<span class="gap-rule-name">' + escapeHtml(r.name) + '</span>' +
+      '<span class="gap-rule-meta">' +
+        r.hits + ' hits \u00b7 ' +
+        '<span class="gap-fp-rate">' + pct + '% FP</span> ' +
+        '<span class="muted">(' + r.fp + '/' + r.reviewed + ' reviewed)</span>' +
+      '</span>' +
+    '</li>';
+  }).join('');
+  return '<div class="gap-block">' +
+    '<div class="gap-block-head">' +
+      '<span class="gap-block-title">Noisy rules, consider tuning</span>' +
+      '<span class="gap-block-count gap-block-count-warn">' + noisy.length + '</span>' +
+    '</div>' +
+    '<p class="gap-block-hint">' +
+      'Rules that fire often AND are frequently marked false-positive. ' +
+      'Tighten the rule\u2019s threshold or add whitelist entries for the ' +
+      'specific accounts / IPs / services that keep tripping it.' +
+    '</p>' +
+    '<ul class="gap-list">' + rows + '</ul>' +
+  '</div>';
 }
 
 function _renderHero(rules) {
