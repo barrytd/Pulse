@@ -71,6 +71,10 @@ export async function renderHistoryPage() {
   c.innerHTML =
     '<div class="page-head">' +
       '<div class="page-head-title"><strong>' + scans.length + '</strong> scans tracked</div>' +
+      '<div class="page-head-actions">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal">' +
+          '<i data-lucide="upload"></i><span>Upload .evtx</span></button>' +
+      '</div>' +
     '</div>' +
 
     '<div class="summary-row">' +

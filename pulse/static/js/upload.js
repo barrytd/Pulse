@@ -8,7 +8,7 @@ import {
   invalidateFindingsCache,
 } from './api.js';
 import { formatBytes } from './dashboard.js';
-import { navigate, getCurrentPage } from './navigation.js';
+import { navigate } from './navigation.js';
 
 let selectedFiles = [];
 
@@ -186,7 +186,11 @@ export async function uploadAndScan() {
   status.className = 'upload-status success';
   invalidateScansCache();
   invalidateFindingsCache();
-  setTimeout(function () { closeUploadModal(); navigate(getCurrentPage()); }, 1500);
+  // Land on History after a successful upload — that's where the scan
+  // list lives now (the standalone Scans page got merged in). If the
+  // user was already on History the navigate() collapses to a re-render
+  // so the new row appears without a flash.
+  setTimeout(function () { closeUploadModal(); navigate('history'); }, 1500);
 }
 
 // Wire up DOM listeners. Module scripts are deferred, so target

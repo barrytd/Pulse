@@ -1312,7 +1312,9 @@
   align-items: center;
 }
 
-/* Scans page tab bar — Scans | All Findings */
+/* In-page tab bar — also used by the Firewall page (Block list / Rules).
+   Class names are legacy from the old Scans-page tabs; left as-is so
+   firewall.js doesn't need a parallel rename. */
 .scans-tabs {
   display: flex;
   gap: 2px;

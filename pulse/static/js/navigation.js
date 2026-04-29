@@ -12,7 +12,7 @@
 
 import { renderDashboardPage } from './dashboard.js';
 import { renderMonitorPage } from './monitor.js';
-import { renderScansPage, setScansPageTab, viewScan } from './findings.js';
+import { renderFindingsPage, viewScan } from './findings.js';
 import { renderHistoryPage } from './history.js';
 import { renderFleetPage } from './fleet.js';
 import { renderFirewallPage } from './firewall.js';
@@ -62,44 +62,32 @@ export function navigate(page, opts) {
   // a finding drawer hanging around when the user clicks Rules).
   _closeAnyOpenDrawer();
 
-  // "Findings" sidebar item is a sub-tab of the Scans page. Translate
-  // the click into a Scans route with the All Findings tab active so
-  // old /findings bookmarks still resolve correctly.
-  if (page === 'findings') {
-    _syncUrl('findings', null, opts);
-    _currentPage = 'findings';
-    _updateSidebarHighlight('findings');
-    _updateTitle('Findings');
-    document.body.dataset.page = 'findings';
-    // renderScansPage will read scansPageTab = 'findings' and draw the
-    // All Findings view inside the Scans shell.
-    setScansPageTab('findings');
-    return;
-  }
-
   _syncUrl(page, opts.scanId, opts);
   _currentPage = page;
-  _updateSidebarHighlight(page);
+  _updateSidebarHighlight(page === 'scans' ? 'findings' : page);
   _updateTitle(_titleFor(page, opts.scanId));
   document.body.dataset.page = page;
 
-  // Scan detail is a sub-page of Scans: show Scans highlighted in the
-  // sidebar but render the detail view instead of the list.
+  // Scan detail (`/scans/{id}`) keeps working as a deep-link target —
+  // History rows + finding-drawer "View scan" both navigate here. The
+  // sidebar highlight points at Findings since the standalone Scans
+  // sidebar entry is gone (the scans list got merged into History).
   if (page === 'scans' && opts.scanId) {
     viewScan(opts.scanId, { push: false });
     return;
   }
 
-  // Clicking "Scans" in the sidebar resets to the list tab — don't
-  // resume from whichever sub-tab was last visited.
+  // Bare `/scans` (no id) is now an alias for /findings — there's no
+  // standalone scans-list view anymore. We keep the route valid so old
+  // bookmarks still resolve.
   if (page === 'scans') {
-    setScansPageTab('scans');
-    return;
+    return renderFindingsPage();
   }
 
   var renderers = {
     dashboard: renderDashboardPage,
     monitor:   renderMonitorPage,
+    findings:  renderFindingsPage,
     history:   renderHistoryPage,
     fleet:     renderFleetPage,
     firewall:  renderFirewallPage,
