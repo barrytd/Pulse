@@ -339,20 +339,31 @@ export const monitorClient = {
     });
   },
 
+  // Fetch the current monitor status and overwrite the cached value.
+  // Returns the fetched status. Used by `renderMonitorPage` to bypass
+  // the `_initialized` early-return inside `init()` so every Monitor
+  // page mount paints against truth-of-the-backend, not stale state.
+  async _refreshStatus() {
+    try {
+      var s = await apiMonitorStatus();
+      this.status = s;
+      this._notify('status');
+      return s;
+    } catch (e) { return this.status; }
+  },
+
   async start(cfgOverride) {
     var cfg = cfgOverride || this._readSettingsForm();
     try {
       var s = await apiMonitorStart(cfg || {});
       this.status = s;
       this._connect();
+      // Tell every subscriber, then force a direct render. Doing both
+      // covers (a) the rAF-coalesced path used during normal SSE bursts,
+      // and (b) a synchronous paint right now — so the LIVE state is
+      // visible on the same tick the user clicked Start, even if the
+      // rAF in `_scheduleMonRerender` somehow gets dropped.
       this._notify('status');
-      // Force a synchronous re-render on the monitor page itself. The
-      // navlive pill in the topbar updates correctly via _notify, but
-      // the page-level subscriber goes through a `requestAnimationFrame`
-      // scheduler that has been observed to skip a frame on the very
-      // first start after a fresh server boot — leaving the page stuck
-      // on IDLE while the topbar shows LIVE. Calling the render function
-      // directly here makes the LIVE state visible immediately.
       _forceMonitorPageRender();
     } catch (e) {
       toastError('Failed to start monitor');
@@ -1395,7 +1406,21 @@ export async function renderMonitorPage() {
   var c = document.getElementById('content');
   c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading monitor\u2026</div>';
 
+  // FIX FOR FRESH-API-START RACE \u2014 `init()` short-circuits if it's been
+  // called once (boot calls it fire-and-forget, then this `await` may
+  // return before the boot init's `apiMonitorStatus` has resolved), so
+  // `monitorClient.status` could still be null when render() runs and
+  // the page paints IDLE even though the backend is active. Pull the
+  // fresh status here on every mount so the page always renders against
+  // the truth-of-the-backend, then ALSO open the SSE stream if it's
+  // active and we haven't connected yet.
   await monitorClient.init();
+  try {
+    var freshStatus = await monitorClient._refreshStatus();
+    if (freshStatus && freshStatus.active && !monitorClient._source) {
+      monitorClient._connect();
+    }
+  } catch (e) { /* best-effort \u2014 render falls through with whatever we have */ }
 
   function render() {
     var s      = monitorClient.status || {};
