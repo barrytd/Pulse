@@ -36,6 +36,7 @@ import {
   sevPillHtml,
   formatRelativeTime,
   relTimeHtml,
+  roleBadgeHtml,
 } from './dashboard.js';
 import { navigate } from './navigation.js';
 
@@ -2339,6 +2340,11 @@ export function openFindingDrawer(f) {
       '<div class="finding-drawer-details">' + escapeHtml(details) + '</div>' +
     '</div>' : '') +
 
+    // Threat Intel slots between Event Details and Remediation so the
+    // analyst sees IP reputation while triaging — before deciding what
+    // to do about it. Section returns '' when no public IP is present.
+    _renderIntelSection(f) +
+
     (rawXml ? '<div class="finding-drawer-section">' +
       '<details class="raw-xml-toggle">' +
         '<summary class="sec-label" style="cursor:pointer;">Raw Event XML</summary>' +
@@ -2350,8 +2356,6 @@ export function openFindingDrawer(f) {
       '<div class="sec-label">Remediation</div>' +
       _remediationBlock(f) +
     '</div>' +
-
-    _renderIntelSection(f) +
 
     _stageBlockSection(f) +
 
@@ -2548,6 +2552,7 @@ async function _loadDrawerAssign(f) {
       '<li class="assign-item' + (String(u.id) === current ? ' is-selected' : '') + '" ' +
         'data-action="pickFindingAssignee" data-arg="' + escapeHtml(String(u.id)) + '">' +
         '<span class="assign-item-name">' + escapeHtml(primary) + '</span>' +
+        roleBadgeHtml(u.role) +
         (secondary
           ? '<span class="assign-item-email">' + escapeHtml(secondary) + '</span>'
           : '') +
@@ -2722,6 +2727,7 @@ function _renderNotesThread(notes) {
     return '<div class="note-item" data-note-id="' + escapeHtml(String(n.id)) + '">' +
       '<div class="note-meta">' +
         '<span class="note-author">' + escapeHtml(author) + '</span>' +
+        roleBadgeHtml(n.role) +
         relTimeHtml(when, 'note-time') +
         '<button type="button" class="note-delete" aria-label="Delete note" ' +
           'title="Delete note" data-action="deleteFindingNote" ' +

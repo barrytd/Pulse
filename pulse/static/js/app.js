@@ -192,6 +192,9 @@ import {
   toggleReportSelect,
   toggleReportSelectAll,
   deleteSelectedReports,
+  openGenerateReportModal,
+  closeGenerateReportModal,
+  submitGenerateReport,
 } from './reports.js';
 import {
   toggleRuleEnabled,
@@ -441,6 +444,9 @@ const actions = {
   toggleReportSelect,
   toggleReportSelectAll,
   deleteSelectedReports,
+  openGenerateReportModal,
+  closeGenerateReportModal,
+  submitGenerateReport,
 
   // rules
   toggleRuleEnabled,

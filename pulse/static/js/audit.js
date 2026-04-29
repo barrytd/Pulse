@@ -16,7 +16,7 @@
 'use strict';
 
 import { fetchAudit, apiListUsers } from './api.js';
-import { escapeHtml, _restoreSearchFocus, formatRelativeTime } from './dashboard.js';
+import { escapeHtml, _restoreSearchFocus, formatRelativeTime, roleBadgeHtml } from './dashboard.js';
 import { openDrawer, closeDrawer, isDrawerOpen } from './drawer.js';
 
 // Newest-first cache of every audit row the API returned last refresh.
@@ -937,6 +937,7 @@ function _actorCell(r) {
   return '<span class="audit-actor" title="' + escapeHtml(title) + '">' +
            '<span class="audit-actor-ic">' + icon + '</span>' +
            escapeHtml(label) +
+           roleBadgeHtml(r.user_role) +
          '</span>';
 }
 

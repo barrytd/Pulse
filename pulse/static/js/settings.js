@@ -37,7 +37,7 @@ import {
   apiDeleteWaitlistSignup,
   apiListAllNotes,
 } from './api.js';
-import { escapeHtml, showToast, toastError, relTimeHtml } from './dashboard.js';
+import { escapeHtml, showToast, toastError, relTimeHtml, roleBadgeHtml } from './dashboard.js';
 import { getTheme } from './theme.js';
 import {
   getSeverityColors,
@@ -357,6 +357,18 @@ export async function renderSettingsPage() {
       '</a>'
     : '<span class="profile-name-hint muted">Ask an admin to change this</span>';
 
+  // Role surface — read-only here. Admins see "Full access…", viewers
+  // see "View access… contact your admin to change permissions." so the
+  // user always knows what they can and can't do.
+  var roleLabel = (me && me.role === 'admin') ? 'Admin'
+                : (me && me.role === 'viewer') ? 'Viewer (read-only)'
+                : 'Member';
+  var roleExplain = (me && me.role === 'admin')
+    ? 'Full access to all settings, users, scans, and findings.'
+    : (me && me.role === 'viewer')
+    ? 'View access to scans and findings assigned to you. Contact your admin to change permissions.'
+    : 'Standard access. Contact your admin to change permissions.';
+
   var profileHtml =
     avatarHtml +
     '<div class="card" style="margin-bottom:16px;">' +
@@ -368,6 +380,12 @@ export async function renderSettingsPage() {
         '<div class="profile-name-row">' +
           '<span class="profile-name-value">' + displayNameHtml + '</span>' +
           nameHint +
+        '</div>' +
+      '</div>' +
+      '<div class="form-row"><label>Role</label>' +
+        '<div class="profile-role-row">' +
+          '<span class="profile-role-value">' + escapeHtml(roleLabel) + '</span>' +
+          '<span class="profile-role-hint">' + escapeHtml(roleExplain) + '</span>' +
         '</div>' +
       '</div>' +
       '<div class="form-row"><label>Account email</label>' +
@@ -845,6 +863,9 @@ function _renderUsersPanel(me, users) {
       '</div>'
     );
 
+    var lastActiveCell = u.last_active_at
+      ? relTimeHtml(u.last_active_at)
+      : '<span style="color:var(--text-muted);">never</span>';
     return (
       '<tr class="user-row' + (isSelf ? ' is-self' : '') + '">' +
         '<td class="user-cell-name">' + nameInput +
@@ -853,6 +874,7 @@ function _renderUsersPanel(me, users) {
         '<td class="user-cell-role">' + rolePill + '</td>' +
         '<td class="user-cell-status">' + statusCell + '</td>' +
         '<td class="user-cell-created">' + relTimeHtml(u.created_at) + '</td>' +
+        '<td class="user-cell-active">' + lastActiveCell + '</td>' +
         '<td class="user-cell-actions">' + actionsCell + '</td>' +
       '</tr>'
     );
@@ -862,7 +884,8 @@ function _renderUsersPanel(me, users) {
     ? '<div class="table-wrap"><table class="users-table">' +
         '<thead><tr>' +
           '<th>Name</th><th>Email</th><th>Role</th><th>Status</th>' +
-          '<th>Created</th><th class="user-cell-actions" aria-label="Actions"></th>' +
+          '<th>Created</th><th>Last active</th>' +
+          '<th class="user-cell-actions" aria-label="Actions"></th>' +
         '</tr></thead>' +
         '<tbody>' + rowsHtml + '</tbody>' +
       '</table></div>'
@@ -1340,7 +1363,7 @@ function _renderNotesAdminPanel(rows) {
       '<tr class="feedback-row note-admin-row" data-action="toggleNoteAdminRow" data-arg="' + i + '">' +
         '<td class="feedback-when">' + relTimeHtml(r.created_at) + '</td>' +
         '<td><span class="' + sevCls + '">' + escapeHtml(sev) + '</span></td>' +
-        '<td class="feedback-from">' + escapeHtml(author) + '</td>' +
+        '<td class="feedback-from">' + escapeHtml(author) + roleBadgeHtml(r.role) + '</td>' +
         '<td>' +
           '<a href="' + escapeHtml(scanHref) + '" data-action="viewScanFromLink" ' +
              'data-arg="' + escapeHtml(String(r.scan_id || '')) + '" ' +

@@ -91,6 +91,20 @@ export function sevPillHtml(sev) {
   return '<span class="pill pill-' + lo + '">' + up + '</span>';
 }
 
+// Compact one-letter role badge — A for admin, V for viewer. Tooltip
+// expands to the full word so the visual reads at a glance but stays
+// accessible. `extraCls` lets callers tighten spacing inside their
+// containing surface (e.g. drawer assignee row vs. audit table cell).
+// Returns '' for unknown roles so callers don't have to guard.
+export function roleBadgeHtml(role, extraCls) {
+  var r = (role || '').toLowerCase();
+  if (r !== 'admin' && r !== 'viewer') return '';
+  var letter = r === 'admin' ? 'A' : 'V';
+  var label  = r === 'admin' ? 'Admin' : 'Viewer';
+  var cls = 'role-badge role-badge-' + r + (extraCls ? ' ' + extraCls : '');
+  return '<span class="' + cls + '" title="' + label + '">' + letter + '</span>';
+}
+
 // HTML-attribute-safe escape — escapes quotes so the string can sit
 // inside a double-quoted attribute value without breaking out.
 export function attrEscape(str) {

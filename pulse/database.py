@@ -408,6 +408,10 @@ def init_db(db_path):
         # actually does the thing.
         "ALTER TABLE users ADD COLUMN onboarding_dismissed_at TEXT",
         "ALTER TABLE users ADD COLUMN first_finding_viewed_at TEXT",
+        # Sprint 6 polish — "Last active" column on the Users admin
+        # table. Bumped by the auth middleware on every authenticated
+        # request so admins can see who's actively using the system.
+        "ALTER TABLE users ADD COLUMN last_active_at TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -1607,7 +1611,8 @@ def count_users(db_path):
 
 _USER_COLS = (
     "id, email, password_hash, created_at, role, active, avatar_mime, "
-    "display_name, onboarding_dismissed_at, first_finding_viewed_at"
+    "display_name, onboarding_dismissed_at, first_finding_viewed_at, "
+    "last_active_at"
 )
 
 
@@ -1625,7 +1630,27 @@ def _row_to_user(row):
         "display_name": row[7] if len(row) > 7 else None,
         "onboarding_dismissed_at": row[8] if len(row) > 8 else None,
         "first_finding_viewed_at": row[9] if len(row) > 9 else None,
+        "last_active_at": row[10] if len(row) > 10 else None,
     }
+
+
+def touch_user_last_active(db_path, user_id):
+    """Bump the user's last_active_at to now. Called by the auth
+    middleware on every request so admins can see who's online recently
+    on the Users admin tab. Throttled-on-the-write side at 60s would be
+    nicer (less DB churn) but the row is tiny and a single UPDATE on
+    a hot index column is sub-ms; not worth the throttling cost."""
+    if user_id is None:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with _connect(db_path) as conn:
+            conn.execute(
+                "UPDATE users SET last_active_at = ? WHERE id = ?",
+                (now, int(user_id)),
+            )
+    except db_backend.OperationalError:
+        pass
 
 
 def mark_onboarding_dismissed(db_path, user_id):
@@ -2170,7 +2195,7 @@ def list_finding_notes(db_path, finding_id):
         with _connect(db_path) as conn:
             cursor = conn.execute(
                 """SELECT n.id, n.finding_id, n.user_id, n.body, n.created_at,
-                          u.email, u.display_name
+                          u.email, u.display_name, u.role
                    FROM finding_notes n
                    LEFT JOIN users u ON u.id = n.user_id
                    WHERE n.finding_id = ?
@@ -2216,7 +2241,7 @@ def list_all_notes(db_path, limit=500):
         with _connect(db_path) as conn:
             cursor = conn.execute(
                 """SELECT n.id, n.finding_id, n.body, n.created_at,
-                          u.email, u.display_name,
+                          u.email, u.display_name, u.role,
                           f.rule, f.ref_id, f.severity, f.scan_id
                    FROM finding_notes n
                    LEFT JOIN users u    ON u.id = n.user_id

@@ -2731,6 +2731,174 @@ tr.pending-flash {
 .wl-empty-builtin em     { color: var(--text); font-style: normal; font-weight: 500; }
 
 /* ------------------------------------------------------------------ */
+/* Reports — empty state, generate-report modal, history quick action  */
+/* ------------------------------------------------------------------ */
+.reports-empty {
+  text-align: center;
+  padding: 56px 24px;
+  background: var(--card-bg, #161b22);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.reports-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(139, 148, 158, 0.08);
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+.reports-empty-icon svg { width: 28px; height: 28px; }
+.reports-empty-title {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.reports-empty-subtitle {
+  margin: 0 0 20px 0;
+  max-width: 540px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.reports-empty-actions { display: flex; gap: 10px; }
+
+/* Generate Report modal — format radio buttons styled as picker tiles. */
+.genrep-format-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  flex: 1;
+}
+.genrep-format-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.genrep-format-opt:hover {
+  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+.genrep-format-opt input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.genrep-format-opt:has(input:checked) {
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.06);
+}
+.genrep-format-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.genrep-format-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* History page — per-row quick PDF action, only visible on row hover. */
+.history-cell-actions { width: 36px; text-align: right; }
+.history-quick-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
+}
+.history-row:hover .history-quick-action,
+.history-quick-action:focus {
+  opacity: 1;
+}
+.history-quick-action:hover {
+  color: var(--accent, #58a6ff);
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.06);
+}
+.history-quick-action svg { width: 14px; height: 14px; }
+
+/* ------------------------------------------------------------------ */
+/* Role surfaces — avatar dropdown, profile, role badge component      */
+/* ------------------------------------------------------------------ */
+
+/* User-avatar dropdown: role line under the greeting, 11px muted. */
+.user-dropdown-role {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 2px 0 8px 0;
+  letter-spacing: 0.2px;
+}
+
+/* Settings > Profile read-only Role row. Mirrors `.profile-name-row` */
+.profile-role-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.profile-role-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.profile-role-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Inline role badge — A / V chip rendered next to a user's name in
+   audit-log rows, assignment picker entries, notes thread, etc.
+   Reads as "extra context" not a primary affordance, so the muted
+   palette + tabular numerics keep it from competing for attention. */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  cursor: help;
+  user-select: none;
+}
+.role-badge-admin {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.4);
+}
+.role-badge-viewer {
+  background: rgba(139, 148, 158, 0.12);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------------------ */
 /* Dashboard standup row — funnel + repeat offenders                   */
 /* ------------------------------------------------------------------ */
 .standup-row {
@@ -3521,6 +3689,22 @@ tr.pending-flash {
   margin: 4px 0 0;
   max-width: 720px;
 }
+
+/* Discoverability subnote — drawer-first messaging on the standalone
+   page. Reads as a callout (left accent + tinted background) so users
+   notice that the contextual surface exists. */
+.ti-page-subnote {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.06);
+  border-radius: 0 6px 6px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 720px;
+}
+.ti-page-subnote strong { color: var(--text); font-weight: 600; }
 
 .ti-grid {
   display: grid;

@@ -239,6 +239,7 @@ function _buildHistoryTable(scans) {
         (allSelected ? 'checked ' : '') +
         'data-action="toggleHistorySelectAll" aria-label="Select all scans" /></th>' +
       '<th>Date / Time</th><th>File</th><th>Findings</th><th>Score</th><th>Grade</th><th>Trend</th>' +
+      '<th class="history-cell-actions" aria-label="Quick actions"></th>' +
     '</tr></thead><tbody>' +
     scans.map(function (scan, i) {
       var grade = _gradeFor(scan.score);
@@ -249,6 +250,23 @@ function _buildHistoryTable(scans) {
         else if (diff < 0) trend = '<span class="trend-down">\u2193 ' + diff + '</span>';
       }
       var checked = _selectedHistory[scan.id] ? 'checked' : '';
+      // Quick PDF action \u2014 appears only on row hover (CSS opacity:0 ->
+      // 1). Reuses the central downloadReport helper so the file
+      // streams with the right Content-Disposition. data-format=pdf
+      // tells downloadReport to take the path that needs no second
+      // dialog; data-action's stopClickPropagation prevents the row
+      // click from also firing.
+      var quickReport =
+        '<button type="button" class="history-quick-action" ' +
+          'data-action="downloadReport" data-arg="' + scan.id + '" data-format="pdf" ' +
+          'title="Download PDF report" aria-label="Download PDF report">' +
+          '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+            'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M3 11v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2"/>' +
+            '<polyline points="5 7 8 10 11 7"/>' +
+            '<line x1="8" y1="2" x2="8" y2="10"/>' +
+          '</svg>' +
+        '</button>';
       return '<tr class="clickable history-row" data-scan-id="' + scan.id + '" ' +
         'data-action="highlightHistoryScan" data-arg="' + scan.id + '">' +
         '<td data-action="stopClickPropagation" style="width:32px;">' +
@@ -262,6 +280,7 @@ function _buildHistoryTable(scans) {
           (scan.score != null ? scan.score : '-') + '</td>' +
         '<td>' + (grade ? '<span class="grade-pill grade-' + grade + '">' + grade + '</span>' : '-') + '</td>' +
         '<td>' + trend + '</td>' +
+        '<td class="history-cell-actions" data-action="stopClickPropagation">' + quickReport + '</td>' +
       '</tr>';
     }).join('') +
     '</tbody></table>';

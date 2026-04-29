@@ -61,6 +61,7 @@
             <div class="pulse-dropdown user-dropdown" id="user-dropdown" hidden>
               <div class="pulse-dropdown-section">
                 <div class="user-dropdown-greeting">Hey, <span id="user-dropdown-name">there</span>!</div>
+                <div class="user-dropdown-role" id="user-dropdown-role"></div>
                 <a class="pulse-dropdown-item" data-action="openProfile">
                   <i data-lucide="user"></i>
                   <span>View Profile</span>
@@ -268,6 +269,54 @@
       <div class="modal-actions">
         <button class="btn btn-with-icon" data-action="closeUploadModal"><i data-lucide="x"></i><span>Cancel</span></button>
         <button class="btn btn-primary btn-with-icon" id="scan-btn" data-action="uploadAndScan" disabled><i data-lucide="play"></i><span>Scan</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- GENERATE REPORT MODAL                                           -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="generate-report-modal">
+    <div class="modal">
+      <h3>Generate Report</h3>
+      <p>Pick any completed scan and a format. The file streams to your
+        downloads folder — Pulse generates it on the fly from the saved
+        findings, so no copy lives on the server until you ask.</p>
+
+      <div class="form-row">
+        <label for="genrep-scan">Scan</label>
+        <select id="genrep-scan"></select>
+      </div>
+
+      <div class="form-row" style="align-items:flex-start;">
+        <label>Format</label>
+        <div class="genrep-format-group" role="radiogroup" aria-label="Report format">
+          <label class="genrep-format-opt">
+            <input type="radio" name="genrep-format" value="pdf" checked />
+            <span class="genrep-format-name">PDF</span>
+            <span class="genrep-format-hint">Printable, full report</span>
+          </label>
+          <label class="genrep-format-opt">
+            <input type="radio" name="genrep-format" value="html" />
+            <span class="genrep-format-name">HTML</span>
+            <span class="genrep-format-hint">Browser-rendered, shareable</span>
+          </label>
+          <label class="genrep-format-opt">
+            <input type="radio" name="genrep-format" value="json" />
+            <span class="genrep-format-name">JSON</span>
+            <span class="genrep-format-hint">Machine-readable for SIEM ingestion</span>
+          </label>
+          <label class="genrep-format-opt">
+            <input type="radio" name="genrep-format" value="csv" />
+            <span class="genrep-format-name">CSV</span>
+            <span class="genrep-format-hint">Spreadsheet for analysts</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-with-icon" data-action="closeGenerateReportModal"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-primary btn-with-icon" data-action="submitGenerateReport"><i data-lucide="download"></i><span>Generate</span></button>
       </div>
     </div>
   </div>

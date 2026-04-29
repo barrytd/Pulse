@@ -53,6 +53,7 @@ export async function mountUserMenu() {
       displayName = me.display_name || '';
       if (!email && me.email) email = me.email;
       if (me.has_avatar) refreshUserMenuAvatar();
+      _paintRole(me.role);
     }
   } catch (e) { /* no-op — corner keeps the initial */ }
 
@@ -60,6 +61,18 @@ export async function mountUserMenu() {
   if (avatar) avatar.textContent = _initialFromIdentity(displayName, email);
   var greet = document.getElementById('user-dropdown-name');
   if (greet) greet.textContent = _firstNameFromIdentity(displayName, email);
+}
+
+// Paint the role line under the greeting in the avatar dropdown. Falls
+// back to "Member" only if no role flag came back, which shouldn't
+// happen in practice (require_login resolves before the dropdown loads).
+function _paintRole(role) {
+  var el = document.getElementById('user-dropdown-role');
+  if (!el) return;
+  var label = role === 'admin' ? 'Admin'
+            : role === 'viewer' ? 'Viewer'
+            : 'Member';
+  el.textContent = label;
 }
 
 // Re-fetch /api/me and repaint the greeting + initial. Called after an
@@ -80,6 +93,7 @@ export async function refreshUserMenuIdentity() {
     }
     var greet = document.getElementById('user-dropdown-name');
     if (greet) greet.textContent = _firstNameFromIdentity(dn, email);
+    _paintRole(me.role);
   } catch (e) { /* keep stale — better than flicker */ }
 }
 

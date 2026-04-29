@@ -90,6 +90,12 @@ function _pageHeaderHtml() {
       'cached for 24 hours so repeat lookups don’t burn quota — ' +
       'the cache also drives the score badge in the finding-drawer.' +
     '</p>' +
+    '<p class="ti-page-subnote">' +
+      '<strong>Tip:</strong> threat-intel lookups also appear inline in any ' +
+      'finding’s detail drawer when the finding has a public source IP — ' +
+      'most analysts will use that contextual surface during triage rather ' +
+      'than this standalone page.' +
+    '</p>' +
   '</div>';
 }
 

@@ -233,7 +233,9 @@ def get_audit_log(db_path: str, limit: int = 200) -> list[dict]:
         with _connect(db_path) as conn:
             cursor = conn.execute(
                 """SELECT a.id, a.ts, a.action, a.ip_address, a.comment, a.source,
-                          a.user, a.detail, u.display_name AS user_display_name
+                          a.user, a.detail,
+                          u.display_name AS user_display_name,
+                          u.role        AS user_role
                    FROM audit_log a
                    LEFT JOIN users u ON u.email = a.user
                    ORDER BY a.id DESC

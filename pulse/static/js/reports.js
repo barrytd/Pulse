@@ -5,8 +5,8 @@
 // header + sticky action bar with a single confirmation prompt.
 'use strict';
 
-import { apiDeleteReports } from './api.js';
-import { escapeHtml, showToast, toastError, relTimeHtml } from './dashboard.js';
+import { apiDeleteReports, fetchScans } from './api.js';
+import { escapeHtml, showToast, toastError, relTimeHtml, downloadReport, formatRelativeTime } from './dashboard.js';
 
 var _reportsCache = [];
 var _reportsQuery = '';
@@ -88,10 +88,15 @@ function _renderTable() {
   if (!body) return;
 
   if (rows.length === 0) {
+    // Cache empty -> the renderShell already swapped in the on-page
+    // empty state outside the table; nothing to do here. Cache non-empty
+    // but query filtered everything out -> "no results" line is plenty.
     var msg = _reportsCache.length === 0
-      ? 'No reports yet. Generate one from a scan or run <code>python main.py --logs \u2026 --format html</code>.'
+      ? ''
       : 'No reports match your search.';
-    body.innerHTML = '<tr><td colspan="6"><div class="dash-empty-note" style="margin:0;">' + msg + '</div></td></tr>';
+    body.innerHTML = msg
+      ? '<tr><td colspan="6"><div class="dash-empty-note" style="margin:0;">' + msg + '</div></td></tr>'
+      : '';
     _updateDeleteBar();
     return;
   }
@@ -209,7 +214,48 @@ export async function renderReportsPage() {
   var nSelected = _selectedFilenames().length;
   var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
+  // Page-head with a primary action \u2014 Reports is now generation-led
+  // rather than a passive listing of files-on-disk.
+  var headHtml =
+    '<div class="page-head">' +
+      '<div class="page-head-title">Reports</div>' +
+      '<div class="page-head-actions">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openGenerateReportModal">' +
+          '<i data-lucide="file-plus-2"></i><span>Generate Report</span></button>' +
+      '</div>' +
+    '</div>';
+
+  // First-run empty state \u2014 prominent CTA, no table chrome. Pulse-style
+  // empty card mirrors the Whitelist onboarding panel.
+  if (_reportsCache.length === 0) {
+    c.innerHTML =
+      headHtml +
+      '<div class="reports-empty">' +
+        '<div class="reports-empty-icon" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+            'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>' +
+            '<polyline points="14 3 14 9 20 9"/>' +
+            '<line x1="8" y1="13" x2="16" y2="13"/>' +
+            '<line x1="8" y1="17" x2="13" y2="17"/>' +
+          '</svg>' +
+        '</div>' +
+        '<h3 class="reports-empty-title">No reports generated yet</h3>' +
+        '<p class="reports-empty-subtitle">' +
+          'Generate a report from any completed scan to create a downloadable ' +
+          'security assessment. Choose PDF for sharing, JSON for SIEM ingestion, ' +
+          'or CSV for spreadsheets.' +
+        '</p>' +
+        '<div class="reports-empty-actions">' +
+          '<button class="btn btn-primary btn-with-icon" data-action="openGenerateReportModal">' +
+            '<i data-lucide="file-plus-2"></i><span>Generate your first report</span></button>' +
+        '</div>' +
+      '</div>';
+    return;
+  }
+
   c.innerHTML =
+    headHtml +
     '<div id="reports-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
       '<span class="bulk-bar-count">' + nSelected + ' selected</span>' +
       '<button class="btn btn-danger" id="reports-delete-btn" data-action="deleteSelectedReports">' +
@@ -243,3 +289,72 @@ export async function renderReportsPage() {
 
   _renderTable();
 }
+
+// -----------------------------------------------------------------
+// Generate Report modal \u2014 populated each open with the latest scans
+// -----------------------------------------------------------------
+
+export async function openGenerateReportModal() {
+  var modal = document.getElementById('generate-report-modal');
+  if (!modal) return;
+  var sel = document.getElementById('genrep-scan');
+  if (sel) sel.innerHTML = '<option>Loading scans\u2026</option>';
+  modal.classList.add('open');
+  // Populate the dropdown after the modal animates in. Falls back to a
+  // friendly disabled state if the user has zero scans yet.
+  try {
+    var scans = await fetchScans(200);
+    if (!scans.length) {
+      if (sel) sel.innerHTML = '<option value="">No completed scans yet \u2014 upload one first.</option>';
+      return;
+    }
+    if (sel) {
+      sel.innerHTML = scans.map(function (s) {
+        var num = s.number != null ? s.number : s.id;
+        var label = '#' + num + ' \u00b7 ' + (s.filename || 'Unknown') + ' \u00b7 ' +
+                    formatRelativeTime(s.scanned_at) + ' \u00b7 ' +
+                    (s.total_findings || 0) + ' finding' +
+                    ((s.total_findings || 0) === 1 ? '' : 's');
+        return '<option value="' + s.id + '">' + escapeHtml(label) + '</option>';
+      }).join('');
+    }
+  } catch (e) {
+    if (sel) sel.innerHTML = '<option value="">Failed to load scans.</option>';
+  }
+}
+
+export function closeGenerateReportModal() {
+  var modal = document.getElementById('generate-report-modal');
+  if (modal) modal.classList.remove('open');
+}
+
+export function submitGenerateReport() {
+  var sel = document.getElementById('genrep-scan');
+  var scanId = sel ? Number(sel.value) : 0;
+  if (!scanId) {
+    toastError('Pick a scan to generate from.');
+    return;
+  }
+  var fmtEl = document.querySelector('input[name="genrep-format"]:checked');
+  var fmt = fmtEl ? fmtEl.value : 'pdf';
+  // downloadReport handles the click-to-download flow. Modal stays open
+  // for ~1s so the user sees the format selection persist while the
+  // browser kicks off the file save, then closes itself cleanly.
+  downloadReport(scanId, fmt);
+  showToast('Report generated \u2014 check your downloads folder.');
+  setTimeout(closeGenerateReportModal, 600);
+}
+
+// Click-outside-to-close + Escape \u2014 mirrors the upload modal pattern.
+(function _wireGenerateReportModal() {
+  var modal = document.getElementById('generate-report-modal');
+  if (!modal) return;
+  modal.addEventListener('click', function (e) {
+    if (e.target === this) closeGenerateReportModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.classList.contains('open')) {
+      closeGenerateReportModal();
+    }
+  });
+})();

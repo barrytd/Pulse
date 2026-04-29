@@ -367,6 +367,14 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             user = get_user_by_id(app.state.db_path, user_id)
             if not user or not user.get("active"):
                 return JSONResponse({"detail": "Authentication required."}, status_code=401)
+            # Last-active beacon — bump the column so the Users admin
+            # tab can show "active 3m ago" timestamps. Best-effort; a
+            # DB hiccup here must never break the request.
+            try:
+                from pulse.database import touch_user_last_active
+                touch_user_last_active(app.state.db_path, user_id)
+            except Exception:
+                pass
         return await call_next(request)
 
     _log_startup_summary(
@@ -1209,12 +1217,13 @@ def _register_routes(app: FastAPI) -> None:
     # admins, reject it with 409.
     def _public_user(u):
         return {
-            "id":           u["id"],
-            "email":        u["email"],
-            "role":         u.get("role", "admin"),
-            "active":       bool(u.get("active", True)),
-            "created_at":   u.get("created_at"),
-            "display_name": u.get("display_name"),
+            "id":             u["id"],
+            "email":          u["email"],
+            "role":           u.get("role", "admin"),
+            "active":         bool(u.get("active", True)),
+            "created_at":     u.get("created_at"),
+            "display_name":   u.get("display_name"),
+            "last_active_at": u.get("last_active_at"),
         }
 
     def _audit_user_action(acting_user_id, action, *, target=None, detail=None):
