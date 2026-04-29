@@ -272,6 +272,7 @@ const actions = {
   // scan my system (additive — does not replace upload)
   openSystemScanModal,
   closeSystemScanModal,
+  uploadFromTopbar,
   runSystemScan,
 
   // dashboard
@@ -505,6 +506,19 @@ const actions = {
   threatIntelRefreshRecent,
 };
 
+// Topbar scan-button replacement on non-Windows hosts. We can't run a
+// system scan against the local Windows event log from a Linux server,
+// so the same button leads users to the upload-an-evtx flow instead.
+// Navigate to Scans first so the freshly uploaded scan lands on the
+// right page when it completes.
+function uploadFromTopbar() {
+  navigate('scans');
+  // Wait one frame so the Scans page DOM is in place before the modal
+  // anchors any click handlers; openUploadModal itself just toggles a
+  // class on a globally-mounted modal so this is mostly cosmetic.
+  requestAnimationFrame(function () { openUploadModal(); });
+}
+
 // Hide the banner for the rest of the session and persist the choice.
 function dismissAdminBanner() {
   var el = document.getElementById('admin-banner');
@@ -512,20 +526,35 @@ function dismissAdminBanner() {
   try { localStorage.setItem('pulseAdminBannerDismissed', '1'); } catch (e) {}
 }
 
-// Only show on Windows hosts where the process is not elevated. Hide
-// unconditionally elsewhere so there's no flash on Linux/Mac.
-async function _maybeShowAdminBanner() {
-  var el = document.getElementById('admin-banner');
-  if (!el) return;
+// One-shot health probe at boot. Drives two host-aware UI tweaks:
+//   1) Admin banner — only on Windows hosts where the process isn't elevated
+//      (and the user hasn't already dismissed it).
+//   2) Topbar "Scan My System" button — repurposed to "Upload .evtx" on
+//      non-Windows hosts (e.g. the Render-hosted dashboard) since the
+//      local-system scanner relies on `wevtutil`. The label and click
+//      action both swap so the button leads somewhere useful instead of
+//      silently failing.
+async function _applyHostPlatformGating() {
+  var bannerEl = document.getElementById('admin-banner');
+  var btnEl    = document.getElementById('topbar-scan-btn');
+  var bannerDismissed = false;
   try {
-    if (localStorage.getItem('pulseAdminBannerDismissed') === '1') return;
+    bannerDismissed = (localStorage.getItem('pulseAdminBannerDismissed') === '1');
   } catch (e) { /* ignore — private mode blocks localStorage */ }
   try {
     var resp = await fetch('/api/health');
     if (!resp.ok) return;
     var info = await resp.json();
-    if (info.platform_windows && !info.is_admin) {
-      el.style.display = 'flex';
+
+    if (bannerEl && info.platform_windows && !info.is_admin && !bannerDismissed) {
+      bannerEl.style.display = 'flex';
+    }
+
+    if (btnEl && !info.platform_windows) {
+      btnEl.dataset.action = 'uploadFromTopbar';
+      btnEl.title = 'Upload an .evtx file (this server can\'t read live Windows logs)';
+      var label = btnEl.querySelector('.topbar-scan-label');
+      if (label) label.textContent = 'Upload .evtx';
     }
   } catch (e) { /* health is best-effort */ }
 }
@@ -631,9 +660,10 @@ function _boot() {
   // on every page once mounted.
   mountCommandPalette();
 
-  // Privilege banner — only fires on Windows hosts when the process
-  // doesn't hold admin rights and the user hasn't already dismissed it.
-  _maybeShowAdminBanner();
+  // Single /api/health probe — lights the privilege banner on Windows
+  // hosts that aren't elevated AND swaps the topbar "Scan My System"
+  // button for "Upload .evtx" on non-Windows hosts.
+  _applyHostPlatformGating();
 }
 
 if (document.readyState === 'loading') {
