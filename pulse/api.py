@@ -61,6 +61,7 @@ from pulse.database import (
     get_trend_analytics,
     get_user_avatar, get_user_by_email, get_user_by_id, init_db,
     insert_feedback, list_api_tokens, list_feedback,
+    insert_notification, list_notifications, mark_notifications_read,
     list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
     set_finding_assignee, set_user_avatar,
@@ -237,13 +238,34 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             or bool(cfg.get("alert_discord"))
         )
         # If none of the alert channels are ticked we still save the scan.
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             scan_system,
             app.state.db_path,
             full_cfg,
             days,
             send_alerts,
         )
+        # Bell-feed notification — fan-out to admins so whoever's logged in
+        # next sees the scheduled scan finished. Best-effort; a hiccup must
+        # not break the scheduler loop.
+        try:
+            r = result or {}
+            sid = r.get("scan_id")
+            score = r.get("score")
+            n_findings = r.get("findings") if r.get("findings") is not None else r.get("total_findings")
+            msg_bits = ["Scheduled scan finished"]
+            if score is not None: msg_bits.append(f"score {score}")
+            if n_findings is not None:
+                msg_bits.append(f"{n_findings} finding" + ("" if n_findings == 1 else "s"))
+            msg = " — ".join([msg_bits[0], ", ".join(msg_bits[1:])]) if len(msg_bits) > 1 else msg_bits[0]
+            for u in (list_users(app.state.db_path) or []):
+                if u.get("role") == "admin" and u.get("active"):
+                    insert_notification(app.state.db_path, u.get("id"),
+                                        "scheduled_scan", msg,
+                                        ref_kind="scan", ref_id=sid)
+        except Exception:
+            pass
+        return result
 
     app.state.scheduled_scan = ScheduledScanRunner(
         get_config=_get_sched_cfg,
@@ -1045,6 +1067,16 @@ def _register_routes(app: FastAPI) -> None:
             user_id=agent.get("user_id"),
             agent_id=agent["id"],
         )
+        try:
+            _agent_label = agent.get("name") or agent.get("hostname") or "Pulse Agent"
+            _msg = (f"{_agent_label} reported a scan — score {score_data['score']}, "
+                    f"{len(findings)} finding"
+                    f"{'' if len(findings) == 1 else 's'}")
+            insert_notification(app.state.db_path, agent.get("user_id"),
+                                "scan_complete", _msg,
+                                ref_kind="scan", ref_id=scan_id)
+        except Exception:
+            pass
         return {
             "status": "ok",
             "scan_id": scan_id,
@@ -1284,6 +1316,26 @@ def _register_routes(app: FastAPI) -> None:
         return {"rows": list_feedback(app.state.db_path, limit=limit)}
 
     # -------------------------------------------------------------------
+    # GET  /api/notifications      — bell-icon feed for the current user
+    # POST /api/notifications/read — mark every unread row read
+    # -------------------------------------------------------------------
+    @app.get("/api/notifications")
+    def api_list_notifications(limit: int = 50,
+                               user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"notifications": [], "unread_count": 0}
+        if limit < 1 or limit > 100:
+            raise HTTPException(400, detail="limit must be between 1 and 100.")
+        return list_notifications(app.state.db_path, user_id, limit=limit)
+
+    @app.post("/api/notifications/read")
+    def api_mark_notifications_read(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"marked": 0}
+        marked = mark_notifications_read(app.state.db_path, user_id)
+        return {"marked": int(marked)}
+
+    # -------------------------------------------------------------------
     # POST /api/waitlist  — public sign-up from the marketing landing page
     # GET  /api/waitlist  — admin list view
     # GET  /api/waitlist/export.csv — admin CSV export
@@ -1470,6 +1522,18 @@ def _register_routes(app: FastAPI) -> None:
                 user=(_user_row or {}).get("email") if _user_row else None,
                 detail=f"scan_id={scan_id} filename={file.filename} findings={len(findings)}",
             )
+
+            # Notification — bell-icon feed. Best-effort; a DB blip here
+            # must never bubble up and fail the scan response.
+            try:
+                _msg = (f"Scan complete — score {score_data['score']}, "
+                        f"{len(findings)} finding"
+                        f"{'' if len(findings) == 1 else 's'}")
+                insert_notification(app.state.db_path, user_id,
+                                    "scan_complete", _msg,
+                                    ref_kind="scan", ref_id=scan_id)
+            except Exception:
+                pass
 
             # Fire threshold-based alerts if configured. SMTP can be slow,
             # so run it in a worker thread. Failure never breaks the scan
@@ -1838,6 +1902,15 @@ def _register_routes(app: FastAPI) -> None:
             push_result = blocker.push_pending(
                 app.state.db_path, source="dashboard", user=user_email,
             )
+            try:
+                pushed = (push_result or {}).get("pushed") or 0
+                if pushed:
+                    msg = f"Firewall: {ip} pushed to Windows Firewall"
+                    insert_notification(app.state.db_path, user_id,
+                                        "firewall_block", msg,
+                                        ref_kind="firewall", ref_id=None)
+            except Exception:
+                pass
 
         return {
             "ok": True,
@@ -1850,7 +1923,20 @@ def _register_routes(app: FastAPI) -> None:
     def block_list_push(user_id: int = Depends(require_login)):
         from pulse.firewall import blocker
         user = get_user_by_id(app.state.db_path, user_id) or {}
-        return blocker.push_pending(app.state.db_path, source="dashboard", user=user.get("email"))
+        result = blocker.push_pending(app.state.db_path, source="dashboard", user=user.get("email"))
+        # Bell-feed: notify the user who pushed when at least one rule
+        # actually landed. We don't fan-out to other admins — too noisy
+        # for what's already a deliberate action they're taking.
+        try:
+            pushed = (result or {}).get("pushed") or 0
+            if pushed:
+                msg = f"Firewall: {pushed} rule" + ("" if pushed == 1 else "s") + " pushed"
+                insert_notification(app.state.db_path, user_id,
+                                    "firewall_block", msg,
+                                    ref_kind="firewall", ref_id=None)
+        except Exception:
+            pass
+        return result
 
     # Bulk unblock — mirrors the scans batch pattern. Body: {"ips": [...]}.
     # Each IP is fed through unblock_ip the same way the single-item
@@ -2362,6 +2448,21 @@ def _register_routes(app: FastAPI) -> None:
             finding_id=finding_id,
             detail=audit_detail,
         )
+
+        # Notify the new assignee — but never the user who's assigning
+        # (no point pinging yourself when you grab a finding via the
+        # "Assign to me" button). Self-unassign and unassign-other are
+        # both no-op for the bell feed.
+        try:
+            if assignee is not None and int(assignee) != int(user_id):
+                _rule = updated.get("rule") or "Unknown rule"
+                _ref  = updated.get("ref_id") or f"#{finding_id}"
+                _msg  = f"You were assigned: {_rule} ({_ref})"
+                insert_notification(app.state.db_path, int(assignee),
+                                    "finding_assigned", _msg,
+                                    ref_kind="finding", ref_id=finding_id)
+        except Exception:
+            pass
         return updated
 
     # Admin-only: every note across every finding, newest-first. Powers the

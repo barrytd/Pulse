@@ -379,6 +379,21 @@ export async function apiSetAgentPaused(id, paused) {
   return true;
 }
 
+// --- Notifications (bell-icon feed) ----------------------------------
+
+export async function apiListNotifications(limit) {
+  var qs = limit ? ('?limit=' + encodeURIComponent(limit)) : '';
+  var resp = await fetch('/api/notifications' + qs);
+  if (!resp.ok) return { notifications: [], unread_count: 0 };
+  return resp.json();
+}
+
+export async function apiMarkNotificationsRead() {
+  var resp = await fetch('/api/notifications/read', { method: 'POST' });
+  if (!resp.ok) return { marked: 0 };
+  return resp.json();
+}
+
 export async function apiDeleteAgent(id) {
   var resp = await fetch('/api/agents/' + encodeURIComponent(id), { method: 'DELETE' });
   if (!resp.ok) {

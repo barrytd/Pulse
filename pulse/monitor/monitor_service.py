@@ -27,6 +27,8 @@ from pulse.core.detections import run_all_detections
 from pulse.database import (
     close_monitor_session,
     create_monitor_session,
+    insert_notification,
+    list_users,
     save_scan,
 )
 from pulse.alerts.emailer import dispatch_alerts
@@ -444,6 +446,17 @@ class MonitorManager:
                     "stats":     self._stats_snapshot(),
                 })
 
+            # Bell-feed notification — live monitor has no per-user owner,
+            # so fan-out to every admin. Crit/high gets named explicitly;
+            # everything else lumps into a single "N alerts" summary so a
+            # noisy poll doesn't spam the bell with 30 LOW rows.
+            try:
+                await asyncio.to_thread(
+                    self._notify_admins_of_findings, findings,
+                )
+            except Exception:
+                pass
+
             # Fire an email for monitor findings when the user has enabled
             # it AND the configured interval has elapsed since the last one.
             await self._maybe_dispatch_monitor_email(findings)
@@ -469,6 +482,39 @@ class MonitorManager:
             return True
         now = now or datetime.now()
         return (now - self._last_monitor_email_at) >= timedelta(minutes=interval_minutes)
+
+    def _notify_admins_of_findings(self, findings):
+        """Insert a `monitor_alert` notification for every active admin.
+        Runs in a worker thread so the polling loop doesn't block on DB
+        IO. Single-row summary per poll keeps the bell feed terse even
+        when one poll surfaces a dozen LOW findings."""
+        if not findings:
+            return
+        crit = sum(1 for f in findings if (f.get("severity") or "").upper() == "CRITICAL")
+        high = sum(1 for f in findings if (f.get("severity") or "").upper() == "HIGH")
+        lower = len(findings) - crit - high
+        parts = []
+        if crit:  parts.append(f"{crit} critical")
+        if high:  parts.append(f"{high} high")
+        if lower: parts.append(f"{lower} other")
+        worst = (findings[0].get("rule") or "") if findings else ""
+        msg = "Live monitor: " + ", ".join(parts) + " alert" + ("s" if len(findings) != 1 else "")
+        if worst:
+            msg += f" — including {worst}"
+        try:
+            users = list_users(self.db_path) or []
+        except Exception:
+            users = []
+        for u in users:
+            if (u.get("role") == "admin") and u.get("active"):
+                try:
+                    insert_notification(
+                        self.db_path, u.get("id"),
+                        "monitor_alert", msg,
+                        ref_kind="session", ref_id=self.session_id,
+                    )
+                except Exception:
+                    pass
 
     async def _maybe_dispatch_monitor_email(self, findings):
         """Fire an email for the current poll's findings, gated by the

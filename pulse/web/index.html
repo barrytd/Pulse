@@ -36,6 +36,24 @@
           <button class="btn btn-compact btn-icon-only" data-action="openUploadModal" title="Upload .evtx file" aria-label="Upload .evtx file">
             <i data-lucide="upload"></i>
           </button>
+          <div class="notif-menu" id="notif-menu">
+            <button class="notif-bell" id="notif-bell-btn"
+                    data-action="toggleNotifMenu"
+                    aria-label="Notifications" type="button"
+                    title="Notifications">
+              <i data-lucide="bell"></i>
+              <span class="notif-bell-badge" id="notif-bell-badge" hidden>0</span>
+            </button>
+            <div class="pulse-dropdown notif-dropdown" id="notif-dropdown" hidden>
+              <div class="notif-dropdown-head">
+                <span class="notif-dropdown-title">Notifications</span>
+                <span class="notif-dropdown-sub" id="notif-dropdown-sub">No notifications</span>
+              </div>
+              <div class="notif-dropdown-list" id="notif-dropdown-list">
+                <div class="notif-empty">Loading…</div>
+              </div>
+            </div>
+          </div>
           <div class="user-menu" id="user-menu">
             <button class="user-avatar" data-action="toggleUserMenu" aria-label="Account menu" type="button">
               <span id="user-avatar-initials">R</span>

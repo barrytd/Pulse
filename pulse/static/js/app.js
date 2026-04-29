@@ -248,6 +248,11 @@ import {
   submitFeedback,
   setFeedbackKind,
 } from './feedback.js';
+import {
+  toggleNotifMenu,
+  openNotifTarget,
+  mountNotifBell,
+} from './notifications.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -499,6 +504,10 @@ const actions = {
   // command palette
   openCommandPalette,
 
+  // notifications bell
+  toggleNotifMenu,
+  openNotifTarget,
+
   // threat intel — IOC lookup page
   threatIntelInputChange,
   threatIntelSubmit,
@@ -664,6 +673,9 @@ function _boot() {
   // hosts that aren't elevated AND swaps the topbar "Scan My System"
   // button for "Upload .evtx" on non-Windows hosts.
   _applyHostPlatformGating();
+
+  // Bell-icon notification feed — initial badge paint + 60s poll.
+  mountNotifBell();
 }
 
 if (document.readyState === 'loading') {

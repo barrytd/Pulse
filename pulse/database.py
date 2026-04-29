@@ -294,6 +294,20 @@ CREATE TABLE IF NOT EXISTS waitlist_signups (
 # /api/agent/heartbeat and /api/agent/findings. The owning user_id is the
 # admin who minted the enrollment so scans uploaded by the agent attribute
 # back to that user, falling out of existing data-isolation scopes.
+_CREATE_NOTIFICATIONS = """
+CREATE TABLE IF NOT EXISTS notifications (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type        TEXT    NOT NULL,
+    message     TEXT    NOT NULL,
+    ref_kind    TEXT,
+    ref_id      INTEGER,
+    read        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL
+);
+"""
+
+
 _CREATE_AGENTS = """
 CREATE TABLE IF NOT EXISTS agents (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,6 +358,7 @@ def init_db(db_path):
         _CREATE_INTEL_CACHE,
         _CREATE_WAITLIST,
         _CREATE_AGENTS,
+        _CREATE_NOTIFICATIONS,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -2253,6 +2268,112 @@ def delete_waitlist_signup(db_path, signup_id):
 
 # ---------------------------------------------------------------------------
 # Helpers
+# ---------------------------------------------------------------------------
+# Notifications (Sprint 6 polish) — bell-icon feed in the topbar.
+# One row per discrete event the user might care about: scan completed,
+# finding assigned, live-monitor alert, scheduled scan run, firewall
+# block pushed. Capped to the last 100 per user via prune-on-insert so
+# the table never explodes on a long-running install.
+# ---------------------------------------------------------------------------
+
+NOTIFICATION_KINDS = (
+    "scan_complete",
+    "finding_assigned",
+    "monitor_alert",
+    "scheduled_scan",
+    "firewall_block",
+)
+_NOTIFICATION_CAP = 100  # newest-N per user; older rows pruned on insert
+
+
+def insert_notification(db_path, user_id, kind, message,
+                        ref_kind=None, ref_id=None):
+    """Append a notification for a user and prune past the per-user cap.
+    Silently no-ops on a falsy user_id so unattributed events (CLI scans)
+    don't generate phantom notifications. Returns the new row id, or None."""
+    if user_id is None:
+        return None
+    if kind not in NOTIFICATION_KINDS:
+        kind = "scan_complete"
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO notifications"
+            " (user_id, type, message, ref_kind, ref_id, read, created_at)"
+            " VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (int(user_id), kind, message[:500] if message else "",
+             ref_kind, int(ref_id) if ref_id is not None else None,
+             created_at),
+        )
+        new_id = cursor.lastrowid
+        # Prune anything past the per-user cap so the bell-feed query
+        # stays cheap and the table stays bounded. Newest-first ordering
+        # keeps recent rows; old ones drop off.
+        try:
+            conn.execute(
+                "DELETE FROM notifications"
+                " WHERE user_id = ? AND id NOT IN ("
+                "   SELECT id FROM notifications"
+                "   WHERE user_id = ?"
+                "   ORDER BY id DESC LIMIT ?"
+                " )",
+                (int(user_id), int(user_id), _NOTIFICATION_CAP),
+            )
+        except db_backend.OperationalError:
+            pass
+    return new_id
+
+
+def list_notifications(db_path, user_id, limit=50):
+    """Newest-first list of a user's notifications + unread count."""
+    if user_id is None:
+        return {"notifications": [], "unread_count": 0}
+    limit = max(1, min(int(limit or 50), _NOTIFICATION_CAP))
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, type, message, ref_kind, ref_id, read, created_at"
+            "  FROM notifications"
+            " WHERE user_id = ?"
+            " ORDER BY id DESC"
+            " LIMIT ?",
+            (int(user_id), limit),
+        ).fetchall()
+        unread_row = conn.execute(
+            "SELECT COUNT(*) FROM notifications"
+            " WHERE user_id = ? AND read = 0",
+            (int(user_id),),
+        ).fetchone()
+    return {
+        "notifications": [
+            {
+                "id": r[0],
+                "type": r[1],
+                "message": r[2],
+                "ref_kind": r[3],
+                "ref_id": r[4],
+                "read": bool(r[5]),
+                "created_at": r[6],
+            }
+            for r in rows
+        ],
+        "unread_count": int(unread_row[0] if unread_row else 0),
+    }
+
+
+def mark_notifications_read(db_path, user_id):
+    """Stamp every unread notification for a user as read. Returns the
+    number of rows affected so the API can echo it back to the client."""
+    if user_id is None:
+        return 0
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE notifications SET read = 1"
+            " WHERE user_id = ? AND read = 0",
+            (int(user_id),),
+        )
+        return cursor.rowcount or 0
+
+
 # ---------------------------------------------------------------------------
 
 def _connect(db_path):

@@ -33,11 +33,14 @@
 }
 
 /* Three-column chart row (severity donut | score ring | score history).
-   Score history gets 1.5fr because the line chart wants horizontal
-   room — the donut + ring are compact circles. */
+   Score ring is a compact circle, history is a line chart that needs
+   horizontal room — give it the larger 1.5fr column. The Severity
+   Breakdown donut and the MITRE Categories bars previously lived in
+   this band and the row below; both moved out (Trends owns severity,
+   Rules owns MITRE coverage). */
 .dash-chart-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.5fr;
+  grid-template-columns: 1fr 1.5fr;
   gap: 16px;
   margin-bottom: 16px;
   min-width: 0;
@@ -51,93 +54,8 @@
   flex: 1;
   min-height: 180px;
 }
-@media (max-width: 1100px) {
-  .dash-chart-row { grid-template-columns: 1fr 1fr; }
-  .dash-chart-row .dash-chart-card:nth-child(3) { grid-column: span 2; }
-}
 @media (max-width: 720px) {
   .dash-chart-row { grid-template-columns: 1fr; }
-  .dash-chart-row .dash-chart-card:nth-child(3) { grid-column: auto; }
-}
-
-/* MITRE row — bars card + top rules card, side by side at full width
-   below the chart band. Collapses on narrow viewports. */
-.dash-mitre-row {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-@media (max-width: 960px) {
-  .dash-mitre-row { grid-template-columns: 1fr; }
-}
-
-/* Severity donut — SVG + centered count + legend on the right. */
-.sev-donut-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.sev-donut {
-  flex: 0 0 120px;
-  width: 120px;
-  height: 120px;
-}
-.sev-donut-center {
-  position: absolute;
-  width: 120px;
-  height: 120px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  line-height: 1;
-}
-.sev-donut-total {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text);
-}
-.sev-donut-sub {
-  font-size: 9px;
-  letter-spacing: 1px;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-.sev-donut-legend {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.sev-donut-legend li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.sev-donut-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  flex: 0 0 8px;
-}
-.sev-donut-label {
-  flex: 1;
-  color: var(--text);
-  font-weight: 500;
-}
-.sev-donut-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  font-weight: 600;
 }
 
 /* Compact score display inside the narrower three-column card — stacks
@@ -213,53 +131,6 @@
 /* Inverted variants — used for "score" stat where up=good */
 .trend.up.good   { color: #3fb950; }
 .trend.down.bad  { color: #f85149; }
-
-/* ------------------------------------------------------------------ */
-/* MITRE category bar chart — inside the score panel                   */
-/* ------------------------------------------------------------------ */
-.mitre-bars { display: flex; flex-direction: column; gap: 8px; }
-
-.mitre-row {
-  display: grid;
-  grid-template-columns: 140px 1fr 32px;
-  gap: 10px;
-  align-items: center;
-  font-size: 12px;
-}
-
-.mitre-row {
-  cursor: pointer;
-  border-radius: 4px;
-  padding: 4px 8px;
-  margin: 0 -8px;
-  transition: background 150ms ease;
-}
-.mitre-row:hover { background: var(--hover-bg); }
-
-.mitre-row .label {
-  color: var(--text);
-  font-weight: 500;
-}
-
-.mitre-row .count {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: right;
-}
-
-.mitre-bar-track {
-  background: var(--border);
-  border-radius: 3px;
-  height: 8px;
-  overflow: hidden;
-}
-
-.mitre-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s ease;
-}
 
 /* ------------------------------------------------------------------ */
 /* Dashboard findings list — left-border severity rows                 */
@@ -3804,4 +3675,186 @@ tr.pending-flash {
   text-align: right;
   white-space: nowrap;
   width: 1%;
+}
+
+/* -------------------------------------------------------------------
+   Notification bell — topbar, left of the user avatar.
+   Bell button hosts a tiny unread-count badge in the upper-right.
+   Dropdown is a fixed-width 320px / max-height 480px panel that
+   anchors to the right edge of the bell button.
+------------------------------------------------------------------- */
+.notif-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.notif-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.notif-bell:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.notif-bell .lucide {
+  width: 16px;
+  height: 16px;
+}
+.notif-bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #f85149;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0;
+  box-shadow: 0 0 0 2px var(--bg, #0d1117);
+  pointer-events: none;
+}
+.notif-bell-badge[hidden] {
+  display: none;
+}
+
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-height: 480px;
+  background: var(--bg-2, #161b22);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 50;
+}
+.notif-dropdown[hidden] {
+  display: none;
+}
+.notif-dropdown-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.notif-dropdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.notif-dropdown-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.notif-dropdown-list {
+  overflow-y: auto;
+  flex: 1;
+}
+.notif-empty {
+  padding: 24px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notif-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 8px;
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+  transition: background 0.08s;
+}
+.notif-row:last-child {
+  border-bottom: 0;
+}
+.notif-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.notif-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+  flex-shrink: 0;
+}
+.notif-row-icon[data-kind="monitor_alert"]  { background: rgba(248, 81, 73, 0.12); color: #f85149; }
+.notif-row-icon[data-kind="firewall_block"] { background: rgba(240, 136, 62, 0.12); color: #f0883e; }
+.notif-row-icon[data-kind="finding_assigned"] { background: rgba(210, 153, 34, 0.14); color: #d29922; }
+.notif-row-icon[data-kind="scheduled_scan"] { background: rgba(63, 185, 80, 0.12); color: #3fb950; }
+.notif-row-icon .lucide {
+  width: 14px;
+  height: 14px;
+}
+.notif-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.notif-row-msg {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text);
+  /* Single-line description per spec; rest spills into the title attribute
+     surfaced by the inner relTimeHtml hover, plus the row click navigates
+     to the relevant page. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-row-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.notif-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: transparent;
+  margin-top: 6px;
+}
+.notif-row.is-unread {
+  background: rgba(88, 166, 255, 0.04);
+}
+.notif-row.is-unread .notif-row-dot {
+  background: #58a6ff;
+}
+.notif-row.is-unread .notif-row-msg {
+  font-weight: 600;
 }

@@ -404,25 +404,6 @@ export function filterDailyByDashState(daily) {
   });
 }
 
-// Recompute MITRE categories object from a deductions list so the MITRE
-// bars respect severity + rule filters.
-export function _categoriesFromDeductions(deds) {
-  var sevRank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
-  var statusFor = { CRITICAL: 'critical', HIGH: 'critical', MEDIUM: 'medium', LOW: 'low' };
-  var out = {};
-  (deds || []).forEach(function (d) {
-    var cat = d.category || 'Other';
-    if (!out[cat]) out[cat] = { status: 'clear', rules_triggered: [], _worst: 0 };
-    if (out[cat].rules_triggered.indexOf(d.rule) < 0) out[cat].rules_triggered.push(d.rule);
-    var rank = sevRank[(d.severity || '').toUpperCase()] || 0;
-    if (rank > out[cat]._worst) {
-      out[cat]._worst = rank;
-      out[cat].status = statusFor[(d.severity || '').toUpperCase()] || 'clear';
-    }
-  });
-  return out;
-}
-
 export function _dashFilterBarHtml(rules, sources) {
   var timeOpts = [
     { v: 'today',  l: 'Today' },
@@ -626,37 +607,6 @@ export function _accentForScore(score) {
   return 'accent-critical';
 }
 
-// Horizontal bar chart of MITRE categories.
-export function _mitreBarsHtml(cats, categories) {
-  var counts = cats.map(function (c) {
-    var info = categories[c] || { rules_triggered: [] };
-    return (info.rules_triggered || []).length;
-  });
-  var max = Math.max.apply(null, counts.concat([1]));
-
-  var statusColor = {
-    critical: '#f85149',
-    medium:   '#f0883e',
-    low:      '#d29922',
-    clear:    'var(--border)',
-  };
-
-  return '<div class="mitre-bars">' +
-    cats.map(function (cat, i) {
-      var info = categories[cat] || { status: 'clear', rules_triggered: [] };
-      var count = counts[i];
-      var color = statusColor[info.status] || statusColor.clear;
-      var pct = count === 0 ? 0 : Math.max(6, Math.round((count / max) * 100));
-      return '<div class="mitre-row">' +
-        '<div class="label">' + cat + '</div>' +
-        '<div class="mitre-bar-track">' +
-          '<div class="mitre-bar-fill" style="width:' + pct + '%; background:' + color + ';"></div>' +
-        '</div>' +
-        '<div class="count">' + count + '</div>' +
-      '</div>';
-    }).join('') +
-  '</div>';
-}
 
 // Shared by the Dashboard's Last Scan Findings card. Populated right
 // before we render so the drawer can look up a finding by index.
@@ -918,56 +868,6 @@ export function _formatDuration(seconds) {
   return (seconds / 86400).toFixed(1).replace(/\.0$/, '') + 'd';
 }
 
-// Severity-donut + legend block for the three-column chart row on the
-// Dashboard. Pulls colors from the row-accent palette so it reads like
-// every other sev-coloured surface.
-export function _severityDonutHtml(sevCounts) {
-  var sevs = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-  var colors = { CRITICAL: '#f85149', HIGH: '#f0883e', MEDIUM: '#d29922', LOW: '#3fb950' };
-  var total = sevs.reduce(function (s, k) { return s + (sevCounts[k] || 0); }, 0);
-  var r = 44, cx = 60, cy = 60;
-  var circ = 2 * Math.PI * r;
-  var offset = 0;
-  var arcs;
-  if (total === 0) {
-    arcs = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
-           'stroke="var(--border)" stroke-width="12" />';
-  } else {
-    arcs = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
-           'stroke="var(--border)" stroke-width="12" />';
-    sevs.forEach(function (k) {
-      var count = sevCounts[k] || 0;
-      if (count === 0) return;
-      var dash = (count / total) * circ;
-      arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
-              'stroke="' + colors[k] + '" stroke-width="12" ' +
-              'stroke-linecap="butt" ' +
-              'stroke-dasharray="' + dash.toFixed(2) + ' ' + (circ - dash).toFixed(2) + '" ' +
-              'stroke-dashoffset="' + (-offset).toFixed(2) + '" ' +
-              'transform="rotate(-90 ' + cx + ' ' + cy + ')" />';
-      offset += dash;
-    });
-  }
-  var legend = sevs.map(function (k) {
-    var count = sevCounts[k] || 0;
-    return '<li>' +
-      '<span class="sev-donut-dot" style="background:' + colors[k] + '"></span>' +
-      '<span class="sev-donut-label">' + k + '</span>' +
-      '<span class="sev-donut-count">' + count + '</span>' +
-    '</li>';
-  }).join('');
-  return '<div class="sev-donut-wrap">' +
-    '<svg class="sev-donut" viewBox="0 0 120 120" width="120" height="120">' +
-      arcs +
-    '</svg>' +
-    '<div class="sev-donut-center">' +
-      '<div class="sev-donut-total">' + total + '</div>' +
-      '<div class="sev-donut-sub">FINDINGS</div>' +
-    '</div>' +
-    '<ul class="sev-donut-legend">' + legend + '</ul>' +
-  '</div>';
-}
-
 // Top 5 hosts by finding count in the filtered scan window. Last-seen
 // uses the most recent scanned_at for that host so stale hosts surface.
 export function _dashTopHostsHtml(scans) {
@@ -1124,9 +1024,6 @@ export async function renderDashboardPage() {
   var today = dailyScores[0];
 
   var filteredDeductions = today ? filterFindingsByDashState(today.deductions || []) : [];
-  var filteredCategories = filtersOn && today
-    ? _categoriesFromDeductions(filteredDeductions)
-    : (today && today.categories) || {};
 
   var scoreNum = today ? today.score : 100;
   var scoreLabel = today ? today.label : 'SECURE';
@@ -1147,11 +1044,6 @@ export async function renderDashboardPage() {
   var circumference = 2 * Math.PI * 58;
   var dashOffset = circumference * (1 - scoreNum / 100);
 
-  var sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-  filteredDeductions.forEach(function (d) {
-    if (sevCounts[d.severity] !== undefined) sevCounts[d.severity]++;
-  });
-
   var uniqueRulesFiltered = (function () {
     var set = {};
     filteredDeductions.forEach(function (d) { if (d.rule) set[d.rule] = true; });
@@ -1167,10 +1059,6 @@ export async function renderDashboardPage() {
   var findTrend = _trendFor(scans[0] && scans[0].total_findings,
                             scans[1] && scans[1].total_findings,
                             { upIsGood: false });
-
-  var mitreCats = ['Authentication', 'Persistence', 'Lateral Movement',
-                   'Privilege Escalation', 'Execution'];
-  var mitreBarsHtml = _mitreBarsHtml(mitreCats, filteredCategories);
 
   // Top triggered rules — aggregate deductions in the filtered window
   // and keep the worst severity seen per rule so the badge color maps
@@ -1307,14 +1195,12 @@ export async function renderDashboardPage() {
       '</div>' +
     '</div>';
 
+  // Two-column chart row: score ring (left) + score history line (right).
+  // The Severity Breakdown donut moved out \u2014 Trends owns severity now and
+  // the dashboard donut was redundant. MITRE coverage lives on the Rules
+  // page coverage matrix; the dashboard's inline bars went with it.
   var chartsHtml =
     '<div class="dash-chart-row">' +
-
-      '<div class="card dash-chart-card">' +
-        '<div class="section-label">Severity Breakdown</div>' +
-        _severityDonutHtml(sevCounts) +
-      '</div>' +
-
       '<div class="card dash-chart-card today-security-score">' +
         '<div class="section-label">Today\u2019s Security Score</div>' +
         '<div class="score-display">' +
@@ -1340,9 +1226,7 @@ export async function renderDashboardPage() {
             '<div class="risk-desc">' + scoreDesc + '</div>' +
           '</div>' +
         '</div>' +
-
       '</div>' +
-
       '<div class="card dash-chart-card">' +
         '<div class="section-label">Score History</div>' +
         '<div class="score-chart-wrap"><canvas id="score-line-chart"></canvas></div>' +
@@ -1350,16 +1234,10 @@ export async function renderDashboardPage() {
       '</div>' +
     '</div>';
 
-  var mitreHtml =
-    '<div class="dash-mitre-row">' +
-      '<div class="card">' +
-        '<div class="section-label">MITRE ATT&amp;CK Categories</div>' +
-        mitreBarsHtml +
-      '</div>' +
-      '<div class="card">' +
-        '<div class="section-label">Top Triggered Rules</div>' +
-        topRulesHtml +
-      '</div>' +
+  var topRulesCardHtml =
+    '<div class="card">' +
+      '<div class="section-label">Top Triggered Rules</div>' +
+      topRulesHtml +
     '</div>';
 
   var findingsHtml = (recentFindings.length > 0)
@@ -1382,7 +1260,7 @@ export async function renderDashboardPage() {
     kpiHtml +
     standupHtml +
     chartsHtml +
-    mitreHtml +
+    topRulesCardHtml +
     findingsHtml;
 
   _initScoreLineChart(dailyScores);

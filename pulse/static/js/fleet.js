@@ -14,6 +14,10 @@ import { openDrawer, closeDrawer } from './drawer.js';
 var _fleetCache = [];
 var _activeKpi  = 'total';     // which KPI tile is currently filtering the table
 
+// "Online" here means "scanned within 24h" — used for the table-row status
+// dot. Once the Sprint 7 agent system ships, this will be replaced with
+// real heartbeat-based liveness; for now it's the closest proxy to host
+// freshness we have.
 function _isOnline(h) {
   if (!h.last_scan_at) return false;
   var t = Date.parse(String(h.last_scan_at).replace(' ', 'T'));
@@ -21,44 +25,40 @@ function _isOnline(h) {
   return (Date.now() - t) < (24 * 3600 * 1000);
 }
 
-function _isAtRisk(h) {
-  return h.latest_score != null && h.latest_score < 50;
-}
-
-function _isCritical(h) {
-  var s = (h.worst_severity || '').toUpperCase();
-  return s === 'CRITICAL';
-}
-
-function _isNewlyEnrolled(h) {
-  return (h.scan_count || 0) === 1;
-}
+// Score-bucket helpers. Hosts that haven't been scored yet (`latest_score
+// == null`) drop out of every bucket and only show in `total`. Bands match
+// the user-facing letter grades:
+//   Secure   = 70+   (A/B/C territory)
+//   High     = 40–69 (D/F-edge — needs attention)
+//   Critical = < 40  (F — investigate now)
+function _isSecure(h)   { return h.latest_score != null && h.latest_score >= 70; }
+function _isHighRisk(h) { return h.latest_score != null && h.latest_score >= 40 && h.latest_score < 70; }
+function _isCriticalRisk(h) { return h.latest_score != null && h.latest_score < 40; }
 
 function _buildKpis(hosts) {
-  var online = 0, offline = 0, atRisk = 0, critical = 0, newly = 0;
+  var critical = 0, high = 0, secure = 0;
   hosts.forEach(function (h) {
-    if (_isOnline(h)) online += 1; else offline += 1;
-    if (_isAtRisk(h)) atRisk += 1;
-    if (_isCritical(h)) critical += 1;
-    if (_isNewlyEnrolled(h)) newly += 1;
+    if (_isCriticalRisk(h)) critical += 1;
+    else if (_isHighRisk(h)) high += 1;
+    else if (_isSecure(h)) secure += 1;
   });
+  // Tiles map directly to the existing per-host `latest_score` so every
+  // value here is grounded in real data — no agent-presence assumptions.
+  // Online/Offline/Newly-Enrolled tiles will return alongside the agent
+  // heartbeat surface in Sprint 7.
   return [
-    { key: 'total',    label: 'Total',            value: hosts.length, tone: 'neutral' },
-    { key: 'online',   label: 'Online (24h)',     value: online,       tone: 'ok' },
-    { key: 'offline',  label: 'Offline >24h',     value: offline,      tone: 'off' },
-    { key: 'atrisk',   label: 'At risk',          value: atRisk,       tone: 'warn' },
-    { key: 'critical', label: 'Critical severity',value: critical,     tone: 'error' },
-    { key: 'newly',    label: 'Newly enrolled',   value: newly,        tone: 'info' },
+    { key: 'total',    label: 'Total Hosts',    value: hosts.length, tone: 'neutral' },
+    { key: 'critical', label: 'Critical Risk',  value: critical,     tone: 'error' },
+    { key: 'high',     label: 'High Risk',      value: high,         tone: 'warn' },
+    { key: 'secure',   label: 'Secure',         value: secure,       tone: 'ok' },
   ];
 }
 
 function _applyKpiFilter(hosts) {
   switch (_activeKpi) {
-    case 'online':   return hosts.filter(_isOnline);
-    case 'offline':  return hosts.filter(function (h) { return !_isOnline(h); });
-    case 'atrisk':   return hosts.filter(_isAtRisk);
-    case 'critical': return hosts.filter(_isCritical);
-    case 'newly':    return hosts.filter(_isNewlyEnrolled);
+    case 'critical': return hosts.filter(_isCriticalRisk);
+    case 'high':     return hosts.filter(_isHighRisk);
+    case 'secure':   return hosts.filter(_isSecure);
     default:         return hosts;
   }
 }

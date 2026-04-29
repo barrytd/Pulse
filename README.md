@@ -170,6 +170,7 @@ Pulse/
 ├── send_test_email.py      # SMTP sanity check
 ├── pulse.yaml              # Config file for default settings
 ├── requirements.txt        # Python dependencies
+├── BACKLOG.md              # Unscheduled but validated ideas
 ├── CHANGELOG.md            # Daily change log
 ├── ROADMAP.md              # Current status + sprint plan
 └── README.md               # You are here
@@ -283,6 +284,7 @@ All 271 tests run without needing real `.evtx` files — the test suite uses fak
 ## Roadmap & Changelog
 
 - Current status and planned sprints: [ROADMAP.md](ROADMAP.md)
+- Validated but unscheduled ideas: [BACKLOG.md](BACKLOG.md)
 - Commit-level change history: [CHANGELOG.md](CHANGELOG.md)
 
 ---

@@ -155,36 +155,6 @@ The hosted dashboard on Render can't scan a Windows machine itself — the OS ca
 
 ---
 
-## Backlog — unscheduled, prioritized by impact
+## Backlog
 
-Features validated by SOC/SIEM research but not yet committed to a sprint. Ordered roughly by impact-to-effort ratio.
-
-### Detection depth
-
-- [ ] SIGMA rule import — parse SIGMA YAML files and convert them into Pulse detection rules, enabling community rule packs (thousands of rules on SigmaHQ/sigma GitHub) without hand-writing each one
-- [ ] Time-based correlation rules — sequence and threshold detections that reason over windows of time rather than single events:
-  - Brute force success: N failed logins (4625) followed by a successful login (4624) from the same source IP within a configurable window
-  - Impossible travel: same user authenticating from two different hosts within seconds
-  - Privilege escalation chain: new user created (4720) then immediately added to an admin group (4728/4732)
-  - Lateral spray: same source IP hitting 3+ distinct hosts within 5 minutes
-- [ ] Sysmon log support — parse Sysmon channel events (Event 1 process create, Event 3 network connection, Event 7 image load, Event 11 file create, Event 22 DNS query) to enable command-line-pattern detections (Mimikatz, encoded PowerShell, LOLBins) and network-based detections (C2 beaconing frequency, DNS tunneling) that are impossible with standard Security/Application/System logs alone
-
-### Operational health
-
-- [ ] Alert fatigue metrics — surface detection-pipeline health data: alerts suppressed by throttling this week, reviewed vs ignored ratio, dead rules (never triggered), noisy rules (high fire rate + high false-positive rate); display as a card on Dashboard or a section on Trends
-- [ ] API rate limiting — per-token request limits (e.g. 60 req/min default, configurable) to prevent misbehaving agents or scripts from hammering the API; return 429 with Retry-After header
-- [ ] Data retention policy — configurable retention window (90/180/365 days) with automatic archival or purge of aged findings, scans, and audit log entries; required for GDPR/HIPAA compliance and database performance at scale
-
-### Incident response
-
-- [ ] Evidence preservation — "Export incident package" button on any finding or group of findings that generates a ZIP containing: relevant raw .evtx snippet, PDF report scoped to those findings, audit log entries related to the incident, analyst notes, remediation actions taken, and a JSON manifest with hashes for chain-of-custody integrity
-
-### Branding + white-label
-
-- [ ] Custom branding (v2) — admin uploads a company logo + sets an organization name, but both render as a SUBTITLE under the Pulse brand (not as a replacement). Keep the Pulse logo + "PULSE" title always visible so the product identity stays intact. A first pass was shipped then reverted because replacing the Pulse lockup with just the company name lost too much brand recognition. The empty `branding` table from the v1 schema is still in the DB — reuse it rather than recreating. Also reach into HTML/PDF report headers for the same subtitle treatment
-
-### Platform hardening
-
-- [ ] Webhook signature verification — sign outgoing Slack/Discord webhook payloads with HMAC so receivers can verify authenticity
-- [ ] Encrypted config secrets — encrypt SMTP passwords, API keys, and webhook URLs at rest in pulse.yaml using a machine-derived key rather than storing plaintext
-- [ ] Session hardening — add CSRF tokens to state-changing API endpoints, enforce SameSite=Strict on session cookies, add idle timeout (configurable, default 30 min)
+Unscheduled work — validated ideas not yet committed to a sprint — lives in [BACKLOG.md](BACKLOG.md). When an item gets picked up, move it from there into the next-up sprint section above.
