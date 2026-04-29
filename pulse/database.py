@@ -426,6 +426,13 @@ def init_db(db_path):
         except db_backend.OperationalError:
             pass
 
+    # Heal any orphaned monitor sessions left over from a previous run
+    # that exited without going through the normal Stop path. The in-memory
+    # manager is brand-new on this boot, so no row can really still be
+    # active. Done outside the connect-block above because it manages its
+    # own connection.
+    close_orphaned_monitor_sessions(db_path)
+
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None, agent_id=None):
     """
@@ -1374,6 +1381,31 @@ def close_monitor_session(db_path, session_id, poll_count, events_checked, findi
             (ended_at, duration_sec, int(poll_count or 0),
              int(events_checked or 0), int(findings_count or 0), int(session_id)),
         )
+
+
+def close_orphaned_monitor_sessions(db_path):
+    """Close any monitor_session rows with no ``ended_at``.
+
+    The in-memory ``MonitorManager`` lives only inside the Pulse Python
+    process; if the process exited before ``stop()`` ran (Ctrl+C, crash,
+    deploy restart), the session row stays open and the UI keeps showing
+    it as "active". On every server boot we know the process just started
+    and therefore *no* in-memory monitor is running, so any open row is by
+    definition orphaned. We stamp ``ended_at = started_at`` so the row
+    surfaces as a 0-second blip rather than a phantom active session.
+
+    Returns the number of rows that were closed.
+    """
+    try:
+        with _connect(db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE monitor_sessions"
+                " SET ended_at = started_at, duration_sec = 0"
+                " WHERE ended_at IS NULL"
+            )
+            return cursor.rowcount or 0
+    except db_backend.OperationalError:
+        return 0
 
 
 def list_monitor_sessions(db_path, limit=100):

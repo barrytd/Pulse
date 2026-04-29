@@ -5,7 +5,7 @@
 // pfirewall.log parser landing in a later sprint.
 'use strict';
 
-import { escapeHtml, showToast, toastError } from './dashboard.js';
+import { escapeHtml, showToast, toastError, relTimeHtml } from './dashboard.js';
 import { apiUnblockBatch } from './api.js';
 
 // Tab state persists across navigation so a user who switched to
@@ -178,9 +178,9 @@ function _buildBlockListRow(row) {
   var pill = '<span class="pill ' + pillCls + '">' + escapeHtml(status) + '</span>';
   var comment = row.comment ? escapeHtml(row.comment) :
                 '<span style="color:var(--text-light);">\u2014</span>';
-  var added = row.added_at ? escapeHtml(row.added_at) :
+  var added = row.added_at ? relTimeHtml(row.added_at) :
               '<span style="color:var(--text-light);">\u2014</span>';
-  var pushed = row.pushed_at ? escapeHtml(row.pushed_at) :
+  var pushed = row.pushed_at ? relTimeHtml(row.pushed_at) :
                '<span style="color:var(--text-light);">\u2014</span>';
   var source = row.source ? escapeHtml(row.source) :
                '<span style="color:var(--text-light);">\u2014</span>';

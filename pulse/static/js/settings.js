@@ -37,7 +37,7 @@ import {
   apiDeleteWaitlistSignup,
   apiListAllNotes,
 } from './api.js';
-import { escapeHtml, showToast, toastError, formatRelativeTime } from './dashboard.js';
+import { escapeHtml, showToast, toastError, relTimeHtml } from './dashboard.js';
 import { getTheme } from './theme.js';
 import {
   getSeverityColors,
@@ -840,7 +840,7 @@ function _renderUsersPanel(me, users) {
         '<td class="user-cell-email">' + escapeHtml(u.email) + '</td>' +
         '<td class="user-cell-role">' + rolePill + '</td>' +
         '<td class="user-cell-status">' + statusCell + '</td>' +
-        '<td class="user-cell-created">' + escapeHtml(u.created_at || '') + '</td>' +
+        '<td class="user-cell-created">' + relTimeHtml(u.created_at) + '</td>' +
         '<td class="user-cell-actions">' + actionsCell + '</td>' +
       '</tr>'
     );
@@ -894,13 +894,13 @@ function _renderUsersPanel(me, users) {
 function _renderTokensPanel(tokens) {
   var rowsHtml = (tokens || []).map(function (t) {
     var lastUsed = t.last_used_at
-      ? escapeHtml(t.last_used_at)
+      ? relTimeHtml(t.last_used_at)
       : '<span style="color:var(--text-muted);">never</span>';
     return (
       '<tr>' +
         '<td>' + escapeHtml(t.name || '') + '</td>' +
         '<td style="font-family:monospace; color:var(--text-muted);">\u2026' + escapeHtml(t.last4 || '') + '</td>' +
-        '<td style="color:var(--text-muted); font-size:12px;">' + escapeHtml(t.created_at || '') + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' + relTimeHtml(t.created_at) + '</td>' +
         '<td style="color:var(--text-muted); font-size:12px;">' + lastUsed + '</td>' +
         '<td>' +
           '<button class="btn btn-danger btn-sm" data-action="revokeTokenConfirm" data-arg="' +
@@ -964,9 +964,7 @@ function _renderAgentsPanel(agents, lastEnrollment) {
     var name     = a.name || ('agent-' + (a.id || ''));
     var hostBits = [a.hostname, a.platform].filter(Boolean).join(' \u00b7 ');
     var lastSeen = a.last_heartbeat_at
-      ? '<span title="' + escapeHtml(a.last_heartbeat_at) + '">' +
-          escapeHtml(formatRelativeTime(a.last_heartbeat_at)) +
-        '</span>'
+      ? relTimeHtml(a.last_heartbeat_at)
       : '<span style="color:var(--text-muted);">never</span>';
     var version  = a.version
       ? '<span class="mono">' + escapeHtml(a.version) + '</span>'
@@ -1109,17 +1107,13 @@ function _renderFeedbackPanel(rows) {
 
   var rowsHtml = rows.map(function (r, i) {
     var kind = (r.kind || 'general').toLowerCase();
-    var submittedAt = r.submitted_at || '';
-    var rel = formatRelativeTime(submittedAt);
     var email = r.email || ('user #' + (r.user_id || '?'));
     var page = r.page_hint ? '/' + r.page_hint : '—';
     var msg = String(r.message || '');
     var preview = msg.length > 140 ? msg.slice(0, 140) + '…' : msg;
     return (
       '<tr class="feedback-row" data-action="toggleFeedbackRow" data-arg="' + i + '">' +
-        '<td class="feedback-when" title="' + escapeHtml(submittedAt) + '">' +
-          escapeHtml(rel) +
-        '</td>' +
+        '<td class="feedback-when">' + relTimeHtml(r.submitted_at) + '</td>' +
         '<td><span class="feedback-chip feedback-chip-' + kind + '">' + escapeHtml(kind) + '</span></td>' +
         '<td class="feedback-from">' + escapeHtml(email) + '</td>' +
         '<td><span class="mono feedback-page">' + escapeHtml(page) + '</span></td>' +
@@ -1200,12 +1194,10 @@ function _renderWaitlistPanel(rows) {
   }
 
   var rowsHtml = rows.map(function (r) {
-    var when = r.created_at || '';
-    var rel = formatRelativeTime(when);
     var src = (r.source || '').trim() || '—';
     return (
       '<tr>' +
-        '<td class="feedback-when" title="' + escapeHtml(when) + '">' + escapeHtml(rel) + '</td>' +
+        '<td class="feedback-when">' + relTimeHtml(r.created_at) + '</td>' +
         '<td class="mono">' + escapeHtml(r.email || '') + '</td>' +
         '<td>' + escapeHtml(src) + '</td>' +
         '<td style="text-align:right;">' +
@@ -1329,25 +1321,12 @@ function _renderNotesAdminPanel(rows) {
     var rule = r.rule || 'Unknown rule';
     var author = (r.display_name && r.display_name.trim()) ||
                  r.email || ('user #' + (r.user_id || '?'));
-    var when = r.created_at || '';
-    var rel = (function () {
-      // Lightweight relative-time; mirrors dashboard formatRelativeTime.
-      var t = Date.parse((when || '').replace(' ', 'T'));
-      if (isNaN(t)) return when;
-      var sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-      if (sec < 45)    return 'just now';
-      if (sec < 3600)  return Math.floor(sec / 60)  + 'm ago';
-      if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
-      return Math.floor(sec / 86400) + 'd ago';
-    })();
     var body = String(r.body || '');
     var preview = body.length > 140 ? body.slice(0, 140) + '…' : body;
     var scanHref = r.scan_id ? ('/scans/' + r.scan_id) : '#';
     return (
       '<tr class="feedback-row note-admin-row" data-action="toggleNoteAdminRow" data-arg="' + i + '">' +
-        '<td class="feedback-when" title="' + escapeHtml(when) + '">' +
-          escapeHtml(rel) +
-        '</td>' +
+        '<td class="feedback-when">' + relTimeHtml(r.created_at) + '</td>' +
         '<td><span class="' + sevCls + '">' + escapeHtml(sev) + '</span></td>' +
         '<td class="feedback-from">' + escapeHtml(author) + '</td>' +
         '<td>' +

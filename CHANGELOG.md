@@ -27,10 +27,22 @@ The roadmap's Sprint 7 is "agent / server split — the Splunk distribution mode
 
 ---
 
-## 2026-04-28 — Customizable dashboard widgets
+## 2026-04-29 — Polish pass
 
-### Added
-- **Drag-and-drop dashboard layout** (`pulse/static/js/dashboard-layout.js`) — five major dashboard panels (KPI strip, standup row, charts, MITRE categories + top rules, last-scan findings) are now wrapped as `dash-widget` shells whose order and visibility the user controls. A "Customize layout" button at the top of the Dashboard enters edit mode: each widget grows a toolbar with a drag handle and Hide button, the whole shell becomes `draggable="true"`, and an end-of-list drop sentinel lets users send a panel to the bottom. Hidden widgets surface as chips in a "Hidden panels" tray below the canvas; clicking a chip restores the widget at its original position. Layout (`[{id, visible}, …]`) persists per browser in `localStorage.pulseDashWidgets`; a Reset button wipes the override and falls back to the default order. Layout reconciles on load against the in-code `WIDGETS` registry so a future release that adds a panel surfaces it automatically (visible, at the end). Closes the last in-flight Sprint 6 item
+### Removed
+- ~~**Customizable dashboard widgets**~~ — *reverted from the 2026-04-28 ship.* The drag-and-drop reorder, hide/restore, and `localStorage`-backed layout persistence all worked, but the "Customize layout" button on the Dashboard read as a placeholder during the cleanup pass — a feature surfaced before its use case was clear. Removed entirely: `dashboard-layout.js` deleted, the widget shells / customize bar / hidden-panel tray markup inlined back to direct concatenation in `renderDashboardPage()`, the `enterDashEditMode` / `exitDashEditMode` / `hideDashWidget` / `showDashWidget` / `resetDashLayout` actions deleted from the registry, and the `~200 lines of `.dash-widget*` / `.dash-customize*` / `.dash-hidden-*` CSS removed. Roadmap entry for this Sprint 6 item flipped back to deferred. The default panel order (KPI strip → standup → charts → MITRE → last-scan findings) is what every user sees again. Stale `localStorage.pulseDashWidgets` entries from the previous build are harmless — the loader is gone, so they're never read
+
+### Fixed
+- **Monitor "Live pill on, page IDLE" race** (`pulse/static/js/monitor.js`) — clicking Start Monitoring now triggers a synchronous `_forceMonitorPageRender()` after the API call resolves, instead of relying solely on the `requestAnimationFrame`-based scheduler. The rAF path was occasionally dropping the very first frame after a fresh `--api` boot, leaving the page stuck on IDLE while the topbar Live indicator flipped on. Both paths now fire on the same tick
+- **Orphaned monitor sessions on server restart** (`pulse/database.py::close_orphaned_monitor_sessions`) — `init_db()` now stamps `ended_at = started_at` on every `monitor_sessions` row that lacks an end timestamp. The in-memory `MonitorManager` lives only inside the Pulse process; a Ctrl+C / crash / deploy-restart that exited before `stop()` ran would otherwise leave rows that read as "ACTIVE" forever in the dashboard. The cleanup runs on every server boot and is idempotent
+- **Auto-resume after server restart** (`pulse/static/js/monitor.js::monitorClient.init`) — removed the `localStorage.pulse.monitor.autoResume` flag check that caused the dashboard to silently relaunch the monitor on a fresh server boot. Closing the API and starting it again should mean monitoring is off until the user explicitly clicks Start. The flag is no longer written by `start()`/`stop()` either; init removes any stale value left over from previous installs
+
+### Changed
+- **Relative timestamps everywhere** — `formatRelativeTime(iso)` now switches to a "Apr 21" (or "Apr 21, 2024" if cross-year) absolute-month-day format past the 7-day mark, instead of the unbounded "Xd ago" it used before. New companion `relTimeHtml(iso, extraClass?)` returns a `<span class="rel-time" title="<full-datetime>">…</span>` so every timestamp gets the absolute value as a hover tooltip without callers escaping it themselves. Rolled out to: Findings table (Time column), Scans table (Date/Time + Last scan KPI), History table (Date column + comparison labels + dropdown options), Audit Log table (relative branch routes through the shared helper, absolute toggle preserved), Fleet table (Last Scan column + host detail drawer), Firewall table (Added / Pushed columns), Monitor live event feed + idle-panel session list + sessions rail, Reports table, Threat Intel result card + recent-lookups list, Settings → Users / API Tokens / Agents / Feedback / Waitlist / Notes admin tables, Dashboard "Repeat offenders" + "Last Scan Findings" + "Needs Attention" rows, finding drawer (assigned / reviewed / workflow updated / notes thread). Two duplicate ad-hoc relative-time formatters in `findings.js` and `settings.js` were deleted so there's exactly one source of truth
+
+---
+
+## 2026-04-28 — Customizable dashboard widgets *(reverted 2026-04-29)*
 
 ---
 

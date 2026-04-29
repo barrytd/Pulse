@@ -16,7 +16,7 @@
 'use strict';
 
 import { fetchAudit, apiListUsers } from './api.js';
-import { escapeHtml, _restoreSearchFocus } from './dashboard.js';
+import { escapeHtml, _restoreSearchFocus, formatRelativeTime } from './dashboard.js';
 import { openDrawer, closeDrawer, isDrawerOpen } from './drawer.js';
 
 // Newest-first cache of every audit row the API returned last refresh.
@@ -520,18 +520,10 @@ function _renderTimeCell(ts) {
   if (_auditTimeFmt === 'absolute') {
     return '<code title="' + escapeHtml(abs) + '">' + escapeHtml(ts) + '</code>';
   }
-  // Relative formatter — "3h ago" / "yesterday" / "2025-04-22".
-  var diff = Math.max(0, Date.now() - d.getTime());
-  var s = Math.floor(diff / 1000);
-  var label;
-  if (s < 60)        label = 'just now';
-  else if (s < 3600) label = Math.floor(s / 60) + 'm ago';
-  else if (s < 86400) label = Math.floor(s / 3600) + 'h ago';
-  else if (s < 172800) label = 'yesterday';
-  else if (s < 604800) label = Math.floor(s / 86400) + 'd ago';
-  else label = d.toISOString().slice(0, 10);
-  return '<span class="audit-time-rel" title="' + escapeHtml(abs) + '">' +
-           escapeHtml(label) +
+  // Relative formatter — shared with the rest of the app via
+  // dashboard.formatRelativeTime so "3h ago" / "Apr 21" stays consistent.
+  return '<span class="audit-time-rel rel-time" title="' + escapeHtml(abs) + '">' +
+           escapeHtml(formatRelativeTime(ts)) +
          '</span>';
 }
 

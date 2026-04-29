@@ -15,7 +15,7 @@ import {
   apiClearMonitorSessions,
   apiDeleteMonitorSessionsBatch,
 } from './api.js';
-import { escapeHtml, toastError, showToast, sevPillHtml } from './dashboard.js';
+import { escapeHtml, toastError, showToast, sevPillHtml, relTimeHtml, formatRelativeTime } from './dashboard.js';
 import { openFindingDrawer } from './findings.js';
 
 // Module-level refs that used to live on window as _monPageUnsub / _dingCtx.
@@ -307,12 +307,16 @@ export const monitorClient = {
       this.status = s;
       var h = await apiMonitorHistory(50);
       this.checks = h.checks || [];
+      // Only attach the SSE stream if the backend is genuinely still
+      // running. We deliberately do NOT auto-restart monitoring after a
+      // server restart — the user closed the API for a reason, and a
+      // browser tab loaded later shouldn't silently relaunch background
+      // polling on their behalf. Each server start begins in IDLE.
       if (s.active) {
         this._connect();
-      } else if (localStorage.getItem('pulse.monitor.autoResume') === '1') {
-        // Backend restarted since last session — pick up where we left off.
-        await this.start();
       }
+      // Clean up any stale autoResume flag from previous installs.
+      try { localStorage.removeItem('pulse.monitor.autoResume'); } catch (e) {}
     } catch (e) { /* monitor endpoints unreachable — ignore */ }
 
     // 1-second ticker so "time since last check" labels keep flowing.
@@ -340,9 +344,16 @@ export const monitorClient = {
     try {
       var s = await apiMonitorStart(cfg || {});
       this.status = s;
-      localStorage.setItem('pulse.monitor.autoResume', '1');
       this._connect();
       this._notify('status');
+      // Force a synchronous re-render on the monitor page itself. The
+      // navlive pill in the topbar updates correctly via _notify, but
+      // the page-level subscriber goes through a `requestAnimationFrame`
+      // scheduler that has been observed to skip a frame on the very
+      // first start after a fresh server boot — leaving the page stuck
+      // on IDLE while the topbar shows LIVE. Calling the render function
+      // directly here makes the LIVE state visible immediately.
+      _forceMonitorPageRender();
     } catch (e) {
       toastError('Failed to start monitor');
     }
@@ -352,9 +363,9 @@ export const monitorClient = {
     try {
       var s = await apiMonitorStop();
       this.status = s;
-      localStorage.removeItem('pulse.monitor.autoResume');
       this._disconnect();
       this._notify('status');
+      _forceMonitorPageRender();
     } catch (e) {
       toastError('Failed to stop monitor');
     }
@@ -552,7 +563,7 @@ function _feedRowHtml(item, key) {
   return '<div class="dash-finding-row sev-' + sev.toLowerCase() + '" ' +
          'data-action="openLiveFeedFinding" data-arg="' + escapeHtml(key) + '" ' +
          'data-feed-key="' + escapeHtml(key) + '" style="cursor:pointer;">' +
-    '<div><div class="time">' + escapeHtml(item.at || '') + '</div></div>' +
+    '<div><div class="time">' + relTimeHtml(item.at) + '</div></div>' +
     '<div>' +
       '<div class="rule">' + escapeHtml(f.rule || 'Unknown') + '</div>' +
       '<div class="desc">' + escapeHtml(f.details || f.description || '') + '</div>' +
@@ -593,12 +604,11 @@ function _monitorIdlePanelHtml(sessions) {
   var recentHtml = recent.length === 0
     ? '<div class="mon-idle-recent-empty">No sessions recorded yet.</div>'
     : recent.map(function (s) {
-        var started = s.started_at || '';
         var findings = parseInt(s.findings_count, 10) || 0;
         var dur = _humanDuration(s.duration_sec);
         var isActive = !s.ended_at;
         return '<div class="mon-idle-recent-row">' +
-          '<span class="mon-idle-recent-when">' + escapeHtml(started) + '</span>' +
+          '<span class="mon-idle-recent-when">' + relTimeHtml(s.started_at) + '</span>' +
           '<span class="mon-idle-recent-meta">' +
             (isActive ? 'active' : escapeHtml(dur)) + ' \u00b7 ' +
             findings + ' finding' + (findings === 1 ? '' : 's') +
@@ -1228,9 +1238,8 @@ function _sessionsMiniCard() {
   if (active) {
     lastHtml = '<div class="mon-rail-empty" style="color:var(--text);">Session in progress</div>';
   } else if (last) {
-    var started = last.started_at || '—';
     var findings = parseInt(last.findings_count, 10) || 0;
-    lastHtml = '<div class="mon-rail-empty">Last: ' + escapeHtml(started) + ' · ' +
+    lastHtml = '<div class="mon-rail-empty">Last: ' + relTimeHtml(last.started_at) + ' · ' +
                findings + ' finding' + (findings === 1 ? '' : 's') + '</div>';
   } else {
     lastHtml = '<div class="mon-rail-empty">No sessions recorded yet.</div>';
@@ -1361,6 +1370,22 @@ function _scheduleMonRerender() {
     _monRenderScheduled = false;
     if (document.getElementById('monitor-page-root')) _monRenderFn();
   });
+}
+
+// Synchronous re-render path used by start/stop so the LIVE/IDLE
+// transition is visible on the same tick as the click — the rAF-based
+// scheduler can race the user's expectation on the very first run.
+function _forceMonitorPageRender() {
+  if (!_monRenderFn) return;
+  if (!document.getElementById('monitor-page-root')) return;
+  // Cancel any pending rAF render so we don't paint twice with the same
+  // state. The flag is reset; the queued callback no-ops because the
+  // page-root presence check still passes but `_monRenderFn` will have
+  // already run with the current state.
+  _monRenderScheduled = true;
+  try { _monRenderFn(); } finally {
+    _monRenderScheduled = false;
+  }
 }
 
 // ---------------------------------------------------------------

@@ -18,6 +18,8 @@ import {
   _gradeFor,
   _trendStatCard,
   _accentForScore,
+  formatRelativeTime,
+  relTimeHtml,
 } from './dashboard.js';
 import { buildFindingsTable } from './findings.js';
 
@@ -104,7 +106,10 @@ function _buildComparePanel(scans) {
   if (!scans || scans.length < 2) return '';
   var options = scans.map(function (s) {
     var num = s.number != null ? s.number : s.id;
-    var label = '#' + num + ' \u00b7 ' + (s.scanned_at || '') +
+    // Option text can't carry HTML, so the dropdown loses the tooltip;
+    // it gets the relative form anyway because the scan number already
+    // disambiguates between scans uploaded the same day.
+    var label = '#' + num + ' \u00b7 ' + formatRelativeTime(s.scanned_at) +
                 ' \u00b7 ' + (s.filename || 'Unknown') +
                 ' \u00b7 ' + s.total_findings + ' finding(s)';
     return '<option value="' + s.id + '">' + escapeHtml(label) + '</option>';
@@ -183,8 +188,8 @@ function _buildDiffView() {
 
   var meta =
     '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:12px; color:var(--text-muted);">' +
-      '<span><strong>Before:</strong> #' + (a.number != null ? a.number : a.id) + ' \u00b7 ' + escapeHtml(a.scanned_at || '') + ' \u00b7 ' + (a.total_findings || 0) + ' finding(s)</span>' +
-      '<span><strong>After:</strong> #' + (b.number != null ? b.number : b.id) + ' \u00b7 ' + escapeHtml(b.scanned_at || '') + ' \u00b7 ' + (b.total_findings || 0) + ' finding(s)</span>' +
+      '<span><strong>Before:</strong> #' + (a.number != null ? a.number : a.id) + ' \u00b7 ' + relTimeHtml(a.scanned_at) + ' \u00b7 ' + (a.total_findings || 0) + ' finding(s)</span>' +
+      '<span><strong>After:</strong> #' + (b.number != null ? b.number : b.id) + ' \u00b7 ' + relTimeHtml(b.scanned_at) + ' \u00b7 ' + (b.total_findings || 0) + ' finding(s)</span>' +
     '</div>';
 
   function tab(key, label) {
@@ -246,7 +251,7 @@ function _buildHistoryTable(scans) {
           '<input type="checkbox" ' + checked +
             ' data-action="toggleHistorySelect" data-arg="' + scan.id + '" ' +
             'aria-label="Select scan ' + scan.id + '" /></td>' +
-        '<td>' + escapeHtml(scan.scanned_at || '-') + '</td>' +
+        '<td>' + relTimeHtml(scan.scanned_at) + '</td>' +
         '<td style="color:var(--text-muted);">' + escapeHtml(scan.filename || 'Unknown') + '</td>' +
         '<td>' + scan.total_findings + '</td>' +
         '<td style="font-weight:700; color:' + scoreColor(scan.score) + '">' +

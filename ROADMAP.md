@@ -123,7 +123,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
 - [ ] ~~Custom branding~~ — *deferred to Backlog; first pass shipped then reverted on 2026-04-24 because replacing the Pulse brand in the sidebar conflicted with the product identity. The future pass should keep the Pulse logo + "PULSE" title, and surface the org name as a subtitle underneath. The empty `branding` table already exists on current installs so the future sprint can reuse the schema.*
 - [x] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
-- [x] Dashboard widgets — customizable layout with drag-and-drop panels (Customize layout button puts the dashboard into edit mode; each major panel — KPI strip, standup row, charts, MITRE, last-scan findings — can be reordered via HTML5 drag-and-drop and hidden / restored from a tray. Order + visibility persist per browser in `localStorage.pulseDashWidgets`)
+- [ ] ~~Dashboard widgets~~ — *first pass shipped 2026-04-28 then rolled back 2026-04-29. The drag-and-drop reorder + hide/restore worked but a non-functional surface (the "Customize layout" button) hurt trust during the polish pass; revisit when there's a clearer use case for a per-user dashboard layout. Underlying panel HTML is now inlined directly in `renderDashboardPage()` again*
 - [x] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
 
 ---

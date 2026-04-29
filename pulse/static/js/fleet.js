@@ -8,7 +8,7 @@
 import { fetchFleet } from './api.js';
 import { dashFilterState, writeDashFiltersToURL } from './dashboard.js';
 import { navigate } from './navigation.js';
-import { escapeHtml, scoreColorClass, _gradeFor, sevPillHtml } from './dashboard.js';
+import { escapeHtml, scoreColorClass, _gradeFor, sevPillHtml, relTimeHtml } from './dashboard.js';
 import { openDrawer, closeDrawer } from './drawer.js';
 
 var _fleetCache = [];
@@ -95,7 +95,7 @@ function _buildFleetTable(hosts) {
       '<td>' + sevPillHtml(worst) + '</td>' +
       '<td>' + h.scan_count + '</td>' +
       '<td>' + h.total_findings + '</td>' +
-      '<td>' + escapeHtml(h.last_scan_at || '-') + '</td>' +
+      '<td>' + relTimeHtml(h.last_scan_at) + '</td>' +
       '</tr>';
   }).join('');
 
@@ -192,7 +192,7 @@ export function fleetOpenHost(hostname) {
                 '<div class="k">Total findings</div>' +
                 '<div class="v">' + (host.total_findings || 0) + '</div>' +
                 '<div class="k">Last scan</div>' +
-                '<div class="v mono">' + escapeHtml(host.last_scan_at || '—') + '</div>' +
+                '<div class="v">' + relTimeHtml(host.last_scan_at) + '</div>' +
               '</div>',
       },
       {

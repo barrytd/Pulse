@@ -32,11 +32,6 @@ import {
   openFindingDrawerByIdx,
   openAttentionFinding,
   clickStatCard,
-  enterDashEditMode,
-  exitDashEditMode,
-  hideDashWidget,
-  showDashWidget,
-  resetDashLayout,
 } from './dashboard.js';
 import {
   toggleScanSelect,
@@ -288,11 +283,6 @@ const actions = {
   openAttentionFinding,
   clickStatCard,
   openUnreviewedCriticalHigh,
-  enterDashEditMode,
-  exitDashEditMode,
-  hideDashWidget,
-  showDashWidget,
-  resetDashLayout,
 
   // scans + findings
   toggleScanSelect,

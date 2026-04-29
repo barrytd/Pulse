@@ -8,7 +8,7 @@
 // have to retype anything they investigated this week.
 'use strict';
 
-import { escapeHtml } from './dashboard.js';
+import { escapeHtml, relTimeHtml } from './dashboard.js';
 import { apiFetchIntel } from './api.js';
 
 // Module state — persists across re-renders during the session.
@@ -156,10 +156,10 @@ function _renderResult(d) {
   var isp     = d.isp     ? escapeHtml(d.isp)     : '—';
   var reports = d.total_reports != null ? d.total_reports.toLocaleString() : '—';
   var lastReported = d.last_reported
-    ? escapeHtml(String(d.last_reported).replace('T', ' ').slice(0, 19))
+    ? relTimeHtml(d.last_reported)
     : 'Never reported';
   var fetched = d.fetched_at
-    ? escapeHtml(String(d.fetched_at).replace('T', ' ').slice(0, 19))
+    ? relTimeHtml(d.fetched_at)
     : '—';
   var cached = d.cached
     ? '<span class="ti-cache-flag" title="Served from local cache">cached</span>'
@@ -236,9 +236,7 @@ function _recentListHtml(rows) {
   return rows.map(function (r) {
     var sc = _scoreClass(r.score);
     var label = r.score == null ? '—' : String(r.score);
-    var fetched = r.fetched_at
-      ? String(r.fetched_at).replace('T', ' ').slice(0, 16)
-      : '';
+    var fetched = r.fetched_at ? relTimeHtml(r.fetched_at) : '';
     return '<button type="button" class="ti-recent-row" ' +
         'data-action="threatIntelLookupRecent" ' +
         'data-arg="' + escapeHtml(r.ip) + '">' +
@@ -246,7 +244,7 @@ function _recentListHtml(rows) {
       '<span class="ti-recent-ip ti-mono">' + escapeHtml(r.ip) + '</span>' +
       '<span class="ti-recent-meta">' +
         (r.country ? escapeHtml(r.country) + ' · ' : '') +
-        escapeHtml(fetched) +
+        fetched +
       '</span>' +
     '</button>';
   }).join('');

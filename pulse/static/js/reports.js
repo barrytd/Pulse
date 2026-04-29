@@ -6,7 +6,7 @@
 'use strict';
 
 import { apiDeleteReports } from './api.js';
-import { escapeHtml, showToast, toastError } from './dashboard.js';
+import { escapeHtml, showToast, toastError, relTimeHtml } from './dashboard.js';
 
 var _reportsCache = [];
 var _reportsQuery = '';
@@ -106,7 +106,7 @@ function _renderTable() {
         '<input type="checkbox" ' + checked +
           ' data-action="toggleReportSelect" data-arg="' + fnAttr + '" ' +
           'aria-label="Select ' + fnAttr + '" /></td>' +
-      '<td class="mono">' + escapeHtml(r.generated_at) + '</td>' +
+      '<td>' + relTimeHtml(r.generated_at) + '</td>' +
       '<td class="mono">' + fnAttr + '</td>' +
       '<td><span class="fmt-badge ' + _formatBadgeClass(r.format) + '">' + escapeHtml((r.format || '?').toUpperCase()) + '</span></td>' +
       '<td class="mono num">' + _formatBytes(r.size_bytes || 0) + '</td>' +

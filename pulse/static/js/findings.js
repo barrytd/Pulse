@@ -33,6 +33,8 @@ import {
   _gradeFor,
   _gradeRank,
   sevPillHtml,
+  formatRelativeTime,
+  relTimeHtml,
 } from './dashboard.js';
 import { navigate } from './navigation.js';
 
@@ -245,25 +247,6 @@ function _formatDuration(sec) {
   return m ? (h + 'h ' + m + 'm') : (h + 'h');
 }
 
-// "2 hours ago" — compact relative time from an ISO-ish timestamp.
-function _relativeTimeShort(iso) {
-  if (!iso) return '—';
-  var t = Date.parse(iso);
-  if (isNaN(t)) return '—';
-  var diff = Math.max(0, Date.now() - t);
-  var s = Math.floor(diff / 1000);
-  if (s < 60) return 'just now';
-  var m = Math.floor(s / 60);
-  if (m < 60) return m + ' minute' + (m === 1 ? '' : 's') + ' ago';
-  var h = Math.floor(m / 60);
-  if (h < 24) return h + ' hour' + (h === 1 ? '' : 's') + ' ago';
-  var d = Math.floor(h / 24);
-  if (d < 30) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
-  var mo = Math.floor(d / 30);
-  if (mo < 12) return mo + ' month' + (mo === 1 ? '' : 's') + ' ago';
-  var y = Math.floor(mo / 12);
-  return y + ' year' + (y === 1 ? '' : 's') + ' ago';
-}
 
 // Severity-mix mini pills — compact "2C 4H 6M 1L" signature. Zeroes
 // are omitted so low-noise scans stay uncluttered.
@@ -470,7 +453,7 @@ function _scansKpisHtml(rows) {
     kLast = kpi('Last scan', '<span style="color:var(--text-muted);">&mdash;</span>', 'No scans in range');
   } else {
     kLast = kpi('Last scan',
-      escapeHtml(_relativeTimeShort(last.scanned_at)),
+      relTimeHtml(last.scanned_at),
       escapeHtml(last.hostname || last.filename || 'Unknown host'));
   }
 
@@ -582,8 +565,9 @@ function _buildScansTable(rows) {
       return '<tr class="clickable" data-action="viewScan" data-arg="' + row.id + '">' +
         '<td data-action="stopClickPropagation"><input type="checkbox" ' + checked +
           ' data-action="toggleScanSelect" data-arg="' + row.id + '" aria-label="Select scan ' + row.id + '" /></td>' +
-        // Date/Time \u2014 bold timestamp + type icon + host subtitle.
-        '<td><div style="font-weight:500;">' + escapeHtml(row.scanned_at || '-') + '</div>' +
+        // Date/Time \u2014 relative timestamp + type icon + host subtitle.
+        // Hover the cell to see the absolute "YYYY-MM-DD HH:MM:SS" value.
+        '<td><div style="font-weight:500;">' + relTimeHtml(row.scanned_at) + '</div>' +
           '<div class="scan-when-sub" title="' + escapeHtml(typeMeta.title) + '">' +
             '<span class="scan-type-icon" aria-hidden="true">' + _scanTypeIconSvg(typeMeta.key) + '</span>' +
             escapeHtml(hostLabel) +
@@ -702,7 +686,7 @@ export async function viewScan(scanId, opts) {
       statCard('File', fname, scan ? (scan.hostname || '') : '', '') +
       statCard('Score', scan ? (scan.score != null ? scan.score : '-') : '-', scan ? (scan.score_label || '') : '', scan ? scoreColorClass(scan.score) : '') +
       statCard('Findings', findings.length, 'In this scan', '') +
-      statCard('Date', scan ? scan.scanned_at : '-', '', '') +
+      statCard('Date', scan ? relTimeHtml(scan.scanned_at) : '-', '', '') +
     '</div>' +
     '<div class="card">' +
       '<div class="card-title" style="justify-content:space-between;">' +
@@ -2236,7 +2220,8 @@ function _buildFindingsTable(findings) {
         : '-';
       var details = f.details || f.description || '';
       var shortDetails = details.length > 100 ? details.substring(0, 100) + '\u2026' : details;
-      var time = f.timestamp || _extractTime(f) || '-';
+      var time = f.timestamp || _extractTime(f) || '';
+      var timeCell = time ? relTimeHtml(time) : '<span class="rel-time">—</span>';
       var isOpen = expanded === f._uid;
 
       var rowCls = 'clickable sev-row sev-' + sev.toLowerCase();
@@ -2267,7 +2252,7 @@ function _buildFindingsTable(findings) {
                  'data-filter-dim="severity" data-filter-value="' + sev + '" ' +
                  'data-filter-label="' + escapeHtml(sev) + '">' +
         checkboxCell +
-        '<td class="col-time">' + escapeHtml(time) + '</td>' +
+        '<td class="col-time">' + timeCell + '</td>' +
         '<td class="col-rule" data-filter-dim="rule" data-filter-value="' + escapeHtml(rule) + '" ' +
           'data-filter-label="' + escapeHtml(rule) + '">' +
           '<div class="rule-cell">' +
@@ -3137,7 +3122,7 @@ async function _loadDrawerAssign(f) {
   }
   var current = f.assigned_to != null ? String(f.assigned_to) : '';
   var assignedAt = f.assigned_at ? '<div class="assign-meta">Assigned <strong>' +
-    escapeHtml(f.assigned_at) + '</strong></div>' : '';
+    relTimeHtml(f.assigned_at) + '</strong></div>' : '';
   var meBtn = (me && me.id && current !== String(me.id))
     ? '<button type="button" class="btn-link-sm btn-with-icon" data-action="assignFindingToMe"><i data-lucide="user-check"></i><span>Assign to me</span></button>'
     : '';
@@ -3342,9 +3327,7 @@ function _renderNotesThread(notes) {
     return '<div class="note-item" data-note-id="' + escapeHtml(String(n.id)) + '">' +
       '<div class="note-meta">' +
         '<span class="note-author">' + escapeHtml(author) + '</span>' +
-        '<span class="note-time" title="' + escapeHtml(when) + '">' +
-          escapeHtml(formatRelativeTime(when) || when) +
-        '</span>' +
+        relTimeHtml(when, 'note-time') +
         '<button type="button" class="note-delete" aria-label="Delete note" ' +
           'title="Delete note" data-action="deleteFindingNote" ' +
           'data-arg="' + escapeHtml(String(n.id)) + '">&times;</button>' +
@@ -3418,7 +3401,7 @@ document.addEventListener('input', function (e) {
 function _renderWorkflowSection(f) {
   var current = (f && f.workflow_status) || 'new';
   var updatedLine = f && f.workflow_updated_at
-    ? '<div class="wf-meta">Updated <strong>' + escapeHtml(f.workflow_updated_at) + '</strong></div>'
+    ? '<div class="wf-meta">Updated <strong>' + relTimeHtml(f.workflow_updated_at) + '</strong></div>'
     : '';
   var pills = _WF_STATES.map(function (w) {
     var on = (w.id === current);
@@ -3442,7 +3425,7 @@ function _renderReviewSection(f) {
   var reviewedAtHtml = (touched && f.reviewed_at)
     ? '<div class="review-meta-prominent" id="drawer-review-meta">' +
         '<span class="review-meta-icon">\u29BF</span>' +
-        '<span>Last reviewed at <strong>' + escapeHtml(f.reviewed_at) + '</strong></span>' +
+        '<span>Last reviewed <strong>' + relTimeHtml(f.reviewed_at) + '</strong></span>' +
       '</div>'
     : '<div class="review-meta-prominent" id="drawer-review-meta" style="display:none;"></div>';
 
@@ -3518,7 +3501,7 @@ function _updateReviewMeta(reviewedAt, touched) {
     el.style.display = '';
     el.innerHTML =
       '<span class="review-meta-icon">\u29BF</span>' +
-      '<span>Last reviewed at <strong>' + escapeHtml(reviewedAt) + '</strong></span>';
+      '<span>Last reviewed <strong>' + relTimeHtml(reviewedAt) + '</strong></span>';
   } else {
     el.style.display = 'none';
     el.innerHTML = '';
@@ -3654,7 +3637,7 @@ function _repaintWorkflowPills(state, updatedAt) {
       meta.className = 'wf-meta';
       wrap.parentElement.appendChild(meta);
     }
-    meta.innerHTML = 'Updated <strong>' + escapeHtml(updatedAt) + '</strong>';
+    meta.innerHTML = 'Updated <strong>' + relTimeHtml(updatedAt) + '</strong>';
   }
 }
 
@@ -3815,13 +3798,14 @@ export function buildFindingsTable(findings) {
       var details = f.details || f.description || '';
       var shortDetails = details.length > 120 ? details.substring(0, 120) + '...' : details;
       var timeMatch = details.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
-      var time = f.timestamp || (timeMatch ? timeMatch[1] + ' ' + timeMatch[2] : '-');
+      var time = f.timestamp || (timeMatch ? timeMatch[1] + ' ' + timeMatch[2] : '');
       var rowCls = 'clickable' + (isTouched(f) ? ' row-reviewed' : '');
       var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
+      var timeCell = time ? relTimeHtml(time) : '<span class="rel-time">—</span>';
 
       return '<tr class="' + rowCls + '"' + fidAttr + ' ' +
              'data-action="openScanDetailFindingByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
-        '<td class="col-time">' + time + '</td>' +
+        '<td class="col-time">' + timeCell + '</td>' +
         '<td class="col-severity">' + sevPillHtml(sev) + '</td>' +
         '<td class="col-rule">' + rule + '</td>' +
         '<td class="col-mitre">' + mitreLink + '</td>' +

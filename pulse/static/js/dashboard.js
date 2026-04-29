@@ -19,17 +19,6 @@ import {
   isReviewed,
   isFalsePositive,
 } from './findings.js';
-import {
-  WIDGETS,
-  loadLayout,
-  saveLayout,
-  resetLayout,
-  isEditMode,
-  setEditMode,
-  moveWidget,
-  setWidgetVisible,
-  widgetLabel,
-} from './dashboard-layout.js';
 
 // ---------------------------------------------------------------
 // Shared state
@@ -140,17 +129,49 @@ export function _gradeRank(score) {
   return { A: 5, B: 4, C: 3, D: 2, F: 1 }[g] || 0;
 }
 
-// Short relative time — "just now" / "3m ago" / "2h ago" / "5d ago".
+// Short relative time — "just now" / "3m ago" / "2h ago" / "5d ago" /
+// "Apr 21" (or "Apr 21, 2025" if the year isn't the current one).
 // Accepts ISO strings (DB stores local time as "YYYY-MM-DD HH:MM:SS").
+//
+// The 7-day cutoff is the user-experience inflection: anything within
+// the last week is "I remember roughly when that was"; older than that
+// the absolute date carries more meaning than "47d ago".
 export function formatRelativeTime(iso) {
   if (!iso) return '—';
   var d = new Date(String(iso).replace(' ', 'T'));
   if (isNaN(d.getTime())) return String(iso);
   var sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-  if (sec < 45)    return 'just now';
-  if (sec < 3600)  return Math.floor(sec / 60)  + 'm ago';
-  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
-  return Math.floor(sec / 86400) + 'd ago';
+  if (sec < 45)        return 'just now';
+  if (sec < 3600)      return Math.floor(sec / 60)  + 'm ago';
+  if (sec < 86400)     return Math.floor(sec / 3600) + 'h ago';
+  if (sec < 86400 * 7) return Math.floor(sec / 86400) + 'd ago';
+  // ≥ 7 days: absolute month-day. Include the year when it isn't the
+  // current calendar year so an entry from 18 months ago doesn't read
+  // ambiguously as "Apr 21".
+  var now = new Date();
+  var sameYear = (d.getFullYear() === now.getFullYear());
+  var opts = sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' };
+  try { return d.toLocaleDateString(undefined, opts); }
+  catch (e) { return d.toISOString().slice(0, 10); }
+}
+
+// Wrapped form for direct use in templates — returns a `<span>` with
+// the absolute timestamp as a hover tooltip and the relative value as
+// the visible text. Accepts the same input as `formatRelativeTime`.
+//
+// `extraClass` adds class names (e.g. for muted-styled cells) without
+// callers having to escape the wrapper themselves. The visible text is
+// always `formatRelativeTime`-ed and HTML-escaped; the title is the
+// raw input string so it shows the local-time value the DB stored.
+export function relTimeHtml(iso, extraClass) {
+  if (!iso) return '<span class="rel-time">—</span>';
+  var rel  = formatRelativeTime(iso);
+  var cls  = 'rel-time' + (extraClass ? ' ' + extraClass : '');
+  return '<span class="' + cls + '" title="' + attrEscape(iso) + '">' +
+           escapeHtml(rel) +
+         '</span>';
 }
 
 // Refresh ticker for the Dashboard "Last updated" timestamp. Recreated
@@ -649,14 +670,14 @@ export function _dashFindingsHtml(findings) {
       var sev = (f.severity || 'LOW').toUpperCase();
       var rule = f.rule || 'Unknown';
       var details = f.details || f.description || '';
-      var time = f.timestamp || _extractTime(f) || '-';
+      var time = f.timestamp || _extractTime(f) || '';
       var rowCls = 'dash-finding-row sev-' + sev.toLowerCase() +
                    (isTouched(f) ? ' row-reviewed' : '');
       var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
       return '<div class="' + rowCls + '"' + fidAttr + ' ' +
              'data-action="openFindingDrawerByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
         '<div>' +
-          '<div class="time">' + escapeHtml(time) + '</div>' +
+          '<div class="time">' + (time ? relTimeHtml(time) : '<span class="rel-time">—</span>') + '</div>' +
         '</div>' +
         '<div>' +
           '<div class="rule">' + escapeHtml(rule) + '</div>' +
@@ -772,7 +793,7 @@ export function _needsAttentionHtml(findings, scansInWindow) {
       '<span class="na-rule">' + escapeHtml(rule) + '</span>' +
       sevPillHtml(sev) +
       '<span class="na-host">' + escapeHtml(host) + '</span>' +
-      '<span class="na-time">' + escapeHtml(time) + '</span>' +
+      '<span class="na-time">' + relTimeHtml(time) + '</span>' +
     '</div>';
   }).join('');
 
@@ -974,7 +995,7 @@ export function _dashTopHostsHtml(scans) {
                '<div class="offender-host mono">' + escapeHtml(r.host) + '</div>' +
                '<div class="offender-bar-wrap"><div class="offender-bar" style="width:' + pct + '%"></div></div>' +
                '<div class="offender-count">' + r.count + '</div>' +
-               '<div class="offender-last">' + escapeHtml(formatRelativeTime(r.last) || '') + '</div>' +
+               '<div class="offender-last">' + relTimeHtml(r.last) + '</div>' +
              '</div>';
     }).join('') +
   '</div>';
@@ -1246,9 +1267,7 @@ export async function renderDashboardPage() {
       '</div>';
   }
 
-  // Build each customizable widget's inner HTML up front — render order
-  // is decided by the saved layout below. Wrapping happens in `_wrapWidget`.
-  var kpiInner =
+  var kpiHtml =
     '<div class="stat-row stat-row-6">' +
       _trendStatCard('Daily Score',
                      score + ' <span style="font-size:14px; opacity:0.7;">(' + grade + ')</span>',
@@ -1276,7 +1295,7 @@ export async function renderDashboardPage() {
                      null, null) +
     '</div>';
 
-  var standupInner =
+  var standupHtml =
     '<div class="standup-row">' +
       '<div class="card standup-card">' +
         '<div class="section-label">Data reduction — events through to critical</div>' +
@@ -1288,7 +1307,7 @@ export async function renderDashboardPage() {
       '</div>' +
     '</div>';
 
-  var chartsInner =
+  var chartsHtml =
     '<div class="dash-chart-row">' +
 
       '<div class="card dash-chart-card">' +
@@ -1331,7 +1350,7 @@ export async function renderDashboardPage() {
       '</div>' +
     '</div>';
 
-  var mitreInner =
+  var mitreHtml =
     '<div class="dash-mitre-row">' +
       '<div class="card">' +
         '<div class="section-label">MITRE ATT&amp;CK Categories</div>' +
@@ -1343,7 +1362,7 @@ export async function renderDashboardPage() {
       '</div>' +
     '</div>';
 
-  var findingsInner = (recentFindings.length > 0)
+  var findingsHtml = (recentFindings.length > 0)
     ? '<div class="card">' +
         '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
           '<span>Last Scan Findings</span>' +
@@ -1355,186 +1374,19 @@ export async function renderDashboardPage() {
         ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
         : '');
 
-  var WIDGET_HTML = {
-    kpi:      kpiInner,
-    standup:  standupInner,
-    charts:   chartsInner,
-    mitre:    mitreInner,
-    findings: findingsInner,
-  };
-
   c.innerHTML =
     dashMetaHtml +
     filterBarHtml +
     emptyBannerHtml +
     attentionHtml +
-    _renderWidgetsHtml(WIDGET_HTML);
+    kpiHtml +
+    standupHtml +
+    chartsHtml +
+    mitreHtml +
+    findingsHtml;
 
   _initScoreLineChart(dailyScores);
   _startDashUpdatedTimer(updatedIso);
-  _wireDashboardDnD();
-}
-
-// ---------------------------------------------------------------
-// Customizable widget layout — render, edit-mode chrome, drag-and-drop
-// ---------------------------------------------------------------
-
-function _wrapWidget(id, inner) {
-  var label = widgetLabel(id);
-  var edit = isEditMode();
-  var attrs = ' data-widget-id="' + id + '"' +
-              (edit ? ' draggable="true"' : '');
-  var cls = 'dash-widget' + (edit ? ' dash-widget-edit' : '');
-  var toolbar = edit
-    ? '<div class="dash-widget-toolbar">' +
-        '<span class="dash-widget-handle" title="Drag to reorder" aria-hidden="true">☰</span>' +
-        '<span class="dash-widget-name">' + escapeHtml(label) + '</span>' +
-        '<button type="button" class="dash-widget-hide" ' +
-          'data-action="hideDashWidget" data-arg="' + id + '" ' +
-          'title="Hide this panel">Hide</button>' +
-      '</div>'
-    : '';
-  return '<section class="' + cls + '"' + attrs + '>' +
-           toolbar +
-           '<div class="dash-widget-body">' + (inner || '') + '</div>' +
-         '</section>';
-}
-
-function _renderWidgetsHtml(widgetHtml) {
-  var layout = loadLayout();
-  var edit = isEditMode();
-
-  var visibleHtml = layout
-    .filter(function (e) { return e.visible; })
-    .map(function (e) {
-      var inner = widgetHtml[e.id];
-      // In normal mode, drop empty widgets (e.g. findings with nothing
-      // to show) so the dashboard doesn't render an empty shell. In
-      // edit mode keep the shell so the user can still reorder/hide it.
-      if (!edit && (inner == null || inner === '')) return '';
-      return _wrapWidget(e.id, inner == null ? '' : inner);
-    }).join('');
-
-  var endTarget = edit
-    ? '<div class="dash-widget-end-drop" data-widget-end="1"></div>'
-    : '';
-
-  var topBar = '<div class="dash-customize-bar' + (edit ? ' editing' : '') + '">' +
-    (edit
-      ? '<span class="dash-customize-msg">Drag panels to reorder. Click Hide to remove. ' +
-          'Hidden panels appear below.</span>' +
-        '<div class="dash-customize-actions">' +
-          '<button type="button" class="dash-customize-btn ghost" ' +
-            'data-action="resetDashLayout">Reset</button>' +
-          '<button type="button" class="dash-customize-btn primary" ' +
-            'data-action="exitDashEditMode">Done</button>' +
-        '</div>'
-      : '<button type="button" class="dash-customize-btn" ' +
-          'data-action="enterDashEditMode" title="Customize dashboard layout">' +
-          '<span>Customize layout</span></button>'
-    ) + '</div>';
-
-  var hidden = layout.filter(function (e) { return !e.visible; });
-  var trayHtml = '';
-  if (edit && hidden.length) {
-    trayHtml = '<div class="dash-hidden-tray">' +
-      '<div class="dash-hidden-tray-label">Hidden panels</div>' +
-      '<div class="dash-hidden-tray-list">' +
-        hidden.map(function (e) {
-          return '<button type="button" class="dash-hidden-chip" ' +
-            'data-action="showDashWidget" data-arg="' + e.id + '">' +
-            '<span class="dash-hidden-chip-plus" aria-hidden="true">+</span>' +
-            '<span>' + escapeHtml(widgetLabel(e.id)) + '</span>' +
-          '</button>';
-        }).join('') +
-      '</div></div>';
-  }
-
-  return topBar + visibleHtml + endTarget + trayHtml;
-}
-
-let _dragSrcId = null;
-function _clearDropMarkers() {
-  document.querySelectorAll('.dash-widget.drop-before, .dash-widget-end-drop.drop-active')
-    .forEach(function (n) {
-      n.classList.remove('drop-before');
-      n.classList.remove('drop-active');
-    });
-}
-
-function _wireDashboardDnD() {
-  if (!isEditMode()) return;
-  var widgets = document.querySelectorAll('.dash-widget[draggable="true"]');
-  widgets.forEach(function (el) {
-    el.addEventListener('dragstart', function (e) {
-      _dragSrcId = el.dataset.widgetId || null;
-      el.classList.add('dragging');
-      try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
-      try { e.dataTransfer.setData('text/plain', _dragSrcId || ''); } catch (_) {}
-    });
-    el.addEventListener('dragend', function () {
-      el.classList.remove('dragging');
-      _clearDropMarkers();
-      _dragSrcId = null;
-    });
-    el.addEventListener('dragover', function (e) {
-      if (!_dragSrcId) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-      _clearDropMarkers();
-      el.classList.add('drop-before');
-    });
-    el.addEventListener('drop', function (e) {
-      e.preventDefault();
-      var dstId = el.dataset.widgetId || null;
-      if (_dragSrcId && dstId && _dragSrcId !== dstId) {
-        moveWidget(_dragSrcId, dstId);
-        renderDashboardPage();
-      }
-    });
-  });
-  var endDrop = document.querySelector('.dash-widget-end-drop');
-  if (endDrop) {
-    endDrop.addEventListener('dragover', function (e) {
-      if (!_dragSrcId) return;
-      e.preventDefault();
-      _clearDropMarkers();
-      endDrop.classList.add('drop-active');
-    });
-    endDrop.addEventListener('drop', function (e) {
-      e.preventDefault();
-      if (_dragSrcId) {
-        moveWidget(_dragSrcId, null);
-        renderDashboardPage();
-      }
-    });
-  }
-
-}
-
-export function enterDashEditMode() {
-  setEditMode(true);
-  renderDashboardPage();
-}
-
-export function exitDashEditMode() {
-  setEditMode(false);
-  renderDashboardPage();
-}
-
-export function hideDashWidget(id) {
-  setWidgetVisible(id, false);
-  renderDashboardPage();
-}
-
-export function showDashWidget(id) {
-  setWidgetVisible(id, true);
-  renderDashboardPage();
-}
-
-export function resetDashLayout() {
-  resetLayout();
-  renderDashboardPage();
 }
 
 // ---------------------------------------------------------------
