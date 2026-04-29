@@ -123,8 +123,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
 - [ ] ~~Custom branding~~ — *deferred to Backlog; first pass shipped then reverted on 2026-04-24 because replacing the Pulse brand in the sidebar conflicted with the product identity. The future pass should keep the Pulse logo + "PULSE" title, and surface the org name as a subtitle underneath. The empty `branding` table already exists on current installs so the future sprint can reuse the schema.*
 - [x] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
-- [ ] Dashboard widgets — customizable layout with drag-and-drop panels
-
+- [x] Dashboard widgets — customizable layout with drag-and-drop panels (Customize layout button puts the dashboard into edit mode; each major panel — KPI strip, standup row, charts, MITRE, last-scan findings — can be reordered via HTML5 drag-and-drop and hidden / restored from a tray. Order + visibility persist per browser in `localStorage.pulseDashWidgets`)
 - [x] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
 
 ---
@@ -135,9 +134,9 @@ The hosted dashboard on Render can't scan a Windows machine itself — the OS ca
 
 ### Hosted dashboard (stays on Render)
 - [ ] Multi-tenant data model — every scan / finding / fleet row scoped to an `organization_id` so agents from different customers never cross-contaminate
-- [ ] Agent enrollment flow — Settings > Agents page generates a per-host enrollment token (long-lived, rotatable, scoped to one org); install script on Windows consumes it once and exchanges for a regular API token
-- [ ] Agent status panel — each registered host shows last-heartbeat, agent version, auto-scan schedule, "pause agent" button; stale agents (>24h no check-in) turn red on the Fleet page
-- [ ] `POST /api/agent/heartbeat` + `POST /api/agent/findings` — new endpoints the agent hits instead of uploading raw `.evtx`. Findings arrive pre-computed so the server never has to run detections on Linux
+- [x] Agent enrollment flow — Settings → Agents tab mints a single-use, 1h-TTL enrollment token (`pe_…`); the agent installer trades it via `POST /api/agent/exchange` for a long-lived bearer (`pa_…`). Both tokens are sha256-at-rest, raw values shown once. Delete-agent revokes the bearer immediately
+- [x] Agent status panel — Settings → Agents lists every registered host with status pill (online / stale / offline / paused / pending), last-heartbeat relative time, hostname + platform, version. Pause and Delete actions per row; viewers see only their own agents, admins see every install
+- [x] `POST /api/agent/heartbeat` + `POST /api/agent/findings` — implemented in `pulse/api.py`. Heartbeat updates `last_heartbeat_at` and surfaces the paused flag; findings ingest writes a scan attributed to the enrolling user with `scans.agent_id` stamped for provenance. Paused agents ack heartbeats but their findings are dropped so quiet-mode is observable from both sides
 - [ ] Hide / disable "Scan my system" in hosted mode — replace with a **Download Pulse Agent** button that links to the installer; CLI-upload path stays usable for analysts who prefer to scan manually
 - [ ] Public landing / signup page — Splunk-style `pulse.io`-ish marketing page with Sign Up → org created → agent download link in one flow
 

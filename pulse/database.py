@@ -284,6 +284,37 @@ CREATE TABLE IF NOT EXISTS waitlist_signups (
 """
 
 
+# Pulse Agents — one row per registered host. Lifecycle is two-step:
+#   1) Admin clicks "Add agent" -> we mint a single-use enrollment token,
+#      store its sha256 here, and show the raw token to the admin once.
+#   2) The agent installer POSTs the enrollment token to /api/agent/exchange,
+#      we validate the hash, mint a long-lived agent_token (sha256 stored),
+#      clear enrollment_token_sha256, and return the raw agent_token.
+# After exchange, the agent uses agent_token as a Bearer header for
+# /api/agent/heartbeat and /api/agent/findings. The owning user_id is the
+# admin who minted the enrollment so scans uploaded by the agent attribute
+# back to that user, falling out of existing data-isolation scopes.
+_CREATE_AGENTS = """
+CREATE TABLE IF NOT EXISTS agents (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name                     TEXT    NOT NULL,
+    hostname                 TEXT,
+    platform                 TEXT,
+    version                  TEXT,
+    enrollment_token_sha256  TEXT,
+    enrollment_expires_at    TEXT,
+    agent_token_sha256       TEXT,
+    agent_token_last4        TEXT,
+    last_heartbeat_at        TEXT,
+    last_status              TEXT,
+    paused                   INTEGER NOT NULL DEFAULT 0,
+    created_at               TEXT    NOT NULL,
+    enrolled_at              TEXT
+);
+"""
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -312,6 +343,7 @@ def init_db(db_path):
         _CREATE_BRANDING,
         _CREATE_INTEL_CACHE,
         _CREATE_WAITLIST,
+        _CREATE_AGENTS,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -351,6 +383,10 @@ def init_db(db_path):
         # can surface their real name instead of an email prefix. NULL
         # means "fall back to the email local-part" at render time.
         "ALTER TABLE users ADD COLUMN display_name TEXT",
+        # Sprint 7 agent split — scans uploaded by a Pulse Agent carry the
+        # agent's id so the UI can show provenance and an admin can audit
+        # which host the data came from. NULL = manual upload / live monitor.
+        "ALTER TABLE scans ADD COLUMN agent_id INTEGER",
     )
 
     with _connect(db_path) as conn:
@@ -391,7 +427,7 @@ def init_db(db_path):
             pass
 
 
-def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None):
+def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None, agent_id=None):
     """
     Saves a completed scan and all its findings to the database.
 
@@ -423,12 +459,13 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
                 total_findings, score, score_label, filename, scope,
-                session_id, duration_sec, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                session_id, duration_sec, user_id, agent_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
              total_findings, score, score_label, filename, scope,
              session_id, duration_sec,
-             int(user_id) if user_id else None)
+             int(user_id) if user_id else None,
+             int(agent_id) if agent_id else None)
         )
         scan_id = cursor.lastrowid
 
@@ -1751,6 +1788,183 @@ def touch_api_token(db_path, token_sha256):
             " WHERE token_sha256 = ? AND revoked = 0",
             (now, token_sha256),
         )
+
+
+# ---------------------------------------------------------------------------
+# Pulse Agents (Sprint 7) — host enrollment + agent token bookkeeping.
+# Two-phase auth: enrollment_token_sha256 is single-use and gets cleared on
+# exchange; agent_token_sha256 is the long-lived bearer.
+# ---------------------------------------------------------------------------
+
+def _row_to_agent(r):
+    if not r:
+        return None
+    return {
+        "id": r[0],
+        "user_id": r[1],
+        "name": r[2],
+        "hostname": r[3],
+        "platform": r[4],
+        "version": r[5],
+        "enrollment_token_sha256": r[6],
+        "enrollment_expires_at": r[7],
+        "agent_token_sha256": r[8],
+        "agent_token_last4": r[9],
+        "last_heartbeat_at": r[10],
+        "last_status": r[11],
+        "paused": int(r[12] or 0),
+        "created_at": r[13],
+        "enrolled_at": r[14],
+    }
+
+
+_AGENT_COLS = (
+    "id, user_id, name, hostname, platform, version,"
+    " enrollment_token_sha256, enrollment_expires_at,"
+    " agent_token_sha256, agent_token_last4,"
+    " last_heartbeat_at, last_status, paused, created_at, enrolled_at"
+)
+
+
+def insert_agent(db_path, user_id, name, enrollment_token_sha256,
+                 enrollment_expires_at):
+    """Create a pending agent row carrying only the enrollment-token hash.
+    The agent_token columns are filled by `complete_agent_enrollment` once
+    the agent installer exchanges the enrollment token for a long-lived
+    bearer."""
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO agents (user_id, name, enrollment_token_sha256,"
+            " enrollment_expires_at, paused, created_at)"
+            " VALUES (?, ?, ?, ?, 0, ?)",
+            (int(user_id), name, enrollment_token_sha256,
+             enrollment_expires_at, created_at),
+        )
+        return cursor.lastrowid
+
+
+def get_agent_by_id(db_path, agent_id):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"SELECT {_AGENT_COLS} FROM agents WHERE id = ?",
+            (int(agent_id),),
+        ).fetchone()
+    return _row_to_agent(row)
+
+
+def find_agent_by_enrollment_hash(db_path, token_sha256):
+    """Look up the still-pending agent that minted this enrollment token.
+    Returns None if the token has been exchanged or never existed."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"SELECT {_AGENT_COLS} FROM agents"
+            " WHERE enrollment_token_sha256 = ?",
+            (token_sha256,),
+        ).fetchone()
+    return _row_to_agent(row)
+
+
+def find_agent_by_token_hash(db_path, token_sha256):
+    """Look up the agent that owns this long-lived agent token. Used by
+    the API auth path for /api/agent/* endpoints."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"SELECT {_AGENT_COLS} FROM agents"
+            " WHERE agent_token_sha256 = ?",
+            (token_sha256,),
+        ).fetchone()
+    return _row_to_agent(row)
+
+
+def complete_agent_enrollment(db_path, agent_id, *, agent_token_sha256,
+                              agent_token_last4, hostname=None,
+                              platform=None, version=None):
+    """Finalize enrollment: stamp the agent token, clear the single-use
+    enrollment token, and capture host metadata reported by the installer.
+    Returns True if the row was updated."""
+    enrolled_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE agents SET"
+            "  agent_token_sha256 = ?,"
+            "  agent_token_last4 = ?,"
+            "  enrollment_token_sha256 = NULL,"
+            "  enrollment_expires_at = NULL,"
+            "  hostname = COALESCE(?, hostname),"
+            "  platform = COALESCE(?, platform),"
+            "  version = COALESCE(?, version),"
+            "  enrolled_at = ?"
+            " WHERE id = ?",
+            (agent_token_sha256, agent_token_last4,
+             hostname, platform, version, enrolled_at, int(agent_id)),
+        )
+        return cursor.rowcount > 0
+
+
+def record_agent_heartbeat(db_path, agent_id, *, status=None, version=None):
+    """Bump last_heartbeat_at to now and optionally update status/version."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE agents SET"
+            "  last_heartbeat_at = ?,"
+            "  last_status = COALESCE(?, last_status),"
+            "  version = COALESCE(?, version)"
+            " WHERE id = ?",
+            (now, status, version, int(agent_id)),
+        )
+
+
+def list_agents(db_path, user_id=None):
+    """Newest-first list of agents. ``user_id=None`` is admin scope (every
+    agent across the install); otherwise restrict to agents the user owns."""
+    with _connect(db_path) as conn:
+        if user_id is None:
+            rows = conn.execute(
+                f"SELECT {_AGENT_COLS} FROM agents ORDER BY id DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_AGENT_COLS} FROM agents"
+                " WHERE user_id = ? ORDER BY id DESC",
+                (int(user_id),),
+            ).fetchall()
+    return [_row_to_agent(r) for r in rows]
+
+
+def set_agent_paused(db_path, agent_id, paused, *, owner_user_id=None):
+    """Toggle the paused flag. If owner_user_id is given the row must belong
+    to that user (viewer-scope guard); pass None for admin callers."""
+    with _connect(db_path) as conn:
+        if owner_user_id is None:
+            cursor = conn.execute(
+                "UPDATE agents SET paused = ? WHERE id = ?",
+                (1 if paused else 0, int(agent_id)),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE agents SET paused = ? WHERE id = ? AND user_id = ?",
+                (1 if paused else 0, int(agent_id), int(owner_user_id)),
+            )
+        return cursor.rowcount > 0
+
+
+def delete_agent(db_path, agent_id, *, owner_user_id=None):
+    """Hard delete. Same scope rules as `set_agent_paused`. Returns True if
+    a row was removed."""
+    with _connect(db_path) as conn:
+        if owner_user_id is None:
+            cursor = conn.execute(
+                "DELETE FROM agents WHERE id = ?",
+                (int(agent_id),),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM agents WHERE id = ? AND user_id = ?",
+                (int(agent_id), int(owner_user_id)),
+            )
+        return cursor.rowcount > 0
 
 
 # ---------------------------------------------------------------------------

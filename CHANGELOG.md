@@ -5,6 +5,35 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-28 — Pulse Agents (Sprint 7 transport layer)
+
+### Added
+- **`agents` table + `scans.agent_id`** (`pulse/database.py`) — one row per registered host with two-phase token columns: `enrollment_token_sha256` (single-use, 1h TTL) is filled by the dashboard at mint and cleared on exchange; `agent_token_sha256` + `agent_token_last4` are filled at exchange and stay until the operator deletes the agent. Heartbeat metadata (`last_heartbeat_at`, `last_status`, `version`, `paused`) is updated by every check-in. Scans uploaded by an agent carry the new `scans.agent_id` column for provenance
+- **`pulse/agents.py`** — server-side enrollment + heartbeat orchestration. Token generation uses `secrets.token_urlsafe` with `pe_` / `pa_` prefixes (so logs read at a glance), sha256 hashing pattern matches `api_tokens`, single-use enrollment guarded by hash-clear-on-exchange, and `compute_status()` maps a row → status pill (`online` / `stale` / `offline` / `paused` / `pending`) using 3-min and 1-hour heartbeat windows
+- **API endpoints** (`pulse/api.py`):
+  - `POST /api/agents` (admin-authed) — mint enrollment token, returns the raw value exactly once
+  - `GET  /api/agents` — list with status (viewers see their own agents; admins see all)
+  - `PUT  /api/agents/{id}` — toggle the paused flag (owner or admin)
+  - `DELETE /api/agents/{id}` — hard delete; bearer token stops working immediately
+  - `POST /api/agent/exchange` — *no auth*. Trades a still-pending enrollment token for a long-lived agent token; rate-limited to 30 attempts / 5 min / IP. Single use: a successful call clears the enrollment hash so a replay returns 401
+  - `POST /api/agent/heartbeat` — Bearer-authed by `agent_token`. Bumps `last_heartbeat_at`, returns `{paused}` so the agent can self-throttle
+  - `POST /api/agent/findings` — Bearer-authed; persists a scan + findings attributed to the enrolling user with `scans.agent_id` stamped. Hostname/scope/duration come from the request body, defaulting to the agent's registered hostname. Paused agents still ack the heartbeat side-channel but their findings are dropped server-side. 25k-finding cap matches the upload-side ceiling
+- **Auth middleware exception** for `/api/agent/` (singular) — those routes authenticate themselves against the `agents` table; the user-session middleware was returning 401 before we ever reached the handler. The plural `/api/agents/` management routes stay behind the normal user-session check
+- **Settings → Agents tab** (`pulse/static/js/settings.js`) — third-from-top tab in the Settings nav. Top card: enroll a new agent by name, surfaces the raw enrollment token in a tinted "copy this now" banner with a Copy button (clipboard API + `window.prompt` fallback). Bottom card: registered-agents table with name, status pill, hostname/platform, version, last-seen relative time, and per-row Pause/Resume + Delete buttons
+- **`tests/test_agents.py`** — 12 new tests cover the full server-side flow: enrollment + exchange round-trip, replay rejection, expired-token rejection, heartbeat updates, status computation across all five states, end-to-end POST chain over `TestClient`, paused-agent drop semantics, agent listing without secrets, delete-revokes-token, and viewer-cannot-manage-admin-agent ownership guard
+
+### Why this lands first
+The roadmap's Sprint 7 is "agent / server split — the Splunk distribution model". This change ships the wire layer the future Pulse Agent will speak: enrollment, heartbeat, and findings ingest. With this in place, the next ship (`pulse-agent.exe` via PyInstaller) has a real server to talk to from minute one. Multi-tenant data isolation is still pending — agents currently attach to the enrolling user, which is correct for single-org installs but will need an `organization_id` column before this can serve more than one customer
+
+---
+
+## 2026-04-28 — Customizable dashboard widgets
+
+### Added
+- **Drag-and-drop dashboard layout** (`pulse/static/js/dashboard-layout.js`) — five major dashboard panels (KPI strip, standup row, charts, MITRE categories + top rules, last-scan findings) are now wrapped as `dash-widget` shells whose order and visibility the user controls. A "Customize layout" button at the top of the Dashboard enters edit mode: each widget grows a toolbar with a drag handle and Hide button, the whole shell becomes `draggable="true"`, and an end-of-list drop sentinel lets users send a panel to the bottom. Hidden widgets surface as chips in a "Hidden panels" tray below the canvas; clicking a chip restores the widget at its original position. Layout (`[{id, visible}, …]`) persists per browser in `localStorage.pulseDashWidgets`; a Reset button wipes the override and falls back to the default order. Layout reconciles on load against the in-code `WIDGETS` registry so a future release that adds a panel surfaces it automatically (visible, at the end). Closes the last in-flight Sprint 6 item
+
+---
+
 ## 2026-04-24 — Contextual sidebar filter panel (first pass)
 
 ### Added

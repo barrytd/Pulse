@@ -303,7 +303,12 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     # existing endpoint, a single middleware 401s for unauthenticated requests
     # to /api/*. Exceptions are the login surface and the health check.
     _AUTH_EXEMPT_EXACT   = {"/api/health"}
-    _AUTH_EXEMPT_PREFIX  = ("/api/auth/",)
+    # `/api/agent/` (singular) is the agent transport surface — exchange,
+    # heartbeat, findings. Each route authenticates itself against the
+    # agents table; the user-session middleware would always 401 these
+    # otherwise. The plural `/api/agents/` management routes stay behind
+    # the normal user-session check.
+    _AUTH_EXEMPT_PREFIX  = ("/api/auth/", "/api/agent/")
 
     @app.middleware("http")
     async def _auth_middleware(request, call_next):
@@ -809,6 +814,243 @@ def _register_routes(app: FastAPI) -> None:
         if not revoke_api_token(app.state.db_path, token_id, user_id):
             raise HTTPException(404, detail="Token not found.")
         return {"status": "ok"}
+
+    # -------------------------------------------------------------------
+    # Pulse Agents (Sprint 7) — host enrollment + heartbeat + findings ingest
+    # -------------------------------------------------------------------
+    # Two routes are unauthenticated by design and instead authorize on
+    # the Bearer token themselves:
+    #   POST /api/agent/exchange  — agent installer trades an enrollment
+    #                               token for a long-lived agent token.
+    #   POST /api/agent/heartbeat — periodic check-in.
+    #   POST /api/agent/findings  — agent uploads detection results.
+    # The /api/agents (with the trailing s) routes are the dashboard-side
+    # management surface and require a logged-in user.
+    from pulse import agents as _agents
+
+    _AGENT_NAME_MAX = 64
+
+    def _resolve_agent_from_request(request: Request):
+        """Authenticate an agent-bearing request. Returns the agent dict or
+        raises HTTPException(401). Used by /api/agent/heartbeat and
+        /api/agent/findings — separate from `require_login` because agent
+        tokens are not user tokens."""
+        auth = request.headers.get("authorization") or ""
+        if not auth.lower().startswith("bearer "):
+            raise HTTPException(401, detail="Missing agent token.")
+        raw = auth[7:].strip()
+        agent = _agents.authenticate_agent(app.state.db_path, raw)
+        if not agent:
+            raise HTTPException(401, detail="Invalid agent token.")
+        return agent
+
+    def _agent_owner_or_admin(agent_id: int, caller_user_id: int) -> dict:
+        """Fetch an agent the caller is allowed to manage. Admins can act
+        on any agent; viewers only on agents they own. Raises 404 in both
+        the "doesn't exist" and "not yours" cases so a viewer can't probe
+        for other users' agent ids."""
+        from pulse.database import get_agent_by_id as _get_agent
+        a = _get_agent(app.state.db_path, agent_id)
+        if not a:
+            raise HTTPException(404, detail="Agent not found.")
+        if not app.state.auth_required:
+            return a
+        caller = get_user_by_id(app.state.db_path, caller_user_id) or {}
+        if caller.get("role") == "admin":
+            return a
+        if a.get("user_id") != caller_user_id:
+            raise HTTPException(404, detail="Agent not found.")
+        return a
+
+    @app.get("/api/agents")
+    def api_list_agents(user_id: int = Depends(require_login)):
+        from pulse.database import list_agents as _list_agents
+        scope = _scan_scope_for(app, user_id)
+        rows = _list_agents(app.state.db_path, user_id=scope)
+        return {"agents": [_agents.public_view(a) for a in rows]}
+
+    @app.post("/api/agents")
+    async def api_create_agent(request: Request, user_id: int = Depends(require_login)):
+        """Mint a new enrollment token. The raw token is returned exactly
+        once — the UI must surface it as a "copy-now-or-lose-it" snippet."""
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Agent enrollment requires authentication.")
+        rate_limit.hit(request, "agent_enroll", window_sec=3600, max_hits=20)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        name = str(body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(400, detail="Agent name is required.")
+        if len(name) > _AGENT_NAME_MAX:
+            raise HTTPException(400, detail=f"Agent name must be {_AGENT_NAME_MAX} chars or fewer.")
+        result = _agents.mint_enrollment(
+            app.state.db_path, user_id=user_id, name=name,
+        )
+        return result
+
+    @app.put("/api/agents/{agent_id}")
+    async def api_update_agent(agent_id: int, request: Request,
+                               user_id: int = Depends(require_login)):
+        """Toggle the paused flag. Body: {"paused": bool}. Other fields
+        are read-only from the dashboard — version/hostname come from the
+        agent itself on next heartbeat."""
+        agent = _agent_owner_or_admin(agent_id, user_id)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict) or "paused" not in body:
+            raise HTTPException(400, detail="Body must be {'paused': bool}.")
+        from pulse.database import set_agent_paused as _set_paused
+        _set_paused(app.state.db_path, agent["id"], bool(body.get("paused")))
+        return {"status": "ok", "paused": bool(body.get("paused"))}
+
+    @app.delete("/api/agents/{agent_id}")
+    def api_delete_agent(agent_id: int, user_id: int = Depends(require_login)):
+        agent = _agent_owner_or_admin(agent_id, user_id)
+        from pulse.database import delete_agent as _del_agent
+        _del_agent(app.state.db_path, agent["id"])
+        return {"status": "ok"}
+
+    @app.post("/api/agent/exchange")
+    async def api_agent_exchange(request: Request):
+        """Trade an enrollment token for a long-lived agent token.
+        Public (no auth) — the enrollment token IS the credential. Single
+        use: a successful exchange clears the enrollment token hash so a
+        replay attempt returns 401."""
+        rate_limit.hit(request, "agent_exchange", window_sec=300, max_hits=30)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        token = str(body.get("enrollment_token") or "").strip()
+        if not token:
+            raise HTTPException(400, detail="enrollment_token is required.")
+        # Optional metadata reported by the installer. Trimmed to keep
+        # log lines + UI rendering bounded; nothing here gates auth.
+        hostname = (str(body.get("hostname") or "").strip() or None)
+        platform = (str(body.get("platform") or "").strip() or None)
+        version  = (str(body.get("version")  or "").strip() or None)
+        if hostname and len(hostname) > 255: hostname = hostname[:255]
+        if platform and len(platform) > 64:  platform = platform[:64]
+        if version  and len(version)  > 32:  version  = version[:32]
+        result = _agents.exchange_enrollment(
+            app.state.db_path,
+            enrollment_token=token,
+            hostname=hostname, platform=platform, version=version,
+        )
+        if not result:
+            raise HTTPException(401, detail="Enrollment token invalid or expired.")
+        return result
+
+    @app.post("/api/agent/heartbeat")
+    async def api_agent_heartbeat(request: Request):
+        agent = _resolve_agent_from_request(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        status = str(body.get("status") or "").strip() or None
+        version = str(body.get("version") or "").strip() or None
+        if status and len(status) > 64:   status = status[:64]
+        if version and len(version) > 32: version = version[:32]
+        _agents.heartbeat(
+            app.state.db_path, agent["id"],
+            status=status, version=version,
+        )
+        return {
+            "status": "ok",
+            "agent_id": agent["id"],
+            "paused": bool(agent.get("paused")),
+        }
+
+    @app.post("/api/agent/findings")
+    async def api_agent_findings(request: Request):
+        """Ingest a scan + findings produced by the agent's local detections.
+        Body shape:
+          {
+            "scan": {
+               "hostname": "...", "scope": "...",
+               "files_scanned": int, "total_events": int,
+               "duration_sec": int (optional)
+            },
+            "findings": [ {rule, severity, description, ...}, ... ]
+          }
+        Paused agents are accepted on the wire (so we still see they're
+        alive) but the findings are dropped — the UI surfaces "paused" so
+        operators know why the host appears quiet.
+        """
+        agent = _resolve_agent_from_request(request)
+        # Heartbeat on the same call so an agent that only ever uploads
+        # findings still shows as online.
+        _agents.heartbeat(app.state.db_path, agent["id"])
+        if agent.get("paused"):
+            return {"status": "paused", "scan_id": None, "findings_saved": 0}
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        scan_meta = body.get("scan") if isinstance(body.get("scan"), dict) else {}
+        findings = body.get("findings")
+        if not isinstance(findings, list):
+            raise HTTPException(400, detail="findings must be a list.")
+        # Defensive cap — a misconfigured agent shouldn't be able to insert
+        # 10M findings in one POST. 25k matches the upload-side ceiling.
+        if len(findings) > 25_000:
+            raise HTTPException(413, detail="Too many findings in one upload.")
+
+        score_data = calculate_score_from_findings(findings)
+        scan_stats = {
+            "files_scanned": int(scan_meta.get("files_scanned") or 0),
+            "total_events":  int(scan_meta.get("total_events")  or 0),
+        }
+        duration_sec = scan_meta.get("duration_sec")
+        try:
+            duration_sec = int(duration_sec) if duration_sec is not None else None
+        except (TypeError, ValueError):
+            duration_sec = None
+        # Hostname preference order: explicit field on the scan meta ->
+        # agent's registered hostname -> findings-derived (handled inside
+        # save_scan). Stamp it on each finding so per-host queries work.
+        host = (str(scan_meta.get("hostname") or "").strip()
+                or (agent.get("hostname") or "")) or None
+        if host:
+            for f in findings:
+                if isinstance(f, dict) and not f.get("hostname"):
+                    f["hostname"] = host
+        scope = str(scan_meta.get("scope") or "").strip() or "Pulse Agent"
+        if len(scope) > 128:
+            scope = scope[:128]
+
+        scan_id = save_scan(
+            app.state.db_path,
+            findings,
+            scan_stats=scan_stats,
+            score=score_data["score"],
+            score_label=score_data["label"],
+            filename=None,
+            scope=scope,
+            duration_sec=duration_sec,
+            user_id=agent.get("user_id"),
+            agent_id=agent["id"],
+        )
+        return {
+            "status": "ok",
+            "scan_id": scan_id,
+            "findings_saved": len(findings),
+            "score": score_data["score"],
+        }
 
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):

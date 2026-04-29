@@ -28,6 +28,10 @@ import {
   apiListTokens,
   apiCreateToken,
   apiRevokeToken,
+  apiListAgents,
+  apiEnrollAgent,
+  apiSetAgentPaused,
+  apiDeleteAgent,
   apiListFeedback,
   apiListWaitlist,
   apiDeleteWaitlistSignup,
@@ -60,6 +64,7 @@ const SETTINGS_TABS = [
   { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar' },
   { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
   { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
+  { id: 'agents',        label: 'Agents',          icon: 'monitor' },
   { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
   { id: 'feedback',      label: 'Feedback',        icon: 'message-square', adminOnly: true },
   { id: 'waitlist',      label: 'Waitlist',        icon: 'mail', adminOnly: true },
@@ -68,6 +73,11 @@ const SETTINGS_TABS = [
 ];
 let _activeSettingsTab = 'profile';
 let _avatarCacheBuster = '';
+
+// Surfaces the just-minted enrollment token across the next render.
+// Read once and cleared so a follow-up navigation doesn't accidentally
+// re-show the raw token.
+let _pendingEnrollment = null;
 
 export function setActiveSettingsTab(name) {
   if (SETTINGS_TABS.some(function (t) { return t.id === name; })) {
@@ -146,6 +156,14 @@ export async function renderSettingsPage() {
     var tl = await apiListTokens();
     tokensList = tl.tokens || [];
   } catch (e) { tokensList = []; }
+
+  // Pulse Agents — registered hosts that ship findings to this server.
+  // Same fetch pattern as tokens; viewers see their own, admins see all.
+  var agentsList = [];
+  try {
+    var al2 = await apiListAgents();
+    agentsList = al2.agents || [];
+  } catch (e) { agentsList = []; }
 
   // Admin-only feedback submissions — same "skip for viewers" pattern
   // as the users list so the Network tab stays clean.
@@ -654,6 +672,11 @@ export async function renderSettingsPage() {
   // --- API tokens tab -----------------------------------------------
   var tokensHtml = _renderTokensPanel(tokensList);
 
+  // --- Agents tab ---------------------------------------------------
+  var enrollFlash = _pendingEnrollment;
+  _pendingEnrollment = null; // single-render flash, see enrollAgent()
+  var agentsHtml = _renderAgentsPanel(agentsList, enrollFlash);
+
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
@@ -661,6 +684,7 @@ export async function renderSettingsPage() {
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
+    agents:        agentsHtml,
     users:         usersHtml,
     feedback:      feedbackHtml,
     waitlist:      waitlistHtml,
@@ -910,6 +934,122 @@ function _renderTokensPanel(tokens) {
     '</div>' +
     '<div class="card">' +
       '<div class="section-label">Active Tokens (' + (tokens || []).length + ')</div>' +
+      tableHtml +
+    '</div>'
+  );
+}
+
+// Render the Agents tab \u2014 Sprint 7 host enrollment surface. The enroll
+// form mints a single-use enrollment token; a banner immediately after
+// surfaces the install snippet (raw token shown once). Existing agents
+// render in a table with a status pill, last-seen relative time,
+// hostname / version, and Pause / Delete actions.
+function _renderAgentsPanel(agents, lastEnrollment) {
+  var STATUS_LABELS = {
+    online:  { label: 'Online',  cls: 'agent-status-online'  },
+    stale:   { label: 'Stale',   cls: 'agent-status-stale'   },
+    offline: { label: 'Offline', cls: 'agent-status-offline' },
+    paused:  { label: 'Paused',  cls: 'agent-status-paused'  },
+    pending: { label: 'Pending', cls: 'agent-status-pending' },
+  };
+
+  function _statusPill(s) {
+    var info = STATUS_LABELS[s] || STATUS_LABELS.offline;
+    return '<span class="agent-status ' + info.cls + '">' +
+      escapeHtml(info.label) + '</span>';
+  }
+
+  var rowsHtml = (agents || []).map(function (a) {
+    var status   = a.status || 'offline';
+    var name     = a.name || ('agent-' + (a.id || ''));
+    var hostBits = [a.hostname, a.platform].filter(Boolean).join(' \u00b7 ');
+    var lastSeen = a.last_heartbeat_at
+      ? '<span title="' + escapeHtml(a.last_heartbeat_at) + '">' +
+          escapeHtml(formatRelativeTime(a.last_heartbeat_at)) +
+        '</span>'
+      : '<span style="color:var(--text-muted);">never</span>';
+    var version  = a.version
+      ? '<span class="mono">' + escapeHtml(a.version) + '</span>'
+      : '<span style="color:var(--text-muted);">\u2014</span>';
+    var pauseLabel = a.paused ? 'Resume' : 'Pause';
+    return (
+      '<tr>' +
+        '<td>' + escapeHtml(name) + '</td>' +
+        '<td>' + _statusPill(status) + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' +
+          (hostBits ? escapeHtml(hostBits) :
+            '<span style="color:var(--text-muted);">awaiting first heartbeat</span>') +
+        '</td>' +
+        '<td>' + version + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' + lastSeen + '</td>' +
+        '<td style="white-space:nowrap;">' +
+          '<button class="btn btn-sm" data-action="toggleAgentPause" ' +
+            'data-arg="' + a.id + '|' + (a.paused ? '0' : '1') + '">' +
+            escapeHtml(pauseLabel) +
+          '</button> ' +
+          '<button class="btn btn-danger btn-sm" data-action="deleteAgentConfirm" ' +
+            'data-arg="' + a.id + '|' + encodeURIComponent(name) + '">Delete</button>' +
+        '</td>' +
+      '</tr>'
+    );
+  }).join('');
+
+  var tableHtml = (agents && agents.length)
+    ? '<div class="table-wrap"><table class="agents-table">' +
+        '<thead><tr>' +
+          '<th>Name</th><th>Status</th><th>Host</th><th>Version</th>' +
+          '<th>Last seen</th><th class="agents-cell-actions"></th>' +
+        '</tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>'
+    : '<p style="color:var(--text-muted); font-size:13px;">' +
+        'No agents enrolled yet. Enroll a host above to start ingesting findings over HTTPS.' +
+      '</p>';
+
+  // Render the just-minted enrollment banner inline so it survives the
+  // re-render that fires after a successful POST. State lives in the
+  // `_pendingEnrollment` module variable; the renderer reads + clears it.
+  var bannerHtml = '';
+  if (lastEnrollment && lastEnrollment.enrollment_token) {
+    var rawTok = String(lastEnrollment.enrollment_token);
+    var attr = rawTok
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    var expires = lastEnrollment.expires_at || '';
+    var displayName = lastEnrollment.name || '';
+    var nameLine = displayName
+      ? '<strong>' + escapeHtml(displayName) + '</strong> enrolled \u2014 '
+      : 'Agent enrolled \u2014 ';
+    bannerHtml =
+      '<div class="agent-enroll-result">' +
+        '<div class="agent-enroll-result-title">' + nameLine + 'copy the token below.</div>' +
+        '<p>This token expires at <span class="mono">' + escapeHtml(expires) + '</span> ' +
+          'and is shown <strong>once</strong>. The agent installer trades it for a ' +
+          'long-lived credential; the raw value is unrecoverable after this page reloads.</p>' +
+        '<div class="agent-enroll-token mono">' + escapeHtml(rawTok) + '</div>' +
+        '<button class="btn btn-sm" type="button" ' +
+          'data-action="copyAgentEnrollToken" data-arg="' + attr + '">Copy token</button>' +
+      '</div>';
+  }
+
+  return (
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Enroll a Pulse Agent</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Pulse Agents run on Windows hosts and ship findings back to this dashboard over HTTPS. ' +
+        'Enrollment mints a single-use token (1 hour TTL) that the agent installer trades for a ' +
+        'long-lived bearer; the long-lived token never leaves the server.' +
+      '</p>' +
+      '<div class="form-row"><label>Agent name</label>' +
+        '<input type="text" id="new-agent-name" placeholder="e.g. dc-01" autocomplete="off" maxlength="64"/></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="enrollAgent">' +
+          '<i data-lucide="monitor"></i><span>Enroll Agent</span></button>' +
+      '</div>' +
+      bannerHtml +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="section-label">Registered Agents (' + (agents || []).length + ')</div>' +
       tableHtml +
     '</div>'
   );
@@ -1299,6 +1439,80 @@ export async function revokeTokenConfirm(arg) {
     renderSettingsPage();
   } catch (e) {
     toastError('Could not revoke token: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+// --- Pulse Agents tab actions -------------------------------------------
+
+export async function enrollAgent() {
+  var input = document.getElementById('new-agent-name');
+  var name = (input && input.value ? input.value : '').trim();
+  if (!name) {
+    toastError('Agent name is required.');
+    return;
+  }
+  try {
+    var r = await apiEnrollAgent(name);
+    // Stash the just-minted token in module state. `renderSettingsPage`
+    // reads + clears `_pendingEnrollment` so the banner shows exactly
+    // once; navigating away and back won't re-leak the raw token.
+    _pendingEnrollment = {
+      name: name,
+      enrollment_token: r.enrollment_token,
+      expires_at: r.expires_at,
+      agent_id: r.agent_id,
+    };
+    if (input) input.value = '';
+    showToast('Agent "' + name + '" enrolled.');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Could not enroll agent: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+export async function copyAgentEnrollToken(arg) {
+  var token = String(arg || '');
+  if (!token) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(token);
+      showToast('Token copied to clipboard.');
+    } else {
+      window.prompt('Copy this token now:', token);
+    }
+  } catch (e) {
+    window.prompt('Copy this token now:', token);
+  }
+}
+
+export async function toggleAgentPause(arg) {
+  // arg = "<id>|<paused-as-0-or-1>"
+  var parts = String(arg || '').split('|');
+  var id = parts[0];
+  var paused = parts[1] === '1';
+  if (!id) return;
+  try {
+    await apiSetAgentPaused(id, paused);
+    showToast(paused ? 'Agent paused.' : 'Agent resumed.');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Could not update agent: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+export async function deleteAgentConfirm(arg) {
+  // arg = "<id>|<url-encoded-name>"
+  var parts = String(arg || '').split('|');
+  var id = parts[0];
+  var name = decodeURIComponent(parts[1] || '');
+  if (!id) return;
+  if (!window.confirm('Delete agent "' + name + '"? Its bearer token will stop working immediately.')) return;
+  try {
+    await apiDeleteAgent(id);
+    showToast('Agent removed.');
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Could not delete agent: ' + (e && e.message ? e.message : String(e)));
   }
 }
 

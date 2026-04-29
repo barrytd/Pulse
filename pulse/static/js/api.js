@@ -339,6 +339,56 @@ export async function apiRevokeToken(id) {
   return true;
 }
 
+// --- Pulse Agents (Sprint 7 — agent/server split) ------------------------
+
+export async function apiListAgents() {
+  var resp = await fetch('/api/agents');
+  if (!resp.ok) return { agents: [] };
+  return resp.json();
+}
+
+// Returns { agent_id, enrollment_token, expires_at }. The enrollment
+// token is shown to the operator exactly once; only the sha256 is
+// stored server-side after this call returns.
+export async function apiEnrollAgent(name) {
+  var resp = await fetch('/api/agents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name }),
+  });
+  var body = null;
+  try { body = await resp.json(); } catch (e) {}
+  if (!resp.ok) {
+    var msg = (body && body.detail) ? body.detail : ('HTTP ' + resp.status);
+    throw new Error(msg);
+  }
+  return body;
+}
+
+export async function apiSetAgentPaused(id, paused) {
+  var resp = await fetch('/api/agents/' + encodeURIComponent(id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paused: !!paused }),
+  });
+  if (!resp.ok) {
+    var msg = ('HTTP ' + resp.status);
+    try { var body = await resp.json(); if (body && body.detail) msg = body.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return true;
+}
+
+export async function apiDeleteAgent(id) {
+  var resp = await fetch('/api/agents/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (!resp.ok) {
+    var msg = ('HTTP ' + resp.status);
+    try { var body = await resp.json(); if (body && body.detail) msg = body.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return true;
+}
+
 export async function apiListUsers() {
   var resp = await fetch('/api/users');
   if (!resp.ok) return { users: [] };

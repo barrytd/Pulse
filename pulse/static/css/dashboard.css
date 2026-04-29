@@ -3709,3 +3709,297 @@ tr.pending-flash {
   color: var(--text-muted);
 }
 
+/* -------------------------------------------------------------------
+   Customizable widget layout — Dashboard.
+   `.dash-widget` shells wrap each major panel; in edit mode they grow
+   a top toolbar (drag handle + hide button) and the whole shell becomes
+   draggable. Drop targets show a 2px accent rule above the would-be
+   landing position. The "Customize" button sits in `.dash-customize-bar`
+   above the widgets; the hidden tray surfaces below them.
+------------------------------------------------------------------- */
+.dash-customize-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px 0;
+}
+.dash-customize-bar.editing {
+  justify-content: space-between;
+  background: rgba(88, 166, 255, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+.dash-customize-msg {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.dash-customize-actions {
+  display: flex;
+  gap: 8px;
+}
+.dash-customize-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-2, #161b22);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.dash-customize-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.dash-customize-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.dash-customize-btn.primary:hover {
+  filter: brightness(1.1);
+  color: #fff;
+}
+.dash-customize-btn.ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+.dash-customize-btn.ghost:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.dash-widget {
+  display: block;
+  position: relative;
+}
+.dash-widget + .dash-widget {
+  margin-top: 16px;
+}
+.dash-widget-body > * {
+  /* Ensures the existing internal grid spacing rule
+     (`.content > * + *` 16px) still applies inside the widget body. */
+  margin-top: 0;
+}
+
+/* Edit-mode chrome */
+.dash-widget-edit {
+  outline: 1px dashed rgba(88, 166, 255, 0.45);
+  outline-offset: 4px;
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.02);
+  padding: 8px;
+  cursor: grab;
+}
+.dash-widget-edit.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.dash-widget-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 8px 6px;
+  user-select: none;
+}
+.dash-widget-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  width: 18px;
+  height: 18px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: grab;
+}
+.dash-widget-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.dash-widget-hide {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.dash-widget-hide:hover {
+  color: #f85149;
+  border-color: #f85149;
+}
+
+/* Drop-target marker — thin accent rule directly above the target. */
+.dash-widget.drop-before::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.6);
+}
+
+.dash-widget-end-drop {
+  height: 32px;
+  border: 2px dashed transparent;
+  border-radius: 6px;
+  margin-top: 8px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.dash-widget-end-drop.drop-active {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+/* Hidden-panel tray — appears below widgets in edit mode when at least
+   one widget has been hidden. Each chip restores the panel on click. */
+.dash-hidden-tray {
+  margin-top: 24px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-1, #0d1117);
+}
+.dash-hidden-tray-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.dash-hidden-tray-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dash-hidden-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-2, #161b22);
+  color: var(--text);
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.dash-hidden-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.dash-hidden-chip-plus {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------------
+   Pulse Agents — Settings tab. Status pills, enrollment success
+   banner, and the raw-token reveal block.
+------------------------------------------------------------------- */
+.agent-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.agent-status-online  { background: rgba(63, 185, 80, 0.15);  color: #3fb950; border: 1px solid rgba(63, 185, 80, 0.4); }
+.agent-status-stale   { background: rgba(210, 153, 34, 0.15); color: #d29922; border: 1px solid rgba(210, 153, 34, 0.4); }
+.agent-status-offline { background: rgba(139, 148, 158, 0.12); color: var(--text-muted); border: 1px solid var(--border); }
+.agent-status-paused  { background: rgba(88, 166, 255, 0.12); color: #58a6ff; border: 1px solid rgba(88, 166, 255, 0.4); }
+.agent-status-pending { background: rgba(240, 136, 62, 0.15); color: #f0883e; border: 1px solid rgba(240, 136, 62, 0.4); }
+
+/* Banner that shows the raw enrollment token exactly once. The block
+   reads as a critical "copy this now" callout — accent border, slight
+   tinted background, monospace token rendered large. */
+.agent-enroll-result {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(88, 166, 255, 0.45);
+  background: rgba(88, 166, 255, 0.06);
+  border-radius: 8px;
+}
+.agent-enroll-result-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.agent-enroll-result p {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.agent-enroll-token {
+  display: block;
+  padding: 10px 12px;
+  background: var(--bg-1, #0d1117);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  word-break: break-all;
+  margin-bottom: 10px;
+  user-select: all;
+}
+
+/* Registered agents table — same density + zebra rules as `.users-table`,
+   right-aligned action column. */
+.agents-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.agents-table thead th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.agents-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.agents-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.agents-table tbody tr:hover td {
+  background: var(--hover-bg);
+}
+.agents-table .agents-cell-actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}

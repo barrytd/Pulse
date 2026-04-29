@@ -19,6 +19,17 @@ import {
   isReviewed,
   isFalsePositive,
 } from './findings.js';
+import {
+  WIDGETS,
+  loadLayout,
+  saveLayout,
+  resetLayout,
+  isEditMode,
+  setEditMode,
+  moveWidget,
+  setWidgetVisible,
+  widgetLabel,
+} from './dashboard-layout.js';
 
 // ---------------------------------------------------------------
 // Shared state
@@ -1235,15 +1246,9 @@ export async function renderDashboardPage() {
       '</div>';
   }
 
-  c.innerHTML =
-    dashMetaHtml +
-    filterBarHtml +
-    emptyBannerHtml +
-    attentionHtml +
-    // Six-card KPI strip — fits on one row at 1440+. Daily Score on
-    // the far left stays the primary anchor; MTTD + Open Findings slot
-    // in on the right as the response-quality pair computed from the
-    // existing attention-window fetch (see `_computeMTTDSeconds`).
+  // Build each customizable widget's inner HTML up front — render order
+  // is decided by the saved layout below. Wrapping happens in `_wrapWidget`.
+  var kpiInner =
     '<div class="stat-row stat-row-6">' +
       _trendStatCard('Daily Score',
                      score + ' <span style="font-size:14px; opacity:0.7;">(' + grade + ')</span>',
@@ -1269,8 +1274,9 @@ export async function renderDashboardPage() {
                      'Unreviewed crit / high', null,
                      _attentionFindings.length > 0 ? 'accent-high' : 'accent-neutral',
                      null, null) +
-    '</div>' +
+    '</div>';
 
+  var standupInner =
     '<div class="standup-row">' +
       '<div class="card standup-card">' +
         '<div class="section-label">Data reduction — events through to critical</div>' +
@@ -1280,10 +1286,9 @@ export async function renderDashboardPage() {
         '<div class="section-label">Repeat offenders — top hosts</div>' +
         _dashTopHostsHtml(scans) +
       '</div>' +
-    '</div>' +
+    '</div>';
 
-    // Three-column chart row: severity donut (left), compact score
-    // ring + label (center), score history line chart (right).
+  var chartsInner =
     '<div class="dash-chart-row">' +
 
       '<div class="card dash-chart-card">' +
@@ -1324,10 +1329,9 @@ export async function renderDashboardPage() {
         '<div class="score-chart-wrap"><canvas id="score-line-chart"></canvas></div>' +
         '<div class="history-footer"><a href="#" data-action="navigate" data-arg="history">View full history &rarr;</a></div>' +
       '</div>' +
-    '</div>' +
+    '</div>';
 
-    // MITRE categories + Top Triggered Rules row — full-width below
-    // the chart band so the bars get horizontal room to breathe.
+  var mitreInner =
     '<div class="dash-mitre-row">' +
       '<div class="card">' +
         '<div class="section-label">MITRE ATT&amp;CK Categories</div>' +
@@ -1337,23 +1341,200 @@ export async function renderDashboardPage() {
         '<div class="section-label">Top Triggered Rules</div>' +
         topRulesHtml +
       '</div>' +
-    '</div>' +
+    '</div>';
 
-    (recentFindings.length > 0
-      ? '<div class="card">' +
-          '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
-            '<span>Last Scan Findings</span>' +
-            '<a href="#" data-action="navigate" data-arg="findings" style="color:var(--accent); font-size:11px; font-weight:600; text-decoration:none;">View all findings &rarr;</a>' +
-          '</div>' +
-          _dashFindingsHtml(recentFindings) +
-        '</div>'
-      : (filtersOn && latestWithFindings
-          ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
-          : '')
-    );
+  var findingsInner = (recentFindings.length > 0)
+    ? '<div class="card">' +
+        '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
+          '<span>Last Scan Findings</span>' +
+          '<a href="#" data-action="navigate" data-arg="findings" style="color:var(--accent); font-size:11px; font-weight:600; text-decoration:none;">View all findings →</a>' +
+        '</div>' +
+        _dashFindingsHtml(recentFindings) +
+      '</div>'
+    : (filtersOn && latestWithFindings
+        ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
+        : '');
+
+  var WIDGET_HTML = {
+    kpi:      kpiInner,
+    standup:  standupInner,
+    charts:   chartsInner,
+    mitre:    mitreInner,
+    findings: findingsInner,
+  };
+
+  c.innerHTML =
+    dashMetaHtml +
+    filterBarHtml +
+    emptyBannerHtml +
+    attentionHtml +
+    _renderWidgetsHtml(WIDGET_HTML);
 
   _initScoreLineChart(dailyScores);
   _startDashUpdatedTimer(updatedIso);
+  _wireDashboardDnD();
+}
+
+// ---------------------------------------------------------------
+// Customizable widget layout — render, edit-mode chrome, drag-and-drop
+// ---------------------------------------------------------------
+
+function _wrapWidget(id, inner) {
+  var label = widgetLabel(id);
+  var edit = isEditMode();
+  var attrs = ' data-widget-id="' + id + '"' +
+              (edit ? ' draggable="true"' : '');
+  var cls = 'dash-widget' + (edit ? ' dash-widget-edit' : '');
+  var toolbar = edit
+    ? '<div class="dash-widget-toolbar">' +
+        '<span class="dash-widget-handle" title="Drag to reorder" aria-hidden="true">☰</span>' +
+        '<span class="dash-widget-name">' + escapeHtml(label) + '</span>' +
+        '<button type="button" class="dash-widget-hide" ' +
+          'data-action="hideDashWidget" data-arg="' + id + '" ' +
+          'title="Hide this panel">Hide</button>' +
+      '</div>'
+    : '';
+  return '<section class="' + cls + '"' + attrs + '>' +
+           toolbar +
+           '<div class="dash-widget-body">' + (inner || '') + '</div>' +
+         '</section>';
+}
+
+function _renderWidgetsHtml(widgetHtml) {
+  var layout = loadLayout();
+  var edit = isEditMode();
+
+  var visibleHtml = layout
+    .filter(function (e) { return e.visible; })
+    .map(function (e) {
+      var inner = widgetHtml[e.id];
+      // In normal mode, drop empty widgets (e.g. findings with nothing
+      // to show) so the dashboard doesn't render an empty shell. In
+      // edit mode keep the shell so the user can still reorder/hide it.
+      if (!edit && (inner == null || inner === '')) return '';
+      return _wrapWidget(e.id, inner == null ? '' : inner);
+    }).join('');
+
+  var endTarget = edit
+    ? '<div class="dash-widget-end-drop" data-widget-end="1"></div>'
+    : '';
+
+  var topBar = '<div class="dash-customize-bar' + (edit ? ' editing' : '') + '">' +
+    (edit
+      ? '<span class="dash-customize-msg">Drag panels to reorder. Click Hide to remove. ' +
+          'Hidden panels appear below.</span>' +
+        '<div class="dash-customize-actions">' +
+          '<button type="button" class="dash-customize-btn ghost" ' +
+            'data-action="resetDashLayout">Reset</button>' +
+          '<button type="button" class="dash-customize-btn primary" ' +
+            'data-action="exitDashEditMode">Done</button>' +
+        '</div>'
+      : '<button type="button" class="dash-customize-btn" ' +
+          'data-action="enterDashEditMode" title="Customize dashboard layout">' +
+          '<span>Customize layout</span></button>'
+    ) + '</div>';
+
+  var hidden = layout.filter(function (e) { return !e.visible; });
+  var trayHtml = '';
+  if (edit && hidden.length) {
+    trayHtml = '<div class="dash-hidden-tray">' +
+      '<div class="dash-hidden-tray-label">Hidden panels</div>' +
+      '<div class="dash-hidden-tray-list">' +
+        hidden.map(function (e) {
+          return '<button type="button" class="dash-hidden-chip" ' +
+            'data-action="showDashWidget" data-arg="' + e.id + '">' +
+            '<span class="dash-hidden-chip-plus" aria-hidden="true">+</span>' +
+            '<span>' + escapeHtml(widgetLabel(e.id)) + '</span>' +
+          '</button>';
+        }).join('') +
+      '</div></div>';
+  }
+
+  return topBar + visibleHtml + endTarget + trayHtml;
+}
+
+let _dragSrcId = null;
+function _clearDropMarkers() {
+  document.querySelectorAll('.dash-widget.drop-before, .dash-widget-end-drop.drop-active')
+    .forEach(function (n) {
+      n.classList.remove('drop-before');
+      n.classList.remove('drop-active');
+    });
+}
+
+function _wireDashboardDnD() {
+  if (!isEditMode()) return;
+  var widgets = document.querySelectorAll('.dash-widget[draggable="true"]');
+  widgets.forEach(function (el) {
+    el.addEventListener('dragstart', function (e) {
+      _dragSrcId = el.dataset.widgetId || null;
+      el.classList.add('dragging');
+      try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+      try { e.dataTransfer.setData('text/plain', _dragSrcId || ''); } catch (_) {}
+    });
+    el.addEventListener('dragend', function () {
+      el.classList.remove('dragging');
+      _clearDropMarkers();
+      _dragSrcId = null;
+    });
+    el.addEventListener('dragover', function (e) {
+      if (!_dragSrcId) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      _clearDropMarkers();
+      el.classList.add('drop-before');
+    });
+    el.addEventListener('drop', function (e) {
+      e.preventDefault();
+      var dstId = el.dataset.widgetId || null;
+      if (_dragSrcId && dstId && _dragSrcId !== dstId) {
+        moveWidget(_dragSrcId, dstId);
+        renderDashboardPage();
+      }
+    });
+  });
+  var endDrop = document.querySelector('.dash-widget-end-drop');
+  if (endDrop) {
+    endDrop.addEventListener('dragover', function (e) {
+      if (!_dragSrcId) return;
+      e.preventDefault();
+      _clearDropMarkers();
+      endDrop.classList.add('drop-active');
+    });
+    endDrop.addEventListener('drop', function (e) {
+      e.preventDefault();
+      if (_dragSrcId) {
+        moveWidget(_dragSrcId, null);
+        renderDashboardPage();
+      }
+    });
+  }
+
+}
+
+export function enterDashEditMode() {
+  setEditMode(true);
+  renderDashboardPage();
+}
+
+export function exitDashEditMode() {
+  setEditMode(false);
+  renderDashboardPage();
+}
+
+export function hideDashWidget(id) {
+  setWidgetVisible(id, false);
+  renderDashboardPage();
+}
+
+export function showDashWidget(id) {
+  setWidgetVisible(id, true);
+  renderDashboardPage();
+}
+
+export function resetDashLayout() {
+  resetLayout();
+  renderDashboardPage();
 }
 
 // ---------------------------------------------------------------
