@@ -144,6 +144,90 @@ def test_signup_validates_email(auth_client):
     assert r.status_code == 400
 
 
+# ---------------------------------------------------------------------------
+# Hosted multi-tenant signup (Sprint 7) — PULSE_HOSTED_SIGNUP=1 keeps the
+# signup endpoint open past the first user, with each new email landing
+# in its own brand-new organization.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def hosted_signup_client(tmp_path, monkeypatch):
+    """Auth-on app with hosted multi-tenant signup turned on."""
+    monkeypatch.setenv("PULSE_HOSTED_SIGNUP", "1")
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text("whitelist:\n  accounts: []\n")
+    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    return TestClient(app), str(db_path)
+
+
+def test_hosted_signup_status_reports_open(hosted_signup_client):
+    client, _ = hosted_signup_client
+    data = client.get("/api/auth/status").json()
+    assert data["hosted_signup"] is True
+    assert data["signup_open"] is True
+
+
+def test_hosted_signup_allows_multiple_signups(hosted_signup_client):
+    client, _ = hosted_signup_client
+    r1 = client.post("/api/auth/signup", json={
+        "email": "founder-a@acme.test",
+        "password": "correct-horse-battery",
+    })
+    assert r1.status_code == 200
+    client.post("/api/auth/logout")
+    r2 = client.post("/api/auth/signup", json={
+        "email": "founder-b@initech.test",
+        "password": "another-long-password",
+    })
+    assert r2.status_code == 200
+
+
+def test_hosted_signup_each_user_lands_in_a_fresh_org(hosted_signup_client):
+    """Two separate signups → two separate organizations, no cross-tenant
+    visibility. Verifies the multi-tenant boundary at the data layer."""
+    from pulse import database
+    client, db_path = hosted_signup_client
+    client.post("/api/auth/signup", json={
+        "email": "founder-a@acme.test", "password": "correct-horse-battery",
+    })
+    client.post("/api/auth/logout")
+    client.post("/api/auth/signup", json={
+        "email": "founder-b@initech.test", "password": "another-long-password",
+    })
+
+    user_a = database.get_user_by_email(db_path, "founder-a@acme.test")
+    user_b = database.get_user_by_email(db_path, "founder-b@initech.test")
+    assert user_a["organization_id"] is not None
+    assert user_b["organization_id"] is not None
+    assert user_a["organization_id"] != user_b["organization_id"]
+
+
+def test_hosted_signup_first_user_still_admin(hosted_signup_client):
+    """First signup should be admin (so the operator running the deploy
+    has somebody to log in as), even in hosted mode."""
+    client, db_path = hosted_signup_client
+    client.post("/api/auth/signup", json={
+        "email": "founder@acme.test", "password": "correct-horse-battery",
+    })
+    from pulse import database
+    user = database.get_user_by_email(db_path, "founder@acme.test")
+    assert user["role"] == "admin"
+
+
+def test_hosted_signup_rejects_duplicate_email(hosted_signup_client):
+    client, _ = hosted_signup_client
+    client.post("/api/auth/signup", json={
+        "email": "dupe@example.com", "password": "correct-horse-battery",
+    })
+    client.post("/api/auth/logout")
+    r = client.post("/api/auth/signup", json={
+        "email": "dupe@example.com", "password": "another-long-password",
+    })
+    assert r.status_code == 409
+    assert "exists" in r.json().get("detail", "").lower()
+
+
 def test_login_accepts_valid_credentials(auth_client):
     auth_client.post("/api/auth/signup", json={
         "email": "me@example.com", "password": "my-secret-pass",

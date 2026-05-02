@@ -147,6 +147,20 @@
       margin-top: -6px;
       margin-bottom: 12px;
     }
+
+    .mode-switch {
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 16px;
+    }
+    .mode-switch a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .mode-switch a:hover { color: var(--accent-hv); }
   </style>
 </head>
 <body>
@@ -177,13 +191,66 @@
 
         <div id="msg" class="msg"></div>
       </form>
+
+      <div class="mode-switch" id="mode-switch" style="display:none;">
+        <span id="mode-switch-text">Don&rsquo;t have an account?</span>
+        <a id="mode-switch-link">Create one</a>
+      </div>
     </div>
 
     <div class="footnote">Pulse &middot; Windows event log analyzer</div>
   </div>
 
   <script>
-    var mode = 'login'; // 'login' or 'signup'
+    var mode = 'login';        // 'login' or 'signup'
+    var signupOpen = false;    // hosted multi-tenant or fresh-install bootstrap
+    var hostedSignup = false;  // hosted-mode flag from /api/auth/status
+    var needsSignup  = false;  // bootstrap moment (no users yet)
+
+    function applyMode() {
+      var title = document.getElementById('form-title');
+      var subtitle = document.getElementById('form-subtitle');
+      var btn = document.getElementById('submit-btn');
+      var pw = document.getElementById('password');
+      var pwHint = document.getElementById('password-hint');
+      var sw = document.getElementById('mode-switch');
+      var swText = document.getElementById('mode-switch-text');
+      var swLink = document.getElementById('mode-switch-link');
+
+      if (mode === 'signup') {
+        title.textContent = needsSignup
+          ? 'Create your account'
+          : 'Create a Pulse workspace';
+        subtitle.textContent = needsSignup
+          ? 'No account exists yet. Set the email and password you\u2019ll use to sign in.'
+          : 'Each signup mints a fresh organization. Pick the email and password your team will use.';
+        btn.textContent = needsSignup ? 'Create account' : 'Create workspace';
+        pw.autocomplete = 'new-password';
+        pwHint.style.display = 'block';
+      } else {
+        title.textContent = 'Sign in';
+        subtitle.textContent = 'Welcome back. Enter your credentials to continue.';
+        btn.textContent = 'Sign in';
+        pw.autocomplete = 'current-password';
+        pwHint.style.display = 'none';
+      }
+
+      // Switch link only renders in hosted-mode (where both branches are
+      // legitimate). Bootstrap signup hides it because there's nothing to
+      // sign in to yet.
+      if (signupOpen && !needsSignup) {
+        sw.style.display = 'block';
+        if (mode === 'signup') {
+          swText.textContent = 'Already have an account?';
+          swLink.textContent = 'Sign in';
+        } else {
+          swText.textContent = 'Don\u2019t have an account?';
+          swLink.textContent = 'Create one';
+        }
+      } else {
+        sw.style.display = 'none';
+      }
+    }
 
     async function loadMode() {
       try {
@@ -193,19 +260,26 @@
           window.location.href = '/';
           return;
         }
-        if (data.needs_signup) {
-          mode = 'signup';
-          document.getElementById('form-title').textContent = 'Create your account';
-          document.getElementById('form-subtitle').textContent =
-            'No account exists yet. Set the email and password you\u2019ll use to sign in.';
-          document.getElementById('submit-btn').textContent = 'Create account';
-          document.getElementById('password').autocomplete = 'new-password';
-          document.getElementById('password-hint').style.display = 'block';
-        }
+        needsSignup  = !!data.needs_signup;
+        hostedSignup = !!data.hosted_signup;
+        signupOpen   = !!data.signup_open;
+        // Bootstrap (no users) jumps straight to signup. Hosted-mode with
+        // existing users defaults to login but exposes the switch link.
+        mode = needsSignup ? 'signup' : 'login';
+        applyMode();
       } catch (e) {
         showError('Could not reach Pulse. Is the server running?');
       }
     }
+
+    document.getElementById('mode-switch-link').addEventListener('click', function (e) {
+      e.preventDefault();
+      mode = (mode === 'login') ? 'signup' : 'login';
+      var m = document.getElementById('msg');
+      m.className = 'msg';
+      m.textContent = '';
+      applyMode();
+    });
 
     function showError(text) {
       var m = document.getElementById('msg');

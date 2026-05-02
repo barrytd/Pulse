@@ -5,6 +5,50 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-02 — Sprint 7 — Auto-update channel for Pulse Agent
+
+The agent now phones home for version drift detection. On startup it calls `GET /api/agent/latest` and surfaces an "update available" warning in its journal when the server reports a newer build, with the GitHub Releases URL one keystroke away. Best-effort: a failing update check never blocks the heartbeat / scan loop.
+
+- New endpoint `GET /api/agent/latest` (in [pulse/api.py](pulse/api.py)) returns `{version, download_url, release_notes_url}`. Public (lives under the `/api/agent/` prefix that's already auth-exempt). Optional bearer auth: when supplied, the server resolves the calling agent, computes `outdated`/`current` from the version the agent reported on enrollment, and stamps `last_status='checked-update'` so the Agents tab can show "last checked update" telemetry before the next heartbeat fires
+- `PULSE_AGENT_DOWNLOAD_URL` + `PULSE_AGENT_NOTES_URL` env vars override the default GitHub Releases / CHANGELOG URLs — useful for staging deploys that want a private build channel
+- New `AgentTransport.get_latest_version()` ([pulse/agent/transport.py](pulse/agent/transport.py)) and a small `_get` / `_handle_response` refactor so GET and POST share the same error-mapping path
+- New `AgentRuntime._check_for_updates()` ([pulse/agent/runtime.py](pulse/agent/runtime.py)) called once at the top of `run_forever()`. Trusts the server's `outdated` flag when present (compares against the agent's *reported* version, not the local module string — they're the same value when the agent imports `pulse.__version__`)
+- 4 new tests in [tests/test_agent_runtime.py](tests/test_agent_runtime.py) cover unauth public probe, bearer-auth `outdated` comparison, `last_status` telemetry stamp, and the warning-log path when the runtime detects drift
+
+## 2026-05-02 — Sprint 7 — Public multi-tenant signup
+
+`PULSE_HOSTED_SIGNUP=1` opens `POST /api/auth/signup` past the first user — every new email mints a brand-new organization, so customers sharing a hosted Pulse instance each land in their own isolated tenant. Default off, so a self-hosted install keeps the safe single-tenant behavior (no rando off the internet can sign up on your local Pulse). This unblocks the multi-tenant data model from 2026-05-02 — without it the org-isolation tests couldn't be exercised by real customers.
+
+- `app.state.hosted_signup` flag fed from the `PULSE_HOSTED_SIGNUP` env var ([pulse/api.py](pulse/api.py))
+- `auth_signup` rewritten: 409 only when the install is single-tenant *and* a user already exists. Hosted-mode signups always succeed for fresh emails. First signup (single-tenant or hosted) still gets admin via the existing `create_user` first-row promotion. Pre-checks `get_user_by_email` to return a clean 409 instead of bubbling the UNIQUE-constraint exception
+- `auth_status` response gains `hosted_signup` + `signup_open` so the login page can decide whether to render the "Create account" link
+- [pulse/web/login.html](pulse/web/login.html) extended with a mode-switch link (login ↔ signup) that only renders in hosted-mode-with-existing-users (bootstrap signup hides it because there's nothing to log into yet). Signup copy reads "Create a Pulse workspace" in hosted mode vs. "Create your account" on bootstrap
+- 5 new tests in [tests/test_auth.py](tests/test_auth.py): hosted-signup status flags, multiple signups allowed, each user lands in a fresh org, first user still admin, duplicate email returns 409
+
+## 2026-05-02 — Sprint 7 — Hosted-mode topbar swap
+
+The topbar's "Scan My System" button is the wrong CTA on a Linux server that can't read a Windows host's event log. On non-Windows hosts the button now becomes **Download Agent** with a `download` icon, pointing the user at Settings → Agents — the supported way to monitor Windows fleets from a hosted dashboard. The .evtx CLI fallback stays available on the History page for analysts who want one-off triage.
+
+- `_applyHostPlatformGating` (boot-time `/api/health` probe) now rewrites the topbar action to `goToAgentEnroll`, label to "Download Agent", icon to `download`. Lucide is re-rendered after the swap so the new icon paints
+- New action `goToAgentEnroll` (in [pulse/static/js/app.js](pulse/static/js/app.js)) calls `setActiveSettingsTab('agents')` then `navigate('settings')` so the user lands directly on the Agents tab
+- `_renderAgentsPanel` ([pulse/static/js/settings.js](pulse/static/js/settings.js)) gains an "Install Pulse Agent on a Windows host" install-instructions card above the enrollment form: pip install + `python -m pulse.agent enroll` + `run` snippet, with a note that the packaged `pulse-agent.exe` ships later this sprint
+- Command palette (Ctrl/Cmd-K) gates `act.system_scan` behind a host-platform `condition()` check — hidden on non-Windows. New `act.download_agent` entry takes its place on hosted hosts ("Install Pulse Agent" → Settings → Agents)
+- `_COMMANDS` rendering switches to `_availableCommands()` so per-entry `condition` filters apply to both no-query (recents+default) and query-ranked code paths
+
+## 2026-05-02 — Sprint 7 — Multi-tenant data model
+
+Hosted Pulse becomes safe to share across customers. Every owned row (scans, agents, notifications) carries an `organization_id`, and the API filters reads / writes by that column instead of by `user_id`, so two customers running on the same instance never see each other's data — but every member of the same org *does* share scan/agent/finding visibility (the right collaboration boundary for a SOC team).
+
+- New `organizations` table (id, name, slug, created_at) with unique slugs minted from name or email local-part on collision
+- `users.organization_id`, `scans.organization_id`, `agents.organization_id`, `notifications.organization_id` ALTERed in via idempotent `init_db` migration
+- `_backfill_organizations` runs every startup: any row with NULL `organization_id` gets a fresh per-user org so legacy single-user installs upgrade in place without manual SQL
+- Self-signup (POST `/api/auth/signup`) auto-creates a new org for the new tenant; admin-side user creation (POST `/api/users`) joins the new user to the admin's existing org
+- `_read_scope_kwargs(app, user_id)` helper resolves to `{}` for admin / no-auth, `{"organization_id": N}` for org members, `{"user_id": N}` for legacy untenanted users — splat into every read/write helper
+- `get_history`, `get_scan_findings`, `get_scan_number`, `get_fleet_summary`, `get_rule_stats`, `get_trend_analytics`, `delete_scans`, `list_agents`, `set_agent_paused`, `delete_agent`, `_scope_filter_finding_ids`, `batch_set_finding_*` all gained an `organization_id` parameter that supersedes `user_id`
+- `_agent_owner_or_admin` (`PUT|DELETE /api/agents/{id}`) treats org membership as authorization so any teammate can pause/delete shared agents
+- 9 new tests in `tests/test_data_isolation.py` cover create-org, slug uniqueness, auto-org on signup, explicit-org join, scan stamping, history org-scope, the legacy-row backfill, and three end-to-end cross-tenant assertions (history invisible, report 404, delete no-op)
+- Existing per-user isolation tests rewritten to assert the new org-shared semantics (admin + viewer in the same org now see each other's scans, agents, and reports — that was always the multi-tenant intent)
+
 ## 2026-04-30 — Release v1.6.0 (Sprint 6 close)
 
 Sprint 6 — *Workflows, branding, threat intel* — locks in. v1.5.0 already shipped Sprint 5 (auth / compliance / analytics); this ship picks up the cursor at 1.6.0 to match the sprint number.

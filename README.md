@@ -257,6 +257,174 @@ Or copy directly from `C:\Windows\System32\winevt\Logs\`.
 
 ---
 
+## Multi-tenant (Sprint 7)
+
+When you self-host Pulse on the public internet, every signup creates a
+fresh **organization** and rows are scoped to it — two different
+customers running on the same instance never see each other's scans,
+agents, findings, or notifications. Admins can invite teammates via
+**Settings → Users**; teammates join the admin's org and share scan,
+fleet, and agent visibility (the right collaboration boundary for a SOC
+team).
+
+- Self-signup (`POST /api/auth/signup`) auto-creates a new org with a
+  slug derived from the user's email. Set **`PULSE_HOSTED_SIGNUP=1`** on
+  the deployment to keep the endpoint open past the first user (default
+  is closed-after-bootstrap so a self-hosted install doesn't accidentally
+  let strangers create accounts).
+- Admin-created users (`POST /api/users`) inherit the admin's
+  `organization_id` so they immediately see existing scans and agents.
+- Legacy single-user installs upgrade in place: `init_db` runs
+  `_backfill_organizations`, which mints a personal org per user and
+  stamps every owned scan / agent / notification with that
+  `organization_id`. Re-running is idempotent — only NULL columns are
+  touched.
+- Every read / write helper (`get_history`, `get_scan_findings`,
+  `delete_scans`, `list_agents`, `set_agent_paused`, …) accepts an
+  `organization_id` parameter; the API uses `_read_scope_kwargs` to
+  splat the right scope into each call.
+
+## Pulse Agent (Sprint 7)
+
+The hosted Pulse dashboard runs on Linux and can't read a Windows host's
+event log over the network. The **Pulse Agent** is a lightweight client
+you install on each Windows host you want to monitor — it scans the
+local event log and ships findings to your hosted dashboard over HTTPS.
+
+The wire layer (enrollment exchange, heartbeat, findings ingest) ships
+with the server in v1.6.0+. The agent runtime ships with the same
+package (`pulse.agent`) — a packaged `pulse-agent.exe` lands later this
+sprint, but the runtime can be exercised today via Python.
+
+### Two-step setup
+
+**1.** In the dashboard, go to **Settings → Agents → Enroll a Pulse Agent**.
+Pick a name, click **Enroll Agent**, and copy the `pe_…` token from the
+banner (shown once).
+
+**2.** On the Windows host, run the enroll command. This trades the
+single-use enrollment token for a long-lived bearer and writes it to
+`%PROGRAMDATA%\Pulse\agent.yaml` (or `~/.pulse/agent.yaml` on non-
+Windows).
+
+```powershell
+python -m pulse.agent enroll https://your-pulse-domain.example.com pe_AAAA...
+```
+
+Then start the agent loop:
+
+```powershell
+python -m pulse.agent run
+```
+
+The agent heartbeats every 60 seconds and runs a full local scan every
+30 minutes by default; tune via `scan_interval_sec` / `heartbeat_interval_sec`
+in the config file. Stop with Ctrl+C — a packaged Windows Service
+installer is the next ship in Sprint 7.
+
+### Auto-update channel
+
+On startup the agent calls `GET /api/agent/latest` and logs an
+`update available` warning when the server reports a newer build,
+including the download URL. The check is best-effort — a failing probe
+never blocks the heartbeat or scan loop. Override the default GitHub
+Releases / CHANGELOG URLs on the server side via env vars:
+
+- `PULSE_AGENT_DOWNLOAD_URL` — where to point the operator for the
+  latest build (default: `https://github.com/anthropics/pulse/releases/latest`)
+- `PULSE_AGENT_NOTES_URL` — release notes URL (default: the CHANGELOG)
+
+When the agent supplies its bearer token the server resolves the calling
+agent and computes `outdated`/`current` server-side (compared against
+the version the agent reported on enrollment), so the agent doesn't have
+to do its own semver math.
+
+### CLI reference
+
+```text
+python -m pulse.agent enroll <server_url> <enrollment_token>   # one-time
+python -m pulse.agent run                                       # daemon
+python -m pulse.agent status                                    # config dump
+```
+
+Add `--config <path>` (before the subcommand) to override the default
+config location, or `-v` / `-vv` for log verbosity. `--insecure` is
+available on `enroll` for dev work against a self-signed Pulse server
+(never use in production):
+
+```powershell
+python -m pulse.agent --config C:\custom\agent.yaml status
+python -m pulse.agent -vv run
+python -m pulse.agent enroll http://localhost:8000 pe_dev_token --insecure
+```
+
+### Building `pulse-agent.exe`
+
+The packaged binary is what ends customers on a Windows host actually
+run. Build it on a Windows developer box:
+
+```powershell
+pip install -r requirements-agent.txt
+python scripts/build_agent.py --clean
+```
+
+Outputs a one-folder bundle under `dist/pulse-agent/` (37 MB total,
+6.5 MB launcher exe). Add `--onefile` to collapse to a single .exe at
+the cost of a slower cold start. Build artifacts are gitignored — the
+final binary ships via GitHub Releases, not source control.
+
+The exe takes the same CLI as `python -m pulse.agent`, so smoke-testing
+is identical:
+
+```powershell
+.\dist\pulse-agent\pulse-agent.exe --help
+.\dist\pulse-agent\pulse-agent.exe enroll https://your-pulse pe_AAAA...
+.\dist\pulse-agent\pulse-agent.exe run
+```
+
+### Running as a Windows Service
+
+For unattended hosts, register the agent with Windows so it survives
+reboots and runs as SYSTEM (which can read every event-log channel
+without UAC). Two paths — `sc.exe` is built into Windows; **NSSM** is
+the friendlier wrapper.
+
+**Path 1 — `sc.exe` (no extra tooling).** Copy the unpacked bundle
+under `C:\Program Files\Pulse\`, then:
+
+```powershell
+sc.exe create PulseAgent binPath= "\"C:\Program Files\Pulse\pulse-agent\pulse-agent.exe\" run" start= auto DisplayName= "Pulse Agent"
+sc.exe description PulseAgent "Pulse threat-detection agent — ships local event-log findings to the configured Pulse server."
+sc.exe start PulseAgent
+```
+
+The space after `binPath=` / `start=` / `DisplayName=` is required —
+that's a `sc.exe` quirk, not a typo.
+
+**Path 2 — [NSSM](https://nssm.cc/) (recommended).** NSSM handles
+service-mode quirks (no STDOUT, signal differences) better than raw
+`sc.exe`:
+
+```powershell
+nssm install PulseAgent "C:\Program Files\Pulse\pulse-agent\pulse-agent.exe" run
+nssm set PulseAgent DisplayName "Pulse Agent"
+nssm set PulseAgent Description "Pulse threat-detection agent."
+nssm set PulseAgent Start SERVICE_AUTO_START
+nssm start PulseAgent
+```
+
+Either way, lock the agent.yaml token file down so only SYSTEM +
+Administrators can read it:
+
+```powershell
+icacls "C:\ProgramData\Pulse\agent.yaml" /inheritance:r /grant:r "SYSTEM:(R,W)" "Administrators:(F)"
+```
+
+A bundled installer that does this in one click is the next-up Sprint 7
+item — see [ROADMAP.md](ROADMAP.md).
+
+---
+
 ## Example Output (HTML)
 
 The HTML report opens in any browser with colour-coded findings:

@@ -294,6 +294,25 @@ CREATE TABLE IF NOT EXISTS waitlist_signups (
 # /api/agent/heartbeat and /api/agent/findings. The owning user_id is the
 # admin who minted the enrollment so scans uploaded by the agent attribute
 # back to that user, falling out of existing data-isolation scopes.
+# Multi-tenant root (Sprint 7) — every user belongs to exactly one
+# organization, every scan / agent / notification carries the org id
+# its owning user is in. Cross-org queries are rejected at the helper
+# layer so two customers running on the same hosted Pulse instance can
+# never see each other's data, regardless of role.
+#
+# `slug` is a URL-safe lowercase identifier — used in the (future)
+# public landing / signup page when an admin shares a custom domain
+# fragment. Unique constraint keeps signups from colliding.
+_CREATE_ORGANIZATIONS = """
+CREATE TABLE IF NOT EXISTS organizations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    slug        TEXT    UNIQUE,
+    created_at  TEXT    NOT NULL
+);
+"""
+
+
 _CREATE_NOTIFICATIONS = """
 CREATE TABLE IF NOT EXISTS notifications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -359,6 +378,7 @@ def init_db(db_path):
         _CREATE_WAITLIST,
         _CREATE_AGENTS,
         _CREATE_NOTIFICATIONS,
+        _CREATE_ORGANIZATIONS,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -412,6 +432,15 @@ def init_db(db_path):
         # table. Bumped by the auth middleware on every authenticated
         # request so admins can see who's actively using the system.
         "ALTER TABLE users ADD COLUMN last_active_at TEXT",
+        # Sprint 7 multi-tenant — every user belongs to exactly one
+        # organization. The init-time backfill creates a default
+        # "Personal" org for every existing user that doesn't already
+        # have one, so an upgraded single-user install transparently
+        # becomes a one-org tenant.
+        "ALTER TABLE users         ADD COLUMN organization_id INTEGER",
+        "ALTER TABLE scans         ADD COLUMN organization_id INTEGER",
+        "ALTER TABLE agents        ADD COLUMN organization_id INTEGER",
+        "ALTER TABLE notifications ADD COLUMN organization_id INTEGER",
     )
 
     with _connect(db_path) as conn:
@@ -458,6 +487,13 @@ def init_db(db_path):
     # own connection.
     close_orphaned_monitor_sessions(db_path)
 
+    # Sprint 7 multi-tenant backfill. Every user with NULL
+    # organization_id gets a freshly-created "Personal" org, and every
+    # scan / agent / notification gets stamped with that user's org.
+    # Idempotent — once a user has an org, this loop is a no-op for
+    # them on subsequent boots.
+    _backfill_organizations(db_path)
+
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None, agent_id=None):
     """
@@ -486,18 +522,23 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
     total_events  = scan_stats.get("total_events",  0) if scan_stats else 0
     total_findings = len(findings)
 
+    # Resolve the org id to stamp on the row. If user_id is unset (CLI
+    # scans, single-user installs without auth) we leave organization_id
+    # NULL so the legacy "no org" path still works.
+    organization_id = get_user_organization_id(db_path, user_id) if user_id else None
     with _connect(db_path) as conn:
         cursor = conn.execute(
             """INSERT INTO scans
                (scanned_at, hostname, files_scanned, total_events,
                 total_findings, score, score_label, filename, scope,
-                session_id, duration_sec, user_id, agent_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                session_id, duration_sec, user_id, agent_id, organization_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scanned_at, hostname, files_scanned, total_events,
              total_findings, score, score_label, filename, scope,
              session_id, duration_sec,
              int(user_id) if user_id else None,
-             int(agent_id) if agent_id else None)
+             int(agent_id) if agent_id else None,
+             int(organization_id) if organization_id else None)
         )
         scan_id = cursor.lastrowid
 
@@ -541,7 +582,7 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
     return scan_id
 
 
-def get_history(db_path, limit=20, user_id=None):
+def get_history(db_path, limit=20, user_id=None, organization_id=None):
     """
     Returns a list of past scans, newest first.
 
@@ -552,21 +593,29 @@ def get_history(db_path, limit=20, user_id=None):
     Parameters:
         db_path (str):   Path to the .db file.
         limit (int):     Maximum number of scans to return (default 20).
-        user_id (int|None): If set, only scans owned by this user are
-                            returned. ``None`` returns every scan (the
-                            admin / CLI view).
+        user_id (int|None): Legacy per-user filter. Ignored when
+                            ``organization_id`` is supplied (org scope is
+                            broader and supersedes the per-user scope).
+        organization_id (int|None): If set, return every scan in this org
+                            regardless of the originating user. Preferred
+                            over ``user_id`` for multi-tenant deployments.
+                            Both ``None`` returns every scan (CLI / admin).
 
     Returns:
         list[dict]: Past scans, or an empty list if the DB doesn't exist yet.
     """
     try:
         with _connect(db_path) as conn:
-            if user_id is None:
-                where_outer, where_inner, params = "", "", ()
-            else:
+            if organization_id is not None:
+                where_outer = " WHERE s.organization_id = ?"
+                where_inner = " AND s2.organization_id = ?"
+                params = (int(organization_id), int(organization_id))
+            elif user_id is not None:
                 where_outer = " WHERE s.user_id = ?"
                 where_inner = " AND s2.user_id = ?"
                 params = (int(user_id), int(user_id))
+            else:
+                where_outer, where_inner, params = "", "", ()
             # LEFT JOIN findings + GROUP BY lets us compute the per-scan
             # severity breakdown in the same round trip, so the Scans page
             # can render a sev-mix badge row without fetching every scan's
@@ -595,25 +644,31 @@ def get_history(db_path, limit=20, user_id=None):
         return []
 
 
-def get_scan_number(db_path, scan_id, user_id=None):
+def get_scan_number(db_path, scan_id, user_id=None, organization_id=None):
     """
     Return the display number (position in current scan history, oldest = 1)
     for a given DB id. Returns None if the scan doesn't exist (or isn't
-    visible to the supplied ``user_id``).
+    visible to the supplied ``user_id`` / ``organization_id`` scope).
     """
     try:
         with _connect(db_path) as conn:
-            if user_id is None:
+            if organization_id is not None:
                 row = conn.execute(
-                    "SELECT COUNT(*) FROM scans WHERE id <= ? "
-                    "AND EXISTS (SELECT 1 FROM scans WHERE id = ?)",
-                    (scan_id, scan_id),
+                    "SELECT COUNT(*) FROM scans WHERE id <= ? AND organization_id = ? "
+                    "AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND organization_id = ?)",
+                    (scan_id, int(organization_id), scan_id, int(organization_id)),
                 ).fetchone()
-            else:
+            elif user_id is not None:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM scans WHERE id <= ? AND user_id = ? "
                     "AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND user_id = ?)",
                     (scan_id, int(user_id), scan_id, int(user_id)),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM scans WHERE id <= ? "
+                    "AND EXISTS (SELECT 1 FROM scans WHERE id = ?)",
+                    (scan_id, scan_id),
                 ).fetchone()
             return int(row[0]) if row and row[0] else None
     except Exception:
@@ -666,7 +721,7 @@ def get_findings_since(db_path, days, user_id=None):
         return []
 
 
-def get_rule_stats(db_path, user_id=None):
+def get_rule_stats(db_path, user_id=None, organization_id=None):
     """
     Return per-rule aggregate statistics computed from the findings table.
 
@@ -695,7 +750,10 @@ def get_rule_stats(db_path, user_id=None):
     now = datetime.now()
     cutoff_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     extra_where, extra_params = "", ()
-    if user_id is not None:
+    if organization_id is not None:
+        extra_where = " AND s.organization_id = ?"
+        extra_params = (int(organization_id),)
+    elif user_id is not None:
         extra_where = " AND s.user_id = ?"
         extra_params = (int(user_id),)
     stats = {}
@@ -783,22 +841,31 @@ def get_scans_since(db_path, days, user_id=None):
         return []
 
 
-def get_scan_findings(db_path, scan_id, user_id=None):
+def get_scan_findings(db_path, scan_id, user_id=None, organization_id=None):
     """
     Returns all findings for a specific scan.
 
     Parameters:
         db_path (str):   Path to the .db file.
         scan_id (int):   The scan ID to look up.
-        user_id (int|None): If set, an empty list is returned when the scan
-                            belongs to another user. ``None`` bypasses the
-                            ownership check (admin / CLI view).
+        user_id (int|None): Legacy per-user ownership check. Ignored when
+                            ``organization_id`` is supplied.
+        organization_id (int|None): Org-scope check — empty list if the scan
+                            belongs to a different org. Preferred over
+                            ``user_id`` for multi-tenant deployments.
 
     Returns:
         list[dict]: Findings for that scan.
     """
     with _connect(db_path) as conn:
-        if user_id is not None:
+        if organization_id is not None:
+            row = conn.execute(
+                "SELECT organization_id FROM scans WHERE id = ?",
+                (int(scan_id),),
+            ).fetchone()
+            if not row or row[0] != int(organization_id):
+                return []
+        elif user_id is not None:
             owner = conn.execute(
                 "SELECT user_id FROM scans WHERE id = ?", (int(scan_id),)
             ).fetchone()
@@ -1019,30 +1086,43 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
         return d
 
 
-def _scope_filter_finding_ids(db_path, finding_ids, scope_user_id):
+def _scope_filter_finding_ids(db_path, finding_ids, scope_user_id,
+                              scope_organization_id=None):
     """Return the subset of ``finding_ids`` whose parent scan is visible
-    to the given user. ``scope_user_id=None`` is admin scope — skip the
-    filter and return everything."""
+    under the given scope. Both scope ids ``None`` is admin scope — skip
+    the filter and return everything. ``scope_organization_id`` (preferred
+    multi-tenant scope) supersedes ``scope_user_id`` when both are set."""
     if not finding_ids:
         return []
     finding_ids = [int(i) for i in finding_ids]
-    if scope_user_id is None:
+    if scope_user_id is None and scope_organization_id is None:
         return finding_ids
     placeholders = ",".join(["?"] * len(finding_ids))
+    if scope_organization_id is not None:
+        scope_clause = "s.organization_id = ?"
+        scope_param = int(scope_organization_id)
+    else:
+        scope_clause = "s.user_id = ?"
+        scope_param = int(scope_user_id)
     with _connect(db_path) as conn:
         rows = conn.execute(
             "SELECT f.id FROM findings f "
             "JOIN scans s ON s.id = f.scan_id "
-            "WHERE f.id IN (" + placeholders + ") AND s.user_id = ?",
-            tuple(finding_ids) + (int(scope_user_id),),
+            "WHERE f.id IN (" + placeholders + ") AND " + scope_clause,
+            tuple(finding_ids) + (scope_param,),
         ).fetchall()
     return [int(r[0]) for r in rows]
 
 
-def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id, scope_user_id):
+def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id,
+                               scope_user_id, scope_organization_id=None):
     """Bulk assignment. Only findings whose parent scan is in the caller's
-    scope are updated. Returns ``{updated, skipped}``."""
-    eligible = _scope_filter_finding_ids(db_path, finding_ids, scope_user_id)
+    scope are updated. Returns ``{updated, skipped}``. ``scope_organization_id``
+    supersedes ``scope_user_id`` for multi-tenant deployments."""
+    eligible = _scope_filter_finding_ids(
+        db_path, finding_ids, scope_user_id,
+        scope_organization_id=scope_organization_id,
+    )
     if not eligible:
         return {"updated": 0, "skipped": len(finding_ids)}
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1069,11 +1149,16 @@ def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id, scope_use
     return {"updated": len(eligible), "skipped": len(finding_ids) - len(eligible)}
 
 
-def batch_set_finding_review(db_path, finding_ids, reviewed, false_positive, scope_user_id):
+def batch_set_finding_review(db_path, finding_ids, reviewed, false_positive,
+                             scope_user_id, scope_organization_id=None):
     """Bulk review flag update. Both flags set explicitly. Returns
     ``{updated, skipped}``. Leaves review_note untouched — the analyst
-    notes thread owns commentary now."""
-    eligible = _scope_filter_finding_ids(db_path, finding_ids, scope_user_id)
+    notes thread owns commentary now. ``scope_organization_id`` supersedes
+    ``scope_user_id`` for multi-tenant deployments."""
+    eligible = _scope_filter_finding_ids(
+        db_path, finding_ids, scope_user_id,
+        scope_organization_id=scope_organization_id,
+    )
     if not eligible:
         return {"updated": 0, "skipped": len(finding_ids)}
     r = 1 if reviewed else 0
@@ -1090,7 +1175,7 @@ def batch_set_finding_review(db_path, finding_ids, reviewed, false_positive, sco
     return {"updated": len(eligible), "skipped": len(finding_ids) - len(eligible)}
 
 
-def get_fleet_summary(db_path, user_id=None):
+def get_fleet_summary(db_path, user_id=None, organization_id=None):
     """Roll up scan + finding counts per hostname for the Fleet overview.
 
     Returns one row per distinct ``scans.hostname`` with:
@@ -1116,7 +1201,10 @@ def get_fleet_summary(db_path, user_id=None):
             # aggregates. Second: newest scan row per host so we can read
             # its score + grade without relying on GROUP BY argmax tricks.
             scope_where, scope_params = "", ()
-            if user_id is not None:
+            if organization_id is not None:
+                scope_where = " AND organization_id = ?"
+                scope_params = (int(organization_id),)
+            elif user_id is not None:
                 scope_where = " AND user_id = ?"
                 scope_params = (int(user_id),)
             cursor = conn.execute(
@@ -1157,7 +1245,7 @@ def get_fleet_summary(db_path, user_id=None):
                               f.severity
                        FROM findings f
                        JOIN scans s ON s.id = f.scan_id
-                       WHERE s.hostname = ?{(" AND s.user_id = ?" if user_id is not None else "")}""",
+                       WHERE s.hostname = ?{(" AND s." + ("organization_id" if organization_id is not None else "user_id") + " = ?" if (organization_id is not None or user_id is not None) else "")}""",
                     (host,) + scope_params,
                 ).fetchone()
                 worst = None
@@ -1182,12 +1270,14 @@ def get_fleet_summary(db_path, user_id=None):
         return []
 
 
-def delete_scans(db_path, scan_ids, user_id=None):
+def delete_scans(db_path, scan_ids, user_id=None, organization_id=None):
     """Delete one or more scans (and their findings via ON DELETE CASCADE).
 
-    Pass ``user_id`` to restrict the delete to rows owned by that user —
-    a viewer can only wipe their own scans. ``None`` deletes unconditionally
-    (admin / CLI tool path).
+    Scope rules: ``organization_id`` (preferred multi-tenant scope)
+    restricts the delete to rows in that org so any org member can clear
+    shared scans. ``user_id`` (legacy single-user scope) restricts to rows
+    owned by that user. Both ``None`` deletes unconditionally (admin /
+    CLI tool path).
 
     Returns the number of scan rows actually deleted.
     """
@@ -1196,14 +1286,19 @@ def delete_scans(db_path, scan_ids, user_id=None):
         return 0
     placeholders = ",".join("?" for _ in ids)
     with _connect(db_path) as conn:
-        if user_id is None:
+        if organization_id is not None:
             cursor = conn.execute(
-                f"DELETE FROM scans WHERE id IN ({placeholders})", ids
+                f"DELETE FROM scans WHERE id IN ({placeholders}) AND organization_id = ?",
+                ids + [int(organization_id)]
             )
-        else:
+        elif user_id is not None:
             cursor = conn.execute(
                 f"DELETE FROM scans WHERE id IN ({placeholders}) AND user_id = ?",
                 ids + [int(user_id)]
+            )
+        else:
+            cursor = conn.execute(
+                f"DELETE FROM scans WHERE id IN ({placeholders})", ids
             )
         return cursor.rowcount or 0
 
@@ -1213,7 +1308,7 @@ def delete_scans(db_path, scan_ids, user_id=None):
 # ---------------------------------------------------------------------------
 
 
-def get_trend_analytics(db_path, days=30, user_id=None):
+def get_trend_analytics(db_path, days=30, user_id=None, organization_id=None):
     """Aggregate finding counts over a rolling window for the Trends page.
 
     Returns a dict with:
@@ -1258,7 +1353,10 @@ def get_trend_analytics(db_path, days=30, user_id=None):
         with _connect(db_path) as conn:
             scope_filter = ""
             scope_params = ()
-            if user_id is not None:
+            if organization_id is not None:
+                scope_filter = " AND s.organization_id = ?"
+                scope_params = (int(organization_id),)
+            elif user_id is not None:
                 scope_filter = " AND s.user_id = ?"
                 scope_params = (int(user_id),)
 
@@ -1598,6 +1696,185 @@ def was_recently_alerted(db_path, rule, cooldown_minutes=60):
 
 
 # ---------------------------------------------------------------------------
+# Organizations (Sprint 7 multi-tenant root)
+# ---------------------------------------------------------------------------
+# Every user belongs to exactly one organization. Scans, agents, and
+# notifications carry the org id of their owning user so cross-org
+# queries can be rejected at the helper layer rather than relying on
+# every endpoint to remember to filter.
+#
+# Single-user installs end up with one "Personal" org per user — the
+# backfill on `init_db` creates them transparently. Hosted multi-tenant
+# installs grow new orgs through the (future) public signup flow.
+
+def create_organization(db_path, name, slug=None):
+    """Insert a new organization row and return the id. ``slug`` is
+    optional; if omitted we derive a URL-safe form from the name. The
+    UNIQUE constraint on slug means a duplicate name auto-suffixes a
+    short id to keep the slug unique."""
+    name = (name or "").strip() or "Organization"
+    base_slug = (slug or _slugify(name)).strip() or "org"
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        # Try the bare slug first. On collision (UNIQUE constraint on
+        # `slug`) insert with a NULL slug, capture the new id, and
+        # write back a uniquified slug. We catch broadly here because
+        # SQLite raises IntegrityError while psycopg raises
+        # UniqueViolation — `db_backend` doesn't unify them and the
+        # only thing that can fail at this exact statement is the
+        # uniqueness constraint we just defined.
+        try:
+            cursor = conn.execute(
+                "INSERT INTO organizations (name, slug, created_at)"
+                " VALUES (?, ?, ?)",
+                (name, base_slug, created_at),
+            )
+            return cursor.lastrowid
+        except Exception:
+            cursor = conn.execute(
+                "INSERT INTO organizations (name, slug, created_at)"
+                " VALUES (?, NULL, ?)",
+                (name, created_at),
+            )
+            new_id = cursor.lastrowid
+            conn.execute(
+                "UPDATE organizations SET slug = ? WHERE id = ?",
+                (f"{base_slug}-{new_id}", int(new_id)),
+            )
+            return new_id
+
+
+def _slugify(name):
+    """Tight URL-safe slugifier — ASCII letters / digits / hyphens only,
+    capped at 40 chars so a 200-char company name doesn't produce a
+    monster slug. Spaces and underscores collapse to hyphens; other
+    punctuation is dropped."""
+    out = []
+    last_dash = True
+    for ch in name.lower():
+        if ch.isalnum():
+            out.append(ch)
+            last_dash = False
+        elif ch in (" ", "_", "-") and not last_dash:
+            out.append("-")
+            last_dash = True
+    s = "".join(out).strip("-")
+    return s[:40] or "org"
+
+
+def get_organization(db_path, org_id):
+    """Lookup by id. Returns ``{id, name, slug, created_at}`` or None."""
+    if org_id is None:
+        return None
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, name, slug, created_at FROM organizations WHERE id = ?",
+            (int(org_id),),
+        ).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "name": row[1], "slug": row[2], "created_at": row[3]}
+
+
+def list_organizations(db_path):
+    """Newest-first list of every org. Used by the (future) admin UI;
+    not exposed to end users."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, name, slug, created_at FROM organizations"
+            " ORDER BY id DESC"
+        ).fetchall()
+    return [
+        {"id": r[0], "name": r[1], "slug": r[2], "created_at": r[3]}
+        for r in rows
+    ]
+
+
+def get_user_organization_id(db_path, user_id):
+    """Resolve a user_id to its org_id. Returns None for unknown users
+    or auth-disabled mode (caller passes user_id=None). Hot path —
+    called from `_org_scope_for` on every authenticated request, so
+    keep it cheap (single SELECT, no JOIN)."""
+    if user_id is None:
+        return None
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT organization_id FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+    if not row or row[0] is None:
+        return None
+    return int(row[0])
+
+
+def assign_user_to_organization(db_path, user_id, org_id):
+    """Stamp a user with an org_id. Used by the backfill + (future)
+    invite flow. Idempotent — if the user already belongs to this org
+    nothing changes."""
+    if user_id is None or org_id is None:
+        return False
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET organization_id = ? WHERE id = ?",
+            (int(org_id), int(user_id)),
+        )
+        return cursor.rowcount > 0
+
+
+def _backfill_organizations(db_path):
+    """One-shot per boot: ensure every user has an organization_id, and
+    every scan / agent / notification carries the org of its owning user.
+
+    Runs inside `init_db`. Idempotent — once a user has an org, the
+    "users with NULL org" query returns nothing and we early-out.
+    """
+    try:
+        with _connect(db_path) as conn:
+            users = conn.execute(
+                "SELECT id, email, display_name FROM users"
+                " WHERE organization_id IS NULL"
+            ).fetchall()
+            for uid, email, dn in users:
+                # Org name: prefer the user's display name, fall back to
+                # the email's local-part. Slug is derived from whichever
+                # we picked. Single-user installs end up with one
+                # "Personal" org per user; that's intentional — easy to
+                # rename later, never collides across installs.
+                seed = (dn or "").strip() or (str(email or "user").split("@")[0] or "user")
+                org_id = create_organization(
+                    db_path, name=f"{seed}'s organization",
+                    slug=_slugify(seed),
+                )
+                conn.execute(
+                    "UPDATE users SET organization_id = ? WHERE id = ?",
+                    (int(org_id), int(uid)),
+                )
+                # Tag every existing row that depends on this user.
+                # We use UPDATE … WHERE organization_id IS NULL so a
+                # second invocation of the backfill can't double-stamp.
+                conn.execute(
+                    "UPDATE scans SET organization_id = ?"
+                    " WHERE user_id = ? AND organization_id IS NULL",
+                    (int(org_id), int(uid)),
+                )
+                conn.execute(
+                    "UPDATE agents SET organization_id = ?"
+                    " WHERE user_id = ? AND organization_id IS NULL",
+                    (int(org_id), int(uid)),
+                )
+                conn.execute(
+                    "UPDATE notifications SET organization_id = ?"
+                    " WHERE user_id = ? AND organization_id IS NULL",
+                    (int(org_id), int(uid)),
+                )
+    except db_backend.OperationalError:
+        # Fresh install — tables exist but the column may have just
+        # been added; the next boot's pass will succeed. Never block
+        # init_db on this.
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Users (dashboard login)
 # ---------------------------------------------------------------------------
 
@@ -1612,7 +1889,7 @@ def count_users(db_path):
 _USER_COLS = (
     "id, email, password_hash, created_at, role, active, avatar_mime, "
     "display_name, onboarding_dismissed_at, first_finding_viewed_at, "
-    "last_active_at"
+    "last_active_at, organization_id"
 )
 
 
@@ -1631,6 +1908,7 @@ def _row_to_user(row):
         "onboarding_dismissed_at": row[8] if len(row) > 8 else None,
         "first_finding_viewed_at": row[9] if len(row) > 9 else None,
         "last_active_at": row[10] if len(row) > 10 else None,
+        "organization_id": row[11] if len(row) > 11 else None,
     }
 
 
@@ -1734,11 +2012,18 @@ def get_user_avatar(db_path, user_id):
     return row[0], row[1]
 
 
-def create_user(db_path, email, password_hash, role="viewer"):
+def create_user(db_path, email, password_hash, role="viewer", *,
+                organization_id=None):
     """Insert a new user and return the row id. Email is lowercased and
     stripped so lookups are consistent. `role` is 'admin' or 'viewer'; the
     first user created (empty table) is always promoted to admin so there
-    is never a locked-out database."""
+    is never a locked-out database.
+
+    Multi-tenant behavior: if ``organization_id`` is omitted, the new
+    user lands in their own brand-new "Personal" organization. The
+    admin "invite a teammate" flow passes the inviter's ``org_id`` so
+    invited users join the same tenant.
+    """
     email = (email or "").strip().lower()
     if not email:
         raise ValueError("email is required")
@@ -1750,10 +2035,19 @@ def create_user(db_path, email, password_hash, role="viewer"):
         first = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
         if first:
             role = "admin"
+        # Mint a fresh org for self-signups; reuse the inviter's org
+        # for admin-created users. Either way, every user lands with a
+        # non-NULL organization_id from row 0 — the backfill only
+        # exists to heal pre-Sprint-7 installs.
+        if organization_id is None:
+            seed = (email.split("@")[0] or "user")
+            organization_id = create_organization(
+                db_path, name=f"{seed}'s organization", slug=_slugify(seed),
+            )
         cursor = conn.execute(
-            "INSERT INTO users (email, password_hash, created_at, role, active)"
-            " VALUES (?, ?, ?, ?, 1)",
-            (email, password_hash, created_at, role),
+            "INSERT INTO users (email, password_hash, created_at, role, active, organization_id)"
+            " VALUES (?, ?, ?, ?, 1, ?)",
+            (email, password_hash, created_at, role, int(organization_id)),
         )
         return cursor.lastrowid
 
@@ -1942,6 +2236,7 @@ def _row_to_agent(r):
         "paused": int(r[12] or 0),
         "created_at": r[13],
         "enrolled_at": r[14],
+        "organization_id": r[15],
     }
 
 
@@ -1949,7 +2244,8 @@ _AGENT_COLS = (
     "id, user_id, name, hostname, platform, version,"
     " enrollment_token_sha256, enrollment_expires_at,"
     " agent_token_sha256, agent_token_last4,"
-    " last_heartbeat_at, last_status, paused, created_at, enrolled_at"
+    " last_heartbeat_at, last_status, paused, created_at, enrolled_at,"
+    " organization_id"
 )
 
 
@@ -1960,13 +2256,15 @@ def insert_agent(db_path, user_id, name, enrollment_token_sha256,
     the agent installer exchanges the enrollment token for a long-lived
     bearer."""
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    organization_id = get_user_organization_id(db_path, user_id) if user_id else None
     with _connect(db_path) as conn:
         cursor = conn.execute(
             "INSERT INTO agents (user_id, name, enrollment_token_sha256,"
-            " enrollment_expires_at, paused, created_at)"
-            " VALUES (?, ?, ?, ?, 0, ?)",
+            " enrollment_expires_at, paused, created_at, organization_id)"
+            " VALUES (?, ?, ?, ?, 0, ?, ?)",
             (int(user_id), name, enrollment_token_sha256,
-             enrollment_expires_at, created_at),
+             enrollment_expires_at, created_at,
+             int(organization_id) if organization_id else None),
         )
         return cursor.lastrowid
 
@@ -2043,53 +2341,81 @@ def record_agent_heartbeat(db_path, agent_id, *, status=None, version=None):
         )
 
 
-def list_agents(db_path, user_id=None):
-    """Newest-first list of agents. ``user_id=None`` is admin scope (every
-    agent across the install); otherwise restrict to agents the user owns."""
+def list_agents(db_path, user_id=None, organization_id=None):
+    """Newest-first list of agents.
+
+    Both scopes ``None`` is admin scope (every agent across the install).
+    ``organization_id`` (preferred for multi-tenant) returns every agent
+    owned by anyone in that org. ``user_id`` (legacy single-user) returns
+    only the user's own agents and is ignored when ``organization_id`` is
+    provided."""
     with _connect(db_path) as conn:
-        if user_id is None:
+        if organization_id is not None:
             rows = conn.execute(
-                f"SELECT {_AGENT_COLS} FROM agents ORDER BY id DESC"
+                f"SELECT {_AGENT_COLS} FROM agents"
+                " WHERE organization_id = ? ORDER BY id DESC",
+                (int(organization_id),),
             ).fetchall()
-        else:
+        elif user_id is not None:
             rows = conn.execute(
                 f"SELECT {_AGENT_COLS} FROM agents"
                 " WHERE user_id = ? ORDER BY id DESC",
                 (int(user_id),),
             ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_AGENT_COLS} FROM agents ORDER BY id DESC"
+            ).fetchall()
     return [_row_to_agent(r) for r in rows]
 
 
-def set_agent_paused(db_path, agent_id, paused, *, owner_user_id=None):
-    """Toggle the paused flag. If owner_user_id is given the row must belong
-    to that user (viewer-scope guard); pass None for admin callers."""
+def set_agent_paused(db_path, agent_id, paused, *,
+                     owner_user_id=None, owner_organization_id=None):
+    """Toggle the paused flag.
+
+    Scope rules: ``owner_organization_id`` (preferred multi-tenant scope)
+    restricts the row to the supplied org; ``owner_user_id`` (legacy
+    single-user scope) restricts to the supplied user. Both ``None`` is
+    admin-only callers."""
     with _connect(db_path) as conn:
-        if owner_user_id is None:
+        if owner_organization_id is not None:
             cursor = conn.execute(
-                "UPDATE agents SET paused = ? WHERE id = ?",
-                (1 if paused else 0, int(agent_id)),
+                "UPDATE agents SET paused = ?"
+                " WHERE id = ? AND organization_id = ?",
+                (1 if paused else 0, int(agent_id), int(owner_organization_id)),
             )
-        else:
+        elif owner_user_id is not None:
             cursor = conn.execute(
                 "UPDATE agents SET paused = ? WHERE id = ? AND user_id = ?",
                 (1 if paused else 0, int(agent_id), int(owner_user_id)),
             )
+        else:
+            cursor = conn.execute(
+                "UPDATE agents SET paused = ? WHERE id = ?",
+                (1 if paused else 0, int(agent_id)),
+            )
         return cursor.rowcount > 0
 
 
-def delete_agent(db_path, agent_id, *, owner_user_id=None):
+def delete_agent(db_path, agent_id, *,
+                 owner_user_id=None, owner_organization_id=None):
     """Hard delete. Same scope rules as `set_agent_paused`. Returns True if
     a row was removed."""
     with _connect(db_path) as conn:
-        if owner_user_id is None:
+        if owner_organization_id is not None:
             cursor = conn.execute(
-                "DELETE FROM agents WHERE id = ?",
-                (int(agent_id),),
+                "DELETE FROM agents WHERE id = ? AND organization_id = ?",
+                (int(agent_id), int(owner_organization_id)),
             )
-        else:
+        elif owner_user_id is not None:
             cursor = conn.execute(
                 "DELETE FROM agents WHERE id = ? AND user_id = ?",
                 (int(agent_id), int(owner_user_id)),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM agents WHERE id = ?",
+                (int(agent_id),),
             )
         return cursor.rowcount > 0
 
@@ -2376,14 +2702,17 @@ def insert_notification(db_path, user_id, kind, message,
     if kind not in NOTIFICATION_KINDS:
         kind = "scan_complete"
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    organization_id = get_user_organization_id(db_path, user_id)
     with _connect(db_path) as conn:
         cursor = conn.execute(
             "INSERT INTO notifications"
-            " (user_id, type, message, ref_kind, ref_id, read, created_at)"
-            " VALUES (?, ?, ?, ?, ?, 0, ?)",
+            " (user_id, type, message, ref_kind, ref_id, read, created_at,"
+            "  organization_id)"
+            " VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
             (int(user_id), kind, message[:500] if message else "",
              ref_kind, int(ref_id) if ref_id is not None else None,
-             created_at),
+             created_at,
+             int(organization_id) if organization_id else None),
         )
         new_id = cursor.lastrowid
         # Prune anything past the per-user cap so the bell-feed query

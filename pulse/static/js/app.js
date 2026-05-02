@@ -173,6 +173,7 @@ import {
   testThreatIntelKey,
   onScheduleKindChange,
   saveScheduleSettings,
+  setActiveSettingsTab,
   switchSettingsTab,
   resetSeverityPaletteAndRender,
   createUser,
@@ -280,6 +281,7 @@ const actions = {
   openSystemScanModal,
   closeSystemScanModal,
   uploadFromTopbar,
+  goToAgentEnroll,
   runSystemScan,
 
   // dashboard
@@ -532,6 +534,17 @@ function uploadFromTopbar() {
   requestAnimationFrame(function () { openUploadModal(); });
 }
 
+// Hosted-mode CTA. The Render-deployed dashboard can't read a Windows
+// host's event log itself, so we point the topbar at the agent
+// enrollment flow — that's the supported way to monitor Windows fleets
+// from a non-Windows server. The History page still hosts the
+// upload-.evtx CLI fallback for analysts who want to triage a one-off
+// log file.
+function goToAgentEnroll() {
+  setActiveSettingsTab('agents');
+  navigate('settings');
+}
+
 // Hide the banner for the rest of the session and persist the choice.
 function dismissAdminBanner() {
   var el = document.getElementById('admin-banner');
@@ -542,11 +555,12 @@ function dismissAdminBanner() {
 // One-shot health probe at boot. Drives two host-aware UI tweaks:
 //   1) Admin banner — only on Windows hosts where the process isn't elevated
 //      (and the user hasn't already dismissed it).
-//   2) Topbar "Scan My System" button — repurposed to "Upload .evtx" on
+//   2) Topbar "Scan My System" button — repurposed to "Download Agent" on
 //      non-Windows hosts (e.g. the Render-hosted dashboard) since the
-//      local-system scanner relies on `wevtutil`. The label and click
-//      action both swap so the button leads somewhere useful instead of
-//      silently failing.
+//      local-system scanner relies on `wevtutil`. The button leads to
+//      Settings → Agents where users can enroll a `pulse-agent.exe` on
+//      each Windows host they want monitored. The .evtx upload fallback
+//      stays available on the History page for one-off analyst triage.
 async function _applyHostPlatformGating() {
   var bannerEl = document.getElementById('admin-banner');
   var btnEl    = document.getElementById('topbar-scan-btn');
@@ -564,10 +578,17 @@ async function _applyHostPlatformGating() {
     }
 
     if (btnEl && !info.platform_windows) {
-      btnEl.dataset.action = 'uploadFromTopbar';
-      btnEl.title = 'Upload an .evtx file (this server can\'t read live Windows logs)';
+      btnEl.dataset.action = 'goToAgentEnroll';
+      btnEl.title = 'Install Pulse Agent on a Windows host to ship findings to this dashboard';
       var label = btnEl.querySelector('.topbar-scan-label');
-      if (label) label.textContent = 'Upload .evtx';
+      if (label) label.textContent = 'Download Agent';
+      var icon = btnEl.querySelector('[data-lucide]');
+      if (icon) {
+        icon.setAttribute('data-lucide', 'download');
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+          window.lucide.createIcons();
+        }
+      }
     }
   } catch (e) { /* health is best-effort */ }
 }

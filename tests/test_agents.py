@@ -329,7 +329,7 @@ def test_delete_agent_revokes_token(agent_client):
     assert r.status_code == 401
 
 
-def test_viewer_cannot_manage_admin_agent(agent_client):
+def test_viewer_in_same_org_can_see_admin_agent(agent_client):
     client, db_path = agent_client
     agent_id, _agent_token = _enroll_and_exchange(client)
 
@@ -349,13 +349,14 @@ def test_viewer_cannot_manage_admin_agent(agent_client):
         "password": "another-long-password",
     })
 
-    # Viewer's listing is empty (the agent belongs to the admin).
+    # Viewer joins the admin's org and shares agent visibility / control —
+    # the agent shows in the listing and the viewer can pause it.
     r = client.get("/api/agents")
     assert r.status_code == 200
-    assert r.json()["agents"] == []
+    listing = r.json()["agents"]
+    assert any(a["id"] == agent_id for a in listing)
 
-    # Viewer cannot pause / delete the admin's agent — 404 (no leak).
     r = client.put(f"/api/agents/{agent_id}", json={"paused": True})
-    assert r.status_code == 404
+    assert r.status_code == 200
     r = client.delete(f"/api/agents/{agent_id}")
-    assert r.status_code == 404
+    assert r.status_code == 200

@@ -43,11 +43,15 @@ def is_admin():
         _IS_ADMIN = False
     return _IS_ADMIN
 
-from pulse.database import init_db, save_scan
+# Server-side imports (DB writes, alert dispatch, remediation lookup)
+# are deferred into `scan_system` itself so the agent's scanner can
+# `from pulse.monitor.system_scan import _resolve_log_paths,
+# is_supported_platform, …` without pulling the FastAPI / SQLite / SMTP
+# stack into the packaged pulse-agent.exe. The deferred imports add
+# ~microseconds to scan_system's first call — utterly insignificant
+# next to the wevtutil queries that follow.
 from pulse.core.detections import run_all_detections
-from pulse.alerts.emailer import dispatch_alerts
 from pulse.core.parser import parse_evtx
-from pulse.remediation import attach_remediation
 from pulse.reports.reporter import calculate_score_from_findings
 from pulse.whitelist import filter_whitelist
 
@@ -183,6 +187,15 @@ def scan_system(
         "total_events": len(all_events),
         "files_scanned": files_scanned,
     }
+    # Lazy-import the DB + alert + remediation stack — see the module
+    # docstring for the agent-bundling rationale. These imports are only
+    # exercised when the *server* runs a system scan, never when the
+    # agent's `scan_for_findings` reuses the path-resolution helpers
+    # above.
+    from pulse.database import init_db, save_scan
+    from pulse.alerts.emailer import dispatch_alerts
+    from pulse.remediation import attach_remediation
+
     init_db(db_path)
     duration_sec = max(0, int((datetime.now() - scan_started).total_seconds()))
     scan_id = save_scan(

@@ -153,19 +153,19 @@ A focused polish pass landed alongside the Sprint 6 ACs:
 The hosted dashboard on Render can't scan a Windows machine itself — the OS can't read `.evtx` files or tail the Windows Event Log. "Scan my system" from the hosted UI currently fails with an authorization error because the server has no access to the user's local logs. The plan is to split Pulse the way Splunk does: a hosted multi-tenant dashboard + a downloadable Windows agent that ships detections to it over HTTPS.
 
 ### Hosted dashboard (stays on Render)
-- [ ] Multi-tenant data model — every scan / finding / fleet row scoped to an `organization_id` so agents from different customers never cross-contaminate
+- [x] Multi-tenant data model — `organizations` table + `organization_id` denormalized onto users, scans, agents, notifications. `_read_scope_kwargs` API helper resolves admin → unrestricted, org-member → org-scoped, legacy untenanted → per-user-scoped. Self-signup creates a fresh org; admin-side user creation joins the admin's org. Idempotent backfill at every `init_db` migrates legacy single-user installs in place. Cross-org reads / writes return 404 / no-op
 - [x] Agent enrollment flow — Settings → Agents tab mints a single-use, 1h-TTL enrollment token (`pe_…`); the agent installer trades it via `POST /api/agent/exchange` for a long-lived bearer (`pa_…`). Both tokens are sha256-at-rest, raw values shown once. Delete-agent revokes the bearer immediately
 - [x] Agent status panel — Settings → Agents lists every registered host with status pill (online / stale / offline / paused / pending), last-heartbeat relative time, hostname + platform, version. Pause and Delete actions per row; viewers see only their own agents, admins see every install
 - [x] `POST /api/agent/heartbeat` + `POST /api/agent/findings` — implemented in `pulse/api.py`. Heartbeat updates `last_heartbeat_at` and surfaces the paused flag; findings ingest writes a scan attributed to the enrolling user with `scans.agent_id` stamped for provenance. Paused agents ack heartbeats but their findings are dropped so quiet-mode is observable from both sides
-- [ ] Hide / disable "Scan my system" in hosted mode — replace with a **Download Pulse Agent** button that links to the installer; CLI-upload path stays usable for analysts who prefer to scan manually
-- [ ] Public landing / signup page — Splunk-style `pulse.io`-ish marketing page with Sign Up → org created → agent download link in one flow
+- [x] Hide / disable "Scan my system" in hosted mode — topbar swaps to **Download Agent** on non-Windows hosts (action: `goToAgentEnroll` → Settings → Agents). Command palette filters `act.system_scan` away and surfaces `act.download_agent` instead. Agents tab now leads with a two-step install card (pip install + `python -m pulse.agent enroll/run`). The .evtx CLI-upload fallback stays on the History page
+- [x] Public multi-tenant signup — `PULSE_HOSTED_SIGNUP=1` opens `POST /api/auth/signup` past the first user; each signup mints a fresh org via the data-layer auto-org logic. Login page surfaces a "Create account" link in hosted mode. *(Marketing landing page deferred — the auth flow itself is what the hosted dashboard needs first; the landing page is decorative on top.)*
 
 ### Downloadable Windows agent
 - [ ] Packaged `pulse-agent.exe` via PyInstaller — reuses `pulse/detections.py` and `pulse/core/rules_config.py`; bundles a minimal config + YAML enrollment token
 - [ ] Windows Service installer — registers Pulse Agent as a SYSTEM-privileged service (moved up from Sprint 6) so scheduled scans + Event Log access work without manual UAC each time
 - [ ] Local-scan → HTTPS upload pipeline — agent runs detections every N minutes, POSTs findings to the hosted API using the enrollment-minted bearer token; retries + offline queue if the dashboard is unreachable
 - [ ] Tamper resistance — service locked to Administrators for start/stop, token file ACL'd to SYSTEM + Administrators
-- [ ] Auto-update channel — agent checks `GET /api/agent/latest` on startup, downloads + verifies a signed installer when a newer version is available
+- [x] Auto-update channel — `GET /api/agent/latest` shipped; the agent calls it once at startup via `AgentTransport.get_latest_version()` and logs an "update available" warning with the download URL when the server reports drift. *Auto-download + signature verification deferred to Sprint 8 once we have a code-signing cert.*
 - [ ] Local dashboard mode (optional) — same installer can run Pulse as a single-user local dashboard (current behavior) instead of as an agent, controlled by one install-time checkbox
 
 ### Deferred product questions (flag before starting this sprint)

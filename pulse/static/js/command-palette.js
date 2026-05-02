@@ -10,6 +10,20 @@ import { toggleTheme } from './theme.js';
 import { monitorClient } from './monitor.js';
 import { openUploadModal } from './upload.js';
 import { openSystemScanModal } from './system-scan.js';
+import { setActiveSettingsTab } from './settings.js';
+
+// Cached at boot via /api/health. `null` means "not yet probed" — fall
+// back to assuming Windows so the local-scan command shows on first
+// open if the probe is racing the keystroke. Updated to true/false once
+// the fetch resolves.
+let _platformWindows = null;
+fetch('/api/health').then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (info) {
+    if (info && typeof info.platform_windows === 'boolean') {
+      _platformWindows = info.platform_windows;
+    }
+  })
+  .catch(function () { /* health is best-effort */ });
 
 // Each command declares: id, label (shown first), hint (meta text on the
 // right), group (section header), keywords (extra tokens for fuzzy match),
@@ -37,9 +51,22 @@ const _COMMANDS = [
   { id: 'act.stop_monitor',  label: 'Stop monitoring',      group: 'Actions', keywords: 'halt end',          run: () => monitorClient.stop() },
   { id: 'act.test_alert',    label: 'Send test alert',      group: 'Actions', keywords: 'ping demo notify',  run: () => monitorClient.sendTestAlert() },
   { id: 'act.upload',        label: 'Upload .evtx file',    group: 'Actions', keywords: 'import log scan',   run: () => openUploadModal() },
-  { id: 'act.system_scan',   label: 'Scan my system',       group: 'Actions', keywords: 'local run now',     run: () => openSystemScanModal() },
+  { id: 'act.system_scan',   label: 'Scan my system',       group: 'Actions', keywords: 'local run now',     run: () => openSystemScanModal(),
+    condition: () => _platformWindows !== false },
+  { id: 'act.download_agent', label: 'Install Pulse Agent', group: 'Actions', keywords: 'download agent windows host enroll',
+    run: () => { setActiveSettingsTab('agents'); navigate('settings'); },
+    condition: () => _platformWindows === false },
   { id: 'act.toggle_theme',  label: 'Toggle dark / light',  group: 'Actions', keywords: 'theme appearance',  run: () => toggleTheme() },
 ];
+
+// Filter `_COMMANDS` against any per-entry `condition()` so the palette
+// reflects host-platform gating (e.g. hide "Scan my system" on a non-
+// Windows hosted server, surface "Install Pulse Agent" instead).
+function _availableCommands() {
+  return _COMMANDS.filter(function (c) {
+    return typeof c.condition !== 'function' || c.condition();
+  });
+}
 
 // Recent selections — stored as ids so labels can change without drifting.
 const LS_RECENT = 'pulse.palette.recent';
@@ -88,15 +115,16 @@ function _fuzzyScore(haystack, needle) {
 
 function _rank(query) {
   var recent = _readRecent();
+  var available = _availableCommands();
   if (!query) {
     // No query: recents first, then the rest in declared order.
     var recentCmds = recent
-      .map(function (id) { return _COMMANDS.find(function (c) { return c.id === id; }); })
+      .map(function (id) { return available.find(function (c) { return c.id === id; }); })
       .filter(Boolean);
-    var remaining = _COMMANDS.filter(function (c) { return recent.indexOf(c.id) < 0; });
+    var remaining = available.filter(function (c) { return recent.indexOf(c.id) < 0; });
     return recentCmds.concat(remaining).slice(0, 8);
   }
-  return _COMMANDS
+  return available
     .map(function (c) {
       var labelScore = _fuzzyScore(c.label, query);
       var kwScore    = _fuzzyScore(c.keywords || '', query);

@@ -44,3 +44,10 @@ pulse.yaml
 
 # Claude Code settings (local to each developer, not needed in repo)
 .claude/
+
+# PyInstaller build artifacts (Sprint 7 — packaged Pulse Agent).
+# `python scripts/build_agent.py` regenerates these on demand; the
+# resulting pulse-agent.exe is shipped via GitHub Releases, not the
+# source repo.
+build/
+dist/

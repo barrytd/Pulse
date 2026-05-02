@@ -186,6 +186,15 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     app.state.config_path = config_path
     app.state.auth_required = not disable_auth
     app.state.is_production = _is_production
+    # Hosted multi-tenant signup. Default is False so a self-hosted install
+    # keeps the safe single-tenant behavior (signup self-closes after the
+    # first user, no rando off the internet can create an account on
+    # someone's local Pulse). Set PULSE_HOSTED_SIGNUP=1 on the Render
+    # deployment so each new email mints its own organization.
+    app.state.hosted_signup = (
+        os.environ.get("PULSE_HOSTED_SIGNUP", "").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
 
     # Resolve (and if needed, generate + persist) the session signing secret
     # so every logged-in browser cookie can be verified on future requests.
@@ -550,6 +559,61 @@ def _scan_scope_for(app, user_id):
     return None if user.get("role") == "admin" else int(user_id)
 
 
+def _org_scope_for(app, user_id):
+    """Resolve the `organization_id` filter for multi-tenant read helpers.
+
+    Returns the user's ``organization_id`` so every member of an org sees
+    every scan / agent owned by anyone in the same org — the multi-tenant
+    visibility boundary. Admins still see everything (``None``); CLI / test
+    mode with auth disabled is unrestricted (``None``).
+
+    Falls back to ``None`` when the user has no organization_id assigned
+    (legacy single-user installs that pre-date the migration); in that
+    case `_scan_scope_for` continues to provide the per-user scope.
+    """
+    if not getattr(app.state, "auth_required", True):
+        return None
+    if user_id is None:
+        return None
+    user = get_user_by_id(app.state.db_path, user_id)
+    if not user:
+        return None
+    if user.get("role") == "admin":
+        return None
+    org_id = user.get("organization_id")
+    return int(org_id) if org_id else None
+
+
+def _read_scope_kwargs(app, user_id):
+    """Return scope kwargs to splat into DB read helpers.
+
+    Resolution order (broadest first):
+      - admin, no-auth, or unknown caller -> ``{}`` (no filter)
+      - user has an organization_id -> ``{"organization_id": N}``
+      - legacy single-user install (no org assigned yet) -> ``{"user_id": N}``
+
+    Splat at the call site::
+
+        rows = get_history(db_path, limit=20, **_read_scope_kwargs(app, uid))
+
+    Keeps every endpoint to a single line instead of repeating the
+    org-scope/user-scope branch.
+    """
+    if not getattr(app.state, "auth_required", True):
+        return {}
+    if user_id is None:
+        return {}
+    user = get_user_by_id(app.state.db_path, user_id)
+    if not user:
+        return {"user_id": int(user_id)}
+    if user.get("role") == "admin":
+        return {}
+    org_id = user.get("organization_id")
+    if org_id:
+        return {"organization_id": int(org_id)}
+    return {"user_id": int(user_id)}
+
+
 def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
     """Record a scan-deletion in the audit log. Wrapped in try/except via
     blocker.log_audit so a logging failure never breaks the delete."""
@@ -642,9 +706,20 @@ def _register_routes(app: FastAPI) -> None:
     def auth_status(request: Request):
         """Tell the login page whether to show login or first-user signup,
         and tell the dashboard whether the user is already signed in."""
+        hosted_signup = bool(getattr(app.state, "hosted_signup", False))
         if not app.state.auth_required:
-            return {"logged_in": True, "email": "local", "role": "admin", "needs_signup": False}
-        needs_signup = count_users(app.state.db_path) == 0
+            return {
+                "logged_in": True, "email": "local", "role": "admin",
+                "needs_signup": False, "hosted_signup": hosted_signup,
+                "signup_open": hosted_signup,
+            }
+        user_count = count_users(app.state.db_path)
+        needs_signup = user_count == 0
+        # Signup remains open whenever the dashboard is in hosted multi-tenant
+        # mode, plus the bootstrap moment on a fresh install. The login page
+        # uses this to decide whether to render a "Create account" link
+        # alongside the signin form.
+        signup_open = needs_signup or hosted_signup
         cookie = request.cookies.get(SESSION_COOKIE_NAME)
         from pulse.auth import verify_session_cookie
         user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
@@ -656,17 +731,38 @@ def _register_routes(app: FastAPI) -> None:
                     "email": user["email"],
                     "role": user.get("role", "admin"),
                     "needs_signup": False,
+                    "hosted_signup": hosted_signup,
+                    "signup_open": signup_open,
                 }
-        return {"logged_in": False, "email": None, "role": None, "needs_signup": needs_signup}
+        return {
+            "logged_in": False, "email": None, "role": None,
+            "needs_signup": needs_signup,
+            "hosted_signup": hosted_signup,
+            "signup_open": signup_open,
+        }
 
     @app.post("/api/auth/signup")
     async def auth_signup(request: Request):
-        """Create the one and only user. 409s after the first row exists."""
-        # Signup is self-closing after the first user, but rate-limit
-        # anyway so an attacker can't flood the endpoint during a brief
-        # bootstrap window on a fresh deploy.
+        """Create a user.
+
+        Two flavors, gated by the ``PULSE_HOSTED_SIGNUP`` env var:
+
+        - **Single-tenant install** (default): the very first signup creates
+          the admin account; every subsequent signup gets a 409 because the
+          owner manages their team via Settings → Users.
+        - **Hosted multi-tenant** (`PULSE_HOSTED_SIGNUP=1`): each signup is a
+          new tenant. The user lands in a fresh ``organization_id`` (auto-
+          minted by `create_user` when no org is supplied) so customers
+          sharing the same Pulse instance never see each other's data.
+          The first signup still becomes admin so the operator running the
+          deployment has an account to log in with.
+        """
+        # Rate-limit always — even in hosted mode where the endpoint is
+        # legitimately reusable, 10/5min is more than enough for real
+        # signups and stops a stuffing-style flood cold.
         rate_limit.hit(request, "auth_signup", window_sec=300, max_hits=10)
-        if count_users(app.state.db_path) > 0:
+        existing_user_count = count_users(app.state.db_path)
+        if existing_user_count > 0 and not getattr(app.state, "hosted_signup", False):
             raise HTTPException(409, detail="Signup is closed. An account already exists.")
         try:
             body = await request.json()
@@ -680,7 +776,20 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail="Please enter a valid email address.")
         if len(password) < 8:
             raise HTTPException(400, detail="Password must be at least 8 characters.")
-        user_id = create_user(app.state.db_path, email, hash_password(password))
+        # Block duplicate emails up front. ``create_user`` will also raise
+        # on its own UNIQUE-constraint hit, but a clean 409 with a clear
+        # message beats a 500 from the bubbling exception.
+        if get_user_by_email(app.state.db_path, email):
+            raise HTTPException(409, detail="An account with that email already exists.")
+        # Role: first signup -> admin (so somebody can manage the install);
+        # every later hosted-mode signup -> their own org's first user, also
+        # admin within that org so they can invite teammates immediately.
+        # `create_user` with `organization_id=None` auto-creates a fresh org
+        # for them — exactly the multi-tenant boundary we want.
+        role = "admin"
+        user_id = create_user(
+            app.state.db_path, email, hash_password(password), role=role,
+        )
         cookie = issue_session_cookie(app.state.session_secret, user_id)
         resp = JSONResponse({"status": "ok", "email": email})
         resp.set_cookie(
@@ -948,9 +1057,11 @@ def _register_routes(app: FastAPI) -> None:
 
     def _agent_owner_or_admin(agent_id: int, caller_user_id: int) -> dict:
         """Fetch an agent the caller is allowed to manage. Admins can act
-        on any agent; viewers only on agents they own. Raises 404 in both
-        the "doesn't exist" and "not yours" cases so a viewer can't probe
-        for other users' agent ids."""
+        on any agent; org members can act on any agent owned by their
+        organization (multi-tenant rule); legacy single-user installs fall
+        back to the per-user check. Raises 404 in both the "doesn't exist"
+        and "not yours" cases so a viewer can't probe for other tenants'
+        agent ids."""
         from pulse.database import get_agent_by_id as _get_agent
         a = _get_agent(app.state.db_path, agent_id)
         if not a:
@@ -960,6 +1071,10 @@ def _register_routes(app: FastAPI) -> None:
         caller = get_user_by_id(app.state.db_path, caller_user_id) or {}
         if caller.get("role") == "admin":
             return a
+        caller_org = caller.get("organization_id")
+        agent_org = a.get("organization_id")
+        if caller_org and agent_org and int(caller_org) == int(agent_org):
+            return a
         if a.get("user_id") != caller_user_id:
             raise HTTPException(404, detail="Agent not found.")
         return a
@@ -967,8 +1082,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/agents")
     def api_list_agents(user_id: int = Depends(require_login)):
         from pulse.database import list_agents as _list_agents
-        scope = _scan_scope_for(app, user_id)
-        rows = _list_agents(app.state.db_path, user_id=scope)
+        rows = _list_agents(app.state.db_path, **_read_scope_kwargs(app, user_id))
         return {"agents": [_agents.public_view(a) for a in rows]}
 
     @app.post("/api/agents")
@@ -1164,6 +1278,66 @@ def _register_routes(app: FastAPI) -> None:
             "score": score_data["score"],
         }
 
+    @app.get("/api/agent/latest")
+    def api_agent_latest(request: Request):
+        """Auto-update channel for the Pulse Agent.
+
+        Returns the latest known agent version + a download URL hint so a
+        running agent can detect when it's behind and surface the upgrade
+        path in its logs (or, eventually, an in-app prompt). The endpoint
+        is **public** — version + download URL are already public data
+        (the README, the GitHub Releases page, `/api/health`) and update
+        checks shouldn't depend on a valid bearer token.
+
+        Bearer auth is *optional*: when supplied, the agent gets a
+        per-agent comparison field (``outdated`` true/false) so the agent
+        doesn't have to do its own semver comparison. We also stamp
+        ``last_status='checked-update'`` so the dashboard can hint at
+        which agents have phoned in for updates recently.
+
+        ``PULSE_AGENT_DOWNLOAD_URL`` env var overrides the default GitHub
+        Releases URL — useful for staging deploys that want to point
+        agents at a private build channel.
+        """
+        latest = __version__
+        download_url = (
+            os.environ.get("PULSE_AGENT_DOWNLOAD_URL", "").strip()
+            or "https://github.com/anthropics/pulse/releases/latest"
+        )
+        release_notes_url = (
+            os.environ.get("PULSE_AGENT_NOTES_URL", "").strip()
+            or "https://github.com/anthropics/pulse/blob/main/CHANGELOG.md"
+        )
+        body: dict = {
+            "version":            latest,
+            "download_url":       download_url,
+            "release_notes_url":  release_notes_url,
+        }
+
+        # Optional bearer-token branch: identify the calling agent so we
+        # can compute outdated + log the check. No-op (with a quiet log
+        # line) when the header is missing or the token doesn't resolve.
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            raw = auth[7:].strip()
+            agent = _agents.authenticate_agent(app.state.db_path, raw)
+            if agent:
+                current = (agent.get("version") or "").strip()
+                body["current"]  = current or None
+                body["outdated"] = bool(current) and current != latest
+                # Cheap "I checked" telemetry — surfaces in the Agents
+                # tab as the most recent status string when a heartbeat
+                # hasn't fired yet.
+                try:
+                    _agents.heartbeat(
+                        app.state.db_path, agent["id"],
+                        status="checked-update",
+                    )
+                except Exception:
+                    # Telemetry must never break the response.
+                    pass
+        return body
+
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):
         try:
@@ -1262,7 +1436,16 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail="Role must be 'admin' or 'viewer'.")
         if get_user_by_email(app.state.db_path, email):
             raise HTTPException(409, detail="A user with that email already exists.")
-        new_id = create_user(app.state.db_path, email, hash_password(password), role=role)
+        # New users created by an admin join the admin's organization so
+        # the dashboard ships shared scan/agent/finding visibility out of
+        # the box. Self-signup (handled separately) auto-creates a fresh
+        # org for the new tenant.
+        admin_row = get_user_by_id(app.state.db_path, user_id) or {}
+        admin_org_id = admin_row.get("organization_id")
+        new_id = create_user(
+            app.state.db_path, email, hash_password(password), role=role,
+            organization_id=admin_org_id,
+        )
         _audit_user_action(user_id, "create_user", target=email, detail=f"role={role}")
         user = get_user_by_id(app.state.db_path, new_id)
         return _public_user(user)
@@ -1664,8 +1847,10 @@ def _register_routes(app: FastAPI) -> None:
                 status_code=400,
                 detail="limit must be between 1 and 200.",
             )
-        scope = _scan_scope_for(app, user_id)
-        return {"scans": get_history(app.state.db_path, limit=limit, user_id=scope)}
+        return {"scans": get_history(
+            app.state.db_path, limit=limit,
+            **_read_scope_kwargs(app, user_id),
+        )}
 
     # -------------------------------------------------------------------
     # GET /api/fleet — per-host rollup (Sprint 4 Thread A)
@@ -1674,8 +1859,9 @@ def _register_routes(app: FastAPI) -> None:
     def fleet(user_id: int = Depends(require_login)):
         """Return one row per tracked hostname with score, last scan, and
         finding totals. Powers the Fleet overview page."""
-        scope = _scan_scope_for(app, user_id)
-        return {"hosts": get_fleet_summary(app.state.db_path, user_id=scope)}
+        return {"hosts": get_fleet_summary(
+            app.state.db_path, **_read_scope_kwargs(app, user_id),
+        )}
 
     # -------------------------------------------------------------------
     # GET /api/audit — dashboard view into the audit_log table
@@ -1836,7 +2022,7 @@ def _register_routes(app: FastAPI) -> None:
         import csv
         import io
 
-        rows = get_fleet_summary(app.state.db_path, user_id=_scan_scope_for(app, user_id))
+        rows = get_fleet_summary(app.state.db_path, **_read_scope_kwargs(app, user_id))
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
@@ -1878,8 +2064,8 @@ def _register_routes(app: FastAPI) -> None:
         import io
         from pulse.database import get_history, get_scan_findings
 
-        scope = _scan_scope_for(app, user_id)
-        scans = get_history(app.state.db_path, limit=200, user_id=scope)
+        scope_kw = _read_scope_kwargs(app, user_id)
+        scans = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_meta = {s["id"]: s for s in scans}
 
         buf = io.StringIO()
@@ -1899,7 +2085,7 @@ def _register_routes(app: FastAPI) -> None:
             "description",
         ])
         for s in scans:
-            for f in get_scan_findings(app.state.db_path, s["id"], user_id=scope) or []:
+            for f in get_scan_findings(app.state.db_path, s["id"], **scope_kw) or []:
                 writer.writerow([
                     f.get("timestamp", "") or "",
                     (f.get("severity") or "").upper(),
@@ -2182,7 +2368,7 @@ def _register_routes(app: FastAPI) -> None:
             ids_int = [int(i) for i in ids]
         except (TypeError, ValueError):
             raise HTTPException(400, detail="All ids must be integers.")
-        deleted = delete_scans(app.state.db_path, ids_int, user_id=_scan_scope_for(app, user_id))
+        deleted = delete_scans(app.state.db_path, ids_int, **_read_scope_kwargs(app, user_id))
         _audit_scan_delete(app.state.db_path, user_id, ids_int, deleted, source_page="scans")
         return {"deleted": deleted}
 
@@ -2201,7 +2387,7 @@ def _register_routes(app: FastAPI) -> None:
             ids_int = [int(i) for i in ids]
         except (TypeError, ValueError):
             raise HTTPException(400, detail="All ids must be integers.")
-        deleted = delete_scans(app.state.db_path, ids_int, user_id=_scan_scope_for(app, user_id))
+        deleted = delete_scans(app.state.db_path, ids_int, **_read_scope_kwargs(app, user_id))
         _audit_scan_delete(app.state.db_path, user_id, ids_int, deleted, source_page="history")
         return {"deleted": deleted}
 
@@ -2215,11 +2401,11 @@ def _register_routes(app: FastAPI) -> None:
         When ?format=pdf, a binary PDF is returned as an attachment so the
         dashboard can offer a one-click PDF download.
         """
-        scope = _scan_scope_for(app, user_id)
-        findings = get_scan_findings(app.state.db_path, scan_id, user_id=scope)
+        scope_kw = _read_scope_kwargs(app, user_id)
+        findings = get_scan_findings(app.state.db_path, scan_id, **scope_kw)
         # Distinguish "scan exists but zero findings" from "scan not found"
         # by checking the scans table.
-        history_rows = get_history(app.state.db_path, limit=200, user_id=scope)
+        history_rows = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
         if not findings and scan_row is None:
             raise HTTPException(
@@ -2263,20 +2449,22 @@ def _register_routes(app: FastAPI) -> None:
         # Ownership check: look up the finding's scan and reject if the
         # caller is a viewer trying to touch someone else's finding. Admins
         # (scope == None) skip the filter.
-        scope = _scan_scope_for(app, user_id)
-        if scope is not None:
+        scope_kw = _read_scope_kwargs(app, user_id)
+        if scope_kw:
             from pulse import db_backend
+            scope_col = "organization_id" if "organization_id" in scope_kw else "user_id"
+            scope_val = scope_kw.get(scope_col)
             with db_backend.connect(app.state.db_path) as conn:
                 row = conn.execute(
-                    "SELECT scans.user_id FROM findings "
+                    f"SELECT scans.{scope_col} FROM findings "
                     "JOIN scans ON scans.id = findings.scan_id "
                     "WHERE findings.id = ?",
                     (int(finding_id),),
                 ).fetchone()
             if row is None:
                 raise HTTPException(404, detail="Finding not found.")
-            owner = row[0] if not isinstance(row, dict) else row.get("user_id")
-            if owner is not None and int(owner) != int(scope):
+            owner = row[0] if not isinstance(row, dict) else row.get(scope_col)
+            if owner is not None and int(owner) != int(scope_val):
                 raise HTTPException(404, detail="Finding not found.")
         reviewed = bool(p.get("reviewed"))
         false_positive = bool(p.get("false_positive"))
@@ -2328,20 +2516,22 @@ def _register_routes(app: FastAPI) -> None:
         # Ownership check — mirror /review: viewers can only touch findings
         # whose scan they own; admins skip the filter. 404 on cross-scope so
         # we don't leak existence.
-        scope = _scan_scope_for(app, user_id)
-        if scope is not None:
+        scope_kw = _read_scope_kwargs(app, user_id)
+        if scope_kw:
             from pulse import db_backend
+            scope_col = "organization_id" if "organization_id" in scope_kw else "user_id"
+            scope_val = scope_kw.get(scope_col)
             with db_backend.connect(app.state.db_path) as conn:
                 row = conn.execute(
-                    "SELECT scans.user_id FROM findings "
+                    f"SELECT scans.{scope_col} FROM findings "
                     "JOIN scans ON scans.id = findings.scan_id "
                     "WHERE findings.id = ?",
                     (int(finding_id),),
                 ).fetchone()
             if row is None:
                 raise HTTPException(404, detail="Finding not found.")
-            owner = row[0] if not isinstance(row, dict) else row.get("user_id")
-            if owner is not None and int(owner) != int(scope):
+            owner = row[0] if not isinstance(row, dict) else row.get(scope_col)
+            if owner is not None and int(owner) != int(scope_val):
                 raise HTTPException(404, detail="Finding not found.")
         # Capture the previous workflow_status so the audit drawer can
         # render "Status changed from New to Acknowledged" instead of
@@ -2402,7 +2592,9 @@ def _register_routes(app: FastAPI) -> None:
         except (TypeError, ValueError):
             raise HTTPException(400, detail="finding_ids must be integers.")
         op = str(body.get("op") or "").strip().lower()
-        scope = _scan_scope_for(app, user_id)
+        scope_kw = _read_scope_kwargs(app, user_id)
+        scope = scope_kw.get("user_id")
+        org_scope = scope_kw.get("organization_id")
         if op == "assign":
             raw = body.get("assignee_user_id")
             if raw is None or raw == "":
@@ -2414,6 +2606,7 @@ def _register_routes(app: FastAPI) -> None:
             try:
                 result = batch_set_finding_assignee(
                     app.state.db_path, finding_ids, assignee, scope,
+                    scope_organization_id=org_scope,
                 )
             except ValueError as exc:
                 raise HTTPException(400, detail=str(exc))
@@ -2440,6 +2633,7 @@ def _register_routes(app: FastAPI) -> None:
         elif op == "unassign":
             result = batch_set_finding_assignee(
                 app.state.db_path, finding_ids, None, scope,
+                scope_organization_id=org_scope,
             )
             ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
@@ -2454,6 +2648,7 @@ def _register_routes(app: FastAPI) -> None:
             # One-click "Mark reviewed" — sets reviewed=True, false_positive=False.
             result = batch_set_finding_review(
                 app.state.db_path, finding_ids, True, False, scope,
+                scope_organization_id=org_scope,
             )
             ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
@@ -2468,6 +2663,7 @@ def _register_routes(app: FastAPI) -> None:
         elif op == "unreview":
             result = batch_set_finding_review(
                 app.state.db_path, finding_ids, False, False, scope,
+                scope_organization_id=org_scope,
             )
             ref_ids = _ref_ids_for_findings(app.state.db_path, finding_ids)
             _audit_finding_action(
@@ -2495,22 +2691,34 @@ def _register_routes(app: FastAPI) -> None:
     def _check_finding_scope(finding_id, user_id):
         """Resolve scope for a single finding. Returns (is_admin, owner_id)
         or raises 404 if finding doesn't exist or the caller is out of
-        scope. Admins always pass; viewers must own the parent scan."""
-        scope = _scan_scope_for(app, user_id)
+        scope. Admins always pass; org members pass for any finding owned
+        by their org; legacy single-user installs fall back to the
+        per-user check."""
+        scope_kw = _read_scope_kwargs(app, user_id)
         from pulse import db_backend
         with db_backend.connect(app.state.db_path) as conn:
             row = conn.execute(
-                "SELECT scans.user_id FROM findings "
+                "SELECT scans.user_id, scans.organization_id FROM findings "
                 "JOIN scans ON scans.id = findings.scan_id "
                 "WHERE findings.id = ?",
                 (int(finding_id),),
             ).fetchone()
         if row is None:
             raise HTTPException(404, detail="Finding not found.")
-        owner = row[0] if not isinstance(row, dict) else row.get("user_id")
-        is_admin = (scope is None)
-        if not is_admin and owner is not None and int(owner) != int(scope):
-            raise HTTPException(404, detail="Finding not found.")
+        if isinstance(row, dict):
+            owner = row.get("user_id")
+            owner_org = row.get("organization_id")
+        else:
+            owner = row[0]
+            owner_org = row[1]
+        is_admin = not scope_kw
+        if not is_admin:
+            if "organization_id" in scope_kw:
+                if owner_org is None or int(owner_org) != int(scope_kw["organization_id"]):
+                    raise HTTPException(404, detail="Finding not found.")
+            elif "user_id" in scope_kw:
+                if owner is None or int(owner) != int(scope_kw["user_id"]):
+                    raise HTTPException(404, detail="Finding not found.")
         return is_admin, owner
 
     @app.get("/api/finding/{finding_id}/notes")
@@ -2674,8 +2882,8 @@ def _register_routes(app: FastAPI) -> None:
         if days < 1 or days > 365:
             raise HTTPException(400, detail="days must be between 1 and 365.")
 
-        scope = _scan_scope_for(app, user_id)
-        all_scans = get_history(app.state.db_path, limit=200, user_id=scope)
+        scope_kw = _read_scope_kwargs(app, user_id)
+        all_scans = get_history(app.state.db_path, limit=200, **scope_kw)
 
         date_groups = {}
         for scan in all_scans:
@@ -2693,7 +2901,7 @@ def _register_routes(app: FastAPI) -> None:
             total_events = 0
             filenames = []
             for scan in group:
-                findings = get_scan_findings(app.state.db_path, scan["id"], user_id=scope)
+                findings = get_scan_findings(app.state.db_path, scan["id"], **scope_kw)
                 all_findings.extend(findings)
                 total_events += scan.get("total_events", 0)
                 if scan.get("filename"):
@@ -2726,8 +2934,8 @@ def _register_routes(app: FastAPI) -> None:
         if a == b:
             raise HTTPException(400, detail="a and b must be different scans.")
 
-        scope = _scan_scope_for(app, user_id)
-        history_rows = get_history(app.state.db_path, limit=200, user_id=scope)
+        scope_kw = _read_scope_kwargs(app, user_id)
+        history_rows = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_a = next((s for s in history_rows if s["id"] == a), None)
         scan_b = next((s for s in history_rows if s["id"] == b), None)
         if scan_a is None:
@@ -2736,8 +2944,8 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(404, detail=f"Scan {b} not found.")
 
         from pulse.reports.comparison import diff_findings
-        findings_a = get_scan_findings(app.state.db_path, a, user_id=scope)
-        findings_b = get_scan_findings(app.state.db_path, b, user_id=scope)
+        findings_a = get_scan_findings(app.state.db_path, a, **scope_kw)
+        findings_b = get_scan_findings(app.state.db_path, b, **scope_kw)
         diff = diff_findings(findings_a, findings_b)
 
         return {
@@ -2757,9 +2965,9 @@ def _register_routes(app: FastAPI) -> None:
         if format not in ("html", "json", "pdf"):
             raise HTTPException(400, detail="format must be 'html', 'json', or 'pdf'.")
 
-        scope = _scan_scope_for(app, user_id)
-        findings = get_scan_findings(app.state.db_path, scan_id, user_id=scope)
-        history_rows = get_history(app.state.db_path, limit=200, user_id=scope)
+        scope_kw = _read_scope_kwargs(app, user_id)
+        findings = get_scan_findings(app.state.db_path, scan_id, **scope_kw)
+        history_rows = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
         if scan_row is None:
             raise HTTPException(404, detail=f"Scan {scan_id} not found.")
@@ -3566,8 +3774,7 @@ def _register_routes(app: FastAPI) -> None:
         ordered = sorted(_get_rule_names(), key=rule_sort_key)
         # Per-user stats — admins see fleet-wide aggregates, viewers see
         # only their own scans. Matches the scoping used by /api/history.
-        scope = _scan_scope_for(app, user_id)
-        stats = get_rule_stats(app.state.db_path, user_id=scope)
+        stats = get_rule_stats(app.state.db_path, **_read_scope_kwargs(app, user_id))
         rows = []
         for name in ordered:
             meta = RULE_META.get(name, {})
@@ -3611,8 +3818,10 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/analytics/trends")
     def analytics_trends(days: int = 30, user_id: int = Depends(require_login)):
-        scope = _scan_scope_for(app, user_id)
-        return get_trend_analytics(app.state.db_path, days=days, user_id=scope)
+        return get_trend_analytics(
+            app.state.db_path, days=days,
+            **_read_scope_kwargs(app, user_id),
+        )
 
     # -------------------------------------------------------------------
     # PUT /api/rules/{name}/enabled — toggle a rule on/off in pulse.yaml

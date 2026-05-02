@@ -1065,7 +1065,34 @@ function _renderAgentsPanel(agents, lastEnrollment) {
       '</div>';
   }
 
+  // Two-step install snippet, shown above the enrollment form so users
+  // arriving from the hosted-mode "Download Agent" topbar button see the
+  // shape of the workflow before they mint a token.
+  var installHtml =
+    '<div class="card agent-install-steps" style="margin-bottom:16px;">' +
+      '<div class="section-label">Install Pulse Agent on a Windows host</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'Each Windows host you want monitored runs a lightweight agent that scans the local event log ' +
+        'and ships findings to this dashboard over HTTPS.' +
+      '</p>' +
+      '<ol class="agent-install-list">' +
+        '<li><strong>Enroll the host</strong> below to mint a single-use token (1 hour TTL).</li>' +
+        '<li><strong>On the Windows host</strong>, install Pulse and run the enroll command, then start the agent loop:' +
+          '<pre class="mono agent-install-snippet">' +
+            'pip install pulse-agent\n' +
+            'python -m pulse.agent enroll ' + escapeHtml(window.location.origin) + ' &lt;your token&gt;\n' +
+            'python -m pulse.agent run' +
+          '</pre>' +
+          '<p style="color:var(--text-muted); font-size:12px; margin-top:6px;">' +
+            'The packaged <span class="mono">pulse-agent.exe</span> (Windows Service installer) ships later this sprint &mdash; ' +
+            'the Python entry above works today and uses the same runtime.' +
+          '</p>' +
+        '</li>' +
+      '</ol>' +
+    '</div>';
+
   return (
+    installHtml +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Enroll a Pulse Agent</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +

@@ -1,0 +1,14 @@
+# Build-time dependencies for packaging pulse-agent.exe.
+#
+# These are NOT runtime deps for the Pulse server — they're only needed
+# on a machine that runs `python scripts/build_agent.py` to produce the
+# Windows binary. Keep this file separate from `requirements.txt` so a
+# minimal Pulse-server install doesn't pull in the PyInstaller toolchain.
+
+# PyInstaller — bundles the agent into a standalone .exe.
+pyinstaller>=6.0,<7.0
+
+# Inherit every runtime dep the agent itself needs (httpx, PyYAML,
+# python-evtx, etc.). The build re-uses requirements.txt so we don't
+# duplicate the version pins here.
+-r requirements.txt
