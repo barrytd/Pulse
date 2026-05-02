@@ -408,6 +408,36 @@ export async function apiMarkFirstFindingViewed() {
   } catch (e) { /* swallow */ }
 }
 
+// --- Firewall log (Sprint 6 polish) ----------------------------------
+
+// GET path-based parse. `path` falls back to the Windows default
+// server-side; pass a custom path on Linux installs that mirror the
+// log to a non-default location.
+export async function apiFirewallLogGet(path) {
+  var qs = path ? ('?path=' + encodeURIComponent(path)) : '';
+  var resp = await fetch('/api/firewall/log' + qs);
+  if (!resp.ok) {
+    var msg = 'HTTP ' + resp.status;
+    try { var b = await resp.json(); if (b && b.detail) msg = b.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return resp.json();
+}
+
+// POST upload — for hosted Linux deployments where the server has no
+// pfirewall.log of its own. Caller passes a File object.
+export async function apiFirewallLogUpload(file) {
+  var fd = new FormData();
+  fd.append('file', file);
+  var resp = await fetch('/api/firewall/log', { method: 'POST', body: fd });
+  if (!resp.ok) {
+    var msg = 'HTTP ' + resp.status;
+    try { var b = await resp.json(); if (b && b.detail) msg = b.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return resp.json();
+}
+
 // --- Notifications (bell-icon feed) ----------------------------------
 
 export async function apiListNotifications(limit) {

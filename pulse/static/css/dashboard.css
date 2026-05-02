@@ -2899,6 +2899,262 @@ tr.pending-flash {
 }
 
 /* ------------------------------------------------------------------ */
+/* Firewall Rules tab — log toolbar, KPI tiles, suspicious card,       */
+/* filter chips, entries table, per-row quick actions                  */
+/* ------------------------------------------------------------------ */
+.fw-toolbar {
+  margin-bottom: 16px;
+}
+.fw-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fw-toolbar-row + .fw-toolbar-row { margin-top: 10px; }
+.fw-toolbar-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  min-width: 100px;
+}
+.fw-path-input {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12.5px;
+}
+.fw-path-input:focus { outline: none; border-color: var(--accent); }
+.fw-toolbar-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.fw-toolbar-hint code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+/* KPI strip — same density as the Whitelist KPI tiles, four columns. */
+.fw-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.fw-kpi-tile {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--card-bg);
+}
+.fw-kpi-tile.tone-neutral { border-left-color: var(--text-muted); }
+.fw-kpi-tile.tone-info    { border-left-color: #58a6ff; }
+.fw-kpi-tile.tone-ok      { border-left-color: #3fb950; }
+.fw-kpi-tile.tone-error   { border-left-color: #f85149; }
+.fw-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.fw-kpi-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 900px) {
+  .fw-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Suspicious activity card — amber accent left border so it reads as
+   "this needs your attention" without being alarmist red. */
+.fw-susp-card {
+  margin-bottom: 16px;
+  border-left: 3px solid #f0883e;
+}
+.fw-susp-blurb {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.fw-susp-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.fw-susp-row:first-of-type { border-top: 0; }
+.fw-susp-rule {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.fw-susp-detail {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Filter bar — chip rows for action / protocol / direction, plus IP search. */
+.fw-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+}
+.fw-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fw-filter-group.fw-filter-search { flex: 1 1 200px; justify-content: flex-end; }
+.fw-filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.fw-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.fw-chip:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.fw-chip.is-active {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border-color: rgba(88, 166, 255, 0.5);
+}
+.fw-search-input {
+  width: 100%;
+  max-width: 240px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+.fw-search-input:focus { outline: none; border-color: var(--accent); }
+
+/* Entries table */
+.fw-entries-card { padding: 16px 20px; }
+.fw-entries-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.fw-entries-table thead th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.fw-entries-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+.fw-entries-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.025);
+}
+.fw-cell-ts { color: var(--text-muted); white-space: nowrap; }
+.fw-cell-actions { width: 60px; text-align: right; white-space: nowrap; }
+
+.fw-action-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
+}
+.fw-action-chip.fw-act-allow {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+}
+.fw-action-chip.fw-act-drop {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+.fw-action-chip.fw-act-other {
+  background: rgba(139, 148, 158, 0.12);
+  color: var(--text-muted);
+}
+
+/* Per-row Block / Lookup buttons — visible on row hover only. */
+.fw-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
+}
+.fw-entries-table tbody tr:hover .fw-row-action,
+.fw-row-action:focus {
+  opacity: 1;
+}
+.fw-row-action:hover {
+  color: var(--accent, #58a6ff);
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.06);
+}
+.fw-row-action svg { width: 12px; height: 12px; }
+
+/* ------------------------------------------------------------------ */
 /* Dashboard standup row — funnel + repeat offenders                   */
 /* ------------------------------------------------------------------ */
 .standup-row {

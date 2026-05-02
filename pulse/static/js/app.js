@@ -111,6 +111,14 @@ import {
   deleteSelectedBlocks,
   firewallReviewPending,
   firewallDiscardPending,
+  fwPathInput,
+  fwPathKey,
+  fwParseLog,
+  fwUploadLog,
+  fwSetFilter,
+  fwSetSearch,
+  fwBlockFromRow,
+  fwLookupFromRow,
 } from './firewall.js';
 import {
   monitorClient,
@@ -365,6 +373,14 @@ const actions = {
   deleteSelectedBlocks,
   firewallReviewPending,
   firewallDiscardPending,
+  fwPathInput,
+  fwPathKey,
+  fwParseLog,
+  fwUploadLog,
+  fwSetFilter,
+  fwSetSearch,
+  fwBlockFromRow,
+  fwLookupFromRow,
 
   // monitor
   startMonitor,

@@ -2059,6 +2059,115 @@ def _register_routes(app: FastAPI) -> None:
         return JSONResponse(result, status_code=status)
 
     # -------------------------------------------------------------------
+    # GET  /api/firewall/log — parse pfirewall.log on disk
+    # POST /api/firewall/log — parse an uploaded pfirewall.log file
+    # -------------------------------------------------------------------
+    # Path-based GET is the common case on Windows hosts where Pulse is
+    # running locally. The upload variant covers Render / Linux where
+    # the host has no Windows Firewall log to read; analysts can ship
+    # their pfirewall.log up and triage it the same way.
+    _FIREWALL_LOG_MAX_BYTES = 50 * 1024 * 1024  # 50 MB upload cap
+    _FIREWALL_ENTRY_LIMIT_DEFAULT = 5000        # newest-N rows returned
+
+    def _serialize_fw_entry(row):
+        """Strip the parser's internal _ts (datetime) before returning to
+        the browser; keep only string/number fields the table renders."""
+        ts = row.get("_ts")
+        return {
+            "ts":       ts.strftime("%Y-%m-%d %H:%M:%S") if ts else None,
+            "action":   (row.get("action") or "").upper() or None,
+            "protocol": (row.get("protocol") or "").upper() or None,
+            "src_ip":   row.get("src-ip"),
+            "src_port": row.get("src-port"),
+            "dst_ip":   row.get("dst-ip"),
+            "dst_port": row.get("dst-port"),
+            "size":     row.get("size"),
+            # Direction inferred from src/dst IP topology — the W3C
+            # default field set doesn't carry a discrete direction
+            "_info":    row.get("info"),
+        }
+
+    def _firewall_summary(rows):
+        total = len(rows)
+        allowed = 0
+        dropped = 0
+        srcs = set()
+        for r in rows:
+            a = (r.get("action") or "").upper()
+            if a == "ALLOW": allowed += 1
+            elif a == "DROP": dropped += 1
+            src = r.get("src-ip")
+            if src and src != "-": srcs.add(src)
+        return {
+            "total": total,
+            "allowed": allowed,
+            "dropped": dropped,
+            "unique_sources": len(srcs),
+        }
+
+    def _firewall_payload(rows, *, source_label, available, path=None):
+        """Build the response shape consumed by both GET and POST handlers."""
+        from pulse.firewall import firewall_parser as fp
+        suspicious = fp.run_firewall_detections(rows)
+        # Newest rows first for the table, capped to keep the response
+        # small. Suspicious activity considers all rows.
+        capped = sorted(rows, key=lambda r: r.get("_ts") or 0, reverse=True)
+        capped = capped[:_FIREWALL_ENTRY_LIMIT_DEFAULT]
+        return {
+            "available": available,
+            "path": path,
+            "source": source_label,
+            "summary": _firewall_summary(rows),
+            "suspicious": suspicious,
+            "entries": [_serialize_fw_entry(r) for r in capped],
+            "entry_cap": _FIREWALL_ENTRY_LIMIT_DEFAULT,
+        }
+
+    @app.get("/api/firewall/log")
+    def firewall_log_get(path: Optional[str] = None,
+                         user_id: int = Depends(require_admin)):
+        from pulse.firewall import firewall_parser as fp
+        # If the caller passes a path we honor it; otherwise fall back to
+        # the Windows default. Path is admin-gated so a viewer can't
+        # probe arbitrary file paths through this endpoint.
+        real_path = (path or "").strip() or fp.default_log_path()
+        if not os.path.exists(real_path):
+            return _firewall_payload([], source_label="path",
+                                     available=False, path=real_path)
+        rows = list(fp.parse_log(real_path))
+        return _firewall_payload(rows, source_label="path",
+                                 available=True, path=real_path)
+
+    @app.post("/api/firewall/log")
+    async def firewall_log_upload(request: Request,
+                                  file: UploadFile = File(...),
+                                  user_id: int = Depends(require_admin)):
+        """Stream the uploaded log to a temp file and parse it. The temp
+        file is deleted before we return — Pulse never keeps raw firewall
+        logs around once parsed."""
+        rate_limit.hit(request, "fw_upload", window_sec=300, max_hits=20)
+        from pulse.firewall import firewall_parser as fp
+        tmp = tempfile.NamedTemporaryFile(prefix="pulse-fwlog-", suffix=".log",
+                                          delete=False)
+        total = 0
+        try:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _FIREWALL_LOG_MAX_BYTES:
+                    raise HTTPException(413, detail="Firewall log exceeds 50MB upload cap.")
+                tmp.write(chunk)
+            tmp.close()
+            rows = list(fp.parse_log(tmp.name))
+            return _firewall_payload(rows, source_label="upload",
+                                     available=True, path=file.filename)
+        finally:
+            try: os.unlink(tmp.name)
+            except OSError: pass
+
+    # -------------------------------------------------------------------
     # DELETE /api/scans — delete one or many scans (+ cascading findings)
     # -------------------------------------------------------------------
     @app.delete("/api/scans")

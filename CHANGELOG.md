@@ -5,6 +5,61 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-04-30 — Release v1.6.0 (Sprint 6 close)
+
+Sprint 6 — *Workflows, branding, threat intel* — locks in. v1.5.0 already shipped Sprint 5 (auth / compliance / analytics); this ship picks up the cursor at 1.6.0 to match the sprint number.
+
+### Sprint 6 acceptance criteria — shipped
+
+- **Incident workflow states** — finding-level `new / acknowledged / investigating / resolved` axis with drawer pill picker
+- **Analyst notes** — append-only thread per finding, drawer composer, admin cross-finding feed in Settings → Notes
+- **Assignment** — assign findings to active users, "Assigned to me" filter, sidebar quick-assign tray
+- **Configurable severity colours** — per-browser palette overrides
+- **In-app feedback** — floating FAB + admin Settings → Feedback review tab
+
+### Sprint 6 acceptance criteria — deferred / moved
+
+- ~~**Custom branding**~~ — first pass shipped 2026-04-23 then reverted 2026-04-24 because replacing the Pulse lockup hurt brand recognition. Tracked in `BACKLOG.md` as "Custom branding (v2)" — same `branding` table reused, org name renders as a *subtitle* under the Pulse mark next time
+- ~~**Dashboard widgets**~~ — drag-and-drop reorder + hide/restore shipped 2026-04-28, reverted 2026-04-29 because the "Customize layout" button surfaced before the use case was clear. Tracked in `BACKLOG.md` under "Polish & UX"
+- ~~**Windows Service installer**~~ — moved to Sprint 7's downloadable-agent block so the SYSTEM-elevation work happens once for both `pulse-agent.exe` and the local install paths
+
+### Bonus work bundled into v1.6.0
+
+A polish pass + Sprint-7 transport-layer prep landed across the same window. Highlights:
+
+- **Relative timestamps everywhere** — `formatRelativeTime` / `relTimeHtml` helper with Apr-21 cutover past 7 days, hover tooltip with the absolute datetime. Rolled out to Findings, Scans/History, Audit Log, Fleet, Firewall, Reports, Threat Intel, Settings (Users / Tokens / Agents / Notes / Feedback / Waitlist), Monitor (live feed + sessions), and the Dashboard's Last-Scan / Repeat-Offenders / Needs-Attention surfaces. Two duplicate ad-hoc relative-time formatters in `findings.js` and `settings.js` were deleted
+- **Scans → History merge** — standalone Scans list page deleted (~595 lines of dead code removed from `findings.js`, ~200 lines of CSS). `/findings` is the All-Findings page, `/history` owns the scan list with the new Upload `.evtx` button + per-row hover-only Quick PDF action. `/scans/{id}` deep-link target survives for History → scan-detail navigation
+- **Reports page rewrite** — page header with primary "Generate Report" button, real onboarding empty state (icon + title + subtitle + CTA), modal with scan dropdown + 4-format radio tiles. After upload completes, navigate to `/history` instead of the deleted Scans list
+- **Whitelist empty-state onboarding** — replaced one-line "No whitelist entries yet" with a proper panel: title + subtitle with `SYSTEM` / backup-agent example + "Add your first entry" (focuses the Add input) + "Learn more" toggle revealing inline Account / Service / IP / Rule reference. Dynamic built-ins count surfaces below
+- **Compliance Coverage Gaps** — new amber/orange KPI tile up top + Coverage Gaps card after the framework grids: uncovered MITRE techniques, silent rules (enabled + zero hits), noisy rules (≥20 hits + ≥40% FP rate)
+- **Getting Started checklist** — 5-step Dashboard onboarding card (Upload `.evtx` / Review a finding / Email alerts / Invite team / Whitelist entry). Progress bar, dismiss link persists in `users.onboarding_dismissed_at`. Drawer-open auto-marks step 2; `/me/onboarding` endpoint computes all 5 flags server-side
+- **Notification bell** — topbar bell with unread badge + 320×480 dropdown panel. Backend `notifications` table (capped 100 per user) with triggers on scan complete (manual + agent), finding assigned, live-monitor alert (admins fan-out), scheduled scan finished, IP block pushed
+- **Role visibility** — avatar-dropdown shows role under name; Settings → Profile has read-only Role row with role-specific explanation; Settings → Users gains Last-active column backed by `users.last_active_at` (touched in auth middleware); A/V role badges render next to user names in audit log, assignment picker, notes thread
+- **Threat Intel inside the drawer** — the existing AbuseIPDB section in the finding drawer was repositioned to sit between Event Details and Remediation (the natural triage path); standalone Threat Intel page kept with a discoverability callout
+- **Pulse Agents — server-side transport layer** — new `agents` table with two-phase token columns (`pe_…` enrollment / `pa_…` bearer, both sha256-at-rest). `POST /api/agent/exchange | heartbeat | findings`. Settings → Agents tab with status pill (online / stale / offline / paused / pending), Pause + Delete actions. Wire is live for the Sprint 7 `pulse-agent.exe` to plug into
+- **Topbar "Scan My System" hosted-mode swap** — `/api/health` already exposed `platform_windows`; the dashboard now reads it at boot and rewrites the topbar button to "Upload `.evtx`" → navigate to History → open upload modal, on non-Windows hosts. Pairs with the Render deployment
+- **Firewall Rules tab live** — placeholder removed; the existing `pulse/firewall/firewall_parser.py` is now wired into the page. Path-based `GET /api/firewall/log` for Windows hosts + multipart `POST /api/firewall/log` for Linux hosts (50MB cap, in-memory parse, temp file deleted). KPI tiles (Total / Allowed / Dropped / Unique sources), Suspicious activity card (port scans, repeated drops, sensitive-port probes — new `detect_repeated_drops` rule added), Action / Protocol / Direction filter chips + IP search, hover-only Block + Lookup actions on DROP rows with public source IPs. `tests/sample-pfirewall.log` ships as a fixture so the parser regressions surface immediately
+- **Customizable dashboard widgets**, the orphan-monitor-session cleanup, removal of `autoResume`, the Monitor "Live pill on, page IDLE" first-start race fix (`_refreshStatus()` on every page mount + `_forceMonitorPageRender()` after Start), and the BACKLOG.md / ROADMAP.md split all also landed in this window
+- **Dashboard simplification** — removed the Severity Breakdown donut and MITRE Categories card from the Dashboard (Trends owns severity now, Rules page owns MITRE coverage). Top Triggered Rules survives as a full-width card. Net ~250 lines lighter
+- **Fleet KPI tiles** — replaced agent-presence tiles (Online / Offline / Newly Enrolled) with score-grounded ones (Total Hosts / Critical Risk / High Risk / Secure) since hosts are scanned hostnames not heartbeating agents yet
+
+### Tests
+
+618 tests passing, up from 477 at the start of Sprint 6. New suites: `test_agents.py` (12), `test_notifications.py` (8), `test_onboarding.py` (8), `test_firewall_log_api.py` (7 — including the `sample-pfirewall.log` end-to-end). Three new parser tests in `test_firewall_parser.py` and a fixture-backed end-to-end suite that proves all three firewall detection rules co-fire on real-shaped data.
+
+### Version
+
+`pulse/__init__.py` bumped to `1.6.0`. v1.5.0 was Sprint 5 (already on GitHub).
+
+---
+
+## 2026-04-30 — Firewall Rules tab live + sample fixture
+
+### Added
+- **Firewall Rules tab — pfirewall.log parsing surface.** Replaces the "coming in Sprint 4" placeholder. Path-based + upload-based parsing routes through `GET / POST /api/firewall/log` (admin-only, 50MB upload cap, temp-file deleted post-parse). Frontend renders KPI tiles (Total / Allowed / Dropped / Unique source IPs), a Suspicious activity card listing port scans + repeated drops + sensitive-port probes, filter chips for Action / Protocol / Direction + IP search, and an entries table with timestamp + colored ALLOW/DROP chip + protocol + src/dst IP+port + inferred direction + size. DROP rows with a public source IP get hover-only Block (stages to the existing Block List flow) and Lookup (calls the existing `apiFetchIntel`) buttons. `detect_repeated_drops` is a new third firewall-detection rule that fires when a public source racks up >10 DROPs across the parsed window. `tests/sample-pfirewall.log` is a real-shaped fixture (97 rows, hits all three detection rules) and seeds 5 new tests across the parser + API levels
+
+---
+
 ## 2026-04-28 — Pulse Agents (Sprint 7 transport layer)
 
 ### Added

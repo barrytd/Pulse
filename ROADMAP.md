@@ -94,7 +94,7 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 5 — Apr 25 – May 1, 2026 (Auth, compliance, analytics)
+## Sprint 5 — Apr 25 – May 1, 2026 (Auth, compliance, analytics) — shipped v1.5.0
 
 - [x] User authentication — login page backed by SQLite users table with scrypt hashes (shipped early, single-user)
 - [x] Session management — signed cookies, logout, 30-day expiry (shipped early)
@@ -115,9 +115,9 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
-## Sprint 6 — May 2–8, 2026 (Workflows, branding, threat intel)
+## Sprint 6 — May 2–8, 2026 (Workflows, branding, threat intel) — shipped v1.6.0
 
-- [ ] Windows Service installer — one-time setup that installs Pulse as a Windows Service running with SYSTEM privileges, so scheduled scans and system log access always work without manual elevation
+- [ ] ~~Windows Service installer~~ — *moved to Sprint 7's downloadable-agent block. Will register Pulse Agent as a SYSTEM-privileged service alongside the bundled `pulse-agent.exe`, so the SYSTEM-elevation work happens once for both the local and agent install paths.*
 - [x] Incident workflow states — mark findings as acknowledged, investigating, or resolved
 - [x] Analyst notes — free-text notes field per finding, stored in DB, shown in finding drawer and PDF reports, timestamped and attributed to the author
 - [x] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
@@ -125,6 +125,26 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
 - [ ] ~~Dashboard widgets~~ — *first pass shipped 2026-04-28 then rolled back 2026-04-29. The drag-and-drop reorder + hide/restore worked but a non-functional surface (the "Customize layout" button) hurt trust during the polish pass; revisit when there's a clearer use case for a per-user dashboard layout. Underlying panel HTML is now inlined directly in `renderDashboardPage()` again*
 - [x] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
+
+### Bonus work shipped under v1.6.0 (polish + Sprint-7 transport prep)
+
+A focused polish pass landed alongside the Sprint 6 ACs:
+
+- **Relative timestamps everywhere** — single `formatRelativeTime` / `relTimeHtml` helper, Apr-21 cutover past 7 days, hover-tooltip with absolute datetime; rolled out across Findings / Scans / History / Audit Log / Fleet / Firewall / Reports / Threat Intel / Settings / Monitor / Dashboard surfaces
+- **Scans → History merge** — standalone Scans list deleted; `/findings` is the All-Findings page, `/history` owns the scan list + Upload `.evtx` button; `/scans/{id}` deep-links survive
+- **Reports page rewrite** — page header with "Generate Report" button, real onboarding empty state, modal (scan dropdown + PDF/HTML/JSON/CSV), per-row hover-only Quick PDF on every History row
+- **Whitelist empty-state onboarding** — title + subtitle + "Add your first entry" + collapsible Account/Service/IP/Rule reference, dynamic built-ins count
+- **Compliance Coverage Gaps** — amber KPI tile + new card listing uncovered MITRE techniques, silent rules, noisy rules (≥20 hits + ≥40% FP rate)
+- **Getting Started checklist** — 5-step Dashboard onboarding card with progress bar, dismiss link persists in `users.onboarding_dismissed_at`, drawer-open beacon ticks step 2
+- **Notification bell** — topbar bell + dropdown panel; backend triggers on scan complete, finding assigned, live-monitor alert, scheduled scan, IP block pushed
+- **Role visibility** — avatar-dropdown role line, Profile read-only Role field, Users tab Last-active column, A/V badges next to user names in audit log / assignment picker / notes
+- **Threat Intel inside the drawer** — the AbuseIPDB lookup that already lived in the finding drawer is now positioned between Event Details and Remediation; standalone page kept with a discoverability callout
+- **Firewall Rules tab live** — placeholder gone; pfirewall.log path/upload parsing, KPI tiles, suspicious-activity card, action / protocol / direction filter chips, hover-only Block + Lookup row actions
+- **Pulse Agents transport layer** — `agents` table, `pulse/agents.py`, `POST /api/agent/exchange | heartbeat | findings`, Settings → Agents tab. Server-side wire ready for the downloadable `pulse-agent.exe` in Sprint 7
+- **Monitor first-start race fix** — `_refreshStatus()` on every page mount, `_forceMonitorPageRender()` after Start, orphan-session cleanup on boot, autoResume removed
+- **Customizable dashboard widgets** — first-pass shipped, then rolled back the same week (see deferred row above)
+- **Topbar Scan-My-System hosted-mode swap** — `/api/health` exposes `platform_windows`; on Linux deployments the button becomes "Upload .evtx"
+- **Backlog split** — `BACKLOG.md` now owns the unscheduled items; `ROADMAP.md` points at it
 
 ---
 

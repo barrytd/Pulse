@@ -237,6 +237,53 @@ def detect_port_scans(entries: Iterable[dict]) -> list[dict]:
     return findings
 
 
+REPEATED_DROP_THRESHOLD = 10
+
+
+def detect_repeated_drops(entries: Iterable[dict]) -> list[dict]:
+    """Flag a public source IP that's been DROPed more than the threshold
+    across the parsed window. Distinct from the port-scan rule: that one
+    triggers on horizontal spread (many ports), this one triggers on raw
+    volume from a single IP regardless of port count. Both can co-fire
+    on the same source — they tell different stories ("this is a scanner"
+    vs "this thing keeps hammering us")."""
+    counts: dict[str, dict] = {}
+    for row in entries:
+        if (row.get("action") or "").upper() != "DROP":
+            continue
+        src = row.get("src-ip") or ""
+        if not _is_public_ipv4(src):
+            continue
+        c = counts.get(src)
+        if c is None:
+            c = {"hits": 0, "first": row["_ts"], "last": row["_ts"]}
+            counts[src] = c
+        c["hits"] += 1
+        if row["_ts"] < c["first"]: c["first"] = row["_ts"]
+        if row["_ts"] > c["last"]:  c["last"]  = row["_ts"]
+
+    findings: list[dict] = []
+    for src, c in counts.items():
+        if c["hits"] <= REPEATED_DROP_THRESHOLD:
+            continue
+        sev = "HIGH" if c["hits"] >= 50 else "MEDIUM"
+        findings.append({
+            "rule": "Firewall Repeated Drops",
+            "severity": sev,
+            "event_id": "FW-REPEAT",
+            "timestamp": c["first"].strftime("%Y-%m-%d %H:%M:%S"),
+            "src": src,
+            "hits": c["hits"],
+            "details": (
+                f"{src} was blocked {c['hits']} time(s) between "
+                f"{c['first'].strftime('%Y-%m-%d %H:%M:%S')} and "
+                f"{c['last'].strftime('%Y-%m-%d %H:%M:%S')}. "
+                f"Sustained probing from a single source — consider blocking the IP."
+            ),
+        })
+    return findings
+
+
 def run_firewall_detections(entries: Iterable[dict]) -> list[dict]:
     """Run every firewall-log rule. Consumes the iterator once by
     materializing it — parse_log streams a generator, but the rules need
@@ -245,6 +292,7 @@ def run_firewall_detections(entries: Iterable[dict]) -> list[dict]:
     findings: list[dict] = []
     findings += detect_sensitive_port_probes(rows)
     findings += detect_port_scans(rows)
+    findings += detect_repeated_drops(rows)
     return findings
 
 

@@ -247,3 +247,104 @@ def test_scan_firewall_log_findings_have_required_fields():
         assert f["severity"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
     finally:
         _drop(path)
+
+
+# ---------------------------------------------------------------------------
+# detect_repeated_drops — sustained probing from a single source
+# ---------------------------------------------------------------------------
+
+def test_detect_repeated_drops_fires_above_threshold():
+    """11+ drops from the same public IP -> one finding with HIT count."""
+    src = "1.2.3.4"
+    lines = [
+        # 12 drops on 12 different ports (deliberately under PORT_SCAN
+        # threshold so port-scan doesn't ALSO fire) — we want only the
+        # repeated-drops rule for this assertion.
+        f"2026-04-30 10:00:{i:02d} DROP TCP {src} 192.168.1.10 4444 {1000 + i} 0 - 0 0 0 0 0 0 - - 0"
+        for i in range(12)
+    ]
+    path = _write_log(lines)
+    try:
+        findings = fw.detect_repeated_drops(fw.parse_log(path))
+        assert len(findings) == 1
+        f = findings[0]
+        assert f["rule"] == "Firewall Repeated Drops"
+        assert f["src"] == src
+        assert f["hits"] == 12
+    finally:
+        _drop(path)
+
+
+def test_detect_repeated_drops_skips_below_threshold():
+    """10 drops <= threshold -> nothing fires (the threshold is `>`, not `>=`)."""
+    src = "1.2.3.5"
+    lines = [
+        f"2026-04-30 10:00:{i:02d} DROP TCP {src} 192.168.1.10 4444 {1000 + i} 0 - 0 0 0 0 0 0 - - 0"
+        for i in range(10)
+    ]
+    path = _write_log(lines)
+    try:
+        assert fw.detect_repeated_drops(fw.parse_log(path)) == []
+    finally:
+        _drop(path)
+
+
+def test_detect_repeated_drops_ignores_private_sources():
+    """LAN sources never count toward the noise heuristic — every box
+    on a busy network would otherwise show up."""
+    lines = [
+        f"2026-04-30 10:00:{i:02d} DROP TCP 10.0.0.5 192.168.1.10 4444 {1000 + i} 0 - 0 0 0 0 0 0 - - 0"
+        for i in range(20)
+    ]
+    path = _write_log(lines)
+    try:
+        assert fw.detect_repeated_drops(fw.parse_log(path)) == []
+    finally:
+        _drop(path)
+
+
+# ---------------------------------------------------------------------------
+# Bundled `tests/sample-pfirewall.log` fixture — a real-shaped log with a
+# mix of LAN ALLOW chatter, sensitive-port probes from multiple public
+# sources, a 12-port scan from one IP, and 15 repeated drops from that
+# same IP. Locks in expected counts so a future parser regression that
+# silently drops rows or misclassifies actions surfaces immediately.
+# ---------------------------------------------------------------------------
+
+SAMPLE_LOG_PATH = os.path.join(os.path.dirname(__file__), "sample-pfirewall.log")
+
+
+def test_sample_log_parses_to_expected_row_count():
+    """97 rows, 35 ALLOW + 62 DROP — anything else means the parser
+    silently dropped lines (e.g. a header-fields regression)."""
+    rows = list(fw.parse_log(SAMPLE_LOG_PATH))
+    assert len(rows) == 97
+    actions = {}
+    for r in rows:
+        a = (r.get("action") or "").upper()
+        actions[a] = actions.get(a, 0) + 1
+    assert actions == {"ALLOW": 35, "DROP": 62}
+
+
+def test_sample_log_fires_every_detection_rule():
+    """The fixture is hand-tuned so all three rules co-fire. If a future
+    detection refactor breaks one, we catch it here."""
+    rows = list(fw.parse_log(SAMPLE_LOG_PATH))
+    findings = fw.run_firewall_detections(rows)
+    rules = {f["rule"] for f in findings}
+    assert "Firewall Blocked Sensitive Port" in rules
+    assert "Firewall Port Scan"               in rules
+    assert "Firewall Repeated Drops"          in rules
+
+
+def test_sample_log_port_scan_identifies_correct_source():
+    """One IP (185.220.101.47) deliberately probes 12 distinct ports in
+    a 5-minute window — that's the canonical scan signature."""
+    rows = list(fw.parse_log(SAMPLE_LOG_PATH))
+    scans = fw.detect_port_scans(rows)
+    sources = [
+        # parse the first IP token out of the details — the rule emits
+        # "<ip> probed <n> distinct ports..."
+        f["details"].split()[0] for f in scans
+    ]
+    assert "185.220.101.47" in sources
