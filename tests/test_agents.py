@@ -435,6 +435,30 @@ def test_download_streams_zip_when_bundle_present(tmp_path):
     assert any(n.startswith("pulse-agent/") for n in names)
 
 
+def test_download_check_reports_availability(tmp_path):
+    """The marketing landing page calls /api/agent/download/check on load
+    so it can flip the Download CTA to a GitHub link when the deployed
+    server has no bundle on disk. Returns 200 + {available: bool} either
+    way — no zip built, no 503 to parse."""
+    import os
+    real_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__import__("pulse").__file__)))
+    bundle_dir = os.path.join(real_repo_root, "dist", "pulse-agent")
+    bundle_present = os.path.isdir(bundle_dir)
+
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text("whitelist:\n  accounts: []\n")
+    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    client = TestClient(app)
+
+    r = client.get("/api/agent/download/check")
+    assert r.status_code == 200
+    body = r.json()
+    assert "available" in body
+    assert isinstance(body["available"], bool)
+    assert body["available"] is bundle_present
+
+
 def test_download_endpoint_is_public(tmp_path):
     """Marketing site visitors aren't logged in. The download path lives
     under /api/agent/ which is auth-exempt; confirm a logged-out client

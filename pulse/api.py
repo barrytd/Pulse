@@ -1354,6 +1354,22 @@ def _register_routes(app: FastAPI) -> None:
                     pass
         return body
 
+    @app.get("/api/agent/download/check")
+    def api_agent_download_check():
+        """Cheap availability probe for the marketing page.
+
+        Returns ``{available: true|false}`` so the landing page's JS can
+        flip the Download CTA over to a GitHub link when the running
+        server doesn't have a built bundle on disk (e.g. the Render
+        deploy where ``dist/`` is gitignored). HEAD on the main download
+        endpoint would also work but FastAPI's ``@app.get`` doesn't
+        register HEAD, and we don't want to build the 20 MB zip in memory
+        just to discard it for a feature-detection probe.
+        """
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        bundle_dir = os.path.join(repo_root, "dist", "pulse-agent")
+        return {"available": os.path.isdir(bundle_dir)}
+
     @app.get("/api/agent/download")
     def api_agent_download():
         """Stream the locally-built ``dist/pulse-agent/`` bundle as a zip.
