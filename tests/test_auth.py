@@ -287,10 +287,28 @@ def test_logout_clears_session(auth_client):
     assert r.status_code == 401
 
 
-def test_root_redirects_to_login_when_signed_out(auth_client):
+def test_root_serves_marketing_landing_when_signed_out(auth_client):
+    """Sprint 7: `/` is the marketing landing page for unauthenticated
+    visitors (replaces the old redirect-to-login). Logged-in users still
+    get the dashboard at the same path."""
     r = auth_client.get("/", follow_redirects=False)
-    assert r.status_code == 302
-    assert "/login" in r.headers["location"]
+    assert r.status_code == 200
+    body = r.text
+    # Distinguish landing from login/dashboard by a marketing-only marker.
+    assert "Stop incidents on Windows" in body or "PULSE" in body
+    # Landing has a Download CTA; the dashboard SPA does not.
+    assert "Download" in body
+
+
+def test_root_serves_dashboard_when_signed_in(auth_client):
+    auth_client.post("/api/auth/signup", json={
+        "email": "me@example.com", "password": "correct-horse-battery",
+    })
+    r = auth_client.get("/", follow_redirects=False)
+    assert r.status_code == 200
+    # Dashboard SPA shell — checks for the core dashboard markup, not the
+    # marketing copy.
+    assert "PULSE" in r.text or "id=\"app\"" in r.text or "topbar-scan-btn" in r.text
 
 
 def test_update_email_requires_current_password(auth_client):

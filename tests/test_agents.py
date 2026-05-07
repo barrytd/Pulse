@@ -360,3 +360,94 @@ def test_viewer_in_same_org_can_see_admin_agent(agent_client):
     assert r.status_code == 200
     r = client.delete(f"/api/agents/{agent_id}")
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# /api/agent/download — packaged Windows bundle stream (Sprint 7)
+# ---------------------------------------------------------------------------
+
+def test_download_returns_503_when_bundle_missing(tmp_path, monkeypatch):
+    """Endpoint must surface a clear "build first" message instead of a
+    generic 404 when dist/pulse-agent/ doesn't exist. We point the
+    process at an empty cwd so the lookup misses regardless of what's on
+    the dev box."""
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text("whitelist:\n  accounts: []\n")
+
+    # Move into a fake repo whose pulse/api.py path resolution will land
+    # in a directory with no dist/. We do this by importing under a
+    # patched __file__ — simpler is to just check the actual repo path
+    # resolution. Since the endpoint computes repo_root from
+    # pulse/api.py's location (the real one), we instead check the
+    # behavior by temporarily renaming the dist/ folder if it exists.
+    import os
+    real_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__import__("pulse").__file__)))
+    bundle_dir = os.path.join(real_repo_root, "dist", "pulse-agent")
+    rename_target = bundle_dir + ".test-hidden"
+
+    bundle_was_present = os.path.isdir(bundle_dir)
+    if bundle_was_present:
+        os.rename(bundle_dir, rename_target)
+    try:
+        app = create_app(db_path=str(db_path), config_path=str(config_path))
+        client = TestClient(app)
+        r = client.get("/api/agent/download")
+        assert r.status_code == 503
+        detail = r.json().get("detail", "")
+        assert "build_agent" in detail or "not built" in detail.lower()
+    finally:
+        if bundle_was_present and os.path.isdir(rename_target):
+            os.rename(rename_target, bundle_dir)
+
+
+def test_download_streams_zip_when_bundle_present(tmp_path):
+    """When dist/pulse-agent/ is present (operator ran build_agent.py),
+    the endpoint streams a zip with proper headers + ZIP magic + a
+    pulse-agent.exe entry inside."""
+    import os
+    import zipfile
+    real_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__import__("pulse").__file__)))
+    bundle_dir = os.path.join(real_repo_root, "dist", "pulse-agent")
+    if not os.path.isdir(bundle_dir):
+        pytest.skip("agent bundle not built (run scripts/build_agent.py)")
+
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text("whitelist:\n  accounts: []\n")
+    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    client = TestClient(app)
+
+    r = client.get("/api/agent/download")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    assert "attachment" in r.headers["content-disposition"]
+    assert "pulse-agent" in r.headers["content-disposition"]
+    assert r.content[:4] == b"PK\x03\x04"  # ZIP magic
+
+    # Verify the archive contains the launcher exe under the expected
+    # archive root (so users unzipping land in `pulse-agent/...`).
+    import io
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    names = zf.namelist()
+    assert any(n.endswith("pulse-agent.exe") for n in names)
+    assert any(n.startswith("pulse-agent/") for n in names)
+
+
+def test_download_endpoint_is_public(tmp_path):
+    """Marketing site visitors aren't logged in. The download path lives
+    under /api/agent/ which is auth-exempt; confirm a logged-out client
+    can hit it without 401."""
+    import os
+    real_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__import__("pulse").__file__)))
+    if not os.path.isdir(os.path.join(real_repo_root, "dist", "pulse-agent")):
+        pytest.skip("agent bundle not built (run scripts/build_agent.py)")
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text("whitelist:\n  accounts: []\n")
+    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    client = TestClient(app)
+    # No signup, no login — straight to the download.
+    r = client.get("/api/agent/download")
+    assert r.status_code == 200

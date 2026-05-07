@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-07 — Sprint 7 — Marketing landing page + Windows download
+
+`/` is now a proper product site instead of a redirect to the login form. Unauthenticated visitors get a CrowdStrike / UpGuard-style marketing page with a hero, stats band, three use-case sections (SOC, IT, security researcher), 12-card feature grid, three-step "how it works", three-tier pricing teaser, FAQ, and a multi-column footer. Logged-in users still get the dashboard at the same path; the old `/welcome` mount stays for back-compat.
+
+The "Download for Windows" CTA streams the locally-built `dist/pulse-agent/` as a zip via a new `/api/agent/download` endpoint — no GitHub Releases dance required to ship the binary today. PyInstaller produces a 6.5 MB launcher exe + 37 MB one-folder bundle on Windows; the endpoint zips the bundle on demand and serves it as `pulse-agent-{version}-windows-x64.zip`.
+
+- New `/api/agent/download` endpoint ([pulse/api.py](pulse/api.py)) — public (under the auth-exempt `/api/agent/` prefix). 503 with build instructions when `dist/pulse-agent/` doesn't exist; otherwise zips the bundle in-memory (~20 MB compressed) and streams it with `Content-Disposition: attachment` headers
+- `/` route in [pulse/api.py](pulse/api.py) rewritten — serves `landing.html` for unauthenticated visitors, dashboard for logged-in users, and dashboard unconditionally when auth is disabled (single-user CLI mode)
+- [pulse/web/landing.html](pulse/web/landing.html) rewritten end-to-end (~1100 lines, was ~350): sticky nav with backdrop-blur, hero with mock dashboard frame and gradient headline, "Built on" trust strip (MITRE / NIST CSF / ISO 27001 / AbuseIPDB / SIGMA), stats band (100+ techniques / 60s heartbeat / <30s alert / $0 ingest), three alternating use-case sections each with a custom mockup (SOC card list, fleet host grid, monitor stream), 12-card feature grid with inline SVG icons, three-step download flow with copy-paste commands, three-tier pricing (Self-host free / Hosted coming soon / Enterprise), 7-question FAQ with `<details>` disclosure, big closing CTA + waitlist, multi-column footer
+- 4 new tests ([tests/test_agents.py](tests/test_agents.py), [tests/test_auth.py](tests/test_auth.py)): 503 when bundle missing, 200 + ZIP magic + correct archive structure when present, public-no-auth access, `/` routing for both unauthenticated (landing) and authenticated (dashboard) visitors
+
 ## 2026-05-02 — Sprint 7 — Auto-update channel for Pulse Agent
 
 The agent now phones home for version drift detection. On startup it calls `GET /api/agent/latest` and surfaces an "update available" warning in its journal when the server reports a newer build, with the GitHub Releases URL one keystroke away. Best-effort: a failing update check never blocks the heartbeat / scan loop.

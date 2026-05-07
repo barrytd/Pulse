@@ -658,8 +658,24 @@ def _register_routes(app: FastAPI) -> None:
         return FileResponse(_dashboard_path, media_type="text/html")
 
     @app.get("/", include_in_schema=False)
-    def dashboard(request: Request):
-        return _serve_dashboard(request)
+    def root(request: Request):
+        """Marketing landing page for unauthenticated visitors; dashboard
+        for logged-in users (and for the single-user CLI mode where auth
+        is disabled). Mirrors the way every product site we'd want to look
+        like (CrowdStrike / UpGuard / Defense.com) routes the homepage —
+        ``/`` is the marketing surface, the app lives one click deeper.
+        ``/welcome`` stays mounted for back-compat."""
+        if not app.state.auth_required:
+            # Single-user CLI / test mode: there's no "logged-out" state,
+            # ``/`` is the dashboard the same way ``localhost:8000`` has
+            # always opened the app.
+            return FileResponse(_dashboard_path, media_type="text/html")
+        cookie = request.cookies.get(SESSION_COOKIE_NAME)
+        from pulse.auth import verify_session_cookie
+        user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
+        if user_id is not None:
+            return FileResponse(_dashboard_path, media_type="text/html")
+        return FileResponse(_landing_path, media_type="text/html")
 
     # Every top-level SPA page gets its own path so the browser's back /
     # forward buttons and hard refreshes land on the right page. The
@@ -1337,6 +1353,64 @@ def _register_routes(app: FastAPI) -> None:
                     # Telemetry must never break the response.
                     pass
         return body
+
+    @app.get("/api/agent/download")
+    def api_agent_download():
+        """Stream the locally-built ``dist/pulse-agent/`` bundle as a zip.
+
+        Public — the marketing landing page's "Download for Windows" CTA
+        hits this endpoint. Returns 503 with build-from-source instructions
+        when the bundle isn't present so the operator running Pulse on a
+        laptop without having built the agent gets a helpful error instead
+        of a mystery 404.
+
+        Trade-off vs. GitHub Releases: this ties the download to a running
+        Pulse server, but in exchange the operator can ship updated agents
+        immediately by re-running ``python scripts/build_agent.py --clean``
+        — no release-tagging dance. ``PULSE_AGENT_DOWNLOAD_URL`` env var
+        is the override for hosted deploys that prefer a CDN / Releases
+        page; when set, the marketing button uses that URL directly and
+        this endpoint is unused.
+        """
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        bundle_dir = os.path.join(repo_root, "dist", "pulse-agent")
+        if not os.path.isdir(bundle_dir):
+            raise HTTPException(
+                503,
+                detail=(
+                    "pulse-agent.exe not built yet. Run "
+                    "`python scripts/build_agent.py --clean` on a Windows "
+                    "host to produce the bundle, then retry."
+                ),
+            )
+
+        # Zip the bundle into a BytesIO. The bundle is ~37 MB so we don't
+        # bother with a streaming generator — fits comfortably in RAM and
+        # ZipFile's seek-based file format wants a file-like sink with
+        # tell()/seek() anyway. For a >100 MB bundle this would want a
+        # disk-backed temp file, but we're well under that.
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root_path, _dirs, files in os.walk(bundle_dir):
+                for name in files:
+                    abs_path = os.path.join(root_path, name)
+                    arcname = os.path.join(
+                        "pulse-agent",
+                        os.path.relpath(abs_path, bundle_dir),
+                    )
+                    zf.write(abs_path, arcname=arcname)
+        payload = buf.getvalue()
+        filename = f"pulse-agent-{__version__}-windows-x64.zip"
+        return Response(
+            content=payload,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(payload)),
+            },
+        )
 
     @app.put("/api/auth/email")
     async def auth_update_email(request: Request, user_id: int = Depends(require_login)):
