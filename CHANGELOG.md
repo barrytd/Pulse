@@ -5,6 +5,58 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-14 — Security audit + hardening pass
+
+Full codebase security audit across SQL injection, input validation, path traversal, auth/authz, XSS, sensitive data exposure, rate limiting, CORS, dependency posture, error handling, and file-upload safety. Surfaced and fixed every issue found; the clean categories are documented below as evidence the audit ran.
+
+### Fixed
+
+- **H1 · Path traversal** in `GET /api/firewall/log?path=…` — admin-only endpoint allowed reading any host file (`/etc/passwd`, `SAM`, etc.). Hardened in [pulse/api.py](pulse/api.py): `..` sequences rejected, null bytes rejected, only `.log` extensions accepted; in production mode (`PULSE_ENV=production`) the `path` parameter is rejected entirely — only the upload endpoint is supported on hosted deploys.
+- **H2 · XSS** in [pulse/static/js/upload.js](pulse/static/js/upload.js) lines 24/146 — file names and error messages were interpolated into `innerHTML` without escaping. Self-XSS only (attacker would need to pick a malicious file from their own filesystem), but fixed via the existing `escapeHtml` helper for hygiene.
+- **M1 · Login lockout** in [pulse/api.py](pulse/api.py) `/api/auth/login` — added two-layer protection. Layer 1: per-IP burst cap of 50/5min via the existing rate-limit `hit()`. Layer 2: 10 *failed* logins per IP per 15 min returns **HTTP 423 Locked** with a clear `Retry-After`. Successful logins never consume failure budget. Added new `rate_limit.check()` (test without ticking) + `rate_limit.record()` (tick without checking) helpers in [pulse/rate_limit.py](pulse/rate_limit.py) to enable the failure-only-counts pattern.
+- **M2 · Rate limit on `POST /api/scan`** — .evtx parsing is CPU-bound (multiprocessing, per-file timeout) and single-worker on Render free tier. Added 20-uploads/hour per IP cap.
+- **M3 · Error-message leak** in [pulse/firewall/blocker.py](pulse/firewall/blocker.py) `stage_ip` + `unblock_ip` — `f"Database error: {e}"` returned the raw exception text to the API caller (e.g. `(sqlite3.OperationalError) no such table: ip_block_list`), leaking schema + driver details. Now logs full details server-side and returns a generic "check the server log" message.
+- **M4 · Info leak** in `GET /api/health` — `is_admin` field was always returned, fingerprinting the server's privilege level on hosted deploys. Now redacted when `PULSE_ENV=production`; still exposed on the local single-user dashboard (which needs it for the "run as administrator" banner).
+- **L1 · Silent audit-log swallow** at [pulse/api.py](pulse/api.py) `_audit_user_action` — security-relevant `blocker.log_audit()` failures were swallowed without trace. Now `print()`s to stderr so the journal / Render log picks them up; user-facing operation still succeeds because the audit row's failure shouldn't 500 the requester.
+- **L2 · Rate limit on `GET /verify`** — added 60-attempts/15min per IP to bound DB-lookup cost on token-spray misuse. The 256-bit token space makes actual brute force infeasible; this is a cost-bound, not a security-bound.
+
+### Verified clean (no fix needed)
+
+- **SQL injection**: every f-string SQL interpolation in [pulse/database.py](pulse/database.py) and [pulse/api.py](pulse/api.py) uses trusted constants (`_USER_COLS`, `_AGENT_COLS`, computed `?,?,?` placeholder strings, two-element hardcoded scope-column whitelist). All user-supplied values use parameterized `?` placeholders. Zero `LIKE` patterns. Zero string concatenation with user input building SQL fragments.
+- **Subprocess injection**: every `subprocess.run()` call uses list-form args (no `shell=True`). User-supplied values (IPs, file paths) are validated before reaching `netsh` / `icacls`.
+- **CORS**: production requires explicit `PULSE_ALLOWED_ORIGIN`, no wildcard fallback, warns on missing. Dev limited to localhost / 127.0.0.1.
+- **Cookie flags**: all three issuances (`signup`, `login`, `verify`) set `HttpOnly`, `SameSite=Lax`, `Secure` in production. `Strict` rejected because it would break the verification-email click-through.
+- **File uploads**: avatar (MIME whitelist + magic bytes + 2MB + DB blob), `.evtx` scan (streaming + 500MB cap + magic + `tempfile`), firewall log upload (streaming + 50MB cap + `tempfile`).
+- **Auth/authz**: every `/api/*` route has the correct dependency (`require_login` / `require_admin`); admin-only routes (`/api/users`, `/api/audit/export.*`, `/api/alerts/test`, `/api/webhook/test`, `/api/intel/test`, `/api/config/*`, `/api/scheduler/config`, `/api/rules/*/enabled`, `/api/monitor/sessions` DELETE-all) are gated. Multi-tenant org-scoping via `_read_scope_kwargs` wired through every read/write helper. Agent-transport routes have separate auth via `Authorization: Bearer pa_…`.
+- **Sensitive data**: passwords never logged or returned; `_public_user()` strips `password_hash`; API tokens and agent tokens stored sha256-at-rest with `last4` for UI identification only.
+- **Bare `except:`**: zero in the codebase. All `except Exception:` handlers either fail-closed (auth path) or are documented "best-effort, never break the request" patterns; the audit-relevant silent swallow at `_audit_user_action` is the only one that got a `print()` added.
+- **XSS in dashboard**: 15 of 20 JS modules import `escapeHtml` and use it consistently. The 5 that don't either have their own `_escape` helper (`drawer.js`, `command-palette.js`), only render hardcoded URLs (`user-menu.js`), or only render static strings (`system-scan.js`). Findings, notes, audit, notifications, whitelist, settings all properly escape user-supplied content.
+
+### Advisory (not fixed in this pass)
+
+- **Dependency pins**: `requirements.txt` uses `>=` (lower-bound) for every package, so a fresh install months from now could pick up an unexpected major version. Recommend `pip freeze > requirements.txt` (after verifying current versions in CI are good) or running `pip-audit` as a periodic check. Not changed here to avoid breaking the build by pinning to whatever's locally installed.
+
+### Tests
+
+12 new tests in [tests/test_security_hardening.py](tests/test_security_hardening.py):
+
+- `test_firewall_log_rejects_non_log_extension`
+- `test_firewall_log_rejects_parent_traversal`
+- `test_firewall_log_rejects_null_byte`
+- `test_firewall_log_blocks_custom_path_in_production`
+- `test_firewall_log_default_path_still_works`
+- `test_login_lockout_after_ten_failures`
+- `test_login_success_does_not_consume_failure_budget`
+- `test_scan_endpoint_rate_limited`
+- `test_blocker_db_error_does_not_leak_schema`
+- `test_health_redacts_is_admin_in_production`
+- `test_health_exposes_is_admin_in_dev`
+- `test_verify_endpoint_rate_limited`
+
+Plus one existing test updated for the new `.log` extension constraint.
+
+Tests at this commit: **688 passing** (+12).
+
 ## 2026-05-13 — Sprint 7 — Agent tamper-resistance
 
 The agent's `agent.yaml` file holds a long-lived `pa_…` bearer in plain text — treat it like an SSH key. This ship makes the agent self-audit its own ACL on startup and surfaces a `pulse-agent harden` subcommand that locks the file down to SYSTEM + Administrators only. Small, focused, doesn't break anything that worked yesterday.

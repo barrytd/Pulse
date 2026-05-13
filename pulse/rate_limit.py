@@ -16,7 +16,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Deque, Dict, Tuple
+from typing import Deque, Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request
 
@@ -71,6 +71,66 @@ def hit(request: Request, name: str, *, window_sec: int, max_hits: int) -> None:
                 detail=f"Too many requests. Try again in {retry_after}s.",
                 headers={"Retry-After": str(retry_after)},
             )
+        dq.append(now)
+
+
+def check(request: Request, name: str, *, window_sec: int, max_hits: int,
+          status_code: int = 429,
+          detail: Optional[str] = None) -> None:
+    """Raise if (client_ip, name) is already over the cap, WITHOUT
+    recording a new hit. Used for the failed-login lockout pattern:
+    ``check()`` before the credential test, ``hit()`` after the
+    credential test FAILS, so successful logins never consume budget.
+
+    ``status_code`` lets callers pick 423 (Locked) for account-lockout
+    semantics rather than the default 429.
+    """
+    ip = _client_ip(request)
+    key = (ip, name)
+    now = time.monotonic()
+    cutoff = now - window_sec
+    with _LOCK:
+        entry = _BUCKETS.get(key)
+        if entry is None:
+            return
+        dq = entry[2]
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= max_hits:
+            retry_after = max(1, int(window_sec - (now - dq[0])))
+            raise HTTPException(
+                status_code=status_code,
+                detail=detail or (
+                    f"Too many attempts. Try again in {retry_after}s."
+                ),
+                headers={"Retry-After": str(retry_after)},
+            )
+
+
+def record(request: Request, name: str, *, window_sec: int) -> None:
+    """Record a hit without checking the cap. Pairs with ``check()``
+    for the "only count failures" pattern: ``record()`` is called only
+    on the unhappy path so a typo-then-correct-password user doesn't
+    consume their own lockout budget.
+
+    ``window_sec`` here only matters as a tie-breaker for the deque's
+    sliding cleanup — the cap is enforced by the matching ``check()``
+    call, not here.
+    """
+    ip = _client_ip(request)
+    key = (ip, name)
+    now = time.monotonic()
+    cutoff = now - window_sec
+    with _LOCK:
+        entry = _BUCKETS.get(key)
+        if entry is None:
+            dq: Deque[float] = deque()
+            # max_hits is irrelevant here; check() is the gate.
+            _BUCKETS[key] = (window_sec, 10_000, dq)
+        else:
+            dq = entry[2]
+        while dq and dq[0] < cutoff:
+            dq.popleft()
         dq.append(now)
 
 

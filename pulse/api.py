@@ -490,8 +490,13 @@ def _audit_finding_action(app, user_id, action, *, finding_id=None, detail=None)
             comment=target,
             detail=detail,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # Audit-log failures are SECURITY-relevant — they mean an
+        # operator action wasn't recorded. We can't 500 the user-facing
+        # request because of it (the action itself succeeded), but the
+        # operator needs to know. Surface on stderr so the journal /
+        # Render log picks it up.
+        print(f"  [!] audit_log write failed for action={action!r}: {exc}")
 
 
 def _ref_ids_for_findings(db_path, finding_ids):
@@ -728,7 +733,14 @@ def _register_routes(app: FastAPI) -> None:
         render as a green banner. Invalid / expired tokens redirect to
         /login?verified=0 so the user sees a clear "link expired"
         message instead of an opaque 404 — and the verify call doesn't
-        require a session cookie (the token IS the credential here)."""
+        require a session cookie (the token IS the credential here).
+
+        Rate-limited (60 attempts / 15 min per IP) so an attacker can't
+        spray random tokens at the endpoint. The 256-bit token space
+        makes brute force impractical anyway, but the limit keeps the
+        DB-lookup cost bounded on misuse.
+        """
+        rate_limit.hit(request, "verify_email", window_sec=900, max_hits=60)
         raw = (token or "").strip()
         if not raw:
             return RedirectResponse(url="/login?verified=0", status_code=302)
@@ -929,12 +941,25 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/api/auth/login")
     async def auth_login(request: Request):
-        # 10 attempts per 5 minutes per IP. Enough for a fat-fingered user
-        # to recover; slow enough that online password brute-force is
-        # impractical. Runs even when auth is disabled (test mode) so the
-        # limiter itself is exercised — tests that need more hits can call
-        # rate_limit.reset_all_for_tests() in a fixture.
-        rate_limit.hit(request, "auth_login", window_sec=300, max_hits=10)
+        # Two layers:
+        #   1. Per-IP burst cap (50 attempts/5min) — stops volumetric abuse
+        #      regardless of success/fail. Loose enough that a fat-fingered
+        #      user doesn't get the wrong status code.
+        #   2. Failed-login lockout — 10 *failures* per IP in 15min returns
+        #      423 Locked. Only failures count, so a legitimate user who
+        #      typos once and then types correctly is never locked out by
+        #      their own success. Pairs with rate_limit.record() below on
+        #      the credential-mismatch branch.
+        rate_limit.hit(request, "auth_login", window_sec=300, max_hits=50)
+        rate_limit.check(
+            request, "auth_login_fail",
+            window_sec=900, max_hits=10,
+            status_code=423,
+            detail=(
+                "Too many failed login attempts. This account is "
+                "temporarily locked. Wait 15 minutes and try again."
+            ),
+        )
         try:
             body = await request.json()
         except Exception:
@@ -945,7 +970,10 @@ def _register_routes(app: FastAPI) -> None:
         password = str(body.get("password") or "")
         user = get_user_by_email(app.state.db_path, email)
         if not user or not verify_password(password, user["password_hash"]):
-            # Deliberately vague — don't leak whether the email exists.
+            # Record the failure so the lockout bucket fills; deliberately
+            # vague status detail so the response doesn't leak whether the
+            # email exists.
+            rate_limit.record(request, "auth_login_fail", window_sec=900)
             raise HTTPException(401, detail="Invalid email or password.")
         if not user.get("active"):
             raise HTTPException(403, detail="Account is deactivated.")
@@ -1944,20 +1972,31 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/health")
     def health():
-        """Simple aliveness check. Returns version info + privilege hints
-        so the dashboard can surface the "run as admin" banner."""
-        return {
-            "status":  "ok",
-            "version": __version__,
+        """Simple aliveness check. Returns version + platform info so the
+        dashboard can surface the "run as admin" banner on the local
+        single-user install.
+
+        Production redaction: ``is_admin`` is only meaningful for the
+        local Windows-installed dashboard ("does the user need to relaunch
+        elevated?"). On a hosted Linux deploy it's always False and leaks
+        whether the server process is running as root — minor
+        fingerprinting that ``PULSE_ENV=production`` should suppress.
+        """
+        payload = {
+            "status":           "ok",
+            "version":          __version__,
             "platform_windows": _system_scan_supported(),
-            "is_admin":         _system_scan_is_admin(),
         }
+        if not getattr(app.state, "is_production", False):
+            payload["is_admin"] = _system_scan_is_admin()
+        return payload
 
     # -------------------------------------------------------------------
     # POST /api/scan
     # -------------------------------------------------------------------
     @app.post("/api/scan")
-    async def scan(file: UploadFile = File(...), user_id: int = Depends(require_login)):
+    async def scan(request: Request, file: UploadFile = File(...),
+                   user_id: int = Depends(require_login)):
         """
         Parse an uploaded .evtx file, run detections, and return findings.
 
@@ -1966,6 +2005,11 @@ def _register_routes(app: FastAPI) -> None:
         scan summary and findings are written to the local database so
         /api/history and /api/report/{id} can reference them later.
         """
+        # 20 scans per IP per hour. .evtx parsing is CPU-bound (per-file
+        # timeout, multiprocessing) and Pulse runs single-worker on the
+        # default Render free tier — a single client pushing 500 MB
+        # uploads in a loop would otherwise pin the dyno.
+        rate_limit.hit(request, "scan_upload", window_sec=3600, max_hits=20)
         if not file.filename or not file.filename.lower().endswith(".evtx"):
             raise HTTPException(
                 status_code=400,
@@ -2583,12 +2627,58 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/firewall/log")
     def firewall_log_get(path: Optional[str] = None,
                          user_id: int = Depends(require_admin)):
+        """Parse the Windows Firewall log at a server-side path.
+
+        Security: even though this endpoint is admin-gated, in a hosted
+        multi-tenant deployment a tenant-admin should not be able to
+        coerce the server into reading arbitrary host files (e.g.
+        ``C:\\Windows\\System32\\config\\SAM`` or ``/etc/shadow``).
+        We restrict the ``path`` parameter to:
+          - the platform default ``pfirewall.log`` location, or
+          - any path whose basename ends with ``.log`` AND whose
+            extension is ``.log`` (rejecting binary files, no
+            ``..`` traversal, no absolute paths to system dirs)
+        In production mode (``PULSE_ENV=production``) the ``path``
+        parameter is rejected entirely — the upload endpoint is the
+        only supported entry point on hosted deploys.
+        """
         from pulse.firewall import firewall_parser as fp
-        # If the caller passes a path we honor it; otherwise fall back to
-        # the Windows default. Path is admin-gated so a viewer can't
-        # probe arbitrary file paths through this endpoint.
-        real_path = (path or "").strip() or fp.default_log_path()
-        if not os.path.exists(real_path):
+        default_path = fp.default_log_path()
+        raw_param = (path or "").strip()
+
+        if not raw_param:
+            real_path = default_path
+        elif getattr(app.state, "is_production", False):
+            # Hosted mode: tenant-admins can't enumerate host paths.
+            raise HTTPException(
+                400,
+                detail=(
+                    "Custom path is disabled in production. Use POST "
+                    "/api/firewall/log to upload a log file instead."
+                ),
+            )
+        else:
+            # Local install / dev: allow custom paths but constrain to
+            # plausibly-firewall-log shapes. .log extension only, no
+            # parent traversal sequences in the supplied string, no
+            # null bytes (a defense-in-depth check that some libraries
+            # truncate on).
+            if "\x00" in raw_param or ".." in raw_param.replace("\\", "/"):
+                raise HTTPException(
+                    400,
+                    detail="Path contains invalid characters.",
+                )
+            # Reject anything that isn't a .log file. The pfirewall.log
+            # parser is the only consumer; refusing other extensions
+            # blocks the obvious /etc/passwd / SAM file misuse.
+            if not raw_param.lower().endswith(".log"):
+                raise HTTPException(
+                    400,
+                    detail="Path must point to a .log file.",
+                )
+            real_path = raw_param
+
+        if not os.path.isfile(real_path):
             return _firewall_payload([], source_label="path",
                                      available=False, path=real_path)
         rows = list(fp.parse_log(real_path))

@@ -7,7 +7,7 @@ import {
   invalidateScansCache,
   invalidateFindingsCache,
 } from './api.js';
-import { formatBytes } from './dashboard.js';
+import { formatBytes, escapeHtml } from './dashboard.js';
 import { navigate } from './navigation.js';
 
 let selectedFiles = [];
@@ -21,7 +21,11 @@ function _setDropError(msg) {
   if (!dz) return;
   dz.classList.add('drop-error');
   var text = dz.querySelector('.drop-text');
-  if (text) text.innerHTML = '<strong>' + msg + '</strong>';
+  // escapeHtml: `msg` can carry a file name that ultimately came from
+  // the user's filesystem (e.g. "wrong-extension.txt"). Filename is
+  // self-supplied here so the XSS impact is limited to self, but
+  // escaping is the right hygiene + matches the dashboard's pattern.
+  if (text) text.innerHTML = '<strong>' + escapeHtml(msg) + '</strong>';
   var status = document.getElementById('upload-status');
   if (status) {
     status.textContent = msg;
@@ -139,7 +143,11 @@ export function copyTutorialCmd(id, btn) {
 export function updateFileDisplay() {
   var text = document.getElementById('drop-zone').querySelector('.drop-text');
   if (selectedFiles.length === 1) {
-    text.innerHTML = '<strong>' + selectedFiles[0].name + '</strong> (' +
+    // escapeHtml: file.name is user-controlled (whatever the user
+    // named the file on their system). Self-XSS only, but rendering
+    // user-supplied content via innerHTML without escaping is the
+    // wrong default — match the dashboard's pattern everywhere.
+    text.innerHTML = '<strong>' + escapeHtml(selectedFiles[0].name) + '</strong> (' +
       formatBytes(selectedFiles[0].size) + ')';
   } else {
     var totalSize = selectedFiles.reduce(function (s, f) { return s + f.size; }, 0);

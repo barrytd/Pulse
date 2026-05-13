@@ -86,7 +86,10 @@ def test_get_returns_payload_shape(fw_client):
 
 
 def test_get_returns_unavailable_for_missing_path(fw_client):
-    body = fw_client.get("/api/firewall/log?path=/no/such/log.txt").json()
+    """Pre-existing test: a path that doesn't exist returns the empty
+    payload with available=False, not a 404. Note the .log suffix —
+    the hardened endpoint rejects non-.log extensions with 400."""
+    body = fw_client.get("/api/firewall/log?path=/no/such/pfirewall.log").json()
     assert body["available"] is False
     assert body["entries"] == []
     assert body["summary"]["total"] == 0

@@ -323,7 +323,17 @@ def stage_ip(
                     "pushed_at", "rule_name", "finding_id")
             row_dict = dict(zip(cols, row))
     except Exception as e:
-        return {"ok": False, "message": f"Database error: {e}", "row": None, "forced": False}
+        # Log full details server-side so the operator can diagnose; the
+        # client gets a generic message so we don't leak schema / driver
+        # internals (e.g. "(sqlite3.OperationalError) no such table:
+        # ip_block_list" reveals the table name to a hostile caller).
+        print(f"  [!] stage_ip db error: {e}")
+        return {
+            "ok": False,
+            "message": "Database error while staging IP. Check the server log.",
+            "row": None,
+            "forced": False,
+        }
 
     if was_forced:
         log_audit(
@@ -473,7 +483,11 @@ def unblock_ip(db_path: str, ip: str, source: str = "cli", user: Optional[str] =
         with _connect(db_path) as conn:
             conn.execute("DELETE FROM ip_block_list WHERE id = ?", (int(_id),))
     except Exception as e:
-        return {"ok": False, "message": f"Database error: {e}"}
+        print(f"  [!] unblock_ip db error: {e}")
+        return {
+            "ok": False,
+            "message": "Database error while unblocking IP. Check the server log.",
+        }
 
     log_audit(db_path, "unblock", canonical, comment, source=source, user=user)
     return {"ok": True, "message": f"Removed {canonical} from the block list"}
