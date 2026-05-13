@@ -7,8 +7,10 @@ PyYAML>=6.0
 fastapi>=0.100.0
 # Uvicorn: ASGI server that runs the FastAPI app
 uvicorn[standard]>=0.23.0
-# python-multipart: Required by FastAPI for accepting file uploads via multipart/form-data
-python-multipart>=0.0.6
+# python-multipart: Required by FastAPI for accepting file uploads via multipart/form-data.
+# Floor bumped to 0.0.28 — earlier versions contain CVE-2026-42561 (uncovered
+# by `python -m pip_audit --strict` during the 2026-05-14 security audit).
+python-multipart>=0.0.28
 # httpx: Required by FastAPI's TestClient in test_api.py (not used at runtime)
 httpx>=0.25.0
 # reportlab: Pure-Python PDF generator used for dashboard PDF export

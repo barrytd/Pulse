@@ -1,0 +1,25 @@
+# Pulse — developer-only dependencies
+# ------------------------------------
+# Install on top of requirements.txt for local development + CI. Not
+# needed in production: these are tooling (CVE scanner, test runner) the
+# server itself never imports.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Why split: keeping prod dependency surface small reduces the install
+# blast radius and makes `requirements-lock.txt` (which derives from a
+# freeze) easier to reason about. CI workflows can run pip-audit + the
+# test suite without those extras leaking into the runtime image.
+
+-r requirements.txt
+
+# pytest is already pulled in transitively through httpx's testclient
+# extras, but pin it explicitly here so the test suite has a documented
+# runner.
+pytest>=8.0,<10.0
+
+# pip-audit — checks installed packages against the Python Packaging
+# Authority's vulnerability database (osv.dev + PyPI advisory feed).
+# Used by tests/test_security_hardening.py and recommended as a manual
+# pre-release step.
+pip-audit>=2.7,<3.0

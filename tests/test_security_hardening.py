@@ -267,3 +267,84 @@ def test_verify_endpoint_rate_limited(tmp_path):
         assert r.status_code in (302, 200), f"call {i + 1}: {r.status_code}"
     r = client.get("/verify?token=pv_nope_overflow", follow_redirects=False)
     assert r.status_code == 429
+
+
+# ---------------------------------------------------------------------------
+# Dependency CVE scan — pip-audit against the live environment
+# ---------------------------------------------------------------------------
+#
+# This test fails the suite when any installed package has a known CVE,
+# so regressions in upstream supply-chain hygiene surface immediately.
+# Requires network access (pip-audit queries osv.dev + the PyPI advisory
+# feed) — marked `network` so it can be skipped in air-gapped runs:
+#
+#   pytest -m "not network"
+#
+# We invoke pip-audit as a subprocess against the same Python interpreter
+# running the tests so it scans this venv's actual installed versions.
+# `--strict` means warnings (e.g. packages skipped because pip-audit
+# couldn't resolve them) escalate to failures, matching the security
+# posture we want in CI: no "soft" passes.
+
+@pytest.mark.network
+def test_no_known_cves_in_dependencies():
+    """Run `pip-audit --strict` against the current interpreter's
+    installed packages. Fails the test suite if any package has a known
+    CVE registered with osv.dev or the PyPI advisory feed.
+
+    Network test: queries osv.dev. Skip in offline environments with
+    `pytest -m "not network"`. If pip-audit itself isn't installed we
+    skip (rather than fail) — production deploys don't need the dev
+    tooling installed, and the test is most useful in CI where it
+    *should* be installed.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    # Prefer `python -m pip_audit` so we use the same interpreter that
+    # owns the installed packages; `shutil.which('pip-audit')` would
+    # also work but might resolve to a different venv on dev machines.
+    try:
+        # `--version` smokes the import; if pip-audit isn't installed
+        # we get a non-zero exit and skip.
+        check = subprocess.run(
+            [sys.executable, "-m", "pip_audit", "--version"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"pip-audit not invokable: {exc}")
+    if check.returncode != 0:
+        pytest.skip(
+            "pip-audit not installed in this environment. Install via "
+            "`pip install -r requirements-dev.txt` to enable this check."
+        )
+
+    # The real audit. `--strict` upgrades warnings to errors so a
+    # skipped-package isn't silently accepted; `--progress-spinner off`
+    # keeps the stdout clean for the failure message below.
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "pip_audit",
+                "--strict",
+                "--progress-spinner", "off",
+            ],
+            capture_output=True, text=True, timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("pip-audit timed out (network slow or offline)")
+
+    if result.returncode != 0:
+        # Truncate so a noisy report doesn't drown the failure summary
+        # but keeps enough context to act on. The full output is on
+        # stderr / stdout in CI logs.
+        head = (result.stdout or "")[:2000]
+        tail = (result.stderr or "")[:2000]
+        pytest.fail(
+            "pip-audit reported known vulnerabilities in installed "
+            "dependencies. Refresh the lock file after upgrading the "
+            "flagged packages:\n\n"
+            f"=== pip-audit stdout (first 2KB) ===\n{head}\n"
+            f"\n=== pip-audit stderr (first 2KB) ===\n{tail}"
+        )

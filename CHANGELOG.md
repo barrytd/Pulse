@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-14 — Dependency pinning + automated CVE scan
+
+Follow-up to today's security audit. Closes the "advisory — pin dependencies" gap by adding a lock file for production deploys and wiring `pip-audit` into the test suite so future CVEs surface on every test run instead of waiting for a manual check.
+
+- **New [requirements-lock.txt](requirements-lock.txt)** — exact `==` pins for all 43 runtime + test + build dependencies. Production deploys (Render, customer self-host, CI) should use this instead of `requirements.txt` (`>=` ranges). [README.md](README.md) explains the workflow + refresh procedure (`pip install -r requirements.txt && pytest -q && pip-audit --strict && pip freeze > requirements-lock.txt`).
+- **CVE fixes uncovered by the first audit run** — three packages had known vulnerabilities:
+  - `pip` 25.3 → 26.1.1 (CVE-2026-1703, -3219, -6357)
+  - `pytest` 9.0.2 → 9.0.3 (CVE-2025-71176)
+  - `python-multipart` 0.0.26 → 0.0.28 (CVE-2026-42561 — runtime dep, affects all installs). `requirements.txt` floor bumped from `>=0.0.6` to `>=0.0.28`.
+- **New [requirements-dev.txt](requirements-dev.txt)** — dev-only tooling kept out of the production install footprint. Currently `pytest>=8.0,<10.0` + `pip-audit>=2.7,<3.0`. Install via `pip install -r requirements.txt -r requirements-dev.txt`.
+- **New test `test_no_known_cves_in_dependencies`** in [tests/test_security_hardening.py](tests/test_security_hardening.py) — spawns `python -m pip_audit --strict --progress-spinner off` and fails the suite if any installed package has a known CVE registered with osv.dev or the PyPI advisory feed. `--strict` upgrades warnings to errors so a skipped-package isn't a soft pass.
+- **`network` pytest marker** registered in [tests/conftest.py](tests/conftest.py) via `pytest_configure` — the pip-audit test is decorated `@pytest.mark.network` so air-gapped environments can skip with `pytest -m "not network"`. Verified: full suite still passes with the test selected (online) and deselected (offline).
+
+Tests: **689 passing** (+1 since the security audit ship).
+
 ## 2026-05-14 — Security audit + hardening pass
 
 Full codebase security audit across SQL injection, input validation, path traversal, auth/authz, XSS, sensitive data exposure, rate limiting, CORS, dependency posture, error handling, and file-upload safety. Surfaced and fixed every issue found; the clean categories are documented below as evidence the audit ran.

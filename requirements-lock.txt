@@ -1,0 +1,77 @@
+# Pulse — pinned dependency lock file
+# -------------------------------------
+# Captured via `pip freeze` on 2026-05-14 against Python 3.14 on Windows
+# x64, with three CVE-fix bumps applied:
+#   - pip:              25.3   -> 26.1.1   (CVE-2026-1703, -3219, -6357)
+#   - pytest:           9.0.2  -> 9.0.3    (CVE-2025-71176)
+#   - python-multipart: 0.0.26 -> 0.0.28   (CVE-2026-42561)
+#
+# Use this for production / hosted deploys where reproducible builds
+# matter: a fresh `pip install -r requirements-lock.txt` six months from
+# now gets the same byte-for-byte versions we ran on the CI green tests.
+#
+# Why both files exist:
+#   requirements.txt        — `>=` ranges. Lets `pip install -r` pull
+#                              fresh minor patches during dev; survives
+#                              Python version bumps and upstream
+#                              re-releases without manual maintenance.
+#   requirements-lock.txt   — exact `==` pins. Production deployments
+#                              (Render service, customer-self-host) use
+#                              this so a compromised or buggy upstream
+#                              update can't silently break Pulse or
+#                              introduce a vulnerable transitive dep.
+#
+# To refresh after a verified upgrade:
+#   1. pip install -r requirements.txt          # pull latest within ranges
+#   2. python -m pytest -q                       # confirm everything green
+#   3. python -m pip_audit --strict              # confirm no new CVEs
+#   4. pip freeze > requirements-lock.txt        # regenerate this file
+#   5. commit + push (CI re-runs against the fresh pins)
+#
+# Includes every package currently installed in the dev environment
+# (runtime + test + build deps). Production deploys end up with pytest +
+# pyinstaller too — slightly larger image, zero security cost.
+
+altgraph==0.17.5
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+certifi==2026.2.25
+charset-normalizer==3.4.7
+click==8.3.2
+colorama==0.4.6
+fastapi==0.135.3
+h11==0.16.0
+hexdump==3.3
+httpcore==1.0.9
+httptools==0.7.1
+httpx==0.28.1
+idna==3.11
+iniconfig==2.3.0
+packaging==26.0
+pefile==2024.8.26
+pillow==12.2.0
+pluggy==1.6.0
+psycopg==3.3.4
+psycopg-binary==3.3.4
+pydantic==2.12.5
+pydantic_core==2.41.5
+Pygments==2.20.0
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.4
+pypdf==6.10.2
+pytest==9.0.3
+python-dotenv==1.2.2
+python-evtx==0.8.1
+python-multipart==0.0.28
+pywin32-ctypes==0.2.3
+PyYAML==6.0.3
+reportlab==4.4.10
+setuptools==82.0.1
+starlette==1.0.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.2
+uvicorn==0.44.0
+watchfiles==1.1.1
+websockets==16.0

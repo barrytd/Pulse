@@ -50,6 +50,21 @@ python main.py --help
 
 `.evtx` files: drop them in `logs/`, or point at `C:\Windows\System32\winevt\Logs\` with `--logs <path>`. Reports land in `reports/`.
 
+### Production deploys — use the lock file
+
+For dev work `requirements.txt` (`>=` ranges) is fine, but **production deployments should install from `requirements-lock.txt`** (exact `==` pins) so a compromised or buggy upstream package can't silently break Pulse or introduce a vulnerable transitive dependency:
+
+```bash
+# Production (Render, customer self-host, CI):
+pip install -r requirements-lock.txt
+
+# Run pip-audit periodically to catch CVEs in the pinned set:
+pip install pip-audit
+python -m pip_audit --strict   # exit code 1 if any CVE found
+```
+
+The lock file is regenerated on each release after `pytest -q` and `pip-audit --strict` pass. A test (`tests/test_security_hardening.py::test_no_known_cves_in_dependencies`) runs `pip-audit --strict` against the live environment on every test sweep — it's marked `@pytest.mark.network` so it's skipped when running offline (`pytest -m "not network"`).
+
 ---
 
 ## Marketing site & download

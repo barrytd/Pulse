@@ -1,12 +1,28 @@
 # tests/conftest.py
 # -----------------
-# Shared pytest fixtures. The only one right now resets the in-process
-# rate limiter before every test so bursts from previous tests don't
-# bleed 429s into unrelated cases.
+# Shared pytest fixtures + global marker registration. Two things:
+#
+#   1. _reset_rate_limits — clears the in-process rate-limit buckets
+#      between tests so bursts from one test don't bleed 429s into
+#      unrelated cases.
+#
+#   2. The `network` pytest marker is registered here so pytest doesn't
+#      emit a PytestUnknownMarkWarning when tests use
+#      `@pytest.mark.network`. Run `pytest -m "not network"` to skip
+#      network-dependent tests in air-gapped / offline environments.
 
 import pytest
 
 from pulse import rate_limit
+
+
+def pytest_configure(config):
+    """Register custom markers so they're not flagged as unknown."""
+    config.addinivalue_line(
+        "markers",
+        "network: marks tests that require network access "
+        "(e.g. pip-audit CVE checks). Skip with `-m 'not network'`.",
+    )
 
 
 @pytest.fixture(autouse=True)
