@@ -305,6 +305,51 @@ def send_alert(email_config, alert_config, triggering_findings,
         return False
 
 
+def send_transactional_email(email_config, recipient, subject,
+                             html_body, text_body=None):
+    """Send a one-off transactional email (verification link, password
+    reset, account notice, etc.) using the same SMTP creds as the alert
+    pipeline. Returns True on success, False on any failure.
+
+    Unlike ``send_alert``/``send_report`` this doesn't touch the alert
+    config — verification emails must go out regardless of whether
+    findings-style alerting is enabled. The only gating is that
+    ``email_config`` is fully populated (smtp_host + sender + password).
+    """
+    if not email_config:
+        return False
+    smtp_host = (email_config.get("smtp_host") or "").strip()
+    smtp_port = int(email_config.get("smtp_port") or 587)
+    sender    = (email_config.get("sender") or "").strip()
+    password  = (email_config.get("password") or "").strip()
+    if not (smtp_host and sender and password and recipient):
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = sender
+    msg["To"]      = recipient
+    if text_body:
+        msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(sender, password)
+            server.sendmail(sender, recipient, msg.as_string())
+        return True
+    except smtplib.SMTPAuthenticationError:
+        print("  [!] Transactional email failed: SMTP authentication error.")
+        return False
+    except smtplib.SMTPConnectError:
+        print(f"  [!] Transactional email failed: could not connect to {smtp_host}:{smtp_port}.")
+        return False
+    except Exception as exc:
+        print(f"  [!] Transactional email failed: {exc}")
+        return False
+
+
 def _severity_counts(findings):
     counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
     for f in findings or []:

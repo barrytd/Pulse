@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-13 — Sprint 8 prep — Email verification on signup
+
+Unblocks turning on `PULSE_HOSTED_SIGNUP=1` for real customers: every new tenant now gets a verification email with a one-time `pv_…` token, and the user lands unverified until they click the link. Single-user installs without SMTP auto-verify on signup so the existing CLI / localhost flow keeps working unchanged.
+
+- New `users` columns: `email_verification_token_sha256` (NULL once consumed), `email_verification_expires_at` (24h TTL), `email_verified_at` (NULL while pending, timestamp once verified). Idempotent backfill stamps `email_verified_at = created_at` on every pre-Sprint-8 row so legacy accounts don't suddenly start failing the verified check.
+- New DB helpers in [pulse/database.py](pulse/database.py): `mint_email_verification_token(user_id, ttl_hours=24)` returns the raw `pv_…` token (sha256-at-rest); `consume_email_verification_token(raw)` validates expiry + clears columns + stamps verified; `is_email_verified(user_id)` for callers; `mark_user_email_verified(user_id)` for the auto-verify branch.
+- New generic `send_transactional_email(email_config, recipient, subject, html_body, text_body)` in [pulse/alerts/emailer.py](pulse/alerts/emailer.py) — same SMTP boilerplate as `send_alert` but decoupled from the alerts pipeline so verification mail goes out even when alerts are off.
+- `/api/auth/signup` ([pulse/api.py](pulse/api.py)) — two branches: SMTP configured → mint token + mail link + leave user unverified, returns `{verification_sent: true}`; SMTP not configured → auto-verify immediately, returns `{verification_sent: false}`. Failure in the mail layer falls back to auto-verify so signup never 500s on a misconfigured SMTP.
+- New `GET /verify?token=…` route — consumes the token, redirects to `/?verified=1` on success or `/login?verified=0` on invalid/expired/replayed, issues a fresh session cookie so the user lands logged in on the dashboard immediately. No session required to hit `/verify` (the token IS the credential).
+- New `POST /api/auth/resend-verification` — logged-in unverified users can request a fresh link. Rate-limited (3/15min per IP). Returns `{sent, smtp_configured, already_verified}` so the UI can pick the right "check your inbox" vs "your email is already verified" vs "SMTP isn't configured" message.
+- `/api/me` and `/api/auth/status` now surface `email_verified: bool` so the dashboard can render a "verify your email" banner without an extra round-trip.
+- 11 new tests in [tests/test_auth.py](tests/test_auth.py): auto-verify when SMTP off, mint+send+receive when SMTP on, /verify success + redirect, /verify rejects bad token, /verify rejects replay, resend when SMTP configured, resend reports smtp_off, resend short-circuits when already verified, DB-level mint/consume round-trip, DB-level expiry.
+
+Tests at this commit: **662 passing** (+10).
+
 ## 2026-05-12 — Release v1.7.0 (Sprint 7 close)
 
 Sprint 7 — *Agent / server split, multi-tenant, marketing site* — ships. The headline since v1.6.0:

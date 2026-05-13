@@ -441,6 +441,16 @@ def init_db(db_path):
         "ALTER TABLE scans         ADD COLUMN organization_id INTEGER",
         "ALTER TABLE agents        ADD COLUMN organization_id INTEGER",
         "ALTER TABLE notifications ADD COLUMN organization_id INTEGER",
+        # Sprint 8 — email verification on signup. Three columns: the
+        # sha256-at-rest token (NULL once consumed), its 24h expiry, and
+        # the timestamp the user clicked the link (NULL while unverified).
+        # Existing users get NULL across all three; the auto-verify
+        # backfill below stamps email_verified_at = created_at for every
+        # pre-Sprint-8 row so legacy installs don't suddenly start
+        # blocking previously-trusted accounts.
+        "ALTER TABLE users ADD COLUMN email_verification_token_sha256 TEXT",
+        "ALTER TABLE users ADD COLUMN email_verification_expires_at   TEXT",
+        "ALTER TABLE users ADD COLUMN email_verified_at               TEXT",
     )
 
     with _connect(db_path) as conn:
@@ -493,6 +503,21 @@ def init_db(db_path):
     # Idempotent — once a user has an org, this loop is a no-op for
     # them on subsequent boots.
     _backfill_organizations(db_path)
+
+    # Sprint 8 — every pre-existing user gets auto-verified at upgrade
+    # time. Without this, flipping PULSE_HOSTED_SIGNUP=1 on a deploy
+    # would suddenly mark every existing account as "unverified" and
+    # gate them out of the dashboard. Idempotent — only NULL columns
+    # are touched, so re-running is free.
+    try:
+        with _connect(db_path) as conn:
+            conn.execute(
+                "UPDATE users SET email_verified_at = COALESCE(created_at, ?)"
+                " WHERE email_verified_at IS NULL",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+            )
+    except db_backend.OperationalError:
+        pass
 
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None, agent_id=None):
@@ -1889,7 +1914,7 @@ def count_users(db_path):
 _USER_COLS = (
     "id, email, password_hash, created_at, role, active, avatar_mime, "
     "display_name, onboarding_dismissed_at, first_finding_viewed_at, "
-    "last_active_at, organization_id"
+    "last_active_at, organization_id, email_verified_at"
 )
 
 
@@ -1909,7 +1934,131 @@ def _row_to_user(row):
         "first_finding_viewed_at": row[9] if len(row) > 9 else None,
         "last_active_at": row[10] if len(row) > 10 else None,
         "organization_id": row[11] if len(row) > 11 else None,
+        # Sprint 8 — string timestamp once the user clicks the link;
+        # None while they're still unverified. The token+expires columns
+        # aren't exposed here on purpose (they're internal to the verify
+        # flow, no caller needs them in the user dict).
+        "email_verified_at": row[12] if len(row) > 12 else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Email verification (Sprint 8)
+# ---------------------------------------------------------------------------
+
+def mint_email_verification_token(db_path, user_id, *, ttl_hours=24,
+                                  now=None):
+    """Generate a one-time verification token for ``user_id``.
+
+    Stores the sha256 hash + an absolute expiry timestamp; the raw token
+    is returned to the caller exactly once so it can be embedded in the
+    verification email. Re-calling for the same user overwrites any
+    pending token — operators clicking "Resend verification" get a fresh
+    code and the old one immediately becomes invalid.
+
+    Returns the raw ``pv_…`` token. Raises if ``user_id`` doesn't exist.
+    """
+    import hashlib
+    import secrets
+    if user_id is None:
+        raise ValueError("user_id is required")
+    raw = "pv_" + secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    base = now or datetime.now()
+    expires_at = (base + timedelta(hours=int(ttl_hours))
+                 ).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE users SET"
+            "  email_verification_token_sha256 = ?,"
+            "  email_verification_expires_at   = ?"
+            " WHERE id = ?",
+            (token_hash, expires_at, int(user_id)),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"user {user_id} not found")
+    return raw
+
+
+def consume_email_verification_token(db_path, raw_token, *, now=None):
+    """Validate + consume a verification token.
+
+    Returns the ``user_id`` on success; clears the token columns and
+    stamps ``email_verified_at = now`` so the same link can't be
+    replayed. Returns ``None`` on any failure path (expired, unknown
+    token, already-consumed, malformed) without leaking which one — the
+    UI surfaces a single "link invalid or expired" message either way.
+    """
+    import hashlib
+    if not raw_token or not isinstance(raw_token, str):
+        return None
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    base = now or datetime.now()
+    now_str = base.strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, email_verification_expires_at FROM users"
+            " WHERE email_verification_token_sha256 = ?",
+            (token_hash,),
+        ).fetchone()
+        if not row:
+            return None
+        user_id = row[0] if not isinstance(row, dict) else row.get("id")
+        expires_at = row[1] if not isinstance(row, dict) else row.get("email_verification_expires_at")
+        # Lexicographic comparison works because the timestamp format is
+        # `%Y-%m-%d %H:%M:%S` — sortable as a string.
+        if not expires_at or expires_at < now_str:
+            return None
+        conn.execute(
+            "UPDATE users SET"
+            "  email_verification_token_sha256 = NULL,"
+            "  email_verification_expires_at   = NULL,"
+            "  email_verified_at               = ?"
+            " WHERE id = ?",
+            (now_str, int(user_id)),
+        )
+    return int(user_id)
+
+
+def is_email_verified(db_path, user_id):
+    """True if the user has clicked their verification link (or was
+    auto-verified by the legacy backfill). Single-user / dev installs
+    without SMTP also report verified because signup auto-stamps."""
+    if user_id is None:
+        return False
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT email_verified_at FROM users WHERE id = ?",
+                (int(user_id),),
+            ).fetchone()
+    except db_backend.OperationalError:
+        return True  # pre-migration DB — fail open, never lock anyone out
+    if not row:
+        return False
+    val = row[0] if not isinstance(row, dict) else row.get("email_verified_at")
+    return bool(val)
+
+
+def mark_user_email_verified(db_path, user_id, *, now=None):
+    """Stamp ``email_verified_at`` directly — used by the signup path
+    when SMTP isn't configured (single-user installs) and by the legacy
+    backfill. Clears any pending token columns so a never-sent code
+    can't be brute-forced later."""
+    if user_id is None:
+        return False
+    base = now or datetime.now()
+    now_str = base.strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE users SET"
+            "  email_verification_token_sha256 = NULL,"
+            "  email_verification_expires_at   = NULL,"
+            "  email_verified_at               = COALESCE(email_verified_at, ?)"
+            " WHERE id = ?",
+            (now_str, int(user_id)),
+        )
+        return cur.rowcount > 0
 
 
 def touch_user_last_active(db_path, user_id):

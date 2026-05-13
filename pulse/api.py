@@ -74,6 +74,8 @@ from pulse.database import (
     count_finding_notes, list_all_notes,
     add_waitlist_signup, list_waitlist_signups,
     count_waitlist_signups, delete_waitlist_signup,
+    mint_email_verification_token, consume_email_verification_token,
+    is_email_verified, mark_user_email_verified,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -81,7 +83,7 @@ from pulse.core.rules_config import (
     RULE_META, build_compliance_summary, filter_by_enabled,
     get_disabled_rules, get_rule_names, rule_sort_key, set_rule_enabled,
 )
-from pulse.alerts.emailer import dispatch_alerts
+from pulse.alerts.emailer import dispatch_alerts, send_transactional_email
 from pulse.remediation import attach_remediation
 from pulse import rate_limit
 from pulse.monitor.monitor_service import MonitorManager
@@ -716,6 +718,36 @@ def _register_routes(app: FastAPI) -> None:
         return FileResponse(_landing_path, media_type="text/html")
 
     # -------------------------------------------------------------------
+    # GET /verify?token=… — consume an email verification token
+    # -------------------------------------------------------------------
+    @app.get("/verify", include_in_schema=False)
+    def verify_email_page(request: Request, token: str = ""):
+        """Land here when the user clicks the link in their verification
+        email. Consumes the token, stamps email_verified_at on the user,
+        and redirects to the dashboard with a flash flag the SPA can
+        render as a green banner. Invalid / expired tokens redirect to
+        /login?verified=0 so the user sees a clear "link expired"
+        message instead of an opaque 404 — and the verify call doesn't
+        require a session cookie (the token IS the credential here)."""
+        raw = (token or "").strip()
+        if not raw:
+            return RedirectResponse(url="/login?verified=0", status_code=302)
+        uid = consume_email_verification_token(app.state.db_path, raw)
+        if uid is None:
+            return RedirectResponse(url="/login?verified=0", status_code=302)
+        # Issue a fresh session cookie so the user lands logged in on
+        # the dashboard immediately — no extra "now please sign in"
+        # roadblock after they just proved they own the inbox.
+        cookie = issue_session_cookie(app.state.session_secret, int(uid))
+        resp = RedirectResponse(url="/?verified=1", status_code=302)
+        resp.set_cookie(
+            SESSION_COOKIE_NAME, cookie,
+            max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+            secure=bool(getattr(app.state, "is_production", False)),
+        )
+        return resp
+
+    # -------------------------------------------------------------------
     # Auth endpoints (all public — these are how you get a session)
     # -------------------------------------------------------------------
     @app.get("/api/auth/status")
@@ -806,8 +838,88 @@ def _register_routes(app: FastAPI) -> None:
         user_id = create_user(
             app.state.db_path, email, hash_password(password), role=role,
         )
+        # Sprint 8 — email verification. Two branches:
+        #
+        # 1. SMTP is configured: mint a `pv_…` token, mail the user a
+        #    /verify?token=… link, leave email_verified_at NULL so
+        #    /api/me reports unverified. The user still gets a session
+        #    cookie so they land on the dashboard immediately, but the
+        #    UI can surface a "verify your email" banner and gate
+        #    destructive operations later.
+        #
+        # 2. SMTP not configured (single-user dev install, no env vars):
+        #    auto-verify on the spot so the existing CLI / localhost
+        #    flow keeps working without forcing the operator to wire
+        #    up SMTP. This is the right default for a self-hosted
+        #    install; hosted multi-tenant deploys always set SMTP env
+        #    vars and so always run branch (1).
+        verified_via_email_sent = False
+        try:
+            cfg = _read_config(app.state.config_path) or {}
+            email_cfg = (cfg.get("email") or {})
+            smtp_configured = bool(
+                (email_cfg.get("smtp_host") or "").strip()
+                and (email_cfg.get("sender") or "").strip()
+                and (email_cfg.get("password") or "").strip()
+            )
+            if smtp_configured:
+                raw_token = mint_email_verification_token(
+                    app.state.db_path, user_id,
+                )
+                base_url = str(request.base_url).rstrip("/")
+                verify_link = f"{base_url}/verify?token={raw_token}"
+                subject = "Verify your Pulse account"
+                # Plain-text body for spam filters + email clients that
+                # block HTML by default.
+                text_body = (
+                    f"Welcome to Pulse.\n\n"
+                    f"Click the link below to verify your email and "
+                    f"finish setting up your account:\n\n"
+                    f"{verify_link}\n\n"
+                    f"This link expires in 24 hours. If you didn't sign "
+                    f"up for Pulse, you can ignore this email.\n"
+                )
+                html_body = (
+                    f"<p>Welcome to <strong>Pulse</strong>.</p>"
+                    f"<p>Click the link below to verify your email and "
+                    f"finish setting up your account:</p>"
+                    f'<p><a href="{verify_link}" '
+                    f'style="background:#3b82f6;color:#fff;padding:10px 18px;'
+                    f'border-radius:6px;text-decoration:none;font-weight:600;">'
+                    f"Verify email</a></p>"
+                    f"<p style='color:#8a94a6;font-size:13px;'>Or paste this "
+                    f"into your browser: <code>{verify_link}</code></p>"
+                    f"<p style='color:#8a94a6;font-size:13px;'>This link "
+                    f"expires in 24 hours. If you didn't sign up for Pulse, "
+                    f"you can ignore this email.</p>"
+                )
+                verified_via_email_sent = send_transactional_email(
+                    email_cfg, email, subject, html_body, text_body,
+                )
+            if not verified_via_email_sent:
+                # Either SMTP isn't configured, or the send failed.
+                # Auto-verify so the user isn't stuck behind a "check
+                # your email" gate for an email that never arrived.
+                # Operators who care about verification will set SMTP
+                # correctly; this is the right fallback for everyone
+                # else.
+                mark_user_email_verified(app.state.db_path, user_id)
+        except Exception as exc:
+            # Verification is a feature, not a hard requirement. Don't
+            # let any failure in the mail layer 500 the signup itself
+            # — fall back to auto-verify with a logged warning.
+            print(f"  [!] Signup verification setup failed: {exc}")
+            try:
+                mark_user_email_verified(app.state.db_path, user_id)
+            except Exception:
+                pass
+
         cookie = issue_session_cookie(app.state.session_secret, user_id)
-        resp = JSONResponse({"status": "ok", "email": email})
+        resp = JSONResponse({
+            "status":         "ok",
+            "email":          email,
+            "verification_sent": verified_via_email_sent,
+        })
         resp.set_cookie(
             SESSION_COOKIE_NAME, cookie,
             max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
@@ -852,12 +964,76 @@ def _register_routes(app: FastAPI) -> None:
         resp.delete_cookie(SESSION_COOKIE_NAME)
         return resp
 
+    @app.post("/api/auth/resend-verification")
+    async def auth_resend_verification(
+        request: Request, user_id: int = Depends(require_login),
+    ):
+        """Mint a fresh verification token and re-send the email.
+
+        Used when the original email got lost / deleted / went to spam.
+        Throttled (3/15min per IP) so an attacker can't bury the user's
+        inbox or spend our SMTP quota. Returns 200 either way to avoid
+        leaking whether the address is in fact verified — callers see
+        ``{sent: bool}`` so the UI can show "check your email" vs.
+        "your email is already verified."
+        """
+        rate_limit.hit(request, "auth_resend_verify", window_sec=900, max_hits=3)
+        user = get_user_by_id(app.state.db_path, user_id)
+        if not user:
+            raise HTTPException(401, detail="Authentication required.")
+        if user.get("email_verified_at"):
+            return {"status": "ok", "sent": False, "already_verified": True}
+
+        cfg = _read_config(app.state.config_path) or {}
+        email_cfg = (cfg.get("email") or {})
+        smtp_configured = bool(
+            (email_cfg.get("smtp_host") or "").strip()
+            and (email_cfg.get("sender") or "").strip()
+            and (email_cfg.get("password") or "").strip()
+        )
+        if not smtp_configured:
+            # No SMTP wired up — surface that so the UI can prompt the
+            # operator to set PULSE_SMTP_* instead of staring at a "we
+            # sent it!" message that never lands.
+            return {"status": "ok", "sent": False, "smtp_configured": False}
+
+        try:
+            raw_token = mint_email_verification_token(
+                app.state.db_path, user_id,
+            )
+        except ValueError:
+            raise HTTPException(404, detail="User not found.")
+        base_url = str(request.base_url).rstrip("/")
+        verify_link = f"{base_url}/verify?token={raw_token}"
+        text_body = (
+            f"Here's a fresh Pulse verification link:\n\n{verify_link}\n\n"
+            f"This link expires in 24 hours.\n"
+        )
+        html_body = (
+            f"<p>Here's a fresh <strong>Pulse</strong> verification link:</p>"
+            f'<p><a href="{verify_link}" '
+            f'style="background:#3b82f6;color:#fff;padding:10px 18px;'
+            f'border-radius:6px;text-decoration:none;font-weight:600;">'
+            f"Verify email</a></p>"
+            f"<p style='color:#8a94a6;font-size:13px;'>This link expires in "
+            f"24 hours.</p>"
+        )
+        sent = send_transactional_email(
+            email_cfg, user["email"], "Verify your Pulse account",
+            html_body, text_body,
+        )
+        return {"status": "ok", "sent": bool(sent), "smtp_configured": True}
+
     @app.get("/api/me")
     def api_me(user_id: int = Depends(require_login)):
         """Return the signed-in user's profile including role. The dashboard
         uses this to gate admin-only UI (Users card, etc.)."""
         if not app.state.auth_required:
-            return {"id": 0, "email": "local", "role": "admin", "active": True, "has_avatar": False}
+            return {
+                "id": 0, "email": "local", "role": "admin",
+                "active": True, "has_avatar": False,
+                "email_verified": True,
+            }
         user = get_user_by_id(app.state.db_path, user_id)
         if not user:
             raise HTTPException(401, detail="Authentication required.")
@@ -869,6 +1045,11 @@ def _register_routes(app: FastAPI) -> None:
             "created_at": user.get("created_at"),
             "has_avatar": bool(user.get("avatar_mime")),
             "display_name": user.get("display_name"),
+            # Sprint 8 — surfaced so the dashboard can render the
+            # "verify your email" banner. True once the user clicks the
+            # link; True from day one on single-user installs with no
+            # SMTP (auto-verified by the signup path).
+            "email_verified": bool(user.get("email_verified_at")),
         }
 
     # -------------------------------------------------------------------

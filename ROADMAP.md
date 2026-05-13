@@ -4,6 +4,9 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 
 ---
 
+<details>
+<summary><strong>Foundation (shipped pre-v1.2.0) — click to expand</strong></summary>
+
 ## Shipped
 
 - Project structure and foundation
@@ -48,7 +51,12 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - **Bulk-select + batch-delete on every list page** — Scans, Reports, Whitelist, Firewall Block List, Monitor Sessions, History all share the same checkbox + sticky action bar pattern with matching `DELETE /api/<resource>/batch` endpoints
 - 447 unit tests, all passing
 
+</details>
+
 ---
+
+<details>
+<summary><strong>Sprints 2–5 (shipped v1.2.0 through v1.5.0) — click to expand</strong></summary>
 
 ## Sprint 2 — Apr 14–15, 2026 (Alerting & detection depth) — shipped v1.2.0
 
@@ -112,6 +120,8 @@ Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for 
 - [x] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan` (Settings > API Tokens; Bearer header, per-user, sha256-at-rest, raw shown once, `last_used_at` bumps on every call)
 - [x] PostgreSQL migration — new `pulse/db_backend.py` adapter lets Pulse run against SQLite (default) or PostgreSQL (`DATABASE_URL=postgresql://…`); `scripts/migrate_to_postgres.py` copies an existing `pulse.db` into a target Postgres database and bumps per-table id sequences; SQLite stays the fallback for local single-user installs
 - [x] **UX blueprint pass** — full dashboard UX rebuild against `.claude/skills/pulse-ux-blueprint.md`: design-token rollout (semantic colors, spacing, type scale), Ctrl+K command palette with fuzzy scoring + recents, universal right-side drawer primitive, Monitor three-band rebuild, Rules page with per-rule hit counts + 24h sparkline + MITRE coverage matrix, Fleet KPI strip + host-detail drawer, Firewall pending-changes banner + tiered bulk-confirm, Whitelist KPI strip + tiered bulk-confirm, Dashboard standup row (reduction funnel + top offenders), Compliance hero coverage gauge + stacked bar, Trends mean-±2σ anomaly bands
+
+</details>
 
 ---
 
@@ -177,6 +187,43 @@ The hosted dashboard on Render can't scan a Windows machine itself — the OS ca
 
 ---
 
+## Sprint 8 — TBD (Detection depth)
+
+Focus: make Pulse's detection engine credible enough that a real SOC team would consider deploying it.
+
+- [ ] **SIGMA rule import** — build a parser that reads SIGMA YAML files and converts them into Pulse detection rules. Map `logsource.category` to Windows log channels, `detection` blocks to Pulse matching logic, `level` to Pulse severity, and `tags` to MITRE technique IDs. Add a **Settings → Rules → Import** tab where admins upload or paste SIGMA YAML, preview the converted rule, and activate it. Track imported rules with an `origin` field (`built-in` / `sigma-import` / `custom`).
+- [ ] **Time-based correlation engine** — add a sequence rule type that matches multiple events within a configurable time window. Ship four initial rules: brute force success (5+ Event 4625 then 4624 from same source IP within 10 min), impossible travel (same user on two hosts within 60 seconds), privilege escalation chain (Event 4720 then 4728/4732 within 5 min same actor), lateral spray (same source IP hitting 3+ hosts with LogonType 3 within 5 min).
+- [ ] **Sysmon log support** — parse Sysmon channel events: Event 1 (process create with command line for Mimikatz / encoded PowerShell / LOLBin detection), Event 3 (network connections for C2 beaconing), Event 10 (process access for LSASS credential dumping), Event 22 (DNS queries for tunneling detection).
+- [ ] **Rule performance dashboard** — Performance tab on the Rules page showing per-rule total hits, 24h sparkline, TP vs FP ratio, average scan time, and health indicator (green/amber/red).
+
+---
+
+## Sprint 9 — TBD (Operational maturity)
+
+Focus: make Pulse safe to run in production with real data at scale.
+
+- [ ] **Data retention policy** — **Settings → Advanced → Retention** with configurable windows per data type (findings 365d, scans 365d, audit log 730d, notifications 90d). Daily background job purges aged records. Audit log entries about purges are exempt from purging. Dry-run mode available.
+- [ ] **API rate limiting** — per-token (60/min default) and per-IP (120/min unauthenticated) limits. HTTP 429 with `Retry-After` header. In-memory sliding window counters. `X-RateLimit-Remaining` and `X-RateLimit-Reset` response headers. Per-token override in Settings → API Tokens.
+- [ ] **Evidence export** — *Export incident package* button on findings. Generates ZIP with: scoped PDF report, raw event XML, related audit log entries, analyst notes, JSON manifest with SHA-256 hashes for chain-of-custody. Available from detail drawer and bulk action bar.
+- [ ] **Encrypted config secrets** — Fernet encryption for SMTP passwords, webhook URLs, API keys in `pulse.yaml` using machine-derived key. Auto-encrypt plaintext secrets on first run after upgrade. Env vars bypass config file entirely.
+- [ ] **Session hardening** — CSRF tokens on all state-changing endpoints, `SameSite=Strict` cookies, configurable idle timeout (default 30 min), active sessions list in Settings → Profile with *Revoke* option.
+- [ ] **Webhook signature verification** — HMAC-SHA256 signatures on outgoing Slack/Discord payloads with `X-Pulse-Signature` header and documented verification process.
+
+---
+
+## Sprint 10 — TBD (Distribution & community)
+
+Focus: make Pulse easy to install, evaluate, and contribute to.
+
+- [ ] **Docker distribution** — `Dockerfile` and `docker-compose.yml` bundling Pulse + PostgreSQL. `PULSE_ADMIN_EMAIL` and `PULSE_ADMIN_PASSWORD` env vars for first-run setup. Persistent volumes for database and uploads.
+- [ ] **One-liner install script** — `curl | bash` script for Linux that installs dependencies, creates a `systemd` service, starts Pulse on port 8443, and prints the admin URL.
+- [ ] **GitHub README overhaul** — one-sentence description, hero screenshot, 3-command quick start, animated GIF of a scan, feature list with screenshots, architecture diagram, contributing guide link, license.
+- [ ] **Contributing guide** — `CONTRIBUTING.md` covering dev environment setup, running tests, adding a detection rule (step-by-step with example), adding a dashboard page, code style, PR review process.
+- [ ] **Sample data bundle** — `samples/` directory with 3-4 synthetic `.evtx` files containing known threats (brute force, credential dumping, lateral movement, persistence), sample `pfirewall.log`, and a README explaining what each file contains and what detections should fire.
+- [ ] **Public landing page polish** — live demo link with read-only viewer account and pre-loaded sample data, GitHub stars badge, test count badge, social proof section.
+
+---
+
 ## Backlog
 
-Unscheduled work — validated ideas not yet committed to a sprint — lives in [BACKLOG.md](BACKLOG.md). When an item gets picked up, move it from there into the next-up sprint section above.
+Unscheduled work — validated ideas not yet committed to a sprint — lives in [BACKLOG.md](BACKLOG.md). Items now covered by Sprints 8 – 10 above (SIGMA, Sysmon, retention, Docker, etc.) should be removed from the backlog when picked up. When a new unscheduled item gets prioritized, move it from there into the next-up sprint section above.

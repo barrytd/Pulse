@@ -228,6 +228,246 @@ def test_hosted_signup_rejects_duplicate_email(hosted_signup_client):
     assert "exists" in r.json().get("detail", "").lower()
 
 
+# ---------------------------------------------------------------------------
+# Email verification on signup (Sprint 8)
+#
+# Two branches gated by whether SMTP is wired up:
+#   - SMTP off  → user is auto-verified at signup (single-user installs)
+#   - SMTP on   → user lands unverified, the verification email goes out,
+#                 clicking the link consumes the token and marks them verified
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def smtp_signup_client(tmp_path):
+    """Auth-on client with SMTP wired in pulse.yaml so signup follows the
+    mail-the-verification-link branch. smtplib.SMTP is patched at the
+    top of each test so no real mail ever leaves the runner."""
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text(
+        "whitelist:\n  accounts: []\n"
+        "email:\n"
+        "  smtp_host: smtp.example.com\n"
+        "  smtp_port: 587\n"
+        "  sender: bot@example.com\n"
+        "  password: hunter2\n"
+    )
+    from pulse.api import create_app
+    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    return TestClient(app), str(db_path)
+
+
+def test_signup_without_smtp_auto_verifies_user(auth_client):
+    """The plain auth_client fixture has no SMTP config — the signup
+    flow should mark the user verified on the spot so single-user CLI
+    installs don't get stuck waiting for an email that never leaves."""
+    r = auth_client.post("/api/auth/signup", json={
+        "email": "me@example.com", "password": "correct-horse-battery",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["verification_sent"] is False
+    me = auth_client.get("/api/me").json()
+    assert me["email_verified"] is True
+
+
+def test_signup_with_smtp_mints_token_and_sends_email(smtp_signup_client):
+    """SMTP wired -> signup mints a pv_… token, ships the link via
+    smtplib, and leaves the user unverified until they click."""
+    from unittest.mock import patch, MagicMock
+    client, _db = smtp_signup_client
+
+    fake_smtp = MagicMock()
+    inner = MagicMock()
+    fake_smtp.return_value.__enter__.return_value = inner
+    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
+        r = client.post("/api/auth/signup", json={
+            "email": "founder@example.com",
+            "password": "correct-horse-battery",
+        })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["verification_sent"] is True
+    assert inner.sendmail.called
+
+    # Inspect the sent message — verify link present, token format right.
+    raw = inner.sendmail.call_args[0][2]
+    import re
+    m = re.search(r"/verify\?token=pv_[A-Za-z0-9_-]+", raw)
+    assert m is not None, "verification email must contain a /verify?token=pv_… link"
+
+    # User starts unverified until they click.
+    me = client.get("/api/me").json()
+    assert me["email_verified"] is False
+
+
+def test_verify_endpoint_consumes_token_and_redirects(smtp_signup_client):
+    """GET /verify?token=… consumes the token, stamps email_verified_at,
+    redirects to /?verified=1, and issues a session cookie so the user
+    lands on the dashboard already signed in."""
+    from unittest.mock import patch, MagicMock
+    client, db_path = smtp_signup_client
+
+    fake_smtp = MagicMock()
+    inner = MagicMock()
+    fake_smtp.return_value.__enter__.return_value = inner
+    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
+        client.post("/api/auth/signup", json={
+            "email": "founder@example.com",
+            "password": "correct-horse-battery",
+        })
+    body = inner.sendmail.call_args[0][2]
+    import re
+    link = re.search(r"/verify\?token=pv_[A-Za-z0-9_-]+", body).group(0)
+
+    # Log out so the verify flow has to re-issue a session.
+    client.post("/api/auth/logout")
+    r = client.get(link, follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/?verified=1"
+    # /verify issued a fresh session cookie too.
+    assert SESSION_COOKIE_NAME in r.cookies
+
+    # And now /api/me reports verified.
+    me = client.get("/api/me").json()
+    assert me["email_verified"] is True
+
+
+def test_verify_endpoint_rejects_bad_token(smtp_signup_client):
+    """Unknown / garbage tokens redirect to /login?verified=0 so the UI
+    can render a single "link invalid or expired" message — no leak of
+    whether the token shape was right vs. whether the row existed."""
+    client, _db = smtp_signup_client
+    r = client.get("/verify?token=pv_not_a_real_token", follow_redirects=False)
+    assert r.status_code == 302
+    assert "verified=0" in r.headers["location"]
+    r = client.get("/verify", follow_redirects=False)  # missing token entirely
+    assert r.status_code == 302
+    assert "verified=0" in r.headers["location"]
+
+
+def test_verify_endpoint_rejects_replay(smtp_signup_client):
+    """Consuming a token should clear it so the same link can't be
+    re-used. The second click 302s to /login?verified=0."""
+    from unittest.mock import patch, MagicMock
+    client, _db = smtp_signup_client
+
+    fake_smtp = MagicMock()
+    inner = MagicMock()
+    fake_smtp.return_value.__enter__.return_value = inner
+    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
+        client.post("/api/auth/signup", json={
+            "email": "founder@example.com",
+            "password": "correct-horse-battery",
+        })
+    body = inner.sendmail.call_args[0][2]
+    import re
+    link = re.search(r"/verify\?token=pv_[A-Za-z0-9_-]+", body).group(0)
+
+    r1 = client.get(link, follow_redirects=False)
+    assert r1.status_code == 302
+    assert "verified=1" in r1.headers["location"]
+
+    r2 = client.get(link, follow_redirects=False)
+    assert r2.status_code == 302
+    assert "verified=0" in r2.headers["location"]
+
+
+def test_resend_verification_succeeds_when_smtp_configured(smtp_signup_client):
+    """Logged-in unverified user can hit /api/auth/resend-verification
+    to mint a fresh token + send a new email."""
+    from unittest.mock import patch, MagicMock
+    client, _db = smtp_signup_client
+
+    fake_smtp = MagicMock()
+    inner = MagicMock()
+    fake_smtp.return_value.__enter__.return_value = inner
+    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
+        client.post("/api/auth/signup", json={
+            "email": "founder@example.com",
+            "password": "correct-horse-battery",
+        })
+        # First email was the signup verification — clear the call list
+        # so we only see the resend.
+        inner.sendmail.reset_mock()
+        r = client.post("/api/auth/resend-verification")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sent"] is True
+    assert body["smtp_configured"] is True
+    assert inner.sendmail.called
+
+
+def test_resend_verification_reports_smtp_off(auth_client):
+    """When SMTP isn't configured, the resend endpoint returns 200 with
+    sent=False + smtp_configured=False so the UI can show a "ask your
+    admin to configure SMTP" message instead of "check your email"."""
+    auth_client.post("/api/auth/signup", json={
+        "email": "me@example.com", "password": "correct-horse-battery",
+    })
+    # The signup auto-verified them, so we re-flip to unverified to
+    # exercise the resend path. (Otherwise the endpoint short-circuits
+    # with already_verified=True, which is a different code path.)
+    from pulse import database
+    import sqlite3
+    # auth_client owns the DB path via app.state — easiest is to find
+    # it via the app
+    app = auth_client.app
+    db_path = app.state.db_path
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE users SET email_verified_at = NULL")
+    r = auth_client.post("/api/auth/resend-verification")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sent"] is False
+    assert body["smtp_configured"] is False
+
+
+def test_resend_verification_short_circuits_when_already_verified(auth_client):
+    """A user who's already verified shouldn't be able to spam more
+    verification emails. The endpoint returns sent=False +
+    already_verified=True without minting a token."""
+    auth_client.post("/api/auth/signup", json={
+        "email": "me@example.com", "password": "correct-horse-battery",
+    })
+    r = auth_client.post("/api/auth/resend-verification")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sent"] is False
+    assert body.get("already_verified") is True
+
+
+def test_db_verification_token_round_trip(tmp_path):
+    """Direct exercise of mint/consume — outside the API stack."""
+    from datetime import datetime, timedelta
+    from pulse import database
+    db_path = str(tmp_path / "test.db")
+    database.init_db(db_path)
+    uid = database.create_user(db_path, "a@b.com", "h")
+
+    raw = database.mint_email_verification_token(db_path, uid)
+    assert raw.startswith("pv_")
+    assert database.consume_email_verification_token(db_path, raw) == uid
+    # Replay must fail.
+    assert database.consume_email_verification_token(db_path, raw) is None
+
+
+def test_db_verification_token_expires(tmp_path):
+    from datetime import datetime, timedelta
+    from pulse import database
+    db_path = str(tmp_path / "test.db")
+    database.init_db(db_path)
+    uid = database.create_user(db_path, "a@b.com", "h")
+
+    past = datetime.now() - timedelta(hours=2)
+    raw = database.mint_email_verification_token(
+        db_path, uid, ttl_hours=1, now=past,
+    )
+    # Token is already expired by the time we try to consume it.
+    assert database.consume_email_verification_token(db_path, raw) is None
+
+
 def test_login_accepts_valid_credentials(auth_client):
     auth_client.post("/api/auth/signup", json={
         "email": "me@example.com", "password": "my-secret-pass",
