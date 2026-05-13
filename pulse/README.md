@@ -59,6 +59,17 @@ Entry points live **outside** this folder:
 | [`firewall/firewall_config.py`](firewall/firewall_config.py) | Parses live `netsh advfirewall` output and flags disabled profiles, any-any allow rules, and overly broad scope on sensitive ports (3389 / 22 / 445 / ...). |
 | [`firewall/blocker.py`](firewall/blocker.py) | Pulse-managed IP block list. Stages IPs in SQLite, pushes inbound deny rules via `netsh advfirewall`, writes the audit log. Every rule is prefixed `Pulse-managed:`. |
 
+## [`agent/`](agent/) — downloadable Windows agent (Sprint 7)
+
+| Module | Role |
+|---|---|
+| [`agent/config.py`](agent/config.py) | `AgentConfig` dataclass + `load_config` / `save_config`. Default path: `%PROGRAMDATA%\Pulse\agent.yaml` on Windows, `~/.pulse/agent.yaml` elsewhere. Drops unknown keys for forward-compat. |
+| [`agent/transport.py`](agent/transport.py) | `AgentTransport` — thin `httpx.Client` wrapper for the four agent endpoints (`exchange`, `heartbeat`, `findings`, `latest`). `TransportError(permanent=…)` distinguishes "retry later" from "re-enroll required". |
+| [`agent/scanner.py`](agent/scanner.py) | `scan_for_findings()` reuses `pulse.core.detections` + `pulse.core.parser` + `pulse.monitor.system_scan._resolve_log_paths`. RuntimeError on non-Windows hosts. |
+| [`agent/runtime.py`](agent/runtime.py) | `AgentRuntime` — main loop. Independent heartbeat (60s) and scan (30min) cadences with sentinel-None "first tick fires" semantics. Startup auto-update probe + token-file ACL audit. |
+| [`agent/permissions.py`](agent/permissions.py) | `audit_token_file_permissions(path)` runs `icacls` and detects loose ACLs (Everyone / BUILTIN\\Users / Authenticated Users + SID forms). `harden_token_file(path)` strips inheritance and grants SYSTEM + Administrators only. |
+| [`agent/__main__.py`](agent/__main__.py) | CLI entry — `enroll <url> <token>`, `run`, `status`, `harden`. Invoked as `python -m pulse.agent` or via the packaged `pulse-agent.exe`. |
+
 ## Root — API, auth, and cross-cutting pieces
 
 These stay at `pulse/` top level because they're consumed by every
@@ -66,11 +77,15 @@ subpackage or are deliberately neutral (no domain of their own).
 
 | Module | Role |
 |---|---|
-| [`api.py`](api.py) | FastAPI application — every `/api/*` endpoint, SPA shell routing, static file mount, auth middleware. |
-| [`auth.py`](auth.py) | Password hashing (scrypt), signed session cookies (HMAC-SHA256), `require_login` and `require_admin` FastAPI dependencies. |
-| [`database.py`](database.py) | SQLite schema + all query helpers: scans, findings, users, audit log, IP block list, monitor sessions, fleet summary. |
+| [`api.py`](api.py) | FastAPI application — every `/api/*` endpoint, SPA shell routing, static file mount, auth middleware, marketing landing route. |
+| [`auth.py`](auth.py) | Password hashing (scrypt), signed session cookies (HMAC-SHA256), `require_login` and `require_admin` FastAPI dependencies, API-token Bearer auth. |
+| [`database.py`](database.py) | Schema + all query helpers: users (with multi-tenant `organization_id` + email-verification columns), scans, findings, agents, audit log, IP block list, monitor sessions, fleet summary, notifications, finding notes. |
+| [`db_backend.py`](db_backend.py) | Pluggable SQLite/Postgres adapter. SQLite by default; `DATABASE_URL=postgresql://…` flips to psycopg with `?`→`%s` translation and `RETURNING` for `lastrowid`. |
+| [`agents.py`](agents.py) | Server-side agent token plumbing (separate from the `agent/` package which is the *client* runtime): mint enrollment, exchange enrollment for bearer, authenticate Bearer header against the `agents` table. |
 | [`whitelist.py`](whitelist.py) | User-configurable whitelist layer on top of `known_good`. Suppresses findings whose `user`, `ip`, `rule`, or `detail` matches. |
 | [`remediation.py`](remediation.py) | "How do I fix this?" lookups — per-rule step-by-step guidance plus MITRE ATT&CK mitigation IDs (M1026, M1027, ...). Attached to findings before they're rendered. |
+| [`rate_limit.py`](rate_limit.py) | In-process sliding-window rate limiter. `hit()` ticks + checks; `check()` checks without ticking; `record()` ticks without checking. Used for the failed-login lockout pattern and per-endpoint burst caps. |
+| [`intel.py`](intel.py) | AbuseIPDB threat-intel lookup with 24h on-disk cache. Returns confidence-of-abuse score, country, ISP, last-reported. Opt-in via `pulse.yaml` API key. |
 | [`interactive.py`](interactive.py) | Terminal-mode browser — lets the CLI user page through findings, investigate, and add whitelist entries without leaving the terminal. |
 | [`animations.py`](animations.py) | ECG heartbeat / spinner animations shown while parsing. |
 
@@ -80,7 +95,7 @@ subpackage or are deliberately neutral (no domain of their own).
 |---|---|
 | [`__init__.py`](__init__.py) | Marks `pulse/` as a Python package. Exposes `__version__`. |
 | [`static/`](static/) | Dashboard JavaScript modules (ES modules) + CSS. Not imported by Python — served by `api.py`. |
-| [`web/`](web/) | Dashboard HTML shells (`index.html`, `login.html`). |
+| [`web/`](web/) | Static HTML shells. `index.html` (dashboard SPA), `login.html` (sign-in / first-user signup), `landing.html` (marketing page for unauthenticated visitors at `/`). |
 
 ---
 

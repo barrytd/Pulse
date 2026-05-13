@@ -22,7 +22,7 @@ Pulse parses Windows event logs (`.evtx`), runs 25 detection rules, and surfaces
 
 **Noise reduction** — Built-in 100+ known-good account allowlist + user whitelist + baseline snapshot for new-account / new-service / new-task diffing.
 
-**Multi-tenant** — Every owned row scoped to an `organization_id`. Self-signup mints a fresh org; admin-side user creation joins the admin's org. See **Multi-tenant** below.
+**Multi-tenant** — Every owned row scoped to an `organization_id`. Self-signup mints a fresh org with email verification (signup → `/verify?token=…` link → `email_verified_at` stamped); admin-side user creation joins the admin's org. See **Multi-tenant** below.
 
 **API** — FastAPI surface with Swagger UI at `/docs`. Bearer tokens minted from Settings → API Tokens.
 
@@ -157,11 +157,12 @@ Persistent files:
 ## Tests
 
 ```bash
-python -m pytest -q                    # all 652 tests
+python -m pytest -q                    # all 689 tests
 python -m pytest tests/test_detections.py -v   # single module
+python -m pytest -m "not network"      # skip CVE-scan / online tests
 ```
 
-The suite covers every detection rule, the API surface, multi-tenant isolation, agent runtime cadence, firewall log parsing, IP block-list lifecycle, and the auto-update channel. No real `.evtx` files needed — synthetic event data mirrors the live structure.
+The suite covers every detection rule, the API surface, multi-tenant isolation, agent runtime cadence + token-file ACL audit, firewall log parsing, IP block-list lifecycle, the auto-update channel, email verification, and the security-hardening fixes (login lockout, path traversal, rate limits, XSS escape). A `pip-audit --strict` CVE scan runs as part of the suite (marked `network`, skippable for air-gapped runs). No real `.evtx` files needed — synthetic event data mirrors the live structure.
 
 ---
 

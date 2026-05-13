@@ -176,9 +176,18 @@ The hosted dashboard on Render can't scan a Windows machine itself — the OS ca
 - [x] Packaged `pulse-agent.exe` via PyInstaller — `pulse-agent.spec` + `scripts/build_agent.py`; one-folder bundle (37 MB total, 6.5 MB launcher) or `--onefile` mode. Shipped as a release asset on the v1.7.0 GitHub release; also streamed live by `/api/agent/download` when the bundle is on disk
 - [ ] Windows Service installer — registers Pulse Agent as a SYSTEM-privileged service (moved up from Sprint 6) so scheduled scans + Event Log access work without manual UAC each time. README documents the manual `sc.exe` and NSSM paths; the bundled one-click installer is the remaining work
 - [x] Local-scan → HTTPS upload pipeline — `AgentRuntime` runs the same detection engine every 30 min (configurable), heartbeats every 60s, ships findings via `POST /api/agent/findings`. `AgentTransport` distinguishes transient (retry) from permanent (re-enroll) errors. Offline queue still TODO but the happy path + retry-on-transient path is live
-- [ ] Tamper resistance — service locked to Administrators for start/stop, token file ACL'd to SYSTEM + Administrators
+- [x] Tamper resistance — `pulse-agent harden` subcommand strips ACL inheritance and grants SYSTEM + Administrators only via `icacls`. `AgentRuntime` startup audits the bearer-token file's ACL via `audit_token_file_permissions()` and logs a WARNING when loose principals (Everyone / BUILTIN\Users / Authenticated Users, plus SID forms for localized installs) are detected. Service-level lock (Administrators-only start/stop) lands with the bundled installer.
 - [x] Auto-update channel — `GET /api/agent/latest` shipped; the agent calls it once at startup via `AgentTransport.get_latest_version()` and logs an "update available" warning with the download URL when the server reports drift. *Auto-download + signature verification deferred to Sprint 8 once we have a code-signing cert.*
 - [ ] Local dashboard mode (optional) — same installer can run Pulse as a single-user local dashboard (current behavior) instead of as an agent, controlled by one install-time checkbox
+
+### Post-v1.7.0 shipped (Sprint 7 closeout work)
+
+These shipped after the v1.7.0 tag but logically belong to the same "make Pulse safe to host" sprint theme. Pulled into a separate section so the reader can see which work-items happened post-release.
+
+- [x] **Email verification on signup** — every new tenant gets a verification email; user lands unverified until they click the `/verify?token=…` link. Single-user installs without SMTP auto-verify on signup. `email_verified_at` column on `users`; idempotent backfill stamps existing rows. Resend endpoint, rate-limited. Unblocks turning on `PULSE_HOSTED_SIGNUP=1` for real customers. (CHANGELOG: 2026-05-13)
+- [x] **Agent tamper resistance** — `pulse-agent harden` + runtime startup ACL audit. (CHANGELOG: 2026-05-13)
+- [x] **Full security audit + hardening pass** — SQL injection / input validation / path traversal / auth / XSS / sensitive data / rate limits / CORS / dependencies / error handling. Eight issues fixed (path traversal in `/api/firewall/log`, XSS in upload.js, login lockout returning 423, scan-upload rate limit, scrubbed SQL exception text, `is_admin` redaction in production, audit-log silent-swallow logging, `/verify` rate limit). (CHANGELOG: 2026-05-14)
+- [x] **Dependency pinning + automated CVE scan** — `requirements-lock.txt` with exact pins for prod deploys; `requirements-dev.txt` for dev tooling; `test_no_known_cves_in_dependencies` runs `pip-audit --strict` against the live env on every test sweep (marked `@pytest.mark.network` so air-gapped runs can skip). First run caught + fixed CVEs in pip / pytest / python-multipart. (CHANGELOG: 2026-05-14)
 
 ### Deferred product questions (flag before starting this sprint)
 - Pricing model: free-for-N-agents vs. per-seat vs. self-host-only? Changes whether enrollment needs a billing gate
