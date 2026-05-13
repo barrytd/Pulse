@@ -5,6 +5,23 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-12 — Release v1.7.0 (Sprint 7 close)
+
+Sprint 7 — *Agent / server split, multi-tenant, marketing site* — ships. The headline since v1.6.0:
+
+- **Pulse Agent** is a real thing: `pulse/agent/` package (config, transport, scanner, runtime, CLI), 6.5 MB packaged `pulse-agent.exe` via PyInstaller, two-token enrollment, 60s heartbeat, auto-update probe on startup
+- **Multi-tenant data model**: every owned row carries `organization_id`. Two customers on the same instance never see each other's data, but org-mates share scan / agent / finding visibility. Idempotent backfill heals legacy single-user installs in place
+- **Public multi-tenant signup**: `PULSE_HOSTED_SIGNUP=1` opens `/api/auth/signup` past the first user; each signup mints a fresh org
+- **Marketing landing page at `/`**: ~1100-line CrowdStrike-style site with hero + stats band + three use-case sections + 12-feature grid + three-step install + three-tier pricing + FAQ + multi-column footer
+- **Windows download wire**: `GET /api/agent/download` streams the locally-built bundle as a zip; `GET /api/agent/download/check` lets the landing page soft-disable the CTA when the server has no bundle on disk (falls back to a GitHub link)
+- **Auto-update channel**: `GET /api/agent/latest` returns `{version, download_url, release_notes_url}`; bearer-auth branch adds `outdated` / `current` so the agent doesn't have to compute its own semver
+- **Hosted-mode topbar swap**: "Scan My System" → "Download Agent" on non-Windows hosts; command palette filters `act.system_scan` away accordingly
+- **README** rewritten: 462 → 162 lines, stale counts refreshed (25 rules, 652 tests)
+
+Tests at release: **652 passing** (+153 since v1.6.0).
+
+Deferred to Sprint 8: bundled Windows Service installer, local dashboard mode toggle, signed auto-download. Email verification + password reset + onboarding wizard are the immediate next-up before flipping `PULSE_HOSTED_SIGNUP=1` for real users.
+
 ## 2026-05-07 — Sprint 7 — Marketing landing page + Windows download
 
 `/` is now a proper product site instead of a redirect to the login form. Unauthenticated visitors get a CrowdStrike / UpGuard-style marketing page with a hero, stats band, three use-case sections (SOC, IT, security researcher), 12-card feature grid, three-step "how it works", three-tier pricing teaser, FAQ, and a multi-column footer. Logged-in users still get the dashboard at the same path; the old `/welcome` mount stays for back-compat.
