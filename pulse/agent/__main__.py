@@ -55,6 +55,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("run", help="Start the heartbeat + scan loop")
     sub.add_parser("status", help="Print current config + connectivity check")
+    sub.add_parser(
+        "harden",
+        help=(
+            "Lock the token file's ACL to SYSTEM + Administrators "
+            "only (Windows). Run after enrollment; the bundled Service "
+            "installer will do this automatically when it ships."
+        ),
+    )
 
     return p
 
@@ -101,9 +109,26 @@ def cmd_run(args) -> int:
     if not cfg.server_url or not cfg.agent_token:
         print("agent is not enrolled. Run `pulse-agent enroll` first.", file=sys.stderr)
         return 2
-    runtime = AgentRuntime(cfg)
+    # Pass the resolved config path through so the runtime's startup
+    # permission audit checks the file we actually loaded from, not the
+    # platform default. ``None`` is fine — the runtime falls back to
+    # default_config_path() in that case.
+    runtime = AgentRuntime(cfg, config_path=args.config)
     runtime.run_forever()
     return 0
+
+
+def cmd_harden(args) -> int:
+    """Lock the bearer-token file down to SYSTEM + Administrators
+    only. No-op on non-Windows (POSIX semantics differ); returns 1
+    when the file isn't on disk yet so the operator gets a clear
+    signal rather than a misleading success."""
+    from pulse.agent.config import default_config_path
+    from pulse.agent.permissions import harden_token_file
+    path = args.config or default_config_path()
+    verdict = harden_token_file(path)
+    print(f"[{verdict.status}] {verdict.message}")
+    return 0 if verdict.status == "ok" else 1
 
 
 def cmd_status(args) -> int:
@@ -121,7 +146,10 @@ def cmd_status(args) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     _setup_logging(args.verbose)
-    handlers = {"enroll": cmd_enroll, "run": cmd_run, "status": cmd_status}
+    handlers = {
+        "enroll": cmd_enroll, "run": cmd_run,
+        "status": cmd_status, "harden": cmd_harden,
+    }
     fn = handlers.get(args.cmd)
     if not fn:
         print(f"unknown command: {args.cmd}", file=sys.stderr)

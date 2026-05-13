@@ -96,8 +96,10 @@ nssm set PulseAgent Start SERVICE_AUTO_START
 nssm start PulseAgent
 
 # Lock the bearer-token file down to SYSTEM + Administrators.
-icacls "C:\ProgramData\Pulse\agent.yaml" /inheritance:r /grant:r "SYSTEM:(R,W)" "Administrators:(F)"
+pulse-agent harden
 ```
+
+The `harden` subcommand wraps the `icacls /inheritance:r /grant:r SYSTEM:(R,W) Administrators:(F)` invocation so you don't have to memorize Windows ACL syntax. The agent runtime *also* audits the file's ACL once at startup and logs a WARNING in the journal if it's still world-readable — so a forgotten `harden` step doesn't sit silently in production.
 
 `sc.exe` works too — see [ROADMAP.md](ROADMAP.md) for the bundled-installer follow-up.
 

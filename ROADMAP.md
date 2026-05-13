@@ -173,9 +173,9 @@ The hosted dashboard on Render can't scan a Windows machine itself — the OS ca
 - [x] **Windows download wire** — `/api/agent/download` endpoint streams the locally-built `dist/pulse-agent/` bundle as a zip; landing page's "Download for Windows" CTA points at it. 503 + clear "build first" message when the bundle isn't present.
 
 ### Downloadable Windows agent
-- [ ] Packaged `pulse-agent.exe` via PyInstaller — reuses `pulse/detections.py` and `pulse/core/rules_config.py`; bundles a minimal config + YAML enrollment token
-- [ ] Windows Service installer — registers Pulse Agent as a SYSTEM-privileged service (moved up from Sprint 6) so scheduled scans + Event Log access work without manual UAC each time
-- [ ] Local-scan → HTTPS upload pipeline — agent runs detections every N minutes, POSTs findings to the hosted API using the enrollment-minted bearer token; retries + offline queue if the dashboard is unreachable
+- [x] Packaged `pulse-agent.exe` via PyInstaller — `pulse-agent.spec` + `scripts/build_agent.py`; one-folder bundle (37 MB total, 6.5 MB launcher) or `--onefile` mode. Shipped as a release asset on the v1.7.0 GitHub release; also streamed live by `/api/agent/download` when the bundle is on disk
+- [ ] Windows Service installer — registers Pulse Agent as a SYSTEM-privileged service (moved up from Sprint 6) so scheduled scans + Event Log access work without manual UAC each time. README documents the manual `sc.exe` and NSSM paths; the bundled one-click installer is the remaining work
+- [x] Local-scan → HTTPS upload pipeline — `AgentRuntime` runs the same detection engine every 30 min (configurable), heartbeats every 60s, ships findings via `POST /api/agent/findings`. `AgentTransport` distinguishes transient (retry) from permanent (re-enroll) errors. Offline queue still TODO but the happy path + retry-on-transient path is live
 - [ ] Tamper resistance — service locked to Administrators for start/stop, token file ACL'd to SYSTEM + Administrators
 - [x] Auto-update channel — `GET /api/agent/latest` shipped; the agent calls it once at startup via `AgentTransport.get_latest_version()` and logs an "update available" warning with the download URL when the server reports drift. *Auto-download + signature verification deferred to Sprint 8 once we have a code-signing cert.*
 - [ ] Local dashboard mode (optional) — same installer can run Pulse as a single-user local dashboard (current behavior) instead of as an agent, controlled by one install-time checkbox

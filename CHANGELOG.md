@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-13 — Sprint 7 — Agent tamper-resistance
+
+The agent's `agent.yaml` file holds a long-lived `pa_…` bearer in plain text — treat it like an SSH key. This ship makes the agent self-audit its own ACL on startup and surfaces a `pulse-agent harden` subcommand that locks the file down to SYSTEM + Administrators only. Small, focused, doesn't break anything that worked yesterday.
+
+- New [pulse/agent/permissions.py](pulse/agent/permissions.py): `audit_token_file_permissions(path)` runs `icacls` and returns a `PermissionsVerdict` (`ok` / `loose` / `not_found` / `not_windows` / `error`). Detects `Everyone`, `BUILTIN\Users`, `NT AUTHORITY\Authenticated Users` (and their SID forms `S-1-1-0`, `S-1-5-32-545`, `S-1-5-11` for localized Windows installs).
+- `harden_token_file(path)` strips ACL inheritance and grants `SYSTEM:(R,W)` + `Administrators:(F)` only. Inheritance-strip comes before the grants so the parent dir's ACEs can't re-clobber them.
+- `AgentRuntime.run_forever()` now invokes `_audit_token_permissions()` once at startup (after the update check). Loose ACL → WARNING in the journal with the exact `pulse-agent harden` command to run. Non-Windows hosts skip silently.
+- `AgentRuntime` constructor accepts a new `config_path=` kwarg so the audit checks the file we actually loaded from when `--config <path>` was used, not the platform default. `__main__.cmd_run` plumbs it through.
+- New `pulse-agent harden` subcommand ([pulse/agent/__main__.py](pulse/agent/__main__.py)): calls `harden_token_file` against `--config` (or the default path) and prints the verdict. Exits 1 when the file is missing or icacls failed, 0 on success.
+- 14 new tests in [tests/test_agent_permissions.py](tests/test_agent_permissions.py): non-Windows no-op, missing-file branch, detects Everyone / BUILTIN\Users / Authenticated Users, accepts locked-down ACL, handles icacls binary missing, harden invokes icacls with correct flag ordering, harden surfaces rc != 0, log level routing (loose → WARNING, ok → INFO), runtime startup fires the audit once.
+
+Plus a ROADMAP cleanup: `[x] Packaged pulse-agent.exe via PyInstaller` (shipped with v1.7.0) and `[x] Local-scan → HTTPS upload pipeline` (shipped as `AgentRuntime` heartbeat + scan loop) — both were technically done but still showing as `[ ]` because nobody updated the ROADMAP when they landed.
+
+Tests: **676 passing** (+14 since the email verification ship).
+
 ## 2026-05-13 — Sprint 8 prep — Email verification on signup
 
 Unblocks turning on `PULSE_HOSTED_SIGNUP=1` for real customers: every new tenant now gets a verification email with a one-time `pv_…` token, and the user lands unverified until they click the link. Single-user installs without SMTP auto-verify on signup so the existing CLI / localhost flow keeps working unchanged.

@@ -45,12 +45,18 @@ class AgentRuntime:
 
     def __init__(self, cfg: AgentConfig, *,
                  transport: Optional[AgentTransport] = None,
-                 clock: Optional[Callable[[], float]] = None):
+                 clock: Optional[Callable[[], float]] = None,
+                 config_path: Optional[str] = None):
         if not cfg.server_url:
             raise ValueError("AgentConfig.server_url must be set")
         if not cfg.agent_token:
             raise ValueError("AgentConfig.agent_token must be set — run `enroll` first")
         self.cfg = cfg
+        # Optional. When the operator ran `pulse-agent --config <path> run`
+        # the path matters for the startup permission audit (we want to
+        # check the file we actually loaded from, not the default).
+        # Falls back to the platform default when None.
+        self.config_path = config_path
         self.transport = transport or AgentTransport(
             cfg.server_url, cfg.agent_token, verify_tls=cfg.verify_tls,
         )
@@ -96,6 +102,14 @@ class AgentRuntime:
             self._check_for_updates()
         except Exception as exc:
             log.debug("update check failed: %s", exc)
+        # Best-effort tamper-resistance audit. Logs a WARNING when the
+        # agent.yaml ACL is loose enough for a non-admin local user to
+        # read the bearer token. No-op on non-Windows hosts and when
+        # the file isn't on disk yet (pre-enrollment).
+        try:
+            self._audit_token_permissions()
+        except Exception as exc:
+            log.debug("permission audit failed: %s", exc)
         while not self._stop:
             try:
                 self.tick()
@@ -137,6 +151,21 @@ class AgentRuntime:
             self._last_scan_at = now
 
     # --- Internals -----------------------------------------------------
+
+    def _audit_token_permissions(self) -> None:
+        """One-shot startup check that the bearer-token file isn't
+        world-readable. Logs WARNING when the ACL is loose; INFO when
+        the file is locked down or on a non-Windows host. Tolerant of
+        config-path-unset (tests construct a runtime from an in-memory
+        cfg with no on-disk file — the audit returns ``not_found``
+        which is silent at INFO)."""
+        from pulse.agent.config import default_config_path
+        from pulse.agent.permissions import (
+            audit_token_file_permissions, log_audit_result,
+        )
+        path = self.config_path or default_config_path()
+        verdict = audit_token_file_permissions(path)
+        log_audit_result(verdict)
 
     def _check_for_updates(self) -> None:
         """Probe ``/api/agent/latest`` once and log any version drift.
