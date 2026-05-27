@@ -52,6 +52,15 @@ RULE_META = {
     "Firewall Profile Disabled":          {"event_id": None,          "severity": "HIGH",    "mitre": "T1562.004", "nist_csf": "PR.PT-4",  "iso_27001": "A.13.1.1"},
     "Firewall Any-Any Allow Rule":        {"event_id": None,          "severity": "MEDIUM",  "mitre": "T1562.004", "nist_csf": "PR.IP-1",  "iso_27001": "A.13.1.1"},
     "Firewall Overly Broad Scope":        {"event_id": None,          "severity": "MEDIUM",  "mitre": "T1562.004", "nist_csf": "PR.IP-1",  "iso_27001": "A.13.1.1"},
+    # Sprint 8 — time-based correlation rules. event_id=None for the
+    # multi-event chains (the Rules page renders those without a
+    # per-event-ID column); single-event rules that just add cross-event
+    # context (Impossible Travel, Lateral Spray) still nominate a
+    # representative event ID for the table.
+    "Brute-Force Success":          {"event_id": None, "severity": "CRITICAL", "mitre": "T1078",     "nist_csf": "DE.AE-3",  "iso_27001": "A.16.1.4"},
+    "Impossible Travel":            {"event_id": 4624, "severity": "HIGH",     "mitre": "T1078",     "nist_csf": "DE.AE-2",  "iso_27001": "A.9.4.2"},
+    "Privilege Escalation Chain":   {"event_id": None, "severity": "CRITICAL", "mitre": "T1098",     "nist_csf": "DE.AE-3",  "iso_27001": "A.9.2.5"},
+    "Lateral Spray":                {"event_id": 4624, "severity": "CRITICAL", "mitre": "T1021",     "nist_csf": "DE.AE-3",  "iso_27001": "A.13.1.3"},
 }
 
 

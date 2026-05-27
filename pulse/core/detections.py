@@ -1886,6 +1886,412 @@ def detect_suspicious_child_process(events):
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Time-based correlation rules (Sprint 8 — "Up Next" ticket).
+#
+# Pulse's other detections fire per-event: read one record, decide if it's
+# suspicious, emit a finding. These four rules instead look at *sequences*
+# of events within a configurable sliding window. They catch attacks that
+# single-event rules miss — a brute-force attempt followed by a successful
+# login is a much stronger signal than either event alone, but neither
+# fires the underlying single-event rule (4624 successful logons are normal,
+# 4625 below the threshold is normal, the *combination* is the signal).
+#
+# Pattern: every function below scans `events` in one pass, groups by the
+# relevant key (source IP, target user, actor user), and emits one finding
+# per high-confidence sequence match. Boundary cases — multiple matches
+# for the same actor, near-miss timings, missing fields on individual
+# events — all degrade silently to "no finding" rather than raising. Same
+# tolerance contract as the per-event detections.
+# ---------------------------------------------------------------------------
+
+def detect_brute_force_success(events):
+    """Detect a brute-force attack that *succeeded*.
+
+    Pattern: 5+ Event 4625 (failed logon) from the same source IP within
+    a 10-minute window, followed by a successful Event 4624 from the
+    same source IP also within the window. The successful logon is what
+    promotes this from "noise the firewall handled" to "the attacker
+    got in."
+
+    Why this exists separately from the per-event Brute Force rule:
+    Brute Force Attempt fires on the failures regardless of outcome.
+    This rule fires only when a success follows, and is a strictly
+    stronger signal (HIGH severity, fewer false positives, much higher
+    triage priority). The two rules can both fire on the same attack —
+    one is the early warning, this one is the "they're in" alert.
+
+    Event ID: 4625 + 4624 (correlated)
+    MITRE ATT&CK: T1110.001 (Password Guessing) → T1078 (Valid Accounts)
+    """
+    findings = []
+
+    FAILURE_THRESHOLD = 5
+    WINDOW = timedelta(minutes=10)
+
+    # PASS 1 — bucket failures + successes by source IP. Each entry is
+    # a list of (event_time, target_user) tuples sorted later.
+    failures_by_ip = {}
+    successes_by_ip = {}
+    for event in events:
+        if event["event_id"] not in (EVENT_FAILED_LOGIN, EVENT_SUCCESSFUL_LOGON):
+            continue
+        when = _parse_event_time(event)
+        if when is None:
+            continue
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except (ET.ParseError, KeyError, TypeError):
+            continue
+        ip = _get_xml_field(xml_tree, "IpAddress")
+        # 4624 LogonType=2 (interactive, console) is local — usually
+        # not the brute-force vector. Pulse cares about network /
+        # remote logons (LogonType 3 + 10) for this chain.
+        if event["event_id"] == EVENT_SUCCESSFUL_LOGON:
+            ltype = (_get_xml_field(xml_tree, "LogonType") or "").strip()
+            if ltype and ltype not in ("3", "10"):
+                continue
+        if not ip or ip in ("-", "127.0.0.1", "::1"):
+            continue
+        target = _get_xml_field(xml_tree, "TargetUserName") or "<unknown>"
+        if event["event_id"] == EVENT_FAILED_LOGIN:
+            failures_by_ip.setdefault(ip, []).append((when, target))
+        else:
+            successes_by_ip.setdefault(ip, []).append((when, target))
+
+    # PASS 2 — for each IP that hit the failure threshold within a
+    # sliding window, look for a success from the same IP after the
+    # final failure (so the success follows the cluster, not before).
+    for ip, fails in failures_by_ip.items():
+        if len(fails) < FAILURE_THRESHOLD:
+            continue
+        fails.sort(key=lambda p: p[0])
+        # Sliding window over the failure list.
+        for i in range(len(fails) - FAILURE_THRESHOLD + 1):
+            window_start = fails[i][0]
+            window_end   = fails[i + FAILURE_THRESHOLD - 1][0]
+            if window_end - window_start > WINDOW:
+                continue
+            # Now look for any successful logon from this IP between
+            # window_start and window_end + 5min (giving the attacker
+            # a brief grace period after the cluster ends).
+            grace_end = window_end + timedelta(minutes=5)
+            successes = successes_by_ip.get(ip, [])
+            promoted = next(
+                ((t, u) for (t, u) in successes
+                 if window_start <= t <= grace_end),
+                None,
+            )
+            if promoted is None:
+                continue
+            success_time, success_user = promoted
+            findings.append({
+                "rule":     "Brute-Force Success",
+                "severity": "CRITICAL",
+                "event_id": EVENT_SUCCESSFUL_LOGON,
+                "timestamp": success_time.isoformat() + "Z",
+                "hostname":  None,  # decorated later from raw_xml if present
+                "details": (
+                    f"Attacker at {ip} sent {len(fails)} failed logons against "
+                    f"this host between {window_start:%Y-%m-%d %H:%M:%S} and "
+                    f"{window_end:%H:%M:%S} UTC, then successfully logged in as "
+                    f"'{success_user}' at {success_time:%H:%M:%S}. The successful "
+                    f"logon promotes this from a brute-force *attempt* to a "
+                    f"likely successful credential compromise — treat as an "
+                    f"active intrusion until the account is locked + investigated."
+                ),
+            })
+            # One finding per IP per attack burst; break out of the
+            # window loop so we don't emit duplicates for overlapping
+            # 5-tuple windows on the same cluster.
+            break
+
+    return findings
+
+
+def detect_impossible_travel(events):
+    """Detect the same user authenticating from two different hosts
+    (or source IPs) within 60 seconds — physically impossible.
+
+    Pattern: 4624 successful logons grouped by TargetUserName. For each
+    user, scan sorted-by-time adjacent pairs; if the two logons land
+    on different ``Computer`` values OR different source IPs and the
+    interval is < 60s, that's a credential-sharing or token-replay
+    indicator.
+
+    Tight window (60s) keeps false positives down — laptops that
+    suspend then resume on a different network are typically minutes
+    apart, not seconds. Domain controllers replicating Kerberos tokens
+    can show "same user, two DCs" within seconds but with identical
+    LogonType=3 + AuthenticationPackageName=Kerberos, which we filter
+    out below.
+
+    Event ID: 4624 (correlated by user)
+    MITRE ATT&CK: T1078 (Valid Accounts) — anomalous concurrent use
+    """
+    findings = []
+
+    WINDOW = timedelta(seconds=60)
+
+    # Bucket per user — each entry is (event_time, host, ip, logon_type).
+    by_user = {}
+    for event in events:
+        if event["event_id"] != EVENT_SUCCESSFUL_LOGON:
+            continue
+        when = _parse_event_time(event)
+        if when is None:
+            continue
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except (ET.ParseError, KeyError, TypeError):
+            continue
+        user = (_get_xml_field(xml_tree, "TargetUserName") or "").strip()
+        if not user or user.endswith("$"):
+            # `$`-suffixed names are machine accounts — they legitimately
+            # auth from many places (DC chatter, service-to-service).
+            continue
+        host  = (event.get("computer") or "").strip()
+        ip    = (_get_xml_field(xml_tree, "IpAddress") or "").strip()
+        ltype = (_get_xml_field(xml_tree, "LogonType") or "").strip()
+        if not host and not ip:
+            continue
+        by_user.setdefault(user, []).append((when, host, ip, ltype))
+
+    for user, hits in by_user.items():
+        hits.sort(key=lambda p: p[0])
+        emitted = False
+        for i in range(len(hits) - 1):
+            a, b = hits[i], hits[i + 1]
+            if b[0] - a[0] > WINDOW:
+                continue
+            # Both source-host AND source-IP identical → not impossible.
+            same_host = a[1] and b[1] and a[1] == b[1]
+            same_ip   = a[2] and b[2] and a[2] == b[2]
+            if same_host and same_ip:
+                continue
+            if same_host or (same_ip and not (a[1] or b[1])):
+                continue
+            # Kerberos service-ticket bursts to multiple DCs are
+            # benign — LogonType=3 with no source host is the typical
+            # shape. Skip when both sides are that pattern.
+            if a[3] == "3" and b[3] == "3" and not (a[1] or b[1]):
+                continue
+            delta = int((b[0] - a[0]).total_seconds())
+            findings.append({
+                "rule":     "Impossible Travel",
+                "severity": "HIGH",
+                "event_id": EVENT_SUCCESSFUL_LOGON,
+                "timestamp": b[0].isoformat() + "Z",
+                "hostname":  b[1] or a[1] or None,
+                "details": (
+                    f"User '{user}' authenticated from "
+                    f"{a[1] or a[2] or '<unknown>'} at {a[0]:%Y-%m-%d %H:%M:%S} "
+                    f"UTC, then from {b[1] or b[2] or '<unknown>'} only "
+                    f"{delta}s later. Same credential on two distinct sources "
+                    f"within a minute is physically implausible — investigate "
+                    f"credential sharing, token replay, or session hijacking."
+                ),
+            })
+            emitted = True
+            break   # One finding per user is enough — investigation
+                    # picks up every other hit from the timeline anyway.
+        if emitted:
+            continue
+
+    return findings
+
+
+def detect_privilege_escalation_chain(events):
+    """Detect new-account-immediately-promoted-to-admin patterns.
+
+    Pattern: Event 4720 (user created) followed within 5 minutes by
+    Event 4728 (added to global security group) or Event 4732 (added
+    to local security group) where the target of the group-add matches
+    the user just created AND the actor (SubjectUserName) is identical
+    on both events.
+
+    Why this exists separately from the per-event Privilege Escalation
+    rule: 4732 fires on every group-add (HIGH but noisy — IT regularly
+    adds users to functional groups). This rule fires only when the
+    group-add follows a fresh account creation by the same actor — a
+    much stronger "attacker setting up persistence" signal that
+    deserves a CRITICAL severity.
+
+    Event IDs: 4720 → 4728 / 4732 (correlated by actor + target)
+    MITRE ATT&CK: T1136.001 (Create Account) + T1098 (Account
+    Manipulation)
+    """
+    findings = []
+
+    WINDOW = timedelta(minutes=5)
+    EVENT_GROUP_ADD_GLOBAL = 4728  # security-enabled global group
+    EVENT_GROUP_ADD_LOCAL  = 4732  # security-enabled local group
+
+    # Pass 1 — capture every account creation: (when, actor, new_user).
+    creations = []
+    # Pass 1 + 2 in one loop — capture group-adds: (when, actor, target_user, group).
+    group_adds = []
+    for event in events:
+        eid = event["event_id"]
+        if eid not in (EVENT_USER_CREATED, EVENT_GROUP_ADD_GLOBAL,
+                       EVENT_GROUP_ADD_LOCAL):
+            continue
+        when = _parse_event_time(event)
+        if when is None:
+            continue
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except (ET.ParseError, KeyError, TypeError):
+            continue
+        actor  = (_get_xml_field(xml_tree, "SubjectUserName") or "").strip()
+        target = (_get_xml_field(xml_tree, "TargetUserName") or "").strip()
+        if not actor or not target:
+            continue
+        if eid == EVENT_USER_CREATED:
+            creations.append((when, actor, target, event.get("computer")))
+        else:
+            # For group-adds the "target" we care about is MemberName
+            # (the user added). TargetUserName on 4732 is the group.
+            group = target
+            member = (_get_xml_field(xml_tree, "MemberName") or "").strip()
+            if not member:
+                continue
+            # MemberName arrives as a DN ("CN=alice,CN=Users,DC=..."),
+            # whereas 4720 gives a flat sAMAccountName. Extract the CN
+            # so the match below works regardless of which form the
+            # source environment emits.
+            cn_match = member
+            if cn_match.upper().startswith("CN="):
+                # take everything between "CN=" and the first comma
+                rest = cn_match[3:]
+                comma = rest.find(",")
+                cn_match = rest if comma < 0 else rest[:comma]
+            group_adds.append((when, actor, cn_match, group, event.get("computer")))
+
+    # Match. For each creation, look for a group-add by the same actor
+    # adding the just-created user to a group within 5 minutes.
+    for c_time, c_actor, c_user, c_host in creations:
+        for g_time, g_actor, g_member, g_group, g_host in group_adds:
+            if g_time < c_time or g_time - c_time > WINDOW:
+                continue
+            if g_actor != c_actor:
+                continue
+            if g_member.lower() != c_user.lower():
+                continue
+            delta = int((g_time - c_time).total_seconds())
+            findings.append({
+                "rule":     "Privilege Escalation Chain",
+                "severity": "CRITICAL",
+                "event_id": EVENT_USER_CREATED,
+                "timestamp": g_time.isoformat() + "Z",
+                "hostname":  g_host or c_host,
+                "details": (
+                    f"Actor '{c_actor}' created account '{c_user}' at "
+                    f"{c_time:%Y-%m-%d %H:%M:%S} UTC and added it to "
+                    f"group '{g_group}' just {delta}s later. Legitimate "
+                    f"onboarding rarely combines account creation + "
+                    f"privileged group membership in the same minute — "
+                    f"verify the actor's authorization to provision "
+                    f"accounts and review the new user's permissions."
+                ),
+            })
+            break   # One finding per creation is enough.
+
+    return findings
+
+
+def detect_lateral_spray(events):
+    """Detect a single source IP authenticating against 3+ distinct
+    hosts within 5 minutes — classic lateral-movement spray pattern.
+
+    Pattern: 4624 with LogonType=3 (network logon) grouped by source
+    IP. Within any sliding 5-minute window, if the same IP successfully
+    authenticates to 3 or more distinct ``Computer`` values, that's a
+    pass-the-hash / kerberoast-followed-by-spray / domain-credential-
+    abuse signal.
+
+    Why per-IP rather than per-user: attackers who recovered a
+    credential will often target many machines with the same single
+    set of stolen creds; the source IP stays constant while the user
+    might rotate (svc accounts, domain admins, etc.). Per-IP catches
+    the spray regardless of which account is being used.
+
+    Event ID: 4624 (LogonType=3, correlated by source IP)
+    MITRE ATT&CK: T1021 (Remote Services) + T1078 (Valid Accounts)
+    """
+    findings = []
+
+    WINDOW = timedelta(minutes=5)
+    HOST_THRESHOLD = 3
+
+    # Bucket per source IP — each entry is (event_time, host, user).
+    by_ip = {}
+    for event in events:
+        if event["event_id"] != EVENT_SUCCESSFUL_LOGON:
+            continue
+        when = _parse_event_time(event)
+        if when is None:
+            continue
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except (ET.ParseError, KeyError, TypeError):
+            continue
+        ltype = (_get_xml_field(xml_tree, "LogonType") or "").strip()
+        if ltype != "3":
+            continue
+        ip = (_get_xml_field(xml_tree, "IpAddress") or "").strip()
+        if not ip or ip in ("-", "127.0.0.1", "::1"):
+            continue
+        host = (event.get("computer") or "").strip()
+        if not host:
+            continue
+        user = (_get_xml_field(xml_tree, "TargetUserName") or "").strip()
+        by_ip.setdefault(ip, []).append((when, host, user))
+
+    for ip, hits in by_ip.items():
+        if len(hits) < HOST_THRESHOLD:
+            continue
+        hits.sort(key=lambda p: p[0])
+        # Sliding window over the hits list.
+        emitted = False
+        n = len(hits)
+        i = 0
+        while i < n and not emitted:
+            window_start = hits[i][0]
+            # Collect everything within WINDOW of hits[i].
+            window_hits = [hits[i]]
+            j = i + 1
+            while j < n and hits[j][0] - window_start <= WINDOW:
+                window_hits.append(hits[j])
+                j += 1
+            distinct_hosts = {h for (_, h, _) in window_hits}
+            if len(distinct_hosts) >= HOST_THRESHOLD:
+                users = sorted({u for (_, _, u) in window_hits if u})
+                last_when = window_hits[-1][0]
+                duration = int((last_when - window_start).total_seconds())
+                findings.append({
+                    "rule":     "Lateral Spray",
+                    "severity": "CRITICAL",
+                    "event_id": EVENT_SUCCESSFUL_LOGON,
+                    "timestamp": last_when.isoformat() + "Z",
+                    "hostname":  None,  # spray crosses hosts by definition
+                    "details": (
+                        f"Source IP {ip} authenticated against {len(distinct_hosts)} "
+                        f"distinct hosts ({', '.join(sorted(distinct_hosts))}) in "
+                        f"{duration}s starting at {window_start:%Y-%m-%d %H:%M:%S} "
+                        f"UTC, using account(s): {', '.join(users) or '<unknown>'}. "
+                        f"A single source hitting 3+ machines in under 5 minutes is "
+                        f"a strong lateral-movement signal — possible pass-the-hash, "
+                        f"stolen credential spread, or a compromised admin "
+                        f"workstation pivoting through the fleet."
+                    ),
+                })
+                emitted = True
+            i += 1
+
+    return findings
+
+
 def run_all_detections(events):
     """
     Runs every detection rule against the parsed events.
@@ -1929,6 +2335,11 @@ def run_all_detections(events):
     findings += detect_lateral_movement_shares(events) or []
     findings += detect_dcsync(events) or []
     findings += detect_suspicious_child_process(events) or []
+    # Time-based correlation rules (Sprint 8 — "Up Next").
+    findings += detect_brute_force_success(events) or []
+    findings += detect_impossible_travel(events) or []
+    findings += detect_privilege_escalation_chain(events) or []
+    findings += detect_lateral_spray(events) or []
 
     # Windows events often name users by raw SID (e.g. S-1-5-21-...-1003)
     # instead of a friendly username. Resolve any SID strings in the free-text

@@ -5,6 +5,41 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-28 — Time-based correlation engine + three bug fixes
+
+### Time-based correlation engine (Sprint 8 — "Up Next" Urgent ticket)
+
+Four new sequence-aware detections that catch attacks single-event rules miss. The detection engine until now fired per-event; these four read the full event stream and emit findings only when a multi-event pattern matches within a sliding time window.
+
+| Rule | Severity | Pattern | MITRE |
+|---|---|---|---|
+| **Brute-Force Success** | 🔴 CRITICAL | 5+ Event 4625 (failed) from one source IP within 10 min → 1+ Event 4624 (success) from same IP | T1110.001 → T1078 |
+| **Impossible Travel** | 🟠 HIGH | Same user authenticates from two different hosts/IPs within 60 s | T1078 |
+| **Privilege Escalation Chain** | 🔴 CRITICAL | Event 4720 (user created) → Event 4728/4732 (added to group) within 5 min, same actor | T1136.001 + T1098 |
+| **Lateral Spray** | 🔴 CRITICAL | One source IP → 3+ distinct hosts via LogonType=3 (network logon) within 5 min | T1021 + T1078 |
+
+All four are scoped + de-duped per (IP / user / actor) so a single attack burst emits one finding, not one per matched event. Boundary cases (just-below threshold, just-outside window, machine accounts, same-host repeats, missing fields) all degrade silently to "no finding."
+
+- Functions: `detect_brute_force_success`, `detect_impossible_travel`, `detect_privilege_escalation_chain`, `detect_lateral_spray` in [`pulse/core/detections.py`](pulse/core/detections.py). Wired into `run_all_detections`.
+- `RULE_META` entries in [`pulse/core/rules_config.py`](pulse/core/rules_config.py) with severity / MITRE / NIST CSF / ISO 27001.
+- Per-rule remediation steps + MITRE mitigation IDs in [`pulse/remediation.py`](pulse/remediation.py) so the finding drawer's Remediation tab is populated.
+- 25 new tests in [`tests/test_correlation_rules.py`](tests/test_correlation_rules.py): each rule has a fires-on-match test, a quiet-on-near-miss test, a window-boundary test, and a "one-finding-per-burst" dedupe test. Plus an integration test that drives a full scenario through `run_all_detections` and asserts all four rules light up.
+- Smoke check against shipped samples: the existing `samples/brute-force-server.evtx` (171 events, 5 detections previously) now also fires **Brute-Force Success** because the synthetic attacker IP eventually succeeds. Confirms the new rule works against realistic synthetic data, not just hand-built unit tests.
+
+### Three bug fixes from live UI testing
+
+While the user was exercising the dashboard end-to-end, three real bugs surfaced. All three are fixed with regression tests.
+
+- **Cache-induced sign-in loop** (commit `c240c77`). `FileResponse` for `/`, `/login`, `/welcome` didn't set cache headers; browser served the cached landing page after sign-in, so the user landed back on the marketing page until a hard refresh. Fix: `Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache` + `Expires: 0` on all three routes. Regression test: `test_auth_state_pages_set_no_store_cache_header`.
+- **Assignment-visibility blocking** (commit `c240c77`). A viewer assigned 25 findings saw "No findings" on their Findings page because `get_history` / `get_scan_findings` filtered strictly by org scope and the scans were out-of-org. Fix: both helpers gained an `assignee_user_id` parameter that OR-widens the scope clause via `EXISTS (SELECT 1 FROM findings WHERE scan_id=s.id AND assigned_to=?)`. New `_findings_scope_kwargs(app, user_id)` helper plumbs it through `/api/history`, `/api/report/{id}`, `/api/findings/export.csv`, `/api/score/daily`, `/api/compare`, `/api/export/{id}`. Non-findings endpoints (`delete_scans`, `list_agents`, `get_fleet_summary`) keep the plain `_read_scope_kwargs` — assignees should NOT gain delete-power or fleet-management on out-of-scope hosts. 4 regression tests in [`tests/test_assignment_visibility.py`](tests/test_assignment_visibility.py): viewer sees assigned scan in history, viewer can fetch report, **viewer does NOT see un-assigned out-of-scope scans** (prevents privilege escalation), admin behavior unchanged.
+- **Filter state resets on F5** (commit `a79411f`). Findings-page filter state lived in JS module memory only; refresh wiped it. Fix: round-trip the filter Sets / query / sort through `URLSearchParams`. Hook points: `applyFindingsView()` calls `_syncFiltersToUrl()` on every filter change (via `history.replaceState`); `renderFindingsPage()` calls `_loadFiltersFromUrl()` on initial load (only when no `_pendingFindingsFilter` deep-link is already set). Encoding: `?severity=CRITICAL,HIGH&-rule=Audit%20Log%20Cleared&q=PowerShell&sort=severity:desc`. Empty axes aren't serialized to keep URLs clean. Side benefit: filtered views are now shareable / bookmarkable.
+
+### Known issue (deferred to separate ticket)
+
+The 62 orphan `"Robert's organization"` rows in the live DB stem from `_backfill_organizations` creating org rows but the `UPDATE users SET organization_id = ?` step not persisting — every server restart adds two more orphans. Tracked in the ROADMAP backlog. The assignment-visibility fix routes around the consequences for now (a viewer assigned a finding sees it regardless of org), but it should be fixed before hosted multi-tenant goes live.
+
+Tests: **730 passing** (+25 new correlation tests + previously committed 5 from the bug fixes).
+
 ## 2026-05-27 — Release polish: sample data, README rewrite, CONTRIBUTING, Docker
 
 Four landings to make Pulse evaluatable + contributable for the GitHub browse experience.

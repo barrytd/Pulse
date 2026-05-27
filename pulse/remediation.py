@@ -184,6 +184,35 @@ REMEDIATION = {
         "If the service truly must be public, put it behind an authenticating reverse proxy and rate-limit source IPs.",
         "Schedule a quarterly review of allow rules whose RemoteIP is Any.",
     ],
+    # ---- Sprint 8: time-based correlation rules ------------------------
+    "Brute-Force Success": [
+        "Treat this as an active intrusion — the attacker has working credentials. Lock the account immediately and force a password reset.",
+        "Block the source IP at the perimeter firewall and add it to the IP block list (Pulse can do this from the Block button on the finding drawer).",
+        "Review every action the breached account took after the successful logon timestamp: new sessions, accessed shares, lateral RDP, mail rules.",
+        "Audit other accounts that authenticated from the same source IP — assume the credential set is compromised.",
+        "Require MFA for the account going forward; brute force only works against single-factor authentication.",
+    ],
+    "Impossible Travel": [
+        "Confirm with the user whether both logon locations were them. If not, force a password reset and revoke active sessions.",
+        "If MFA is configured, check whether the second logon prompted for it — many credential-replay attacks bypass MFA on stale tokens.",
+        "Inspect the second source (host + IP) for indicators of compromise: unusual processes, scheduled tasks, persistence.",
+        "If both logons came from the same user but a credential was clearly shared (e.g. with a contractor), document the exception and rotate the password.",
+        "Tighten conditional access if the platform supports it — geo-fence the account or require MFA from new locations.",
+    ],
+    "Privilege Escalation Chain": [
+        "Treat as an attacker establishing persistence. Suspend the newly-created account and remove it from the group it was added to immediately.",
+        "Audit the actor account — they either provisioned this themselves with stolen privileges, or are an insider misusing legitimate access.",
+        "Look for additional accounts created by the same actor in the past 24 hours and apply the same containment.",
+        "Review what the new account did before suspension — service installs, RDP sessions, file access, scheduled tasks.",
+        "Tighten privileged-account management: require ticketed onboarding for any account that goes into a sensitive group; alert on the same day a new account is promoted.",
+    ],
+    "Lateral Spray": [
+        "Isolate the source host immediately — block it at the firewall and disconnect it from the domain if possible.",
+        "Identify the credential being sprayed: if multiple distinct user accounts authenticated, the attacker has a stolen credential database, not just one account.",
+        "Rotate credentials for every account that successfully authenticated during the spray window, prioritizing service + admin accounts.",
+        "Audit every destination host listed in the finding for follow-on activity: new services, scheduled tasks, lateral RDP sessions.",
+        "Consider enabling protected-users / credential guard on workstations to make pass-the-hash and pass-the-ticket harder to land.",
+    ],
 }
 
 
@@ -252,6 +281,11 @@ MITIGATIONS = {
     "Firewall Profile Disabled":    ["M1031", "M1028", "M1047"],
     "Firewall Any-Any Allow Rule":  ["M1037", "M1030", "M1047"],
     "Firewall Overly Broad Scope":  ["M1037", "M1035", "M1030"],
+    # Sprint 8 — time-based correlation rules.
+    "Brute-Force Success":          ["M1027", "M1032", "M1036"],   # password policy + MFA + behavior-based
+    "Impossible Travel":            ["M1032", "M1036", "M1018"],   # MFA + conditional access + account use policy
+    "Privilege Escalation Chain":  ["M1026", "M1018", "M1047"],   # privileged-account mgmt + audit
+    "Lateral Spray":                ["M1035", "M1043", "M1032"],   # network segmentation + credential access protection
 }
 
 
