@@ -551,6 +551,24 @@ def test_root_serves_dashboard_when_signed_in(auth_client):
     assert "PULSE" in r.text or "id=\"app\"" in r.text or "topbar-scan-btn" in r.text
 
 
+def test_auth_state_pages_set_no_store_cache_header(auth_client):
+    """Regression — `/`, `/login`, and `/welcome` MUST return
+    ``Cache-Control: no-store`` because they all return different
+    content depending on the visitor's auth state. Without it the
+    browser caches the landing page response for `/`, and after a
+    fresh sign-in the user gets bounced back to the cached landing
+    page until they hard-refresh. Reported as a real bug on
+    2026-05-28 — see CHANGELOG."""
+    for path in ("/", "/login", "/welcome"):
+        r = auth_client.get(path, follow_redirects=False)
+        assert r.status_code == 200, f"{path} returned {r.status_code}"
+        cc = (r.headers.get("cache-control") or "").lower()
+        assert "no-store" in cc, (
+            f"{path} is missing no-store; got Cache-Control={cc!r}. "
+            f"Browsers will cache the auth-dependent response."
+        )
+
+
 def test_update_email_requires_current_password(auth_client):
     auth_client.post("/api/auth/signup", json={
         "email": "me@example.com", "password": "my-secret-pass",

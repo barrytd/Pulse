@@ -607,7 +607,8 @@ def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, 
     return scan_id
 
 
-def get_history(db_path, limit=20, user_id=None, organization_id=None):
+def get_history(db_path, limit=20, user_id=None, organization_id=None,
+                assignee_user_id=None):
     """
     Returns a list of past scans, newest first.
 
@@ -625,22 +626,87 @@ def get_history(db_path, limit=20, user_id=None, organization_id=None):
                             regardless of the originating user. Preferred
                             over ``user_id`` for multi-tenant deployments.
                             Both ``None`` returns every scan (CLI / admin).
+        assignee_user_id (int|None): Widen the result set to also include
+                            any scan that contains at least one finding
+                            assigned to this user, regardless of the
+                            scope filter. The product promise of the
+                            assignment feature is "if a finding is
+                            assigned to you, you can see it" — without
+                            this widening, a viewer assigned a finding
+                            from an out-of-scope scan would get a "No
+                            findings" empty state.
 
     Returns:
         list[dict]: Past scans, or an empty list if the DB doesn't exist yet.
     """
     try:
         with _connect(db_path) as conn:
+            # Build the scope clause and the position-counter sub-clause.
+            # Both need to express the same widened scope so the "Scan #N"
+            # display number agrees with which scans actually show.
             if organization_id is not None:
-                where_outer = " WHERE s.organization_id = ?"
-                where_inner = " AND s2.organization_id = ?"
-                params = (int(organization_id), int(organization_id))
+                scope_outer = "s.organization_id = ?"
+                scope_inner = "s2.organization_id = ?"
+                scope_params_outer = [int(organization_id)]
+                scope_params_inner = [int(organization_id)]
             elif user_id is not None:
-                where_outer = " WHERE s.user_id = ?"
-                where_inner = " AND s2.user_id = ?"
-                params = (int(user_id), int(user_id))
+                scope_outer = "s.user_id = ?"
+                scope_inner = "s2.user_id = ?"
+                scope_params_outer = [int(user_id)]
+                scope_params_inner = [int(user_id)]
             else:
-                where_outer, where_inner, params = "", "", ()
+                scope_outer = ""
+                scope_inner = ""
+                scope_params_outer = []
+                scope_params_inner = []
+
+            # Assignment-visibility widening: OR-in scans that own a
+            # finding assigned to this user. ``EXISTS`` keeps the result
+            # set distinct without needing a DISTINCT clause that would
+            # interact awkwardly with the GROUP BY below.
+            assignee_clause_outer = ""
+            assignee_clause_inner = ""
+            assignee_params_outer = []
+            assignee_params_inner = []
+            if assignee_user_id is not None:
+                assignee_clause_outer = (
+                    "EXISTS (SELECT 1 FROM findings fa "
+                    "WHERE fa.scan_id = s.id AND fa.assigned_to = ?)"
+                )
+                assignee_clause_inner = (
+                    "EXISTS (SELECT 1 FROM findings fa2 "
+                    "WHERE fa2.scan_id = s2.id AND fa2.assigned_to = ?)"
+                )
+                assignee_params_outer = [int(assignee_user_id)]
+                assignee_params_inner = [int(assignee_user_id)]
+
+            # Compose: scope_clause OR assignee_clause. Either side empty
+            # means "no constraint on this axis" — when scope is empty
+            # (admin / CLI) we already see everything, no need for the
+            # assignee widening; when assignee is unset, only scope
+            # applies (the existing behavior).
+            def _combine(scope, assignee):
+                parts = [p for p in (scope, assignee) if p]
+                if not parts:
+                    return ""
+                if len(parts) == 1:
+                    return " WHERE " + parts[0]
+                return " WHERE (" + " OR ".join(parts) + ")"
+
+            def _combine_inner(scope, assignee):
+                parts = [p for p in (scope, assignee) if p]
+                if not parts:
+                    return ""
+                if len(parts) == 1:
+                    return " AND " + parts[0]
+                return " AND (" + " OR ".join(parts) + ")"
+
+            where_outer = _combine(scope_outer, assignee_clause_outer)
+            where_inner = _combine_inner(scope_inner, assignee_clause_inner)
+            params = tuple(
+                scope_params_inner + assignee_params_inner +
+                scope_params_outer + assignee_params_outer
+            )
             # LEFT JOIN findings + GROUP BY lets us compute the per-scan
             # severity breakdown in the same round trip, so the Scans page
             # can render a sev-mix badge row without fetching every scan's
@@ -866,7 +932,8 @@ def get_scans_since(db_path, days, user_id=None):
         return []
 
 
-def get_scan_findings(db_path, scan_id, user_id=None, organization_id=None):
+def get_scan_findings(db_path, scan_id, user_id=None, organization_id=None,
+                      assignee_user_id=None):
     """
     Returns all findings for a specific scan.
 
@@ -878,23 +945,44 @@ def get_scan_findings(db_path, scan_id, user_id=None, organization_id=None):
         organization_id (int|None): Org-scope check — empty list if the scan
                             belongs to a different org. Preferred over
                             ``user_id`` for multi-tenant deployments.
+        assignee_user_id (int|None): Bypass the scope check entirely if at
+                            least one finding in this scan is assigned to
+                            this user. Mirrors the widening on
+                            ``get_history`` — "if a finding is assigned to
+                            you, you can see it" trumps org-scope filtering.
 
     Returns:
         list[dict]: Findings for that scan.
     """
     with _connect(db_path) as conn:
+        # Helper — does this scan contain any finding assigned to the
+        # caller? If yes, the scope check is bypassed (assignment is the
+        # access grant). Returns False when assignee_user_id is unset so
+        # the existing scope behavior is preserved for non-viewer paths.
+        def _has_assigned_finding():
+            if assignee_user_id is None:
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM findings WHERE scan_id = ? AND assigned_to = ?"
+                " LIMIT 1",
+                (int(scan_id), int(assignee_user_id)),
+            ).fetchone()
+            return row is not None
+
         if organization_id is not None:
             row = conn.execute(
                 "SELECT organization_id FROM scans WHERE id = ?",
                 (int(scan_id),),
             ).fetchone()
-            if not row or row[0] != int(organization_id):
+            in_org = bool(row and row[0] == int(organization_id))
+            if not in_org and not _has_assigned_finding():
                 return []
         elif user_id is not None:
             owner = conn.execute(
                 "SELECT user_id FROM scans WHERE id = ?", (int(scan_id),)
             ).fetchone()
-            if not owner or owner[0] != int(user_id):
+            is_owner = bool(owner and owner[0] == int(user_id))
+            if not is_owner and not _has_assigned_finding():
                 return []
         cursor = conn.execute(
             """SELECT f.id, f.ref_id, f.timestamp, f.event_id, f.severity, f.rule,

@@ -621,6 +621,28 @@ def _read_scope_kwargs(app, user_id):
     return {"user_id": int(user_id)}
 
 
+def _findings_scope_kwargs(app, user_id):
+    """Same as ``_read_scope_kwargs`` but adds ``assignee_user_id`` so
+    findings-display endpoints honor the assignment-visibility promise.
+
+    Why it's separate: the assignment widening only makes sense for
+    queries that *return findings* (history, report, score-over-time,
+    compare, CSV export). Endpoints like ``delete_scans``, ``list_agents``,
+    ``get_fleet_summary`` would crash on the extra kwarg — and granting
+    an assignee delete-power on out-of-scope scans isn't what we want
+    anyway. Use this helper for finding-shaped reads; use the plain
+    ``_read_scope_kwargs`` everywhere else.
+
+    Admins still get ``{}`` (no filter) — they already see everything.
+    """
+    kw = _read_scope_kwargs(app, user_id)
+    if (kw  # non-empty means we're a non-admin scope-bound user
+            and user_id is not None
+            and getattr(app.state, "auth_required", True)):
+        kw["assignee_user_id"] = int(user_id)
+    return kw
+
+
 def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
     """Record a scan-deletion in the audit log. Wrapped in try/except via
     blocker.log_audit so a logging failure never breaks the delete."""
@@ -664,6 +686,19 @@ def _register_routes(app: FastAPI) -> None:
                 return RedirectResponse(url="/login", status_code=302)
         return FileResponse(_dashboard_path, media_type="text/html")
 
+    # `/` returns *different content* depending on whether the visitor
+    # is logged in (dashboard SPA shell) or not (marketing landing). If
+    # the browser caches either response, the next visit serves the
+    # stale version: a fresh sign-in lands the user back on the landing
+    # page until a hard-refresh re-fetches `/`. `no-store` tells the
+    # browser to never cache this URL so the auth-state branching is
+    # always correct. Same rationale on `/welcome` and `/login` below.
+    _NO_STORE = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     @app.get("/", include_in_schema=False)
     def root(request: Request):
         """Marketing landing page for unauthenticated visitors; dashboard
@@ -676,13 +711,16 @@ def _register_routes(app: FastAPI) -> None:
             # Single-user CLI / test mode: there's no "logged-out" state,
             # ``/`` is the dashboard the same way ``localhost:8000`` has
             # always opened the app.
-            return FileResponse(_dashboard_path, media_type="text/html")
+            return FileResponse(_dashboard_path, media_type="text/html",
+                                headers=_NO_STORE)
         cookie = request.cookies.get(SESSION_COOKIE_NAME)
         from pulse.auth import verify_session_cookie
         user_id = verify_session_cookie(app.state.session_secret, cookie) if cookie else None
         if user_id is not None:
-            return FileResponse(_dashboard_path, media_type="text/html")
-        return FileResponse(_landing_path, media_type="text/html")
+            return FileResponse(_dashboard_path, media_type="text/html",
+                                headers=_NO_STORE)
+        return FileResponse(_landing_path, media_type="text/html",
+                            headers=_NO_STORE)
 
     # Every top-level SPA page gets its own path so the browser's back /
     # forward buttons and hard refreshes land on the right page. The
@@ -713,14 +751,19 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/login", include_in_schema=False)
     def login_page():
-        return FileResponse(_login_path, media_type="text/html")
+        # no-store so logged-in users navigating *back* to /login don't
+        # see a cached "Sign in" page that then 401s every action they
+        # take — same auth-state caching trap as the `/` route above.
+        return FileResponse(_login_path, media_type="text/html",
+                            headers=_NO_STORE)
 
     # -------------------------------------------------------------------
     # GET /welcome — public marketing landing page (no auth required)
     # -------------------------------------------------------------------
     @app.get("/welcome", include_in_schema=False)
     def landing_page():
-        return FileResponse(_landing_path, media_type="text/html")
+        return FileResponse(_landing_path, media_type="text/html",
+                            headers=_NO_STORE)
 
     # -------------------------------------------------------------------
     # GET /verify?token=… — consume an email verification token
@@ -2156,7 +2199,13 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/history")
     def history(limit: int = 20, user_id: int = Depends(require_login)):
-        """Return the most recent scans stored in the local database."""
+        """Return the most recent scans stored in the local database.
+
+        Uses ``_findings_scope_kwargs`` so a viewer with findings
+        assigned to them also sees the scans those findings live on,
+        even when the scan itself is outside their org scope. Without
+        this widening, the assignment feature breaks for anyone who
+        wasn't on the team that ran the scan."""
         if limit < 1 or limit > 200:
             raise HTTPException(
                 status_code=400,
@@ -2164,7 +2213,7 @@ def _register_routes(app: FastAPI) -> None:
             )
         return {"scans": get_history(
             app.state.db_path, limit=limit,
-            **_read_scope_kwargs(app, user_id),
+            **_findings_scope_kwargs(app, user_id),
         )}
 
     # -------------------------------------------------------------------
@@ -2379,7 +2428,8 @@ def _register_routes(app: FastAPI) -> None:
         import io
         from pulse.database import get_history, get_scan_findings
 
-        scope_kw = _read_scope_kwargs(app, user_id)
+        # Findings CSV — include scans containing findings assigned to me.
+        scope_kw = _findings_scope_kwargs(app, user_id)
         scans = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_meta = {s["id"]: s for s in scans}
 
@@ -2761,8 +2811,13 @@ def _register_routes(app: FastAPI) -> None:
 
         When ?format=pdf, a binary PDF is returned as an attachment so the
         dashboard can offer a one-click PDF download.
+
+        Uses ``_findings_scope_kwargs`` so a viewer can fetch a scan
+        that contains a finding assigned to them, even if the scan
+        itself is outside their org scope. Same assignment-visibility
+        widening as ``/api/history`` above.
         """
-        scope_kw = _read_scope_kwargs(app, user_id)
+        scope_kw = _findings_scope_kwargs(app, user_id)
         findings = get_scan_findings(app.state.db_path, scan_id, **scope_kw)
         # Distinguish "scan exists but zero findings" from "scan not found"
         # by checking the scans table.
@@ -3239,11 +3294,15 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/score/daily")
     def daily_scores(days: int = 30, user_id: int = Depends(require_login)):
-        """Return deduplicated daily scores combining all scans per day."""
+        """Return deduplicated daily scores combining all scans per day.
+
+        Includes scans containing findings assigned to the caller (the
+        Dashboard's score-trend chart should reflect every finding a
+        viewer is responsible for, not just ones from their own org)."""
         if days < 1 or days > 365:
             raise HTTPException(400, detail="days must be between 1 and 365.")
 
-        scope_kw = _read_scope_kwargs(app, user_id)
+        scope_kw = _findings_scope_kwargs(app, user_id)
         all_scans = get_history(app.state.db_path, limit=200, **scope_kw)
 
         date_groups = {}
@@ -3295,7 +3354,10 @@ def _register_routes(app: FastAPI) -> None:
         if a == b:
             raise HTTPException(400, detail="a and b must be different scans.")
 
-        scope_kw = _read_scope_kwargs(app, user_id)
+        # Same assignment-visibility widening as /api/history — a viewer
+        # comparing two scans they were assigned findings on should
+        # succeed even if neither scan is in their org scope.
+        scope_kw = _findings_scope_kwargs(app, user_id)
         history_rows = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_a = next((s for s in history_rows if s["id"] == a), None)
         scan_b = next((s for s in history_rows if s["id"] == b), None)
@@ -3322,11 +3384,15 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/export/{scan_id}")
     def export_report(scan_id: int, format: str = "html", user_id: int = Depends(require_login)):
-        """Download a formatted report for a past scan (html | json | pdf)."""
+        """Download a formatted report for a past scan (html | json | pdf).
+
+        Assignment-visibility widening applies the same way the JSON
+        report endpoint does — a viewer can export the PDF / HTML
+        report for a scan they were assigned findings on."""
         if format not in ("html", "json", "pdf"):
             raise HTTPException(400, detail="format must be 'html', 'json', or 'pdf'.")
 
-        scope_kw = _read_scope_kwargs(app, user_id)
+        scope_kw = _findings_scope_kwargs(app, user_id)
         findings = get_scan_findings(app.state.db_path, scan_id, **scope_kw)
         history_rows = get_history(app.state.db_path, limit=200, **scope_kw)
         scan_row = next((s for s in history_rows if s["id"] == scan_id), None)
