@@ -1,238 +1,224 @@
 # Pulse Roadmap
 
-Current status and planned work by sprint. See [CHANGELOG.md](CHANGELOG.md) for a commit-level history.
+Flat status board organized by category, sorted by priority within each section. See [CHANGELOG.md](CHANGELOG.md) for commit-level history.
+
+**Priority key:** 🔴 Urgent · 🟠 High · 🟡 Medium · 🟢 Low
 
 ---
 
+## 🟦 In Progress
+
+> Currently being built. Cap at 1–2 to keep focus.
+
+*Nothing in flight right now.*
+
+---
+
+## 🟪 Up Next
+
+> The next things to pull into **In Progress**. Top-of-list ships next.
+
+| Priority | Item | Notes |
+|---|---|---|
+| 🔴 Urgent | **Time-based correlation engine** | Ship 4 sequence rules: brute-force success (5+ Event 4625 then 4624 from same source IP within 10 min), impossible travel (same user on two hosts within 60s), priv-esc chain (Event 4720 then 4728/4732 within 5 min same actor), lateral spray (same source IP hitting 3+ hosts with LogonType 3 within 5 min). First rule is more work than the next three — the detection engine currently fires per-event and needs a sliding-window framework. |
+| 🟠 High | **SIGMA rule import** | Settings → Rules → Import tab. Parse SIGMA YAML, map `logsource.category` → log channel, `detection` blocks → Pulse matching logic, `level` → severity, `tags` → MITRE technique. New `origin` field tracks `built-in` / `sigma-import` / `custom`. Unlocks community rule packs (thousands on SigmaHQ). |
+| 🟠 High | **Sysmon log support** | Parse Sysmon channel events: Event 1 (process create with cmdline — Mimikatz / encoded PowerShell / LOLBin detection), Event 3 (network connections for C2 beaconing), Event 10 (process access for LSASS credential dumping), Event 22 (DNS queries for tunneling). |
+| 🟡 Medium | **Rule performance dashboard** | Performance tab on Rules page: per-rule total hits, 24h sparkline, TP vs FP ratio, average scan time, health indicator (green/amber/red). |
+
+---
+
+## 🟧 Blocked
+
+> Work that needs an external resource (hardware, cert, decision) before it can land.
+
+| Priority | Item | Blocked on |
+|---|---|---|
+| 🟠 High | **Bundled Windows Service installer** | Windows test box for `sc.exe` / NSSM validation. README documents the manual install paths today. |
+| 🟡 Medium | **Local dashboard mode toggle** | Bundled installer above. Single-checkbox at install time picks "agent only" vs. "local single-user dashboard". |
+| 🟠 High | **Code-signed `pulse-agent.exe`** | Authenticode cert acquisition. Stops SmartScreen from flagging the download. |
+| 🟠 High | **Agent auto-download + signature verification** | Code-signing cert (above). The probe channel (`/api/agent/latest`) is shipped; the verification half waits on the cert. |
+
+---
+
+## 📋 Development Backlog
+
+> Validated work, prioritized. Pull from the top of each tier into Up Next when capacity opens.
+
+### 🔴 Urgent / 🟠 High — Security & operational maturity
+
+| Item | Notes |
+|---|---|
+| **Encrypted config secrets** | Fernet encryption for SMTP password / webhook URLs / API keys in `pulse.yaml` using machine-derived key. Auto-encrypt plaintext secrets on first run after upgrade. Env vars bypass config file entirely. |
+| **Session hardening** | CSRF tokens on state-changing endpoints, `SameSite=Strict` cookies (currently `Lax`), configurable idle timeout (default 30 min), active-sessions list in Settings → Profile with *Revoke* option. |
+| **Webhook signature verification** | HMAC-SHA256 signature + `X-Pulse-Signature` header on outgoing Slack/Discord payloads with documented verification process. |
+| **Data retention policy** | Settings → Advanced → Retention with configurable windows per data type (findings 365d, scans 365d, audit log 730d, notifications 90d). Daily background purge job. Audit log entries about purges exempt from purging. Dry-run mode. |
+| **API rate limiting (per-token)** | Per-token (60/min default) and per-IP (120/min unauthenticated) limits on top of the existing endpoint-level caps. HTTP 429 + `Retry-After`. `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers. Per-token override in Settings → API Tokens. |
+
+### 🟡 Medium — Distribution & DX
+
+| Item | Notes |
+|---|---|
+| **Evidence export** | *Export incident package* button on findings. Generates ZIP with: scoped PDF report, raw event XML, related audit entries, analyst notes, JSON manifest with SHA-256 hashes for chain-of-custody. Available from detail drawer + bulk action bar. |
+| **Docker distribution** | `Dockerfile` + `docker-compose.yml` bundling Pulse + PostgreSQL. `PULSE_ADMIN_EMAIL` + `PULSE_ADMIN_PASSWORD` env vars for first-run setup. Persistent volumes for DB + uploads. |
+| **One-liner install script** | `curl \| bash` script for Linux: install deps, create systemd service, start on port 8443, print admin URL. |
+| **CONTRIBUTING.md** | Dev environment setup, running tests, adding a detection rule (step-by-step with example), adding a dashboard page, code style, PR review process. |
+| **Sample data bundle** | `samples/` directory with 3–4 synthetic `.evtx` files containing known threats (brute force, credential dumping, lateral movement, persistence), sample `pfirewall.log`, README explaining what each demonstrates. |
+
+### 🟢 Low — Polish & nice-to-haves
+
+| Item | Notes |
+|---|---|
+| **Remote log collection via WinRM** | Enter hostname/IP, Pulse pulls Security/Application/System event logs over WinRM, runs detections against them. Complements the agent model (agent pushes, WinRM pulls). Needs credential management + connectivity check. |
+| **Alert fatigue metrics** | Card on Dashboard / section on Trends: alerts suppressed by throttling this week, reviewed vs ignored ratio, dead rules (zero fires), noisy rules (high fire + high FP rate). |
+| **Custom branding (v2)** | Admin uploads company logo + org name, both render as a *subtitle* under the Pulse mark — never as a replacement (v1 reverted 2026-04-24 because it killed brand recognition). Empty `branding` table still in DB; reuse the schema. |
+| **Customizable dashboard layout (v2)** | Drag-reorder + hide/restore for KPI strip / standup row / charts / MITRE / last-scan findings. v1 shipped 2026-04-28, reverted 2026-04-29 — revisit only when there's a specific user signal. |
+| **Sidebar filter configs (other pages)** | Per-page sidebar-filter framework already exists (`pulse/static/js/sidebar-filters.js`). Findings page is wired; wire each of Dashboard / Monitor / Fleet / Audit Log / Firewall with the right dimensions for that surface. |
+| **Findings sidebar — Rule filter** | Top-N (10–15 rules) + "Show all" affordance — current list overflows the sidebar on noisy installs. |
+| **Public landing page polish** | Live-demo link with read-only viewer + pre-loaded sample data, GitHub stars badge, test-count badge, social-proof section. |
+
+---
+
+## 🪲 Bugs
+
+> Tracked defects. Drop in here with a one-line repro + the file where it bites; promote into **Up Next** with priority based on severity + frequency.
+
+*No tracked bugs right now.*
+
+---
+
+## ❓ Decisions Needed
+
+> Product questions that gate downstream work. Answer before pulling the dependent item into Up Next.
+
+- **Pricing model** — free-for-N-agents vs. per-seat vs. self-host-only. Gates whether enrollment needs a billing layer.
+- **Agent-to-server protocol** — REST (shipped, fast) vs. gRPC (more efficient at fleet scale). Default: stay on REST until fleet size justifies the migration.
+- **Code-signing certificate** — needed before SmartScreen-friendly public distribution of `pulse-agent.exe`. Cheapest path: Sectigo / DigiCert OV (~$200/year). EV needed for instant SmartScreen reputation.
+
+---
+
+## ✅ Shipped
+
 <details>
-<summary><strong>Foundation (shipped pre-v1.2.0) — click to expand</strong></summary>
+<summary><strong>Post-v1.7.0 work (May 2026) — click to expand</strong></summary>
 
-## Shipped
+Work that landed after the v1.7.0 tag.
 
-- Project structure and foundation
+- **Email verification on signup** — every new tenant gets a verification email; user lands unverified until they click the `/verify?token=…` link. Single-user installs without SMTP auto-verify. `email_verified_at` column + idempotent backfill. Resend endpoint, rate-limited. Unblocks turning on `PULSE_HOSTED_SIGNUP=1` for real customers. (2026-05-13)
+- **Agent tamper resistance** — `pulse-agent harden` subcommand wraps `icacls /inheritance:r /grant:r SYSTEM:(R,W) Administrators:(F)`. `AgentRuntime` startup audits the bearer-token file ACL and logs WARNING on loose principals (Everyone / BUILTIN\\Users / Authenticated Users + SID forms). (2026-05-13)
+- **Full security audit + hardening pass** — SQL injection / input validation / path traversal / auth / XSS / sensitive data / rate limits / CORS / dependencies / error handling. Eight issues fixed: path traversal in `/api/firewall/log?path=…`, XSS in upload.js, login lockout returning 423, scan-upload rate limit, scrubbed SQL exception text, `is_admin` redaction in production, audit-log silent-swallow logging, `/verify` rate limit. 12 new security tests. (2026-05-14)
+- **Dependency pinning + automated CVE scan** — `requirements-lock.txt` for prod; `requirements-dev.txt` for dev tooling. New test `test_no_known_cves_in_dependencies` runs `pip-audit --strict` against the live env (marked `@pytest.mark.network`). First run caught + fixed CVEs in pip / pytest / python-multipart. (2026-05-14)
+- **Documentation refresh** — README test count + email-verification mention, `pulse/README.md` module index extended with `pulse/agent/` subpackage + `rate_limit.py` / `intel.py` / `agents.py`, BACKLOG.md folded into this ROADMAP. (2026-05-14)
+
+</details>
+
+<details>
+<summary><strong>v1.7.0 — Agent / server split + multi-tenant (May 2026) — click to expand</strong></summary>
+
+The hosted dashboard on Render couldn't scan a Windows machine itself. Sprint 7 split Pulse into a hosted multi-tenant dashboard + downloadable Windows agent.
+
+**Hosted dashboard:**
+- Multi-tenant data model — `organizations` table + `organization_id` denormalized onto users, scans, agents, notifications. `_read_scope_kwargs` API helper. Self-signup creates a fresh org; admin-side user creation joins the admin's org. Idempotent backfill at every `init_db`. Cross-org reads/writes return 404 / no-op.
+- Agent enrollment flow — Settings → Agents mints single-use 1h-TTL `pe_…` enrollment tokens; agent exchanges via `POST /api/agent/exchange` for long-lived `pa_…` bearer. Both sha256-at-rest, raw values shown once.
+- Agent status panel — Settings → Agents lists every host with status pill (online / stale / offline / paused / pending), last-heartbeat, hostname + platform + version. Pause + Delete actions per row.
+- `POST /api/agent/heartbeat` + `POST /api/agent/findings` — heartbeat bumps `last_heartbeat_at` + surfaces paused flag; findings ingest writes a scan attributed to the enrolling user with `scans.agent_id` stamped. Paused agents ack but drop findings.
+- Hide / disable "Scan my system" in hosted mode — topbar swaps to **Download Agent** on non-Windows hosts.
+- Public multi-tenant signup — `PULSE_HOSTED_SIGNUP=1` opens `POST /api/auth/signup` past the first user.
+- Marketing landing page — CrowdStrike-style site at `/` with hero, stats band, three use-case sections, 12-feature grid, three-step download flow, three-tier pricing, FAQ, multi-column footer.
+- Windows download wire — `/api/agent/download` streams the locally-built bundle as a zip; landing page's Download CTA points at it with GitHub fallback via `/api/agent/download/check`.
+
+**Downloadable Windows agent:**
+- Packaged `pulse-agent.exe` via PyInstaller — `pulse-agent.spec` + `scripts/build_agent.py`. One-folder bundle (37 MB / 6.5 MB launcher) or `--onefile`. Shipped as v1.7.0 GitHub release asset.
+- Local-scan → HTTPS upload pipeline — `AgentRuntime` runs detections every 30 min, heartbeats every 60s, ships via `POST /api/agent/findings`. `AgentTransport` distinguishes transient (retry) from permanent (re-enroll) errors.
+- Auto-update channel — `GET /api/agent/latest` returns `{version, download_url, release_notes_url}`. Bearer-auth branch computes `outdated`/`current` server-side.
+
+</details>
+
+<details>
+<summary><strong>Sprint 6 — v1.6.0 (April–May 2026) — click to expand</strong></summary>
+
+Workflows, branding, threat intel.
+
+**ACs:**
+- Incident workflow states — mark findings as acknowledged, investigating, or resolved.
+- Analyst notes — free-text notes field per finding, shown in drawer + PDF, timestamped + author-attributed.
+- Assignment — assign findings to users, filter dashboard by "assigned to me".
+- Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette.
+- In-app feedback button — submit feedback without leaving the app.
+
+**Deferred / reverted:**
+- ~~Custom branding~~ — first pass shipped 2026-04-23, reverted 2026-04-24 (lost brand recognition). Tracked in Backlog as "Custom branding (v2)".
+- ~~Dashboard widgets~~ — first pass shipped 2026-04-28, reverted 2026-04-29 (button surfaced before use case clear). Tracked in Backlog as "Customizable dashboard layout (v2)".
+- ~~Windows Service installer~~ — moved to Sprint 7's downloadable-agent block; now in Blocked above.
+
+**Bonus polish landed under v1.6.0:**
+Relative timestamps everywhere; Scans → History merge; Reports page rewrite; Whitelist empty-state onboarding; Compliance Coverage Gaps; Getting Started checklist; Notification bell; Role visibility; Threat Intel inside the drawer; Firewall Rules tab live; Pulse Agents transport layer (server-side); Monitor first-start race fix; Topbar Scan-My-System hosted-mode swap.
+
+</details>
+
+<details>
+<summary><strong>Sprints 2–5 — v1.2.0 through v1.5.0 (April 2026) — click to expand</strong></summary>
+
+### Sprint 2 — v1.2.0 — Alerting & detection depth
+- Email alerts (CRITICAL/HIGH summary) + throttling + live-monitor email alerts + Slack/Discord webhooks.
+- Kerberoasting (4769 RC4), Golden Ticket, DCSync, Suspicious Child Process detections.
+- Finding detail drawer + dashboard search.
+
+### Sprint 3 — v1.3.0 — Remediation & automation
+- Remediation suggestions per rule + MITRE mitigation IDs.
+- Scheduled scans (folder watch) + recurring HTML summary reports.
+- PDF export from dashboard; scan comparison (diff two scans).
+- "Mark reviewed" persisted state; CLI `--quiet` / `--json-only`.
+
+### Sprint 4 — v1.4.0 — Multi-host & firewall
+- Hostname auto-detection from `Computer` field; per-host dashboard + Fleet overview.
+- `pfirewall.log` parser + sensitive-port detection (3389 / 22 / 445 / 3306 / 5985).
+- Firewall rule misconfiguration rules (any-any, disabled profiles).
+- IP block list (Pulse-managed `netsh` rules, prefix-tagged so user rules untouched).
+- One-click "block source IP" from finding drawer; audit log; fleet CSV export.
+
+### Sprint 5 — v1.5.0 — Auth, compliance, analytics
+- Auth: scrypt password hashing, signed session cookies, 30-day expiry, RBAC (admin/viewer).
+- Multi-user account management (Settings → Users); per-user data isolation; admin activity history.
+- Hosted deployment to Render (env-var config fallback, prod CORS lock, disabled `/docs`).
+- Profile picture upload (BLOB on user row).
+- NIST CSF + ISO 27001 mapping per rule; Compliance page; Trend analytics page.
+- API token auth (Bearer header, per-user, sha256-at-rest); PostgreSQL migration support (`db_backend.py` adapter).
+- **UX blueprint pass** — design tokens, Ctrl+K command palette, universal drawer primitive, Monitor / Rules / Fleet / Firewall / Whitelist / Dashboard / Compliance / Trends rebuilds.
+
+</details>
+
+<details>
+<summary><strong>Foundation — pre-v1.2.0 — click to expand</strong></summary>
+
 - `.evtx` file parsing (parallel, per-file timeout)
 - 22 detection rules covering login attacks, persistence, defence evasion, credential abuse
 - Attack chain correlation (multi-event patterns)
-- MITRE ATT&CK tagging — each finding links to its technique
-- Scan summary statistics (files scanned, total events, time range, top event IDs)
-- Human-readable text report output
-- HTML report with security score, scan stats, severity filters, remediation tab, dark mode
-- JSON report output — machine-readable findings for Splunk, ELK, Python scripts
-- CSV export — spreadsheet format for Excel and Google Sheets
+- MITRE ATT&CK tagging
+- Scan summary statistics
+- Text / HTML / JSON / CSV report formats
 - CLI flags (`--logs`, `--output`, `--format`, `--severity`, `--days`, `--email`, `--api`, etc.)
-- Config file support (`pulse.yaml`) — default settings, email config, alert config
-- Whitelist / allowlist — suppress known-good accounts, services, IPs, and rules
-- Built-in known-good service whitelist (100+ entries, zero config)
-- Baseline comparison — snapshot known-good state, flag anything new on future scans
-- Email delivery — send finished HTML report via SMTP with `--email`
-- SQLite scan history — every scan saved to `pulse.db`; `--history` for trends
-- Deduplicated daily scoring with letter grades (A–F), MITRE category breakdown
-- Live monitoring (CLI) — `--watch` queries live Windows channels in real time
-- Interactive terminal mode — `--interactive` browse, investigate, and whitelist findings
-- Parallel file parsing across all CPU cores
+- Config file support (`pulse.yaml`)
+- Whitelist / allowlist + built-in 100+ known-good service whitelist
+- Baseline comparison (`--save-baseline`)
+- Email delivery via SMTP
+- SQLite scan history + `--history` flag with trends
+- Deduplicated daily scoring with A–F grades
+- Live monitoring (CLI `--watch`)
+- Interactive terminal mode (`--interactive`)
+- Parallel file parsing across CPU cores
 - ECG heartbeat animation during parsing
-- REST API (FastAPI) — `/api/scan`, `/api/history`, `/api/report/{id}`, `/api/health`, Swagger docs at `/docs`
-- Web dashboard — single-page dark-themed UI with sidebar nav, drag-and-drop upload, score ring, scan history, light/dark theme toggle
-- Functional Settings & Whitelist pages — edit whitelist from the browser, view active config and all detection rules
-- Report export from dashboard — download HTML or JSON report for any scan
-- Multi-file upload — drag multiple `.evtx` files at once for batch scanning
-- **Live monitor in dashboard** — SSE-powered live panel with pulsing indicator, slide-in alerts, audio ding, test-alert button, sliding 15-minute detection window, finding dedup, per-poll event-ID diagnostics, localStorage auto-resume
-- **Dashboard authentication** — single-user login/signup page, scrypt-hashed passwords, signed session cookies, `/api/*` auth middleware, "My Account" card for changing email/password
-- **Email alerts with throttling** — `dispatch_alerts` helper unifies CLI + API scan alert paths; per-rule cooldown prevents repeat-finding spam
-- **Live monitor email alerts** — monitor polls can now email findings, gated by a user-configurable interval (5 min – 4 hours)
-- **Settings UX polish** — SMTP jargon hidden behind a provider dropdown (Gmail / Outlook / Yahoo / Custom) with auto-filled host and port
-- **Dashboard zero-state polish** — friendly banner + empty panels when the filtered window has no scans, instead of hiding everything
-- **Slack / Discord webhook delivery** — alongside email alerts, with shared cooldown, payload caps, and a Settings card with test button
-- **Frontend modularized** — `pulse/web/index.html` split into native ES modules under `pulse/static/js/` (api, dashboard, scans, findings, monitor, settings, etc.) with a central action registry replacing inline `on*` handlers
-- **Firewall feature set** — `pfirewall.log` parser, Pulse-managed IP block list with `netsh` push / unblock, one-click block-from-finding, Firewall page with Blocked IPs + Firewall Log tabs, CLI `--block-ip / --block-list / --block-push / --unblock-ip / --firewall-log`
-- **PDF report overhaul** — grade-coloured score ring + title / scope / duration / colored score line, per-finding cards with full description, mono meta line, numbered remediation, MITRE / mitigation pills
-- **Position-based scan numbering** — displayed "Scan #" tracks position in current history, so deleting all scans resets back to #1 (internal DB id preserved for lookups)
-- **Real SPA URL routing** — every page has its own path (`/dashboard`, `/monitor`, `/scans/{id}`, etc.); browser Back / Forward / Refresh / deep-linking all work
-- **Bulk-select + batch-delete on every list page** — Scans, Reports, Whitelist, Firewall Block List, Monitor Sessions, History all share the same checkbox + sticky action bar pattern with matching `DELETE /api/<resource>/batch` endpoints
-- 447 unit tests, all passing
+- REST API (FastAPI) — `/api/scan`, `/api/history`, `/api/report/{id}`, `/api/health`, Swagger at `/docs`
+- Web dashboard — single-page dark-themed UI, drag-and-drop upload, score ring, theme toggle
+- Functional Settings & Whitelist pages
+- Report export from dashboard
+- Multi-file upload
+- Live monitor in dashboard (SSE)
+- Dashboard authentication (single-user)
+- Frontend modularized (native ES modules under `pulse/static/js/`)
+- Firewall feature set (CLI + dashboard)
+- PDF report overhaul (grade-coloured score ring)
+- Position-based scan numbering
+- Real SPA URL routing
+- Bulk-select + batch-delete on every list page
 
 </details>
-
----
-
-<details>
-<summary><strong>Sprints 2–5 (shipped v1.2.0 through v1.5.0) — click to expand</strong></summary>
-
-## Sprint 2 — Apr 14–15, 2026 (Alerting & detection depth) — shipped v1.2.0
-
-- [x] Email alerts — send summary email when a scan finds CRITICAL/HIGH items
-- [x] Alert throttling — dedupe repeated findings so one noisy host doesn't spam inbox
-- [x] Live-monitor email alerts — interval-gated emails straight from the monitor loop
-- [x] Slack / Discord webhook — optional webhook URL in `pulse.yaml` to post CRITICAL findings
-- [x] Kerberoasting detection — Event ID 4769 with weak encryption type (RC4)
-- [x] Golden ticket detection — anomalous TGT lifetime / mismatched domain in 4769/4624
-- [x] DCSync detection — 4662 with directory-replication GUIDs from non-DC accounts
-- [x] Suspicious child process chain — Office / browser spawning cmd.exe, powershell.exe, wscript.exe
-- [x] Finding detail drawer — click a finding in the dashboard to see raw event XML + context
-- [x] Dashboard search — search bar that filters findings by user, IP, rule, or event ID
-
----
-
-## Sprint 3 — Apr 15–16, 2026 (Remediation & automation) — shipped v1.3.0
-
-- [x] Remediation suggestions — each rule includes a "how to fix" recommendation with step-by-step guidance
-- [x] Remediation tab rewrite — group fixes by rule and show MITRE mitigation IDs (M1026, etc.)
-- [x] Scheduled scans — watch a folder for new `.evtx` files and auto-scan on arrival
-- [x] Recurring reports — auto-generate daily or weekly HTML summary reports
-- [x] PDF export — download formatted PDF reports from the dashboard
-- [x] Report comparison — diff two scans side by side, highlight new / resolved findings
-- [x] "Mark reviewed" status — per-finding state saved to DB, persists across scans
-- [x] CLI `--quiet` / `--json-only` — machine-friendly output for cron pipelines
-
----
-
-## Sprint 4 — Apr 17–24, 2026 (Multi-host & firewall) — shipped v1.4.0
-
-- [x] Multi-machine support — track scores per hostname, compare security posture across endpoints
-- [x] Hostname auto-detection — parse `Computer` field from each `.evtx` event, tag findings
-- [x] Per-host dashboard view — pick a machine, see only its history and trend
-- [x] Fleet overview page — sortable table of all machines with score, last scan, top severity
-- [x] Firewall log parser — parse `pfirewall.log`, extract blocked / allowed connections
-- [x] Suspicious outbound detection — flag DROPs from public IPs to high-value ports (3389, 22, 445, 3306, 5985), plus port-scan aggregation across many dst-ports
-- [x] Firewall rule misconfiguration rules — any-any rules, disabled profiles, overly broad scope
-- [x] **IP block list** — Pulse-owned list of blocked source IPs pushed into Windows Firewall via `netsh advfirewall` as inbound deny rules. Every rule is prefixed `Pulse-managed:` so user-authored rules are never touched; optional comment per entry; add / push / unblock from the Firewall page and CLI
-- [x] One-click "block source IP" action — any finding with a source IP shows a Block button in the detail drawer that stages the IP with a comment linking back to the finding
-- [x] Audit log — track who scanned what and when within the dashboard
-- [x] Export fleet CSV — one-row-per-host summary for spreadsheets
-
----
-
-## Sprint 5 — Apr 25 – May 1, 2026 (Auth, compliance, analytics) — shipped v1.5.0
-
-- [x] User authentication — login page backed by SQLite users table with scrypt hashes (shipped early, single-user)
-- [x] Session management — signed cookies, logout, 30-day expiry (shipped early)
-- [x] Role-based access — admin (full) vs viewer (read-only) roles enforced in API
-- [x] Score-over-time chart — line chart of daily scores on the Dashboard
-- [x] Multi-user account management — admin can create, edit, and deactivate user accounts from the dashboard (Settings > Users)
-- [x] Data isolation — viewers see only their own scans / findings / reports; admins see all (scan_scope_for)
-- [x] Admin activity history — Audit page shows every block/unblock/scan/review action, filterable by user and action type, CSV export
-- [x] Hosted deployment — Pulse runs on Render with env-var config fallback, production CORS lock, disabled `/docs`, startup health log
-- [x] Profile picture upload — stored as a BLOB on the users row so it survives Render restarts; auto-syncs to top-right avatar
-- [x] NIST CSF mapping — every rule tagged against Identify / Protect / Detect / Respond / Recover subcategories
-- [x] ISO 27001 mapping — every rule linked to an Annex A control (A.9 access, A.12 ops, etc.)
-- [x] Compliance report view — Compliance page shows per-CSF-function + per-clause coverage and a per-rule lookup table
-- [x] Trend analytics page — Trends page with window-over-window delta, daily finding line chart, severity breakdown, top rules + top hosts bars
-- [x] API token auth — generate / revoke tokens for CI pipelines hitting `/api/scan` (Settings > API Tokens; Bearer header, per-user, sha256-at-rest, raw shown once, `last_used_at` bumps on every call)
-- [x] PostgreSQL migration — new `pulse/db_backend.py` adapter lets Pulse run against SQLite (default) or PostgreSQL (`DATABASE_URL=postgresql://…`); `scripts/migrate_to_postgres.py` copies an existing `pulse.db` into a target Postgres database and bumps per-table id sequences; SQLite stays the fallback for local single-user installs
-- [x] **UX blueprint pass** — full dashboard UX rebuild against `.claude/skills/pulse-ux-blueprint.md`: design-token rollout (semantic colors, spacing, type scale), Ctrl+K command palette with fuzzy scoring + recents, universal right-side drawer primitive, Monitor three-band rebuild, Rules page with per-rule hit counts + 24h sparkline + MITRE coverage matrix, Fleet KPI strip + host-detail drawer, Firewall pending-changes banner + tiered bulk-confirm, Whitelist KPI strip + tiered bulk-confirm, Dashboard standup row (reduction funnel + top offenders), Compliance hero coverage gauge + stacked bar, Trends mean-±2σ anomaly bands
-
-</details>
-
----
-
-## Sprint 6 — May 2–8, 2026 (Workflows, branding, threat intel) — shipped v1.6.0
-
-- [ ] ~~Windows Service installer~~ — *moved to Sprint 7's downloadable-agent block. Will register Pulse Agent as a SYSTEM-privileged service alongside the bundled `pulse-agent.exe`, so the SYSTEM-elevation work happens once for both the local and agent install paths.*
-- [x] Incident workflow states — mark findings as acknowledged, investigating, or resolved
-- [x] Analyst notes — free-text notes field per finding, stored in DB, shown in finding drawer and PDF reports, timestamped and attributed to the author
-- [x] Assignment — assign a finding to a user, filter dashboard by "assigned to me", show assignment in finding drawer and fleet detail
-- [ ] ~~Custom branding~~ — *deferred to Backlog; first pass shipped then reverted on 2026-04-24 because replacing the Pulse brand in the sidebar conflicted with the product identity. The future pass should keep the Pulse logo + "PULSE" title, and surface the org name as a subtitle underneath. The empty `branding` table already exists on current installs so the future sprint can reuse the schema.*
-- [x] Configurable severity colours — override the default CRITICAL/HIGH/MEDIUM palette
-- [ ] ~~Dashboard widgets~~ — *first pass shipped 2026-04-28 then rolled back 2026-04-29. The drag-and-drop reorder + hide/restore worked but a non-functional surface (the "Customize layout" button) hurt trust during the polish pass; revisit when there's a clearer use case for a per-user dashboard layout. Underlying panel HTML is now inlined directly in `renderDashboardPage()` again*
-- [x] In-app feedback button — lets users submit feedback without leaving the app, stored in DB
-
-### Bonus work shipped under v1.6.0 (polish + Sprint-7 transport prep)
-
-A focused polish pass landed alongside the Sprint 6 ACs:
-
-- **Relative timestamps everywhere** — single `formatRelativeTime` / `relTimeHtml` helper, Apr-21 cutover past 7 days, hover-tooltip with absolute datetime; rolled out across Findings / Scans / History / Audit Log / Fleet / Firewall / Reports / Threat Intel / Settings / Monitor / Dashboard surfaces
-- **Scans → History merge** — standalone Scans list deleted; `/findings` is the All-Findings page, `/history` owns the scan list + Upload `.evtx` button; `/scans/{id}` deep-links survive
-- **Reports page rewrite** — page header with "Generate Report" button, real onboarding empty state, modal (scan dropdown + PDF/HTML/JSON/CSV), per-row hover-only Quick PDF on every History row
-- **Whitelist empty-state onboarding** — title + subtitle + "Add your first entry" + collapsible Account/Service/IP/Rule reference, dynamic built-ins count
-- **Compliance Coverage Gaps** — amber KPI tile + new card listing uncovered MITRE techniques, silent rules, noisy rules (≥20 hits + ≥40% FP rate)
-- **Getting Started checklist** — 5-step Dashboard onboarding card with progress bar, dismiss link persists in `users.onboarding_dismissed_at`, drawer-open beacon ticks step 2
-- **Notification bell** — topbar bell + dropdown panel; backend triggers on scan complete, finding assigned, live-monitor alert, scheduled scan, IP block pushed
-- **Role visibility** — avatar-dropdown role line, Profile read-only Role field, Users tab Last-active column, A/V badges next to user names in audit log / assignment picker / notes
-- **Threat Intel inside the drawer** — the AbuseIPDB lookup that already lived in the finding drawer is now positioned between Event Details and Remediation; standalone page kept with a discoverability callout
-- **Firewall Rules tab live** — placeholder gone; pfirewall.log path/upload parsing, KPI tiles, suspicious-activity card, action / protocol / direction filter chips, hover-only Block + Lookup row actions
-- **Pulse Agents transport layer** — `agents` table, `pulse/agents.py`, `POST /api/agent/exchange | heartbeat | findings`, Settings → Agents tab. Server-side wire ready for the downloadable `pulse-agent.exe` in Sprint 7
-- **Monitor first-start race fix** — `_refreshStatus()` on every page mount, `_forceMonitorPageRender()` after Start, orphan-session cleanup on boot, autoResume removed
-- **Customizable dashboard widgets** — first-pass shipped, then rolled back the same week (see deferred row above)
-- **Topbar Scan-My-System hosted-mode swap** — `/api/health` exposes `platform_windows`; on Linux deployments the button becomes "Upload .evtx"
-- **Backlog split** — `BACKLOG.md` now owns the unscheduled items; `ROADMAP.md` points at it
-
----
-
-## Sprint 7 — TBD (Agent / server split — the Splunk distribution model)
-
-The hosted dashboard on Render can't scan a Windows machine itself — the OS can't read `.evtx` files or tail the Windows Event Log. "Scan my system" from the hosted UI currently fails with an authorization error because the server has no access to the user's local logs. The plan is to split Pulse the way Splunk does: a hosted multi-tenant dashboard + a downloadable Windows agent that ships detections to it over HTTPS.
-
-### Hosted dashboard (stays on Render)
-- [x] Multi-tenant data model — `organizations` table + `organization_id` denormalized onto users, scans, agents, notifications. `_read_scope_kwargs` API helper resolves admin → unrestricted, org-member → org-scoped, legacy untenanted → per-user-scoped. Self-signup creates a fresh org; admin-side user creation joins the admin's org. Idempotent backfill at every `init_db` migrates legacy single-user installs in place. Cross-org reads / writes return 404 / no-op
-- [x] Agent enrollment flow — Settings → Agents tab mints a single-use, 1h-TTL enrollment token (`pe_…`); the agent installer trades it via `POST /api/agent/exchange` for a long-lived bearer (`pa_…`). Both tokens are sha256-at-rest, raw values shown once. Delete-agent revokes the bearer immediately
-- [x] Agent status panel — Settings → Agents lists every registered host with status pill (online / stale / offline / paused / pending), last-heartbeat relative time, hostname + platform, version. Pause and Delete actions per row; viewers see only their own agents, admins see every install
-- [x] `POST /api/agent/heartbeat` + `POST /api/agent/findings` — implemented in `pulse/api.py`. Heartbeat updates `last_heartbeat_at` and surfaces the paused flag; findings ingest writes a scan attributed to the enrolling user with `scans.agent_id` stamped for provenance. Paused agents ack heartbeats but their findings are dropped so quiet-mode is observable from both sides
-- [x] Hide / disable "Scan my system" in hosted mode — topbar swaps to **Download Agent** on non-Windows hosts (action: `goToAgentEnroll` → Settings → Agents). Command palette filters `act.system_scan` away and surfaces `act.download_agent` instead. Agents tab now leads with a two-step install card (pip install + `python -m pulse.agent enroll/run`). The .evtx CLI-upload fallback stays on the History page
-- [x] Public multi-tenant signup — `PULSE_HOSTED_SIGNUP=1` opens `POST /api/auth/signup` past the first user; each signup mints a fresh org via the data-layer auto-org logic. Login page surfaces a "Create account" link in hosted mode.
-- [x] **Marketing landing page** — CrowdStrike-style site at `/` (unauth visitors) with hero, stats band, three use-case sections, 12-feature grid, three-step download flow, three-tier pricing, FAQ, multi-column footer. Logged-in users still get the dashboard at `/`. Old `/welcome` mount stays for back-compat.
-- [x] **Windows download wire** — `/api/agent/download` endpoint streams the locally-built `dist/pulse-agent/` bundle as a zip; landing page's "Download for Windows" CTA points at it. 503 + clear "build first" message when the bundle isn't present.
-
-### Downloadable Windows agent
-- [x] Packaged `pulse-agent.exe` via PyInstaller — `pulse-agent.spec` + `scripts/build_agent.py`; one-folder bundle (37 MB total, 6.5 MB launcher) or `--onefile` mode. Shipped as a release asset on the v1.7.0 GitHub release; also streamed live by `/api/agent/download` when the bundle is on disk
-- [ ] Windows Service installer — registers Pulse Agent as a SYSTEM-privileged service (moved up from Sprint 6) so scheduled scans + Event Log access work without manual UAC each time. README documents the manual `sc.exe` and NSSM paths; the bundled one-click installer is the remaining work
-- [x] Local-scan → HTTPS upload pipeline — `AgentRuntime` runs the same detection engine every 30 min (configurable), heartbeats every 60s, ships findings via `POST /api/agent/findings`. `AgentTransport` distinguishes transient (retry) from permanent (re-enroll) errors. Offline queue still TODO but the happy path + retry-on-transient path is live
-- [x] Tamper resistance — `pulse-agent harden` subcommand strips ACL inheritance and grants SYSTEM + Administrators only via `icacls`. `AgentRuntime` startup audits the bearer-token file's ACL via `audit_token_file_permissions()` and logs a WARNING when loose principals (Everyone / BUILTIN\Users / Authenticated Users, plus SID forms for localized installs) are detected. Service-level lock (Administrators-only start/stop) lands with the bundled installer.
-- [x] Auto-update channel — `GET /api/agent/latest` shipped; the agent calls it once at startup via `AgentTransport.get_latest_version()` and logs an "update available" warning with the download URL when the server reports drift. *Auto-download + signature verification deferred to Sprint 8 once we have a code-signing cert.*
-- [ ] Local dashboard mode (optional) — same installer can run Pulse as a single-user local dashboard (current behavior) instead of as an agent, controlled by one install-time checkbox
-
-### Post-v1.7.0 shipped (Sprint 7 closeout work)
-
-These shipped after the v1.7.0 tag but logically belong to the same "make Pulse safe to host" sprint theme. Pulled into a separate section so the reader can see which work-items happened post-release.
-
-- [x] **Email verification on signup** — every new tenant gets a verification email; user lands unverified until they click the `/verify?token=…` link. Single-user installs without SMTP auto-verify on signup. `email_verified_at` column on `users`; idempotent backfill stamps existing rows. Resend endpoint, rate-limited. Unblocks turning on `PULSE_HOSTED_SIGNUP=1` for real customers. (CHANGELOG: 2026-05-13)
-- [x] **Agent tamper resistance** — `pulse-agent harden` + runtime startup ACL audit. (CHANGELOG: 2026-05-13)
-- [x] **Full security audit + hardening pass** — SQL injection / input validation / path traversal / auth / XSS / sensitive data / rate limits / CORS / dependencies / error handling. Eight issues fixed (path traversal in `/api/firewall/log`, XSS in upload.js, login lockout returning 423, scan-upload rate limit, scrubbed SQL exception text, `is_admin` redaction in production, audit-log silent-swallow logging, `/verify` rate limit). (CHANGELOG: 2026-05-14)
-- [x] **Dependency pinning + automated CVE scan** — `requirements-lock.txt` with exact pins for prod deploys; `requirements-dev.txt` for dev tooling; `test_no_known_cves_in_dependencies` runs `pip-audit --strict` against the live env on every test sweep (marked `@pytest.mark.network` so air-gapped runs can skip). First run caught + fixed CVEs in pip / pytest / python-multipart. (CHANGELOG: 2026-05-14)
-
-### Deferred product questions (flag before starting this sprint)
-- Pricing model: free-for-N-agents vs. per-seat vs. self-host-only? Changes whether enrollment needs a billing gate
-- Agent-to-server protocol: plain REST (shipped fast) vs. gRPC (more efficient at fleet scale). Start with REST
-- Code signing: agent `.exe` needs a real Authenticode cert for SmartScreen to stop warning on download
-
----
-
-## Sprint 8 — TBD (Detection depth)
-
-Focus: make Pulse's detection engine credible enough that a real SOC team would consider deploying it.
-
-- [ ] **SIGMA rule import** — build a parser that reads SIGMA YAML files and converts them into Pulse detection rules. Map `logsource.category` to Windows log channels, `detection` blocks to Pulse matching logic, `level` to Pulse severity, and `tags` to MITRE technique IDs. Add a **Settings → Rules → Import** tab where admins upload or paste SIGMA YAML, preview the converted rule, and activate it. Track imported rules with an `origin` field (`built-in` / `sigma-import` / `custom`).
-- [ ] **Time-based correlation engine** — add a sequence rule type that matches multiple events within a configurable time window. Ship four initial rules: brute force success (5+ Event 4625 then 4624 from same source IP within 10 min), impossible travel (same user on two hosts within 60 seconds), privilege escalation chain (Event 4720 then 4728/4732 within 5 min same actor), lateral spray (same source IP hitting 3+ hosts with LogonType 3 within 5 min).
-- [ ] **Sysmon log support** — parse Sysmon channel events: Event 1 (process create with command line for Mimikatz / encoded PowerShell / LOLBin detection), Event 3 (network connections for C2 beaconing), Event 10 (process access for LSASS credential dumping), Event 22 (DNS queries for tunneling detection).
-- [ ] **Rule performance dashboard** — Performance tab on the Rules page showing per-rule total hits, 24h sparkline, TP vs FP ratio, average scan time, and health indicator (green/amber/red).
-
----
-
-## Sprint 9 — TBD (Operational maturity)
-
-Focus: make Pulse safe to run in production with real data at scale.
-
-- [ ] **Data retention policy** — **Settings → Advanced → Retention** with configurable windows per data type (findings 365d, scans 365d, audit log 730d, notifications 90d). Daily background job purges aged records. Audit log entries about purges are exempt from purging. Dry-run mode available.
-- [ ] **API rate limiting** — per-token (60/min default) and per-IP (120/min unauthenticated) limits. HTTP 429 with `Retry-After` header. In-memory sliding window counters. `X-RateLimit-Remaining` and `X-RateLimit-Reset` response headers. Per-token override in Settings → API Tokens.
-- [ ] **Evidence export** — *Export incident package* button on findings. Generates ZIP with: scoped PDF report, raw event XML, related audit log entries, analyst notes, JSON manifest with SHA-256 hashes for chain-of-custody. Available from detail drawer and bulk action bar.
-- [ ] **Encrypted config secrets** — Fernet encryption for SMTP passwords, webhook URLs, API keys in `pulse.yaml` using machine-derived key. Auto-encrypt plaintext secrets on first run after upgrade. Env vars bypass config file entirely.
-- [ ] **Session hardening** — CSRF tokens on all state-changing endpoints, `SameSite=Strict` cookies, configurable idle timeout (default 30 min), active sessions list in Settings → Profile with *Revoke* option.
-- [ ] **Webhook signature verification** — HMAC-SHA256 signatures on outgoing Slack/Discord payloads with `X-Pulse-Signature` header and documented verification process.
-
----
-
-## Sprint 10 — TBD (Distribution & community)
-
-Focus: make Pulse easy to install, evaluate, and contribute to.
-
-- [ ] **Docker distribution** — `Dockerfile` and `docker-compose.yml` bundling Pulse + PostgreSQL. `PULSE_ADMIN_EMAIL` and `PULSE_ADMIN_PASSWORD` env vars for first-run setup. Persistent volumes for database and uploads.
-- [ ] **One-liner install script** — `curl | bash` script for Linux that installs dependencies, creates a `systemd` service, starts Pulse on port 8443, and prints the admin URL.
-- [ ] **GitHub README overhaul** — one-sentence description, hero screenshot, 3-command quick start, animated GIF of a scan, feature list with screenshots, architecture diagram, contributing guide link, license.
-- [ ] **Contributing guide** — `CONTRIBUTING.md` covering dev environment setup, running tests, adding a detection rule (step-by-step with example), adding a dashboard page, code style, PR review process.
-- [ ] **Sample data bundle** — `samples/` directory with 3-4 synthetic `.evtx` files containing known threats (brute force, credential dumping, lateral movement, persistence), sample `pfirewall.log`, and a README explaining what each file contains and what detections should fire.
-- [ ] **Public landing page polish** — live demo link with read-only viewer account and pre-loaded sample data, GitHub stars badge, test count badge, social proof section.
-
----
-
-## Backlog
-
-Unscheduled work — validated ideas not yet committed to a sprint — lives in [BACKLOG.md](BACKLOG.md). Items now covered by Sprints 8 – 10 above (SIGMA, Sysmon, retention, Docker, etc.) should be removed from the backlog when picked up. When a new unscheduled item gets prioritized, move it from there into the next-up sprint section above.

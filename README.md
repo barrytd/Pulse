@@ -168,8 +168,7 @@ The suite covers every detection rule, the API surface, multi-tenant isolation, 
 
 ## Links
 
-- Current sprint plan: [ROADMAP.md](ROADMAP.md)
-- Unscheduled ideas: [BACKLOG.md](BACKLOG.md)
+- Status board (in progress / up next / backlog / shipped): [ROADMAP.md](ROADMAP.md)
 - Change history: [CHANGELOG.md](CHANGELOG.md)
 - API docs: `http://localhost:8000/docs` (Swagger UI) when running with `--api`
 
