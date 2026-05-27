@@ -145,6 +145,95 @@ export const findingsState = {
 
 var SEV_WEIGHT = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 
+// ---------------------------------------------------------------------------
+// Filter ⇄ URL sync — refresh-safe filters
+// ---------------------------------------------------------------------------
+// User complaint (2026-05-28): "I filter Kwame's assigned alerts and on
+// refresh the filter resets." Filter state lived in JS module memory, so
+// F5 wiped it. Fix: round-trip the filter Sets through the URL query
+// string. Refreshing reloads the page with `?severity=CRITICAL,HIGH&...`
+// already set; the renderer hydrates the Sets from there.
+//
+// Encoding convention:
+//   ?severity=CRITICAL,HIGH       → include axis (show only these)
+//   ?-rule=Audit%20Log%20Cleared  → exclude axis (hide these); `-` prefix
+//   ?q=PowerShell                 → free-text search
+//   ?sort=severity:desc           → sort column + direction
+// Comma-separated values inside each parameter; `decodeURIComponent` on
+// read, `encodeURIComponent` on write so any value (incl. spaces / colons
+// / non-ASCII) survives. Empty sets aren't serialized — they'd add noise
+// to the URL for no benefit.
+
+var _FILTER_DIMS = ['severity','status','assignee','host','rule','mitre','scan'];
+
+function _syncFiltersToUrl() {
+  // Always called from applyFindingsView, which fires on every filter
+  // change. replaceState (not pushState) so the back button still steps
+  // out of the page rather than cycling through every filter tweak.
+  try {
+    var params = new URLSearchParams();
+    var s = findingsState;
+    _FILTER_DIMS.forEach(function (dim) {
+      var slot = s.filters[dim];
+      if (!slot) return;
+      if (slot.include && slot.include.size > 0) {
+        params.set(dim, Array.from(slot.include).join(','));
+      }
+      if (slot.exclude && slot.exclude.size > 0) {
+        params.set('-' + dim, Array.from(slot.exclude).join(','));
+      }
+    });
+    var q = (s.query || '').trim();
+    if (q) params.set('q', q);
+    if (s.sortCol && s.sortCol !== 'time') {
+      params.set('sort', s.sortCol + ':' + (s.sortDir || 'desc'));
+    } else if (s.sortDir && s.sortDir !== 'desc') {
+      params.set('sort', 'time:' + s.sortDir);
+    }
+    var qs = params.toString();
+    var url = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+    if (url !== window.location.pathname + window.location.search + window.location.hash) {
+      window.history.replaceState(null, '', url);
+    }
+  } catch (e) { /* URLSearchParams missing in ancient browsers — silent */ }
+}
+
+function _loadFiltersFromUrl() {
+  // Hydrate findingsState.filters / .query / .sortCol / .sortDir from
+  // location.search. Returns true if anything was set so renderFindingsPage
+  // can prefer URL filters over the in-memory defaults.
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var any = false;
+    _FILTER_DIMS.forEach(function (dim) {
+      var incRaw = params.get(dim);
+      if (incRaw) {
+        any = true;
+        incRaw.split(',').forEach(function (v) {
+          if (v) findingsState.filters[dim].include.add(v);
+        });
+      }
+      var excRaw = params.get('-' + dim);
+      if (excRaw) {
+        any = true;
+        excRaw.split(',').forEach(function (v) {
+          if (v) findingsState.filters[dim].exclude.add(v);
+        });
+      }
+    });
+    var q = params.get('q');
+    if (q) { findingsState.query = q; any = true; }
+    var sort = params.get('sort');
+    if (sort && sort.indexOf(':') >= 0) {
+      var parts = sort.split(':');
+      findingsState.sortCol = parts[0];
+      findingsState.sortDir = parts[1] === 'asc' ? 'asc' : 'desc';
+      any = true;
+    }
+    return any;
+  } catch (e) { return false; }
+}
+
 // One-shot filter handoff — lets other pages (e.g. the Dashboard "Needs
 // Attention" widget) deep-link into the Findings page with pre-set
 // filters. The shape mirrors `findingsState.filters` — each dim is an
@@ -205,6 +294,8 @@ export async function renderFindingsPage() {
 
   // Consume a one-shot pre-set filter handoff. Each entry on the pending
   // object is `{ include: [...], exclude: [...] }` for one dimension.
+  // Pending wins over URL params — a deep-link from "Needs Attention" is
+  // explicit-intent and should not be silently mutated by a stale URL.
   if (_pendingFindingsFilter) {
     Object.keys(_pendingFindingsFilter).forEach(function (dim) {
       var slot = findingsState.filters[dim];
@@ -214,6 +305,11 @@ export async function renderFindingsPage() {
       (src.exclude || []).forEach(function (v) { slot.exclude.add(v); });
     });
     _pendingFindingsFilter = null;
+  } else {
+    // Otherwise, hydrate from URL query params so F5 / share-links /
+    // browser-back preserve the filtered view. _syncFiltersToUrl
+    // mirrors state OUT on every filter change; this is the IN side.
+    _loadFiltersFromUrl();
   }
 
   if (allFindings.length === 0) {
@@ -312,6 +408,10 @@ export function applyFindingsView() {
   // a filter, or run a bulk action. Capture scrollY up-front and
   // restore it after the DOM is rebuilt so the page feels static.
   var _scrollY = window.scrollY;
+  // Mirror the current filter state into the URL so F5 / share-link /
+  // browser-back all preserve the filtered view (the user reported the
+  // refresh-resets-filter bug on 2026-05-28).
+  _syncFiltersToUrl();
   var s = findingsState;
   var rows = s.raw.slice();
 
