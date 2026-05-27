@@ -1,0 +1,70 @@
+# Pulse — .dockerignore
+# ----------------------
+# Keep the build context (and therefore the resulting image layers) small.
+# Anything not in this file gets COPY'd into the image; explicit excludes
+# below keep local dev clutter, secrets, and ~hundreds of MB of build
+# artifacts out of production.
+
+# Version control + IDE state
+.git
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+.claude/
+
+# Python bytecode + virtualenvs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+
+# Test surface — production image doesn't need pytest fixtures
+tests/
+
+# Sample data — too big for the runtime image; mount via volume if
+# you want to demo against samples in production.
+samples/
+
+# Distribution artifacts (PyInstaller bundles, etc.) — these can be
+# 30+ MB each and are never used inside the server container.
+build/
+dist/
+
+# Local databases + reports — must NOT bake a customer's data into
+# the image at build time.
+*.db
+*.db-journal
+reports/
+logs/
+pulse_baseline.json
+
+# Secrets — never copy a populated pulse.yaml into the image. The
+# template lives at pulse.yaml.example for documentation only; the
+# real config is mounted at runtime or driven entirely by PULSE_*
+# env vars (see _config_from_env in pulse/api.py).
+pulse.yaml
+.env
+
+# Documentation that doesn't ship inside the image
+README.md
+CHANGELOG.md
+ROADMAP.md
+CONTRIBUTING.md
+LICENSE
+BACKLOG.md
+
+# Node / frontend tooling (we have none, but block in case future
+# contributors add it)
+node_modules/
+
+# OS junk
+.DS_Store
+Thumbs.db

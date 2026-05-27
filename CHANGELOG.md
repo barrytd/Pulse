@@ -5,6 +5,42 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-27 — Release polish: sample data, README rewrite, CONTRIBUTING, Docker
+
+Four landings to make Pulse evaluatable + contributable for the GitHub browse experience.
+
+### Sample data bundle
+
+- New `samples/` directory with four synthetic `.evtx` files demonstrating real attack patterns end-to-end: `brute-force-server.evtx` (171 events, 5 detections incl. Account Takeover Chain), `credential-theft-workstation.evtx` (7 events, 4 detections incl. Credential Dumping), `persistence-malware.evtx` (5 events, 6 detections incl. Malware Persistence Chain), `lateral-movement-dc.evtx` (8 events, 5 detections incl. DCSync + Golden Ticket). Plus the existing `sample-pfirewall.log`.
+- New [`samples/README.md`](samples/README.md) — per-file scenario description, expected detections + severities, expected grade.
+- New [`scripts/generate_sample_evtx.py`](scripts/generate_sample_evtx.py) — regenerates all four samples. Self-contained (doesn't import `pulse`), deterministic time math so reruns produce byte-identical output.
+
+### Pulse-synthetic .evtx format
+
+To ship sample files without requiring a Windows host + admin + `wevtutil` (real `.evtx` is a binary Microsoft format and `python-evtx` is read-only), [`pulse/core/parser.py`](pulse/core/parser.py) gains a synth-file path:
+
+- The standard 8-byte `ElfFile\x00` magic header (so the upload validator's magic-byte check still accepts the file) followed by a `PULSE-SYNTH-v1\n` sentinel followed by a UTF-8 JSON event list.
+- The parser detects the sentinel before falling through to wevtutil / python-evtx and routes to `_parse_pulse_synth()`. Real binary `.evtx` files are unaffected — they never contain the sentinel after the magic.
+- Security guarantee held: the upload validator's first-8-bytes-must-be-`ElfFile\x00` check remains intact, so renamed-junk uploads are still rejected. The new code path is *additive*, not a relaxation.
+- 12 new tests in [`tests/test_parser_synth.py`](tests/test_parser_synth.py) covering happy path (round-trip, multiple events, `since` filter, defaults for missing fields) and negative cases (missing marker falls through to binary parser, bad JSON returns `[]`, non-list payload returns `[]`, non-dict entries skipped) + parametrized end-to-end tests that load each shipped sample and assert its canonical rule fires.
+
+### README rewrite
+
+- [`README.md`](README.md) restructured for GitHub browse: shield badges (Python, license, test count, release tag, stars) → one-line "What Pulse does" → 4-line Quick Start with sample-data references → Quick Start with Docker → features as a compact two-column table → all 25 detection rules in a sorted-by-severity table with event IDs + MITRE technique → architecture summary → screenshots placeholder → docs links → production-deploys note → contributing + license.
+
+### CONTRIBUTING.md
+
+- New [`CONTRIBUTING.md`](CONTRIBUTING.md) — full dev environment setup, running tests (incl. `-m "not network"` offline mode), step-by-step tutorial for adding a detection rule (function → `RULE_META` entry → NIST CSF + ISO 27001 mapping → tests → run suite), adding a dashboard page (4 touch points), code style (Python + JS + HTML escaping + parameterized SQL), PR process, and security-issue disclosure via GitHub's private vulnerability reporting.
+
+### Docker distribution
+
+- New [`Dockerfile`](Dockerfile) — `python:3.11-slim` base, non-root user, installs from `requirements-lock.txt` for reproducible builds, copies only the runtime surface (no tests / samples / dist).
+- New [`docker-compose.yml`](docker-compose.yml) — two-service compose: Pulse + Postgres 16 alpine. Documented env vars for `PULSE_SECRET`, `DATABASE_URL`, `PULSE_ADMIN_EMAIL`/`PULSE_ADMIN_PASSWORD` (first-run seed), and optional alert channels.
+- New [`docker/entrypoint.sh`](docker/entrypoint.sh) — POSIX sh that waits for Postgres readiness (60s timeout, 1s backoff via `psycopg.connect`) then seeds the first admin user from `PULSE_ADMIN_EMAIL`/`PULSE_ADMIN_PASSWORD` env vars (idempotent — skipped on re-runs when a user already exists).
+- New [`.dockerignore`](.dockerignore) — keeps `.git`, `venv/`, `tests/`, `samples/`, `dist/`, `*.db`, `pulse.yaml`, `.env`, and OS junk out of the build context.
+
+Tests: **700 passing** (+12 from the new synth parser test file).
+
 ## 2026-05-14 — Dependency pinning + automated CVE scan
 
 Follow-up to today's security audit. Closes the "advisory — pin dependencies" gap by adding a lock file for production deploys and wiring `pip-audit` into the test suite so future CVEs surface on every test run instead of waiting for a manual check.

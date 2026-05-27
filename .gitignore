@@ -18,6 +18,11 @@ venv/
 # Log files — these can be huge and are specific to each user.
 # Match anywhere in the tree so stray copies in the project root never get committed.
 *.evtx
+# Exception: the samples/ bundle ships Pulse-synthetic .evtx files (tiny,
+# JSON-payload-with-binary-header) demonstrating each detection scenario.
+# These ARE committed — `scripts/generate_sample_evtx.py` regenerates them
+# deterministically.
+!samples/*.evtx
 
 # Generated reports — users will generate their own
 reports/*.txt

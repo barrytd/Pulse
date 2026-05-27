@@ -1,30 +1,20 @@
 # Pulse
 
-**Real-time Windows threat detection — self-hosted, MITRE-mapped, free.**
+> Open-source Windows event log analyzer and threat detection tool for SOC triage.
 
-Pulse parses Windows event logs (`.evtx`), runs 25 detection rules, and surfaces findings in a SOC-style dashboard. Drop a lightweight agent on every host, watch detections fire live in the browser, triage from one page. No SIEM bill, no per-event pricing.
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-689%20passing-brightgreen)
+![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
+![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
+
+<!-- Drop a hero screenshot here: docs/screenshots/dashboard.png (max 800px wide). -->
 
 ---
 
-## Features
+## What Pulse does
 
-**Detections** — 25 rules covering brute force, credential dumping (DCSync, Kerberoasting, LSASS access), persistence (services, scheduled tasks, registry Run keys), lateral movement (admin shares, RDP, pass-the-hash), defense evasion (audit log clearing, AV/firewall disable), and three multi-event attack chains. Each finding tags its MITRE ATT&CK technique, NIST CSF subcategory, and ISO 27001 control. See [pulse/core/rules_config.py](pulse/core/rules_config.py) for the full table.
-
-**Dashboard** — single-page app at `/` (logged-in): live monitor with SSE feed, scan history with score trend, per-host fleet view, findings drawer with append-only notes thread, workflow states (new → ack → investigating → resolved), assignment, MITRE/NIST/ISO coverage report, trends (7/30/90-day), audit log.
-
-**Pulse Agent** — Windows binary that scans the local event log and ships findings over HTTPS. Two-token auth, 60s heartbeat, 30-minute scan cadence (configurable). Pause / delete / revoke from the dashboard. See **Pulse Agent** below.
-
-**Reports** — Text, HTML, JSON, CSV, PDF. Each scan gets a 0–100 security score graded A–F.
-
-**Alerts** — SMTP email + Slack/Discord webhooks, threshold-tripped with cooldown.
-
-**Firewall response** — Reads `pfirewall.log`, surfaces port-scan probes from public IPs, blocks IPs via `netsh advfirewall` from the finding drawer.
-
-**Noise reduction** — Built-in 100+ known-good account allowlist + user whitelist + baseline snapshot for new-account / new-service / new-task diffing.
-
-**Multi-tenant** — Every owned row scoped to an `organization_id`. Self-signup mints a fresh org with email verification (signup → `/verify?token=…` link → `email_verified_at` stamped); admin-side user creation joins the admin's org. See **Multi-tenant** below.
-
-**API** — FastAPI surface with Swagger UI at `/docs`. Bearer tokens minted from Settings → API Tokens.
+Pulse parses Windows `.evtx` event logs, runs 25 detection rules mapped to MITRE ATT&CK, scores your security posture A through F, and gives you a web dashboard for triage. It supports fleet monitoring across multiple hosts, IP blocking through Windows Firewall, email + Slack + Discord alerts, PDF reports, a REST API, and a downloadable Windows agent for continuous monitoring.
 
 ---
 
@@ -34,146 +24,137 @@ Pulse parses Windows event logs (`.evtx`), runs 25 detection rules, and surfaces
 git clone https://github.com/barrytd/Pulse.git
 cd Pulse
 pip install -r requirements.txt
-
-# Scan the default logs/ folder
-python main.py
-
-# Start the dashboard + REST API
 python main.py --api
-
-# Live monitor with terminal alerts
-python main.py --watch
-
-# See every flag
-python main.py --help
 ```
 
-`.evtx` files: drop them in `logs/`, or point at `C:\Windows\System32\winevt\Logs\` with `--logs <path>`. Reports land in `reports/`.
+Open `http://localhost:8000` and upload any file from `samples/` to see Pulse light up:
 
-### Production deploys — use the lock file
+- `samples/brute-force-server.evtx` — domain controller brute-force + account takeover (5 detections, grade F)
+- `samples/credential-theft-workstation.evtx` — Mimikatz + LSASS dump + lateral movement (4 detections, grade F)
+- `samples/persistence-malware.evtx` — service install + scheduled task + Run-key write (6 detections, grade F)
+- `samples/lateral-movement-dc.evtx` — Kerberoasting + Golden Ticket + DCSync (5 detections, grade F)
 
-For dev work `requirements.txt` (`>=` ranges) is fine, but **production deployments should install from `requirements-lock.txt`** (exact `==` pins) so a compromised or buggy upstream package can't silently break Pulse or introduce a vulnerable transitive dependency:
+See [`samples/README.md`](samples/README.md) for what each scenario simulates and which rules it triggers.
+
+### Quick start with Docker
 
 ```bash
-# Production (Render, customer self-host, CI):
-pip install -r requirements-lock.txt
-
-# Run pip-audit periodically to catch CVEs in the pinned set:
-pip install pip-audit
-python -m pip_audit --strict   # exit code 1 if any CVE found
+git clone https://github.com/barrytd/Pulse.git
+cd Pulse
+docker compose up -d
 ```
 
-The lock file is regenerated on each release after `pytest -q` and `pip-audit --strict` pass. A test (`tests/test_security_hardening.py::test_no_known_cves_in_dependencies`) runs `pip-audit --strict` against the live environment on every test sweep — it's marked `@pytest.mark.network` so it's skipped when running offline (`pytest -m "not network"`).
+Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the first launch creates the admin user from `PULSE_ADMIN_EMAIL` / `PULSE_ADMIN_PASSWORD` (set those in `docker-compose.yml` first).
 
 ---
 
-## Marketing site & download
+## Features
 
-`/` serves a marketing landing page for unauthenticated visitors; logged-in users get the dashboard at the same path. The landing's **Download for Windows** CTA streams the built `dist/pulse-agent/` bundle as a zip via `GET /api/agent/download`. When the server has no bundle on disk (the Render-style deploy), the CTAs auto-fall back to the GitHub repo via `/api/agent/download/check` — no dead buttons.
-
----
-
-## Pulse Agent
-
-The hosted dashboard runs on Linux and can't read a remote Windows host's event log. Install Pulse Agent on each Windows host you want monitored.
-
-### Two-step setup
-
-1. In the dashboard: **Settings → Agents → Enroll a Pulse Agent**. Copy the `pe_…` token from the banner (shown once).
-2. On the Windows host:
-
-```powershell
-# Python entry point (works today on any machine with Python 3.8+):
-python -m pulse.agent enroll https://your-pulse pe_AAAA...
-python -m pulse.agent run
-
-# …or the packaged exe (no Python needed on the host):
-.\dist\pulse-agent\pulse-agent.exe enroll https://your-pulse pe_AAAA...
-.\dist\pulse-agent\pulse-agent.exe run
-```
-
-### Building the binary
-
-```powershell
-pip install -r requirements-agent.txt
-python scripts/build_agent.py --clean
-```
-
-Outputs a one-folder bundle under `dist/pulse-agent/` (37 MB total, 6.5 MB launcher). `--onefile` collapses to a single .exe.
-
-### Running as a Windows Service
-
-[NSSM](https://nssm.cc/) is the easy path:
-
-```powershell
-nssm install PulseAgent "C:\Program Files\Pulse\pulse-agent\pulse-agent.exe" run
-nssm set PulseAgent Start SERVICE_AUTO_START
-nssm start PulseAgent
-
-# Lock the bearer-token file down to SYSTEM + Administrators.
-pulse-agent harden
-```
-
-The `harden` subcommand wraps the `icacls /inheritance:r /grant:r SYSTEM:(R,W) Administrators:(F)` invocation so you don't have to memorize Windows ACL syntax. The agent runtime *also* audits the file's ACL once at startup and logs a WARNING in the journal if it's still world-readable — so a forgotten `harden` step doesn't sit silently in production.
-
-`sc.exe` works too — see [ROADMAP.md](ROADMAP.md) for the bundled-installer follow-up.
-
-### Auto-update channel
-
-The agent calls `GET /api/agent/latest` at startup and logs an `update available` warning when the server reports a newer build. Overrides:
-
-- `PULSE_AGENT_DOWNLOAD_URL` — defaults to the GitHub Releases page
-- `PULSE_AGENT_NOTES_URL` — defaults to the CHANGELOG
+| Area | Capability |
+|---|---|
+| **Detection** | 25 rules mapped to MITRE ATT&CK · NIST CSF + ISO 27001 control IDs · multi-event attack chains · custom whitelist + 100+ built-in known-good entries · baseline diff for new accounts / services / tasks |
+| **Dashboard** | Single-page app with live monitor (SSE) · finding drawer with notes thread · workflow states (new → ack → investigating → resolved) · assignment · Ctrl+K command palette · dark mode |
+| **Alerting** | SMTP email · Slack + Discord webhooks · per-rule cooldown · threshold-tripped · live monitor email alerts with interval gating |
+| **Fleet** | Per-host security score · last-scan timestamp · severity mix · drill-into-host view · CSV export |
+| **Firewall** | `pfirewall.log` parser · port-scan + sensitive-port probe detection · Pulse-managed IP block list via `netsh advfirewall` · one-click block from finding drawer |
+| **Compliance** | NIST CSF coverage by Function (Identify/Protect/Detect/Respond/Recover) · ISO 27001 Annex A mapping per rule · coverage-gap report (uncovered techniques, silent rules, noisy rules) |
+| **API** | FastAPI surface with Swagger at `/docs` · Bearer-token auth (Settings → API Tokens) · REST endpoints for scan upload, history, reports, agent transport |
+| **Agent** | Packaged `pulse-agent.exe` (37 MB) · two-token enrollment (single-use enrollment → long-lived bearer) · 60s heartbeat + 30min scan cadence · auto-update probe · ACL self-audit |
+| **Multi-tenant** | Every owned row scoped to `organization_id` · self-signup mints fresh org · email verification · admin invites join the admin's org |
+| **Reports** | Text / HTML / JSON / CSV / PDF · grade-coloured score ring · per-finding remediation steps · MITRE mitigation IDs |
 
 ---
 
-## Multi-tenant
+## Detection rules
 
-Every scan / agent / notification carries an `organization_id`. Two customers on the same hosted Pulse instance never see each other's data, but every member of the same org shares scan / agent / finding visibility (the right SOC team boundary).
+All 25 rules, sorted by severity. Sub-detections (DCSync, Suspicious Child Process) emit under their parent rule. Full source: [`pulse/core/rules_config.py`](pulse/core/rules_config.py).
 
-- Self-signup (`POST /api/auth/signup`) auto-creates a new org. Set `PULSE_HOSTED_SIGNUP=1` on the deployment to keep signup open past the first user (default closes after bootstrap so a self-hosted install doesn't accidentally let strangers create accounts).
-- Admins invite teammates via **Settings → Users**; teammates join the admin's org.
-- Legacy single-user installs upgrade in place via an idempotent backfill in `init_db`.
+| Rule | Event ID(s) | Severity | MITRE |
+|---|---|---|---|
+| Account Takeover Chain | (correlated) | 🔴 CRITICAL | T1078 |
+| Credential Dumping | 4656 · 4663 | 🔴 CRITICAL | T1003.001 |
+| Golden Ticket | 4768 | 🔴 CRITICAL | T1558.001 |
+| Malware Persistence Chain | (correlated) | 🔴 CRITICAL | T1543.003 |
+| Account Lockout | 4740 | 🟠 HIGH | T1110 |
+| Antivirus Disabled | 5001 | 🟠 HIGH | T1562.001 |
+| Audit Log Cleared | 1102 | 🟠 HIGH | T1070.001 |
+| Brute Force Attempt | 4625 | 🟠 HIGH | T1110 |
+| Firewall Disabled | 4950 | 🟠 HIGH | T1562.004 |
+| Firewall Profile Disabled | (config) | 🟠 HIGH | T1562.004 |
+| Kerberoasting | 4769 | 🟠 HIGH | T1558.003 |
+| Lateral Movement via Network Share | 5140 · 5145 | 🟠 HIGH | T1021.002 |
+| Pass-the-Hash Attempt | 4624 | 🟠 HIGH | T1550.002 |
+| Privilege Escalation | 4732 | 🟠 HIGH | T1548 |
+| Suspicious PowerShell | 4104 | 🟠 HIGH | T1059.001 |
+| Suspicious Registry Modification | 4657 | 🟠 HIGH | T1547.001 |
+| After-Hours Logon | 4624 | 🟡 MEDIUM | T1078 |
+| Firewall Any-Any Allow Rule | (config) | 🟡 MEDIUM | T1562.004 |
+| Firewall Overly Broad Scope | (config) | 🟡 MEDIUM | T1562.004 |
+| Firewall Rule Changed | 4946 · 4947 | 🟡 MEDIUM | T1562.004 |
+| Logon from Disabled Account | 4625 | 🟡 MEDIUM | T1078 |
+| RDP Logon Detected | 4624 | 🟡 MEDIUM | T1021.001 |
+| Scheduled Task Created | 4698 | 🟡 MEDIUM | T1053.005 |
+| Service Installed | 7045 | 🟡 MEDIUM | T1543.003 |
+| User Account Created | 4720 | 🟡 MEDIUM | T1136.001 |
 
 ---
 
-## Project structure
+## Architecture
 
-```
-pulse/        Application package — see pulse/README.md for the per-module index
-tests/        Pytest suite (one test_<module>.py per module)
-scripts/      Build + utility scripts (build_agent.py, migrate_to_postgres.py)
-main.py       CLI entry point
-pulse.yaml    Config (whitelist, alerts, secrets template)
-```
+**Server** — Python 3.8+ · [FastAPI](https://fastapi.tiangolo.com/) · SQLite by default, PostgreSQL with `DATABASE_URL=postgresql://…` via a pluggable adapter ([`pulse/db_backend.py`](pulse/db_backend.py)). No build step on the frontend: vanilla ES modules under [`pulse/static/js/`](pulse/static/js/), CSS variables for theming, Server-Sent Events for the live monitor feed.
 
-Persistent files:
-- `pulse.db` — SQLite scan history (use `DATABASE_URL=postgresql://…` to point at Postgres)
-- `pulse_baseline.json` — saved with `--save-baseline`, diffed on future scans
-- `logs/`, `reports/`, `dist/` — drop zone, report output, build artifacts
+**Agent** — Same Python package, packaged via PyInstaller into a 37 MB Windows binary (`pulse-agent.exe`). Runs the same detection engine locally and POSTs findings to the server over HTTPS. Two-token auth: a single-use `pe_…` enrollment token mints a long-lived `pa_…` bearer; both stored sha256-at-rest. See [`pulse/agent/`](pulse/agent/) and [`scripts/build_agent.py`](scripts/build_agent.py).
+
+**Storage** — All scan history, findings, audit log, agents, notifications, organizations, users, API tokens, IP block list, and finding notes live in one schema ([`pulse/database.py`](pulse/database.py)). Multi-tenant rows carry an `organization_id`; the API helper `_read_scope_kwargs` enforces tenant isolation on every read/write.
+
+**Tests** — 689 passing across the suite (688 offline; one runs `pip-audit --strict` and is marked `@pytest.mark.network`).
 
 ---
 
-## Tests
+## Screenshots
+
+<!-- Add screenshots to docs/screenshots/ and reference them here:
+     - dashboard.png        — score ring + KPI strip + last-scan findings
+     - findings.png         — filter bar + table + status pills
+     - monitor.png          — live SSE feed + Start/Stop banner
+     - fleet.png            — per-host card grid + score badges
+     - rules.png            — per-rule hit counts + MITRE coverage matrix
+     - audit.png            — audit log table + filter chips
+-->
+
+*Screenshots coming with the next release.* Until then, point Pulse at the `samples/` directory and see the same surfaces with real detection data.
+
+---
+
+## Documentation
+
+- [`ROADMAP.md`](ROADMAP.md) — status board (in progress / up next / blocked / backlog / shipped)
+- [`CHANGELOG.md`](CHANGELOG.md) — commit-level history
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, running tests, adding a detection rule, PR process
+- [`pulse/README.md`](pulse/README.md) — per-module index of the application package
+- API docs — `http://localhost:8000/docs` (Swagger UI) when running with `--api`
+
+---
+
+## Production deploys
 
 ```bash
-python -m pytest -q                    # all 689 tests
-python -m pytest tests/test_detections.py -v   # single module
-python -m pytest -m "not network"      # skip CVE-scan / online tests
+pip install -r requirements-lock.txt          # exact pins, not >= ranges
+python -m pip_audit --strict                  # CVE scan against the pinned set
 ```
 
-The suite covers every detection rule, the API surface, multi-tenant isolation, agent runtime cadence + token-file ACL audit, firewall log parsing, IP block-list lifecycle, the auto-update channel, email verification, and the security-hardening fixes (login lockout, path traversal, rate limits, XSS escape). A `pip-audit --strict` CVE scan runs as part of the suite (marked `network`, skippable for air-gapped runs). No real `.evtx` files needed — synthetic event data mirrors the live structure.
+`requirements.txt` (loose ranges) is for dev; `requirements-lock.txt` (exact pins) is for production / hosted deploys so a compromised or buggy upstream package can't silently break Pulse or introduce a vulnerable transitive dep. A test in [`tests/test_security_hardening.py`](tests/test_security_hardening.py) runs `pip-audit --strict` against the live environment on every test sweep (marked `@pytest.mark.network`, skip with `-m "not network"`).
 
 ---
 
-## Links
+## Contributing
 
-- Status board (in progress / up next / backlog / shipped): [ROADMAP.md](ROADMAP.md)
-- Change history: [CHANGELOG.md](CHANGELOG.md)
-- API docs: `http://localhost:8000/docs` (Swagger UI) when running with `--api`
+Pull requests welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev environment setup, the step-by-step tutorial for adding a new detection rule, and the PR process. Good first issues are labeled on GitHub.
+
+For security issues, please use GitHub's private vulnerability reporting — don't open a public issue.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [`LICENSE`](LICENSE).

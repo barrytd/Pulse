@@ -23,11 +23,20 @@
 #   If wevtutil fails the full python-evtx path is used as a fallback.
 
 
+import json
 import os
 import subprocess
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from Evtx import Evtx
+
+
+# Marker that immediately follows the standard `ElfFile\x00` magic in a
+# Pulse-synthetic sample file. Real Windows `.evtx` files have a binary
+# FILE_HEADER struct in this position, so this sentinel can never match
+# a legitimate file by accident. Lets the sample-data path coexist with
+# the binary-parser path without loosening upload-validation magic bytes.
+_PULSE_SYNTH_MARKER = b"PULSE-SYNTH-v1\n"
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +101,23 @@ def parse_evtx(file_path, since=None):
     except OSError:
         return []
 
+    # Pulse-synthetic sample-data path. The samples/ bundle ships .evtx
+    # files that begin with the standard `ElfFile\x00` magic followed by
+    # the `PULSE-SYNTH-v1\n` sentinel; the rest is a JSON event list. The
+    # upload validator still rejects renamed junk because the first 8
+    # bytes are always the real .evtx magic — this branch only fires when
+    # the sentinel matches a value no real file would ever contain.
+    try:
+        with open(file_path, "rb") as fh:
+            head = fh.read(8 + len(_PULSE_SYNTH_MARKER))
+        if (head.startswith(b"ElfFile\x00")
+                and head[8:8 + len(_PULSE_SYNTH_MARKER)] == _PULSE_SYNTH_MARKER):
+            return _parse_pulse_synth(file_path, since)
+    except OSError:
+        # Fall through to the binary parsers — if open() failed they'll
+        # fail the same way and return [].
+        pass
+
     try:
         return _parse_evtx_fast(file_path, since)
     except Exception:
@@ -99,6 +125,70 @@ def parse_evtx(file_path, since=None):
             return _parse_evtx_full(file_path, since)
         except Exception:
             return []
+
+
+def _parse_pulse_synth(file_path, since=None):
+    """Read a Pulse-synthetic .evtx sample file.
+
+    Format on disk (so the existing `.evtx` upload validator + magic-byte
+    check still accept the file):
+
+        b"ElfFile\\x00"                        # 8-byte real .evtx magic
+        b"PULSE-SYNTH-v1\\n"                   # sentinel (this branch's trigger)
+        <utf-8 JSON list of event dicts>     # the payload
+
+    The JSON payload is a list of event dicts shaped exactly like the
+    output of the binary parsers — `event_id` / `timestamp` / `data` /
+    `record_num` / `computer`. This lets us ship synthetic threat
+    scenarios in samples/ without depending on a Windows machine to
+    produce binary .evtx files. See ``scripts/generate_sample_evtx.py``.
+
+    Returns [] on any parse failure so callers stay tolerant of bad
+    input the same way the binary parsers are.
+    """
+    try:
+        with open(file_path, "rb") as fh:
+            fh.read(8 + len(_PULSE_SYNTH_MARKER))   # skip header + sentinel
+            payload = fh.read()
+        events = json.loads(payload.decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return []
+    if not isinstance(events, list):
+        return []
+
+    out = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        # Normalize the few keys we rely on; tolerate missing ones the
+        # same way the binary parsers do (they emit empty-string / 0
+        # rather than raising).
+        record = {
+            "event_id":   int(ev.get("event_id") or 0),
+            "timestamp":  str(ev.get("timestamp") or ""),
+            "data":       str(ev.get("data") or ""),
+            "record_num": int(ev.get("record_num") or 0),
+            "computer":   str(ev.get("computer") or ""),
+        }
+        if since is not None:
+            ts = _coerce_event_ts(record["timestamp"])
+            if ts is None or ts < since:
+                continue
+        out.append(record)
+    return out
+
+
+def _coerce_event_ts(raw):
+    """Best-effort ISO-8601 → aware datetime. Returns None on bad input
+    so the caller can treat it as "no timestamp known" and include the
+    event in the unfiltered case."""
+    if not raw:
+        return None
+    try:
+        # Python 3.11+ handles trailing 'Z' natively.
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,107 @@
+# Pulse — one-command production deploy
+# --------------------------------------
+# Boots two containers: a Postgres database and the Pulse app + agent
+# transport. The app talks to Postgres via DATABASE_URL; the
+# entrypoint.sh waits for Postgres to accept connections before
+# launching the FastAPI server.
+#
+# First run:
+#   docker compose up -d
+#   docker compose logs -f pulse        # watch the admin seed line
+# Then open http://localhost:8000 — sign in with PULSE_ADMIN_EMAIL +
+# PULSE_ADMIN_PASSWORD.
+#
+# Before going live, change the four CHANGE_ME values below — at
+# minimum PULSE_SECRET, PULSE_ADMIN_PASSWORD, and POSTGRES_PASSWORD.
+
+services:
+  pulse:
+    build: .
+    container_name: pulse
+    restart: unless-stopped
+    ports:
+      # Host:Container. Map to 8443 if you want the conventional
+      # admin-app port; the container itself listens on 8000.
+      - "8000:8000"
+    depends_on:
+      - postgres
+    environment:
+      # ---- Runtime mode ----
+      # PULSE_ENV=production locks /docs, requires PULSE_SECRET, and
+      # enables the production CORS gate. Don't unset for real deploys.
+      PULSE_ENV: production
+
+      # ---- Session secret ----
+      # Must be a long random string. Generate one with:
+      #   python -c "import secrets; print(secrets.token_hex(32))"
+      # Rotating it logs every active session out, so pick once and keep.
+      PULSE_SECRET: CHANGE_ME_to_a_64_char_random_hex_string
+
+      # ---- CORS ----
+      # Only set this if you'll hit /api/* from a different domain
+      # (e.g. a reverse-proxy hostname or a custom marketing site
+      # making cross-origin requests). Same-origin requests work
+      # without it.
+      # PULSE_ALLOWED_ORIGIN: https://pulse.example.com
+
+      # ---- Hosted multi-tenant signup ----
+      # Default is closed (only first signup allowed). Set to 1 to
+      # open signup for real customers; pair with SMTP env vars below
+      # so verification emails go out.
+      # PULSE_HOSTED_SIGNUP: "1"
+
+      # ---- Database ----
+      # Points at the postgres service defined below. Pulse's
+      # db_backend.py auto-detects the postgres scheme and uses psycopg.
+      DATABASE_URL: postgresql://pulse:CHANGE_ME_pg_password@postgres:5432/pulse
+
+      # ---- First-run admin seed ----
+      # Used by docker/entrypoint.sh on first boot to create an admin
+      # account so the operator can sign in immediately. Skipped if a
+      # user already exists. After first boot you can remove these two
+      # variables — they're only read on container start.
+      PULSE_ADMIN_EMAIL: admin@example.com
+      PULSE_ADMIN_PASSWORD: CHANGE_ME_admin_password
+
+      # ---- Optional alert channels ----
+      # Each channel auto-enables when its required vars are set. Leave
+      # unset to disable that channel entirely.
+      # PULSE_SMTP_HOST: smtp.gmail.com
+      # PULSE_SMTP_PORT: "587"
+      # PULSE_SMTP_USER: alerts@example.com
+      # PULSE_SMTP_PASS: app_password_here
+      # PULSE_SLACK_WEBHOOK: https://hooks.slack.com/services/...
+      # PULSE_DISCORD_WEBHOOK: https://discord.com/api/webhooks/...
+
+      # ---- Agent download URL ----
+      # The landing page's "Download for Windows" button asks the
+      # server where the .exe lives. By default it points at this
+      # repo's GitHub Releases page; override to use your own mirror.
+      # PULSE_AGENT_DOWNLOAD_URL: https://github.com/barrytd/Pulse/releases/latest
+
+    volumes:
+      # Pulse generates report PDFs and persists agent.yaml files; the
+      # volume keeps them across container restarts. Mount only what's
+      # actually writable in production — never mount the source tree.
+      - pulse-reports:/app/reports
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pulse
+      POSTGRES_USER: pulse
+      # MUST match the password in pulse.DATABASE_URL above.
+      POSTGRES_PASSWORD: CHANGE_ME_pg_password
+    volumes:
+      - pulse-postgres:/var/lib/postgresql/data
+    # Don't expose Postgres to the host by default — only the pulse
+    # service in the same compose network needs it. Uncomment if you
+    # need to attach a SQL client from outside the container.
+    # ports:
+    #   - "5432:5432"
+
+volumes:
+  pulse-postgres:
+  pulse-reports:
