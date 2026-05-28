@@ -5,6 +5,22 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-05-28 — SIGMA rule import
+
+### SIGMA rule import (Sprint 8 — "Up Next" High-priority ticket)
+
+Admins can now paste community SIGMA YAML rules straight into Pulse and have them fire on every scan alongside the built-in detections. SigmaHQ ships thousands of community rules; this unlocks them.
+
+- Parser + runtime matcher in [`pulse/core/sigma.py`](pulse/core/sigma.py). Supports the pragmatic subset most community rules use: selection blocks with equality / `|contains` / `|startswith` / `|endswith` / `|re` modifiers; `and` / `or` / `not` / parens conditions; severity mapped from `level:` (`critical` / `high` / `medium` / `low` / `informational`); MITRE technique pulled from `attack.tXXXX[.XXX]` tags. Aggregations, `1 of them`, and the `|all` modifier raise `SigmaUnsupported` at parse time so unimplementable rules fail loud, not silent.
+- New `sigma_rules` DB table stores original YAML + compiled JSON spec with `organization_id` scoping for multi-tenant isolation. Helpers in [`pulse/database.py`](pulse/database.py): `save_sigma_rule`, `list_sigma_rules`, `get_sigma_rule`, `set_sigma_rule_enabled`, `delete_sigma_rule` — all org-scoped so one tenant can't touch another tenant's rules.
+- `run_all_detections(events, sigma_rules=...)` now optionally accepts a list of enabled SIGMA rules and runs them alongside the built-ins. The `/api/scan` endpoint loads the caller's org's enabled rules and passes them through. A broken stored row is skipped instead of crashing the scan.
+- REST API under [`/api/rules/sigma`](pulse/api.py): `GET` list / detail (any signed-in user in the org), `POST` upload + `POST` preview / `PUT` enable / `DELETE` (admin-only, rate-limited at 200 uploads / 30 previews per window). Body accepts either `{yaml: "..."}` JSON or a raw `text/yaml` payload. 64 KB size cap.
+- New **SIGMA Import** tab on the Rules page ([`pulse/static/js/rules.js`](pulse/static/js/rules.js)) with: imported-rules table (name, severity, MITRE, enable/disable toggle, delete), and an importer card for admins (paste YAML → Preview shows what Pulse extracted → Import saves). Viewers see the list read-only.
+- 3 sample SIGMA rules in [`samples/sigma/`](samples/sigma/): encoded PowerShell (`T1059.001`), mimikatz CLI (`T1003.001`), rundll32 from temp (`T1218.011`). Each one targets a real Windows attack the built-ins don't already cover.
+- 63 new tests across [`tests/test_sigma_parser.py`](tests/test_sigma_parser.py) (30), [`tests/test_sigma_db.py`](tests/test_sigma_db.py) (10), [`tests/test_sigma_runtime.py`](tests/test_sigma_runtime.py) (6), [`tests/test_sigma_api.py`](tests/test_sigma_api.py) (17).
+
+---
+
 ## 2026-05-28 — Time-based correlation engine + three bug fixes
 
 ### Time-based correlation engine (Sprint 8 — "Up Next" Urgent ticket)

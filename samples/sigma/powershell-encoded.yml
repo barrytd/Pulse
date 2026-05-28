@@ -1,0 +1,23 @@
+title: Suspicious PowerShell Encoded Command
+id: pulse-sample-powershell-encoded
+status: experimental
+description: |
+  Detects PowerShell process creation events whose command line contains
+  -EncodedCommand or -enc, a common technique to hide malicious payloads
+  from casual log review.
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+tags:
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection:
+    EventID: 4688
+    CommandLine|contains:
+      - '-EncodedCommand'
+      - '-enc '
+  condition: selection
+level: high

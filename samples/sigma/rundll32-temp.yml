@@ -1,0 +1,25 @@
+title: rundll32 Executing From Temp Directories
+id: pulse-sample-rundll32-temp
+status: experimental
+description: |
+  rundll32.exe spawned from %TEMP% or %APPDATA%\Local\Temp is a classic
+  living-off-the-land pattern used by droppers and post-exploitation
+  toolkits. Legitimate software rarely runs rundll32 from those paths.
+references:
+  - https://attack.mitre.org/techniques/T1218/011/
+tags:
+  - attack.defense_evasion
+  - attack.t1218.011
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  proc:
+    EventID: 4688
+    NewProcessName|endswith: '\rundll32.exe'
+  from_temp:
+    CommandLine|contains:
+      - '\Temp\'
+      - '\AppData\Local\Temp\'
+  condition: proc and from_temp
+level: high

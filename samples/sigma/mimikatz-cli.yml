@@ -1,0 +1,24 @@
+title: Mimikatz Command Line Invocation
+id: pulse-sample-mimikatz
+status: experimental
+description: |
+  Flags any process whose command line mentions mimikatz or one of its
+  well-known function names. Mimikatz is the canonical Windows credential
+  dumper; a hit on this rule almost always warrants investigation.
+references:
+  - https://attack.mitre.org/software/S0002/
+tags:
+  - attack.credential_access
+  - attack.t1003.001
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection:
+    CommandLine|contains:
+      - 'mimikatz'
+      - 'sekurlsa::'
+      - 'lsadump::'
+      - 'kerberos::ptt'
+  condition: selection
+level: critical
