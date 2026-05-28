@@ -76,6 +76,11 @@ from pulse.database import (
     count_waitlist_signups, delete_waitlist_signup,
     mint_email_verification_token, consume_email_verification_token,
     is_email_verified, mark_user_email_verified,
+    save_sigma_rule, list_sigma_rules, get_sigma_rule,
+    set_sigma_rule_enabled, delete_sigma_rule,
+)
+from pulse.core.sigma import (
+    parse_sigma, SigmaParseError, SigmaUnsupported,
 )
 from pulse.core.detections import run_all_detections
 from pulse.firewall import firewall_config
@@ -4298,6 +4303,173 @@ def _register_routes(app: FastAPI) -> None:
         set_rule_enabled(config, name, enabled)
         _write_config(app.state.config_path, config)
         return {"name": name, "enabled": enabled}
+
+    # -------------------------------------------------------------------
+    # SIGMA rule import (Sprint 8)
+    # -------------------------------------------------------------------
+    # Admins upload community SIGMA YAML and Pulse compiles it into a
+    # spec the runtime engine evaluates alongside built-in detections.
+    # All write endpoints are admin-only and rate-limited so a runaway
+    # script can't fill the DB. Reads are open to any signed-in user in
+    # the org so analysts can see which rules are active.
+
+    _SIGMA_MAX_BYTES = 64 * 1024  # plenty for a community rule
+
+    def _sigma_org_id(caller_user_id):
+        """The org id new SIGMA rules get attached to: the admin's own
+        org. Falls back to None for legacy single-user installs."""
+        admin = get_user_by_id(app.state.db_path, caller_user_id) or {}
+        raw = admin.get("organization_id")
+        return int(raw) if raw else None
+
+    def _sigma_read_scope(caller_user_id):
+        """Org id to use when *listing* rules. Admins on hosted multi-
+        tenant installs are still scoped to their own org so they don't
+        accidentally manage another tenant's rules. None = admin-scope
+        legacy / no-auth case."""
+        return _sigma_org_id(caller_user_id)
+
+    def _public_sigma_row(row, *, include_yaml=False):
+        """Strip the heavy fields off a stored sigma_rule before
+        returning it to the client. compiled_json and yaml_source are
+        only sent on the per-rule detail endpoint."""
+        if not row:
+            return None
+        out = {
+            "id":          row["id"],
+            "name":        row["name"],
+            "severity":    row["severity"],
+            "mitre":       row["mitre"],
+            "description": row["description"],
+            "enabled":     row["enabled"],
+            "origin":      row["origin"],
+            "created_at":  row["created_at"],
+            "created_by":  row["created_by"],
+            "updated_at":  row["updated_at"],
+        }
+        if include_yaml:
+            out["yaml_source"]   = row["yaml_source"]
+            out["compiled_json"] = row["compiled_json"]
+        return out
+
+    @app.get("/api/rules/sigma")
+    def list_sigma_rules_endpoint(user_id: int = Depends(require_login)):
+        """List every imported SIGMA rule visible to the caller's org.
+        Heavy YAML / compiled-JSON columns are stripped — fetch a single
+        rule by id to get those."""
+        org_id = _sigma_read_scope(user_id)
+        rows = list_sigma_rules(app.state.db_path, organization_id=org_id)
+        return {"rules": [_public_sigma_row(r) for r in rows]}
+
+    @app.get("/api/rules/sigma/{rule_id}")
+    def get_sigma_rule_endpoint(rule_id: int,
+                                user_id: int = Depends(require_login)):
+        org_id = _sigma_read_scope(user_id)
+        row = get_sigma_rule(app.state.db_path, rule_id, organization_id=org_id)
+        if not row:
+            raise HTTPException(404, detail="SIGMA rule not found.")
+        return _public_sigma_row(row, include_yaml=True)
+
+    async def _read_sigma_yaml(request: Request) -> str:
+        """Pull YAML out of a JSON `{yaml: ...}` body or a raw text body.
+        Enforces the size cap. Returns the YAML string."""
+        ct = (request.headers.get("content-type") or "").lower()
+        raw = await request.body()
+        if len(raw) > _SIGMA_MAX_BYTES:
+            raise HTTPException(
+                413,
+                detail=f"SIGMA rule too large (max {_SIGMA_MAX_BYTES // 1024} KB).",
+            )
+        if "application/json" in ct:
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                raise HTTPException(400, detail="Invalid JSON body.")
+            yaml_source = str((body or {}).get("yaml") or "")
+        else:
+            try:
+                yaml_source = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(400, detail="Body must be UTF-8 text.")
+        if not yaml_source.strip():
+            raise HTTPException(400, detail="Empty SIGMA rule body.")
+        return yaml_source
+
+    @app.post("/api/rules/sigma/preview")
+    async def preview_sigma_rule(request: Request,
+                                 user_id: int = Depends(require_admin)):
+        """Parse a YAML rule without saving it. Lets the UI show the
+        admin what Pulse extracted (title / severity / MITRE) before
+        they commit. Returns the parse error message verbatim on
+        failure so the import form can surface a useful hint."""
+        rate_limit.hit(request, "sigma_preview", window_sec=60, max_hits=30)
+        yaml_source = await _read_sigma_yaml(request)
+        try:
+            parsed = parse_sigma(yaml_source)
+        except SigmaUnsupported as exc:
+            raise HTTPException(422, detail=f"Unsupported SIGMA feature: {exc}")
+        except SigmaParseError as exc:
+            raise HTTPException(400, detail=f"SIGMA parse error: {exc}")
+        return {
+            "title":       parsed.title,
+            "severity":    parsed.severity,
+            "mitre":       parsed.mitre,
+            "description": parsed.description,
+        }
+
+    @app.post("/api/rules/sigma")
+    async def upload_sigma_rule(request: Request,
+                                user_id: int = Depends(require_admin)):
+        """Parse + save a YAML rule. Admin-only and rate-limited.
+        Returns the public row on success; 400/422 with the parser's
+        message on failure."""
+        rate_limit.hit(request, "sigma_upload", window_sec=3600, max_hits=200)
+        yaml_source = await _read_sigma_yaml(request)
+        try:
+            parsed = parse_sigma(yaml_source)
+        except SigmaUnsupported as exc:
+            raise HTTPException(422, detail=f"Unsupported SIGMA feature: {exc}")
+        except SigmaParseError as exc:
+            raise HTTPException(400, detail=f"SIGMA parse error: {exc}")
+        org_id = _sigma_org_id(user_id)
+        new_id = save_sigma_rule(
+            app.state.db_path,
+            organization_id=org_id,
+            parsed_rule=parsed,
+            yaml_source=yaml_source,
+            created_by=user_id,
+        )
+        row = get_sigma_rule(app.state.db_path, new_id)
+        return _public_sigma_row(row, include_yaml=True)
+
+    @app.put("/api/rules/sigma/{rule_id}/enabled")
+    async def set_sigma_rule_enabled_endpoint(
+        rule_id: int, request: Request,
+        user_id: int = Depends(require_admin),
+    ):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if "enabled" not in body:
+            raise HTTPException(400, detail="Missing 'enabled' boolean in body.")
+        enabled = bool(body.get("enabled"))
+        org_id = _sigma_org_id(user_id)
+        ok = set_sigma_rule_enabled(
+            app.state.db_path, rule_id, enabled, organization_id=org_id,
+        )
+        if not ok:
+            raise HTTPException(404, detail="SIGMA rule not found.")
+        return {"id": rule_id, "enabled": enabled}
+
+    @app.delete("/api/rules/sigma/{rule_id}")
+    def delete_sigma_rule_endpoint(rule_id: int,
+                                   user_id: int = Depends(require_admin)):
+        org_id = _sigma_org_id(user_id)
+        ok = delete_sigma_rule(app.state.db_path, rule_id, organization_id=org_id)
+        if not ok:
+            raise HTTPException(404, detail="SIGMA rule not found.")
+        return {"status": "ok", "id": rule_id}
 
     # -------------------------------------------------------------------
     # Live monitor endpoints
