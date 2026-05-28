@@ -2292,7 +2292,7 @@ def detect_lateral_spray(events):
     return findings
 
 
-def run_all_detections(events):
+def run_all_detections(events, sigma_rules=None):
     """
     Runs every detection rule against the parsed events.
 
@@ -2302,6 +2302,11 @@ def run_all_detections(events):
 
     Parameters:
         events (list): List of event dictionaries from the parser.
+        sigma_rules (list): Optional list of stored SIGMA rule dicts
+            (shape from ``database.list_sigma_rules``). Each enabled rule
+            is evaluated against every event alongside the built-in
+            detections. Callers without DB access (unit tests, CLI
+            one-offs) can leave this ``None`` to skip SIGMA entirely.
 
     Returns:
         list: Combined list of all findings from all detection rules.
@@ -2340,6 +2345,12 @@ def run_all_detections(events):
     findings += detect_impossible_travel(events) or []
     findings += detect_privilege_escalation_chain(events) or []
     findings += detect_lateral_spray(events) or []
+
+    # SIGMA rules imported by the admin (Sprint 8). Each row carries its
+    # own compiled JSON spec; ``run_sigma_rules`` evaluates them all.
+    if sigma_rules:
+        from . import sigma as _sigma
+        findings += _sigma.run_sigma_rules(events, sigma_rules) or []
 
     # Windows events often name users by raw SID (e.g. S-1-5-21-...-1003)
     # instead of a friendly username. Resolve any SID strings in the free-text

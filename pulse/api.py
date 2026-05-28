@@ -643,6 +643,32 @@ def _findings_scope_kwargs(app, user_id):
     return kw
 
 
+def _load_enabled_sigma_rules(app, user_id):
+    """Return enabled SIGMA rule rows for the caller's organization.
+
+    Admins running on their own install fall back to admin-scope (no org
+    filter) so every rule in the database runs. Auth-disabled CLI/test
+    mode also gets admin scope. Other callers get their org's rules
+    only — tenant isolation lives in the DB helper.
+    """
+    db_path = app.state.db_path
+    try:
+        from pulse.database import list_sigma_rules, get_user_by_id
+    except Exception:
+        return []
+    org_id = None
+    if user_id is not None and getattr(app.state, "auth_required", True):
+        user = get_user_by_id(db_path, user_id)
+        if user and user.get("role") != "admin":
+            raw = user.get("organization_id")
+            org_id = int(raw) if raw else None
+    try:
+        return list_sigma_rules(db_path, organization_id=org_id,
+                                 enabled_only=True)
+    except Exception:
+        return []
+
+
 def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
     """Record a scan-deletion in the audit log. Wrapped in try/except via
     blocker.log_audit so a logging failure never breaks the delete."""
@@ -2092,7 +2118,8 @@ def _register_routes(app: FastAPI) -> None:
                 )
 
             events = parse_evtx(tmp.name)
-            findings = run_all_detections(events)
+            sigma_rules = _load_enabled_sigma_rules(app, user_id)
+            findings = run_all_detections(events, sigma_rules=sigma_rules)
 
             # Audit the live Windows Firewall policy on every API scan.
             # Findings are skipped silently on non-Windows or when netsh

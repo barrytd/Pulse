@@ -541,3 +541,64 @@ def _get_event_field(event: Dict[str, Any], name: str) -> Optional[str]:
             if attr_name and attr_name.lower() == lname:
                 return (el.text or "")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Runtime integration — evaluate a batch of compiled rules across events
+# ---------------------------------------------------------------------------
+
+def run_sigma_rules(events: List[Dict[str, Any]],
+                    rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Evaluate a list of stored SIGMA rule rows against ``events`` and
+    return a list of Pulse-shaped finding dicts.
+
+    ``rules`` is the shape returned by ``database.list_sigma_rules``:
+    each row has ``name``, ``severity``, ``mitre``, ``compiled_json``.
+    A rule whose ``compiled_json`` fails to decode is skipped rather
+    than crashing the whole scan — bad rows shouldn't take the engine
+    down with them.
+    """
+    findings: List[Dict[str, Any]] = []
+    if not events or not rules:
+        return findings
+
+    for rule_row in rules:
+        raw = rule_row.get("compiled_json") or ""
+        if not raw:
+            continue
+        try:
+            compiled = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        name = rule_row.get("name") or compiled.get("title") or "SIGMA rule"
+        severity = (rule_row.get("severity")
+                    or compiled.get("severity") or "MEDIUM")
+        mitre = rule_row.get("mitre") or compiled.get("mitre")
+        description = (rule_row.get("description")
+                       or compiled.get("description") or "")
+
+        for event in events:
+            try:
+                hit = matches(compiled, event)
+            except Exception:
+                # Defensive — a single broken rule must not poison the
+                # rest of the scan. ``matches`` already swallows the
+                # common cases (bad XML, missing fields); this is the
+                # belt-and-suspenders fallback.
+                continue
+            if not hit:
+                continue
+            finding = {
+                "rule":     name,
+                "raw_xml":  event.get("data") or "",
+                "event_id": event.get("event_id"),
+                "severity": severity,
+                "details": (
+                    description
+                    or f"SIGMA rule '{name}' matched at {event.get('timestamp')}."
+                ),
+            }
+            if mitre:
+                finding["mitre"] = mitre
+            findings.append(finding)
+    return findings
