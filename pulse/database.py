@@ -327,6 +327,33 @@ CREATE TABLE IF NOT EXISTS notifications (
 """
 
 
+# Sprint 8 — SIGMA rule import. One row per detection rule imported by an
+# admin from community SIGMA YAML (or pasted in by hand). Both the original
+# YAML source and the compiled JSON spec are stored so the UI can show the
+# admin exactly what they uploaded *and* the runtime engine can evaluate
+# without re-parsing. `origin` is 'sigma-import' for now but exists so we
+# can later distinguish 'sigma-import' / 'custom' (in-app editor) / etc.
+# `organization_id` scopes per tenant; an org's admin can only manage their
+# own org's rules.
+_CREATE_SIGMA_RULES = """
+CREATE TABLE IF NOT EXISTS sigma_rules (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER,
+    name            TEXT    NOT NULL,
+    severity        TEXT    NOT NULL,
+    mitre           TEXT,
+    description     TEXT,
+    yaml_source     TEXT    NOT NULL,
+    compiled_json   TEXT    NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    origin          TEXT    NOT NULL DEFAULT 'sigma-import',
+    created_at      TEXT    NOT NULL,
+    created_by      INTEGER,
+    updated_at      TEXT
+);
+"""
+
+
 _CREATE_AGENTS = """
 CREATE TABLE IF NOT EXISTS agents (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -379,6 +406,7 @@ def init_db(db_path):
         _CREATE_AGENTS,
         _CREATE_NOTIFICATIONS,
         _CREATE_ORGANIZATIONS,
+        _CREATE_SIGMA_RULES,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -3057,3 +3085,139 @@ def _dominant_hostname(findings):
     if not counts:
         return None
     return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+# ---------------------------------------------------------------------------
+# SIGMA rules (Sprint 8)
+# ---------------------------------------------------------------------------
+
+_SIGMA_COLS = (
+    "id, organization_id, name, severity, mitre, description,"
+    " yaml_source, compiled_json, enabled, origin,"
+    " created_at, created_by, updated_at"
+)
+
+
+def _row_to_sigma(row):
+    if row is None:
+        return None
+    return {
+        "id":              row[0],
+        "organization_id": row[1],
+        "name":            row[2],
+        "severity":        row[3],
+        "mitre":           row[4],
+        "description":     row[5],
+        "yaml_source":     row[6],
+        "compiled_json":   row[7],
+        "enabled":         bool(row[8]),
+        "origin":          row[9],
+        "created_at":      row[10],
+        "created_by":      row[11],
+        "updated_at":      row[12],
+    }
+
+
+def save_sigma_rule(db_path, *, organization_id, parsed_rule, yaml_source,
+                    created_by=None, origin="sigma-import"):
+    """Persist a parsed SIGMA rule. ``parsed_rule`` is a
+    :class:`pulse.core.sigma.ParsedSigmaRule`. Returns the new row id."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    compiled_json = parsed_rule.to_json()
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO sigma_rules"
+            " (organization_id, name, severity, mitre, description,"
+            "  yaml_source, compiled_json, enabled, origin,"
+            "  created_at, created_by, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+            (
+                int(organization_id) if organization_id is not None else None,
+                parsed_rule.title,
+                parsed_rule.severity,
+                parsed_rule.mitre,
+                parsed_rule.description,
+                yaml_source,
+                compiled_json,
+                origin,
+                now,
+                int(created_by) if created_by is not None else None,
+                now,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def list_sigma_rules(db_path, organization_id=None, enabled_only=False):
+    """Newest-first list of SIGMA rules. Pass ``organization_id`` to scope
+    to a single tenant; ``None`` returns every rule across the install
+    (admin scope). ``enabled_only`` filters to active rules for the
+    runtime engine."""
+    sql = f"SELECT {_SIGMA_COLS} FROM sigma_rules"
+    where = []
+    params = []
+    if organization_id is not None:
+        where.append("organization_id = ?")
+        params.append(int(organization_id))
+    if enabled_only:
+        where.append("enabled = 1")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id DESC"
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [_row_to_sigma(r) for r in rows]
+
+
+def get_sigma_rule(db_path, rule_id, organization_id=None):
+    """Fetch one rule by id. If ``organization_id`` is supplied, returns
+    None when the rule belongs to a different org (tenant isolation)."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"SELECT {_SIGMA_COLS} FROM sigma_rules WHERE id = ?",
+            (int(rule_id),),
+        ).fetchone()
+    rule = _row_to_sigma(row)
+    if rule is None:
+        return None
+    if organization_id is not None and rule["organization_id"] != int(organization_id):
+        return None
+    return rule
+
+
+def set_sigma_rule_enabled(db_path, rule_id, enabled, *, organization_id=None):
+    """Flip a rule's enabled flag. Returns True if a row was updated.
+    Scoped by ``organization_id`` when provided so one tenant can't toggle
+    another tenant's rules."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        if organization_id is not None:
+            cursor = conn.execute(
+                "UPDATE sigma_rules SET enabled = ?, updated_at = ?"
+                " WHERE id = ? AND organization_id = ?",
+                (1 if enabled else 0, now, int(rule_id), int(organization_id)),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE sigma_rules SET enabled = ?, updated_at = ?"
+                " WHERE id = ?",
+                (1 if enabled else 0, now, int(rule_id)),
+            )
+        return cursor.rowcount > 0
+
+
+def delete_sigma_rule(db_path, rule_id, *, organization_id=None):
+    """Remove a SIGMA rule. Scoped by ``organization_id`` when provided.
+    Returns True if a row was deleted."""
+    with _connect(db_path) as conn:
+        if organization_id is not None:
+            cursor = conn.execute(
+                "DELETE FROM sigma_rules WHERE id = ? AND organization_id = ?",
+                (int(rule_id), int(organization_id)),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM sigma_rules WHERE id = ?",
+                (int(rule_id),),
+            )
+        return cursor.rowcount > 0
