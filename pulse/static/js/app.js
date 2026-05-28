@@ -210,6 +210,10 @@ import {
   rulesShowTab,
   rulesClearFilter,
   filterByTechnique,
+  previewSigmaRule,
+  uploadSigmaRule,
+  toggleSigmaRule,
+  deleteSigmaRule,
 } from './rules.js';
 import {
   openAuditDrawer,
@@ -471,6 +475,10 @@ const actions = {
   rulesShowTab,
   rulesClearFilter,
   filterByTechnique,
+  previewSigmaRule,
+  uploadSigmaRule,
+  toggleSigmaRule,
+  deleteSigmaRule,
 
   // audit log
   openAuditDrawer,

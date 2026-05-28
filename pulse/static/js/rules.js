@@ -6,10 +6,13 @@
 'use strict';
 
 import { escapeHtml, showToast, toastError, mitreMap } from './dashboard.js';
+import { apiGetMe } from './api.js';
 
 var _rulesCache = [];
-var _activeTab  = 'rules';          // 'rules' | 'coverage'
+var _activeTab  = 'rules';          // 'rules' | 'coverage' | 'sigma'
 var _activeTechniqueFilter = null;  // e.g. "T1110" to restrict the Rules table
+var _sigmaCache = [];
+var _sigmaIsAdmin = false;
 
 // Technique -> tactic mapping for the techniques Pulse rules reference.
 // MITRE ATT&CK links each technique to one-or-more tactics; we pick the
@@ -249,8 +252,184 @@ function _clearTechniqueFilter() {
 }
 
 export function rulesShowTab(tab) {
-  _activeTab = (tab === 'coverage') ? 'coverage' : 'rules';
+  if (tab === 'coverage') _activeTab = 'coverage';
+  else if (tab === 'sigma') _activeTab = 'sigma';
+  else _activeTab = 'rules';
   _renderPage();
+  if (_activeTab === 'sigma') _refreshSigmaTab();
+}
+
+// -----------------------------------------------------------------
+// SIGMA Import tab — paste/upload community SIGMA YAML, see imported
+// rules in a list, toggle them on/off, delete. Admin-only writes;
+// viewers still see the list.
+// -----------------------------------------------------------------
+
+async function _fetchSigmaRules() {
+  var resp = await fetch('/api/rules/sigma');
+  if (!resp.ok) throw new Error('Failed to load SIGMA rules: HTTP ' + resp.status);
+  var body = await resp.json();
+  return body.rules || [];
+}
+
+async function _refreshSigmaTab() {
+  try {
+    _sigmaCache = await _fetchSigmaRules();
+  } catch (e) {
+    toastError(e.message);
+    _sigmaCache = [];
+  }
+  var box = document.getElementById('sigma-list');
+  if (box) box.innerHTML = _sigmaListHtml();
+}
+
+function _sigmaListHtml() {
+  if (!_sigmaCache.length) {
+    return '<div class="dash-empty-note">No SIGMA rules imported yet. ' +
+           (_sigmaIsAdmin ? 'Paste a YAML rule below to add one.' : 'Ask an admin to import one.') +
+           '</div>';
+  }
+  var rows = _sigmaCache.map(function (r) {
+    var tone = _severityTone(r.severity);
+    var toggleCls = 'rule-toggle' + (r.enabled ? ' on' : ' off');
+    var ariaPressed = r.enabled ? 'true' : 'false';
+    var mitre = r.mitre
+      ? '<span class="mitre-chip mono">' + escapeHtml(r.mitre) + '</span>'
+      : '<span class="muted">—</span>';
+    var actions = '';
+    if (_sigmaIsAdmin) {
+      actions =
+        '<button class="' + toggleCls + '" role="switch" aria-pressed="' + ariaPressed + '" ' +
+          'data-action="toggleSigmaRule" data-arg="' + r.id + '">' +
+          '<span class="rule-toggle-track"><span class="rule-toggle-thumb"></span></span>' +
+          '<span class="rule-toggle-label">' + (r.enabled ? 'Enabled' : 'Disabled') + '</span>' +
+        '</button>' +
+        ' <button class="btn btn-ghost btn-sm" data-action="deleteSigmaRule" data-arg="' + r.id + '">Delete</button>';
+    } else {
+      actions = '<span class="muted">' + (r.enabled ? 'Enabled' : 'Disabled') + '</span>';
+    }
+    return '<tr class="rule-row sev-edge-' + tone + (r.enabled ? '' : ' rule-row-disabled') + '">' +
+      '<td class="rule-name-cell"><div class="rule-name">' + escapeHtml(r.name) + '</div>' +
+        '<div class="rule-subline muted">' + escapeHtml(r.description || '') + '</div></td>' +
+      '<td><span class="pill pill-' + tone + '">' + escapeHtml(r.severity || 'LOW') + '</span></td>' +
+      '<td>' + mitre + '</td>' +
+      '<td class="col-actions">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<div style="overflow-x:auto;"><table class="data-table rules-table">' +
+           '<thead><tr><th>Rule</th><th>Severity</th><th>MITRE</th><th>Status</th></tr></thead>' +
+           '<tbody>' + rows + '</tbody>' +
+         '</table></div>';
+}
+
+function _sigmaTabHtml() {
+  var importer = '';
+  if (_sigmaIsAdmin) {
+    importer =
+      '<div class="card" style="margin-top:16px;">' +
+        '<div class="section-label">Import a SIGMA rule</div>' +
+        '<p class="muted" style="margin:0 0 8px 0;">Paste a community SIGMA YAML rule. ' +
+          'Pulse compiles it and runs it against your event scans alongside the built-in detections.</p>' +
+        '<textarea id="sigma-yaml-input" rows="14" class="textarea-mono" ' +
+          'placeholder="title: Suspicious PowerShell Encoded Command&#10;detection:&#10;  selection:&#10;    EventID: 4688&#10;    CommandLine|contains: \'-EncodedCommand\'&#10;  condition: selection&#10;level: high"></textarea>' +
+        '<div id="sigma-import-feedback" class="muted" style="margin-top:8px; min-height:1.2em;"></div>' +
+        '<div style="display:flex; gap:8px; margin-top:8px;">' +
+          '<button class="btn btn-secondary" data-action="previewSigmaRule">Preview</button>' +
+          '<button class="btn btn-primary" data-action="uploadSigmaRule">Import</button>' +
+        '</div>' +
+      '</div>';
+  }
+  return '<div class="card">' +
+           '<div class="section-label">Imported SIGMA rules</div>' +
+           '<div id="sigma-list">' + _sigmaListHtml() + '</div>' +
+         '</div>' +
+         importer;
+}
+
+function _setSigmaFeedback(msg, kind) {
+  var el = document.getElementById('sigma-import-feedback');
+  if (!el) return;
+  el.className = 'sigma-feedback ' + (kind || 'muted');
+  el.textContent = msg || '';
+}
+
+export async function previewSigmaRule() {
+  var ta = document.getElementById('sigma-yaml-input');
+  var yaml = ta ? ta.value : '';
+  if (!yaml.trim()) { _setSigmaFeedback('Paste a YAML rule first.', 'warn'); return; }
+  _setSigmaFeedback('Parsing…', 'muted');
+  try {
+    var resp = await fetch('/api/rules/sigma/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml: yaml }),
+    });
+    var body = await resp.json();
+    if (!resp.ok) { _setSigmaFeedback(body.detail || 'Preview failed.', 'error'); return; }
+    _setSigmaFeedback(
+      'Looks good: ' + body.title + ' [' + body.severity +
+      (body.mitre ? ' • ' + body.mitre : '') + ']',
+      'ok',
+    );
+  } catch (e) {
+    _setSigmaFeedback(e.message, 'error');
+  }
+}
+
+export async function uploadSigmaRule() {
+  var ta = document.getElementById('sigma-yaml-input');
+  var yaml = ta ? ta.value : '';
+  if (!yaml.trim()) { _setSigmaFeedback('Paste a YAML rule first.', 'warn'); return; }
+  _setSigmaFeedback('Importing…', 'muted');
+  try {
+    var resp = await fetch('/api/rules/sigma', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml: yaml }),
+    });
+    var body = await resp.json();
+    if (!resp.ok) { _setSigmaFeedback(body.detail || 'Import failed.', 'error'); return; }
+    _setSigmaFeedback('Imported: ' + body.name, 'ok');
+    if (ta) ta.value = '';
+    showToast('SIGMA rule imported.');
+    await _refreshSigmaTab();
+  } catch (e) {
+    _setSigmaFeedback(e.message, 'error');
+  }
+}
+
+export async function toggleSigmaRule(ruleId) {
+  var row = _sigmaCache.find(function (r) { return String(r.id) === String(ruleId); });
+  if (!row) return;
+  var newEnabled = !row.enabled;
+  try {
+    var resp = await fetch('/api/rules/sigma/' + encodeURIComponent(ruleId) + '/enabled', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: newEnabled }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    row.enabled = newEnabled;
+    var box = document.getElementById('sigma-list');
+    if (box) box.innerHTML = _sigmaListHtml();
+    showToast(row.name + ' ' + (newEnabled ? 'enabled' : 'disabled') + '.');
+  } catch (e) {
+    toastError('Could not update rule: ' + e.message);
+  }
+}
+
+export async function deleteSigmaRule(ruleId) {
+  var row = _sigmaCache.find(function (r) { return String(r.id) === String(ruleId); });
+  if (!row) return;
+  if (!window.confirm('Delete "' + row.name + '"? This cannot be undone.')) return;
+  try {
+    var resp = await fetch('/api/rules/sigma/' + encodeURIComponent(ruleId), { method: 'DELETE' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showToast('Deleted ' + row.name + '.');
+    await _refreshSigmaTab();
+  } catch (e) {
+    toastError('Could not delete rule: ' + e.message);
+  }
 }
 
 export function rulesClearFilter() { _clearTechniqueFilter(); }
@@ -261,6 +440,7 @@ function _renderPage() {
   var enabledCount = _rulesCache.filter(function (r) { return r.enabled; }).length;
   var tabRulesCls = 'rules-tab' + (_activeTab === 'rules' ? ' active' : '');
   var tabCovCls   = 'rules-tab' + (_activeTab === 'coverage' ? ' active' : '');
+  var tabSigmaCls = 'rules-tab' + (_activeTab === 'sigma' ? ' active' : '');
   var filterBanner = '';
   if (_activeTab === 'rules' && _activeTechniqueFilter) {
     filterBanner = '<div class="rules-filter-banner">' +
@@ -271,6 +451,8 @@ function _renderPage() {
   var body;
   if (_activeTab === 'coverage') {
     body = _coverageHtml();
+  } else if (_activeTab === 'sigma') {
+    body = '';  // SIGMA tab renders its own cards below
   } else {
     body =
       '<div style="overflow-x:auto;">' +
@@ -297,11 +479,13 @@ function _renderPage() {
         '<div class="rules-tabs">' +
           '<button class="' + tabRulesCls + '" data-action="rulesShowTab" data-arg="rules">Rules</button>' +
           '<button class="' + tabCovCls + '" data-action="rulesShowTab" data-arg="coverage">MITRE Coverage</button>' +
+          '<button class="' + tabSigmaCls + '" data-action="rulesShowTab" data-arg="sigma">SIGMA Import</button>' +
         '</div>' +
       '</div>' +
       filterBanner +
       body +
-    '</div>';
+    '</div>' +
+    (_activeTab === 'sigma' ? _sigmaTabHtml() : '');
   if (_activeTab === 'rules') _renderTable();
   void mitreMap;
 }
@@ -316,5 +500,10 @@ export async function renderRulesPage() {
     c.innerHTML = '<div class="card"><div class="dash-empty-note">' + escapeHtml(e.message) + '</div></div>';
     return;
   }
+  try {
+    var me = await apiGetMe();
+    _sigmaIsAdmin = !!(me && me.role === 'admin');
+  } catch (e) { _sigmaIsAdmin = false; }
+  try { _sigmaCache = await _fetchSigmaRules(); } catch (e) { _sigmaCache = []; }
   _renderPage();
 }
