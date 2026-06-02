@@ -74,6 +74,7 @@ Flat status board organized by category, sorted by priority within each section.
 | **Sidebar filter configs (other pages)** | Per-page sidebar-filter framework already exists (`pulse/static/js/sidebar-filters.js`). Findings page is wired; wire each of Dashboard / Monitor / Fleet / Audit Log / Firewall with the right dimensions for that surface. |
 | **Findings sidebar — Rule filter** | Top-N (10–15 rules) + "Show all" affordance — current list overflows the sidebar on noisy installs. |
 | **Public landing page polish** | Live-demo link with read-only viewer + pre-loaded sample data, GitHub stars badge, test-count badge, social-proof section. |
+| **Reports page UI polish** | Template cards squish into a narrow column on the live dashboard — description text wraps after every 1-2 words instead of using available width. KPI tile spacing also reads cramped against the filter chip row. Targets [`pulse/static/css/dashboard.css`](pulse/static/css/dashboard.css) `.report-template-card` (widen body column, give the description more horizontal space) and the `.reports-kpi-strip` margin-bottom. Also review category-label vertical rhythm: "Threat Detection" sits too close to the card grid below it. Quick visual pass; no API changes. |
 
 ---
 
@@ -81,7 +82,7 @@ Flat status board organized by category, sorted by priority within each section.
 
 > Tracked defects. Drop in here with a one-line repro + the file where it bites; promote into **Up Next** with priority based on severity + frequency.
 
-*No tracked bugs right now.*
+- 🟠 **Threat Detection Summary download fails with "Method Not Allowed"** — clicking Generate on the Threat Detection Summary card returns a 405 toast and no file downloads. Reproduced 2026-06-02 against the freshly-shipped Phase 1 catalog template. Suspected cause: the running API server is stale and falling back to the old `GET /api/reports/{filename}` route; restart didn't clear it for the reporter. Endpoint is at [`POST /api/reports/generate`](pulse/api.py); frontend submit is in [`submitGenerateReport`](pulse/static/js/reports.js). Investigate: (1) confirm the route is actually registered at boot (`/openapi.json`), (2) check whether something is rewriting POST→GET in a proxy / dev server, (3) consider moving the route to an unambiguous prefix like `/api/templates/generate` so the `{filename}` parameterized path can't shadow it under any circumstance.
 
 ---
 
