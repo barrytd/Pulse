@@ -1743,6 +1743,7 @@ function _buildFindingsTable(findings) {
         '<td class="col-rule" data-filter-dim="rule" data-filter-value="' + escapeHtml(rule) + '" ' +
           'data-filter-label="' + escapeHtml(rule) + '">' +
           '<div class="rule-cell">' +
+            _riskShield(f) +
             '<span class="rule-name">' + escapeHtml(rule) + '</span>' +
             _refIdPill(f) +
             _wfChipInline(f) +
@@ -1851,6 +1852,20 @@ export function _expandRow(f, colspan) {
     _remediationBlock(f) +
     xmlBtn +
   '</td></tr>';
+}
+
+// Small colored square next to the rule name in the findings table.
+// Color = exploit difficulty pulled from the knowledge base
+// (green=low, orange=medium, red=high). Tooltip explains the scale so
+// users without a security background know what they're looking at.
+export function _riskShield(f) {
+  var diff = (f.knowledge && f.knowledge.difficulty || '').toLowerCase();
+  if (!diff || (diff !== 'low' && diff !== 'medium' && diff !== 'high')) {
+    return '';
+  }
+  var label = diff.charAt(0).toUpperCase() + diff.slice(1);
+  var tooltip = label + ' exploitation difficulty';
+  return '<span class="risk-shield risk-' + diff + '" title="' + tooltip + '" aria-label="' + tooltip + '"></span>';
 }
 
 // Render the Security Guide card — Pulse's audience often does not have

@@ -20,12 +20,13 @@ import { renderWhitelistPage } from './whitelist.js';
 import { renderSettingsPage } from './settings.js';
 import { renderReportsPage } from './reports.js';
 import { renderRulesPage } from './rules.js';
+import { renderSecurityAdvisorPage } from './advisor.js';
 import { renderAuditPage } from './audit.js';
 import { renderCompliancePage } from './compliance.js';
 import { renderTrendsPage } from './trends.js';
 import { renderThreatIntelPage } from './threat-intel.js';
 
-export const validPages = ['dashboard','monitor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings','intel'];
+export const validPages = ['dashboard','monitor','advisor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings','intel'];
 
 // Current page — mutable module state. Exposed via getter so other
 // modules can peek (see theme.js).
@@ -87,6 +88,7 @@ export function navigate(page, opts) {
   var renderers = {
     dashboard: renderDashboardPage,
     monitor:   renderMonitorPage,
+    advisor:   renderSecurityAdvisorPage,
     findings:  renderFindingsPage,
     history:   renderHistoryPage,
     fleet:     renderFleetPage,

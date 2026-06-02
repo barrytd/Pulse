@@ -4283,6 +4283,177 @@ def _register_routes(app: FastAPI) -> None:
         )
 
     # -------------------------------------------------------------------
+    # GET /api/advisor/overview — Security Advisor page payload
+    # -------------------------------------------------------------------
+    # Pulse's audience often does not have a security analyst on staff,
+    # so the Advisor page is the "what's wrong, what do I do" landing
+    # for the non-expert. The payload bundles a plain-language posture
+    # summary, a prioritized concern list (severity × exploit difficulty),
+    # a small library of attack concepts, and a hardening checklist.
+    @app.get("/api/advisor/overview")
+    def advisor_overview(user_id: int = Depends(require_login)):
+        from pulse.core.knowledge_base import KNOWLEDGE, get_knowledge
+
+        scope = _findings_scope_kwargs(app, user_id)
+        # Pull the last 200 scans worth of findings — plenty for the
+        # advisor's purpose (it ranks by severity + count, not history).
+        scans = get_history(app.state.db_path, limit=200, **scope) or []
+
+        # Aggregate open findings by rule. "Open" = workflow_status not
+        # 'resolved' and not flagged false_positive.
+        from collections import Counter
+        rule_counts = Counter()
+        sev_counts  = Counter()
+        host_counts = Counter()
+        total_open  = 0
+        # Use whatever scope kwargs work for findings reads.
+        for s in scans:
+            scan_id = s.get("id")
+            if scan_id is None:
+                continue
+            try:
+                findings = get_scan_findings(app.state.db_path, scan_id,
+                                              **scope) or []
+            except TypeError:
+                # get_scan_findings may not accept all scope kwargs in
+                # legacy paths; fall back to plain.
+                findings = get_scan_findings(app.state.db_path, scan_id) or []
+            for f in findings:
+                if f.get("false_positive"):
+                    continue
+                if (f.get("workflow_status") or "").lower() == "resolved":
+                    continue
+                rule = f.get("rule") or "Unknown"
+                sev  = (f.get("severity") or "LOW").upper()
+                host = f.get("hostname") or ""
+                rule_counts[rule] += 1
+                sev_counts[sev] += 1
+                if host:
+                    host_counts[host] += 1
+                total_open += 1
+
+        # Build the top-concerns list. Ranking key: severity weight
+        # times exploit-difficulty weight times raw count. Low-difficulty
+        # exploits get bumped because a 12-year-old with a YouTube
+        # tutorial can pull them off.
+        _SEV_RANK  = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+        _DIFF_BUMP = {"low": 1.5, "medium": 1.0, "high": 0.7}
+
+        concerns = []
+        for rule, count in rule_counts.items():
+            k = get_knowledge(rule)
+            sev = (RULE_META.get(rule, {}).get("severity") or "LOW").upper()
+            diff = (k.get("difficulty") or "medium").lower()
+            score = _SEV_RANK.get(sev, 1) * _DIFF_BUMP.get(diff, 1.0) * count
+            concerns.append({
+                "rule":           rule,
+                "count":          count,
+                "severity":       sev,
+                "difficulty":     diff,
+                "plain_language": k.get("plain_language"),
+                "immediate_actions": k.get("immediate_actions") or [],
+                "score":          round(score, 2),
+            })
+        concerns.sort(key=lambda c: c["score"], reverse=True)
+        top_concerns = concerns[:5]
+
+        # Plain-language posture sentence — frames the numbers for users
+        # who can't read a severity histogram at a glance.
+        if total_open == 0:
+            posture = "No unresolved findings. Your scans look clean."
+        else:
+            top_host = host_counts.most_common(1)[0][0] if host_counts else None
+            posture_parts = []
+            if sev_counts["CRITICAL"]:
+                posture_parts.append(
+                    f"{sev_counts['CRITICAL']} critical issue"
+                    f"{'s' if sev_counts['CRITICAL'] != 1 else ''} that need"
+                    f"{'s' if sev_counts['CRITICAL'] == 1 else ''} immediate attention"
+                )
+            if sev_counts["HIGH"]:
+                posture_parts.append(
+                    f"{sev_counts['HIGH']} high-severity issue"
+                    f"{'s' if sev_counts['HIGH'] != 1 else ''}"
+                )
+            if not posture_parts:
+                posture_parts.append(
+                    f"{total_open} unresolved finding"
+                    f"{'s' if total_open != 1 else ''}"
+                )
+            posture = "Your network has " + " and ".join(posture_parts) + "."
+            if top_host and top_concerns:
+                posture += (
+                    f" The most active host is {top_host}; the most "
+                    f"pressing concern is {top_concerns[0]['rule']}."
+                )
+
+        # Concepts library — a small set of attack-type explainers picked
+        # by topical breadth rather than alphabetical, so a beginner sees
+        # a representative range.
+        concept_rules = [
+            "Brute Force Attempt",
+            "Pass-the-Hash Attempt",
+            "Credential Dumping",
+            "Lateral Movement via Network Share",
+            "Suspicious PowerShell",
+            "Account Takeover Chain",
+            "Privilege Escalation Chain",
+        ]
+        concepts = []
+        for r in concept_rules:
+            if r not in KNOWLEDGE:
+                continue
+            entry = KNOWLEDGE[r]
+            concepts.append({
+                "name":           r,
+                "plain_language": entry["plain_language"],
+                "why_it_matters": entry["why_it_matters"],
+                "difficulty":     entry.get("difficulty", "medium"),
+                "learn_more":     entry.get("learn_more", []),
+            })
+
+        # Hardening checklist — high-impact Windows security best
+        # practices. `auto` items are derived from current findings;
+        # `manual` items are reminders the user verifies themselves.
+        # Falsy "open" means the practice looks observed; truthy "open"
+        # means there's an active finding suggesting it's missing.
+        checklist = [
+            {"label": "Audit logging is on and not being cleared",
+             "auto":  True,
+             "open":  rule_counts.get("Audit Log Cleared", 0) > 0},
+            {"label": "Antivirus is enabled and tamper-protected",
+             "auto":  True,
+             "open":  rule_counts.get("Antivirus Disabled", 0) > 0},
+            {"label": "Windows Firewall is on for all profiles",
+             "auto":  True,
+             "open":  (rule_counts.get("Firewall Disabled", 0)
+                       + rule_counts.get("Firewall Profile Disabled", 0)) > 0},
+            {"label": "No brute-force attempts succeeding",
+             "auto":  True,
+             "open":  rule_counts.get("Brute-Force Success", 0) > 0},
+            {"label": "MFA enforced on every remote-access account",
+             "auto":  False, "open": None},
+            {"label": "Admin accounts kept off regular workstations",
+             "auto":  False, "open": None},
+            {"label": "Logs forwarded off-host to a central store",
+             "auto":  False, "open": None},
+        ]
+
+        return {
+            "posture":      posture,
+            "totals": {
+                "critical":   sev_counts["CRITICAL"],
+                "high":       sev_counts["HIGH"],
+                "medium":     sev_counts["MEDIUM"],
+                "low":        sev_counts["LOW"],
+                "open_total": total_open,
+            },
+            "top_concerns": top_concerns,
+            "concepts":     concepts,
+            "checklist":    checklist,
+        }
+
+    # -------------------------------------------------------------------
     # PUT /api/rules/{name}/enabled — toggle a rule on/off in pulse.yaml
     # -------------------------------------------------------------------
     @app.put("/api/rules/{name}/enabled")
