@@ -404,10 +404,14 @@ def test_generate_rejects_unknown_template(client):
     detail = r.json()["detail"].lower()
     assert "threat_detection_summary" in detail
     assert "executive_summary" in detail
-    # Compliance + incident templates also listed once those phases shipped.
+    # Compliance + incident + Phase 5 templates listed.
     assert "nist_csf_coverage" in detail
     assert "iso_27001_annex_a" in detail
     assert "incident_investigation" in detail
+    assert "fleet_health" in detail
+    assert "board_ready_posture" in detail
+    assert "mitre_attack_coverage" in detail
+    assert "compliance_gap_analysis" in detail
 
 
 def test_generate_rejects_unknown_format(client):

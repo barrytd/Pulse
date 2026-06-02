@@ -5,6 +5,51 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-02 — Report template catalog Phases 3, 4, and 5 (full catalog shipped)
+
+The catalog is complete. Seven new templates land across three phases, totaling nine templates with the two from earlier. All share the same dispatch pattern proven in Phase 1.
+
+### Phase 3 — NIST CSF + ISO 27001 (compliance reports)
+
+Theoretical control coverage + observed detection activity in one document. Auditors want both.
+
+- Shared `pulse/reports/compliance.py` module exports `build_nist_csf()` and `build_iso_27001()`. Layers period finding counts onto the theoretical view from `rules_config.build_compliance_summary`. `NIST_EXPECTED_SUBCATEGORIES` + `ISO_EXPECTED_CONTROLS` define what should be there; the gap sections are the diff.
+- Renderers in `pulse/reports/compliance_renderers.py` dispatch on the dict's `framework` field. HTML uses serif body type + print-ready CSS for the audit-document look. PDF uses `KeepTogether` per group so sections don't split across pages. Coverage bars per group.
+- API: `nist_csf_coverage` and `iso_27001_annex_a` slugs registered. Disabled-rules list from pulse.yaml flows through.
+- UI: new "Compliance" category section (blue accent) with both cards. Both default to "Recent activity" scope.
+- **17 tests** in `test_compliance_reports.py`.
+
+### Phase 4 — Incident Investigation Report
+
+The IR-handoff document. Different scope shape (host or finding_ids) instead of date-range.
+
+- `pulse/reports/incident.py` builds per-finding rich detail: source IP + account extracted from raw XML, threat-intel decoration (best-effort, cache-only), analyst notes from the database, remediation actions taken (IP blocks). Chain-of-custody: SHA-256 over (id, ref_id, rule, timestamp, raw_xml) per finding plus a report-level digest over the concatenated finding hashes. Hex digests printed in the manifest so a reviewer can recompute and verify.
+- Renderers in `pulse/reports/incident_renderers.py`. PDF uses `KeepTogether` on every finding card. Raw event XML rendered in 7.5pt Courier with a per-card truncation cap so a 100-finding report stays printable. HTML embeds the dark-themed event block + manifest table.
+- API: dedicated `_generate_incident_report` helper routes the host / finding_ids scope.
+- UI: new "Incident" category section (orange accent). Modal hides date-range radios for this template; shows either a host picker or a preselected-findings confirmation line.
+- **Entry points**: Findings page bulk action bar now has a "Generate Incident Report" button that pre-scopes to the selected finding IDs. Fleet page table rows have a per-host siren icon that opens the modal pre-scoped to that host.
+- **31 tests** in `test_incident_report.py`.
+
+### Phase 5 — Fleet Health, Board-Ready, MITRE Coverage, Compliance Gap
+
+Four templates, one commit because they share infrastructure (single light-theme HTML scaffold, shared PDF stat-tile + table helpers).
+
+- **Fleet Health** (`pulse/reports/fleet_health.py`): every monitored host ranked by risk. Risk tiers match the dashboard's score thresholds. Stale section spotlights hosts with no recent scan. Green accent on the card.
+- **Board-Ready Posture** (`pulse/reports/board_ready.py`): quarterly-style executive view. Inline SVG line chart for the score trend (no external chart library so it survives print). Reuses the Executive Summary's narrative + NIST + ISO + Fleet builders. Purple accent.
+- **MITRE ATT&CK Coverage** (`pulse/reports/mitre_coverage.py`): techniques laid out in the canonical ATT&CK tactic order. Top-fired techniques list. Silent + uncovered tactic spotlights. Red accent.
+- **Compliance Gap Analysis** (`pulse/reports/compliance_gap.py`): uncovered techniques, silent rules (enabled but never fired), noisy rules (≥30 hits AND ≥30% FP rate). Each gap framed as an actionable improvement item. Blue accent.
+- All four share `pulse/reports/phase5_renderers.py` — one HTML scaffold + one generic table-PDF document builder + per-template content composers. Four `render_<slug>(payload, fmt)` entry points.
+- API: four slugs registered in the dispatcher (`fleet_health`, `board_ready_posture`, `mitre_attack_coverage`, `compliance_gap_analysis`). Phase 5 templates pull from `get_fleet_summary`, `get_rule_stats`, and the existing rule-config helpers — no new database queries needed.
+- New `_resolve_org_name()` helper extracted in `pulse/api.py` since five different templates now look up the same org name.
+- UI: new "Fleet" category section (green accent). MITRE Coverage tucked under the existing Threat Detection category. Board-Ready under Executive. Gap Analysis under Compliance.
+- **37 tests** in `test_phase5_reports.py`.
+
+### Catalog totals
+
+Nine templates spanning five categories (Threat Detection, Executive, Compliance, Incident, Fleet). All four output formats (PDF / HTML / JSON / CSV). All saved to the reports table with `template_type` populated. 85 new tests across Phases 3–5; **1057 tests pass overall**.
+
+---
+
 ## 2026-06-02 — Report template catalog Phase 2: Executive Summary
 
 The board-ready report. Phase 2 of the 5-phase catalog plan. Same dispatch pattern proven in Phase 1; the API endpoint now selects builder + renderer based on `template_type` so future templates (Compliance, Incident Investigation, Fleet Health) drop in without further refactoring.

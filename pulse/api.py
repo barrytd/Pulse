@@ -678,6 +678,24 @@ def _load_enabled_sigma_rules(app, user_id):
         return []
 
 
+def _resolve_org_name(app, caller):
+    """Look up the caller's organization name for the report header.
+    Returns None when the user has no org or the lookup fails — the
+    builders fall back to "your organization" in that case."""
+    try:
+        org_id = (caller or {}).get("organization_id")
+        if org_id is None:
+            return None
+        with database._connect(app.state.db_path) as conn:
+            row = conn.execute(
+                "SELECT name FROM organizations WHERE id = ?",
+                (int(org_id),),
+            ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 async def _generate_incident_report(app, user_id, fmt, scope,
                                        filename_prefix):
     """Dispatch path for the Incident Investigation Report. Scope is
@@ -3779,6 +3797,10 @@ def _register_routes(app: FastAPI) -> None:
             "nist_csf_coverage":            "pulse_nist_csf",
             "iso_27001_annex_a":            "pulse_iso_27001",
             "incident_investigation":       "pulse_incident",
+            "fleet_health":                 "pulse_fleet_health",
+            "board_ready_posture":          "pulse_board_ready",
+            "mitre_attack_coverage":        "pulse_mitre_coverage",
+            "compliance_gap_analysis":      "pulse_compliance_gap",
         }
         if fmt not in ("pdf", "html", "json", "csv"):
             raise HTTPException(
@@ -3935,6 +3957,116 @@ def _register_routes(app: FastAPI) -> None:
                 org_name=org_name,
             )
             body_bytes = _render(payload, fmt)
+
+        elif template == "fleet_health":
+            from pulse.reports.fleet_health import build_fleet_health
+            from pulse.reports.phase5_renderers import (
+                render_fleet_health as _render_fh,
+            )
+            org_name_fh = _resolve_org_name(app, caller)
+            fleet_rows = (
+                get_fleet_summary(
+                    app.state.db_path,
+                    organization_id=caller.get("organization_id"),
+                ) or []
+            )
+            payload = build_fleet_health(
+                fleet_rows, org_name=org_name_fh,
+            )
+            body_bytes = _render_fh(payload, fmt)
+
+        elif template == "board_ready_posture":
+            from pulse.core.rules_config import get_disabled_rules as _gdr_br
+            from pulse.reports.board_ready import build_board_ready
+            from pulse.reports.phase5_renderers import (
+                render_board_ready as _render_br,
+            )
+            org_name_br = _resolve_org_name(app, caller)
+            try:
+                disabled_br = _gdr_br(_read_config(app.state.config_path))
+            except Exception:
+                disabled_br = []
+            # Previous period for trend (mirrors executive_summary logic).
+            prev_findings_br: list[dict] = []
+            prev_scans_br: list[dict] = []
+            prev_cutoff_end = (datetime.now() -
+                                timedelta(days=period_days)).strftime(
+                                    "%Y-%m-%d %H:%M:%S")
+            prev_cutoff_start = (datetime.now() -
+                                  timedelta(days=period_days * 2)).strftime(
+                                      "%Y-%m-%d %H:%M:%S")
+            for s in history:
+                ts = s.get("scanned_at") or ""
+                if prev_cutoff_start <= ts < prev_cutoff_end:
+                    prev_scans_br.append(s)
+                    prev_findings_br.extend(
+                        get_scan_findings(app.state.db_path, s["id"],
+                                           **scope_kw) or []
+                    )
+            fleet_rows = (
+                get_fleet_summary(
+                    app.state.db_path,
+                    organization_id=caller.get("organization_id"),
+                ) or []
+            )
+            payload = build_board_ready(
+                findings_in_scope, scans_in_scope,
+                fleet_rows=fleet_rows,
+                period_days=period_days,
+                scope_label=scope_label,
+                prev_findings=prev_findings_br,
+                prev_scans=prev_scans_br,
+                disabled_rules=disabled_br,
+                org_name=org_name_br,
+            )
+            body_bytes = _render_br(payload, fmt)
+
+        elif template == "mitre_attack_coverage":
+            from pulse.core.rules_config import get_disabled_rules as _gdr_mt
+            from pulse.reports.mitre_coverage import build_mitre_coverage
+            from pulse.reports.phase5_renderers import (
+                render_mitre_coverage as _render_mt,
+            )
+            org_name_mt = _resolve_org_name(app, caller)
+            try:
+                disabled_mt = _gdr_mt(_read_config(app.state.config_path))
+            except Exception:
+                disabled_mt = []
+            payload = build_mitre_coverage(
+                findings_in_scope,
+                period_days=period_days,
+                scope_label=scope_label,
+                disabled_rules=disabled_mt,
+                org_name=org_name_mt,
+            )
+            body_bytes = _render_mt(payload, fmt)
+
+        elif template == "compliance_gap_analysis":
+            from pulse.core.rules_config import get_disabled_rules as _gdr_cg
+            from pulse.reports.compliance_gap import build_compliance_gap
+            from pulse.reports.phase5_renderers import (
+                render_compliance_gap as _render_cg,
+            )
+            org_name_cg = _resolve_org_name(app, caller)
+            try:
+                disabled_cg = _gdr_cg(_read_config(app.state.config_path))
+            except Exception:
+                disabled_cg = []
+            try:
+                rule_stats = get_rule_stats(
+                    app.state.db_path,
+                    organization_id=caller.get("organization_id"),
+                ) or {}
+            except Exception:
+                rule_stats = {}
+            payload = build_compliance_gap(
+                rule_stats,
+                disabled_rules=disabled_cg,
+                period_days=period_days,
+                scope_label=scope_label,
+                org_name=org_name_cg,
+            )
+            body_bytes = _render_cg(payload, fmt)
 
         elif template in ("nist_csf_coverage", "iso_27001_annex_a"):
             # Resolve disabled-rules list so the compliance summary

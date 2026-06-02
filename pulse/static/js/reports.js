@@ -475,7 +475,78 @@ export async function renderReportsPage() {
                   'incident responders and forensic handoff.',
         }) +
       '</div>' +
+    '</div>' +
+    '<div class="report-catalog-section">' +
+      '<div class="report-category-label">Fleet</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'fleet_health',
+          name:   'Fleet Health Report',
+          icon:   'server',
+          accent: '#10b981',
+          desc:   'Security posture across all monitored hosts, ranked ' +
+                  'by risk, with scan recency and at-risk machines ' +
+                  'highlighted. For teams managing multiple endpoints.',
+        }) +
+      '</div>' +
     '</div>';
+
+  // Append a second card to each category that gets a new entry in
+  // Phase 5 — we keep the section blocks separate above for clarity
+  // but stitch the new cards into the existing markup so categories
+  // don't get split across the page.
+  templateCatalogHtml = templateCatalogHtml
+    // Threat Detection gets a second card: MITRE Coverage.
+    .replace(
+      '<div class="report-category-label">Threat Detection</div>' +
+      '<div class="report-catalog-grid">',
+      '<div class="report-category-label">Threat Detection</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'mitre_attack_coverage',
+          name:   'MITRE ATT&CK Coverage Report',
+          icon:   'grid-3x3',
+          accent: '#ef4444',
+          desc:   'Which ATT&CK techniques Pulse detected activity for, ' +
+                  'mapped onto the tactic matrix, with finding counts ' +
+                  'per technique. For threat hunters and detection ' +
+                  'engineers.',
+        }),
+    )
+    // Executive gets a second card: Board-Ready Posture.
+    .replace(
+      '<div class="report-category-label">Executive</div>' +
+      '<div class="report-catalog-grid">',
+      '<div class="report-category-label">Executive</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'board_ready_posture',
+          name:   'Board-Ready Posture Report',
+          icon:   'presentation',
+          accent: '#8b5cf6',
+          desc:   'Quarterly-style posture report with score trends, ' +
+                  'fleet overview, compliance coverage, and forward-' +
+                  'looking recommendations. For board presentations ' +
+                  'and quarterly reviews.',
+        }),
+    )
+    // Compliance gets a third card: Gap Analysis.
+    .replace(
+      '<div class="report-category-label">Compliance</div>' +
+      '<div class="report-catalog-grid">',
+      '<div class="report-category-label">Compliance</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'compliance_gap_analysis',
+          name:   'Compliance Gap Analysis',
+          icon:   'target',
+          accent: '#3b82f6',
+          desc:   'Prioritized roadmap of detection gaps: uncovered ' +
+                  'MITRE techniques, silent rules, and noisy rules ' +
+                  'needing tuning. For improving detection coverage ' +
+                  'over time.',
+        }),
+    );
 
   // First-run empty state — KPIs + filters get rendered too so the
   // page still looks like itself even with zero data.
@@ -604,6 +675,38 @@ var _TEMPLATES = {
               'for chain of custody.',
     scope_default: 'incident_host',
     scope_only:    'incident',  // hide both date-range radios
+  },
+  fleet_health: {
+    title:    'Generate Fleet Health Report',
+    subtitle: 'A snapshot of every monitored host ranked by risk. No ' +
+              'date range needed — Fleet Health reports cover the ' +
+              'current state of every host Pulse knows about.',
+    scope_default: 'recent',
+    scope_only:    'recent',
+  },
+  board_ready_posture: {
+    title:    'Generate Board-Ready Posture Report',
+    subtitle: 'Quarterly-style executive view: score trend, fleet ' +
+              'overview, compliance percentages, strategic ' +
+              'recommendations. Pick the reporting period; Pulse compares ' +
+              'against the previous period of the same length.',
+    scope_default: 'recent',
+    scope_only:    'recent',
+  },
+  mitre_attack_coverage: {
+    title:    'Generate MITRE ATT&CK Coverage Report',
+    subtitle: 'Techniques Pulse detected activity for, organized by ' +
+              'tactic. Pick the reporting period and format.',
+    scope_default: 'recent',
+    scope_only:    'recent',
+  },
+  compliance_gap_analysis: {
+    title:    'Generate Compliance Gap Analysis',
+    subtitle: 'Uncovered techniques, silent rules, and noisy rules ' +
+              'needing tuning — a prioritized improvement roadmap. ' +
+              'Pick the reporting period and format.',
+    scope_default: 'recent',
+    scope_only:    'recent',
   },
 };
 
