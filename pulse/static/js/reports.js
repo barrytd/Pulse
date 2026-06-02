@@ -370,8 +370,37 @@ export async function renderReportsPage() {
     '<div class="page-head">' +
       '<div class="page-head-title">Reports</div>' +
       '<div class="page-head-actions">' +
-        '<button class="btn btn-primary btn-with-icon" data-action="openGenerateReportModal">' +
+        '<button class="btn btn-primary btn-with-icon" data-action="openGenerateReportModal" data-arg="threat_detection_summary">' +
           '<i data-lucide="file-plus-2"></i><span>Generate Report</span></button>' +
+      '</div>' +
+    '</div>';
+
+  // Template catalog — Phase 1 ships exactly one template. The
+  // markup is structured so dropping in more templates later (and
+  // grouping them under more category headers) is a copy-paste job.
+  var templateCatalogHtml =
+    '<div class="report-catalog-section">' +
+      '<div class="report-category-label">Threat Detection</div>' +
+      '<div class="report-catalog-grid">' +
+        '<div class="report-template-card">' +
+          '<div class="report-template-icon" aria-hidden="true">' +
+            '<i data-lucide="shield-alert"></i>' +
+          '</div>' +
+          '<div class="report-template-body">' +
+            '<div class="report-template-name">Threat Detection Summary</div>' +
+            '<div class="report-template-desc">' +
+              'Complete summary of detected threats grouped by MITRE tactic, ' +
+              'with attack timeline and repeat offenders. ' +
+              'For security analysts and teams.' +
+            '</div>' +
+          '</div>' +
+          '<div class="report-template-actions">' +
+            '<button class="btn btn-primary btn-with-icon" ' +
+              'data-action="openGenerateReportModal" data-arg="threat_detection_summary">' +
+              '<i data-lucide="file-plus-2"></i><span>Generate</span>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
     '</div>';
 
@@ -381,6 +410,7 @@ export async function renderReportsPage() {
     c.innerHTML =
       headHtml +
       _kpiTilesHtml() +
+      templateCatalogHtml +
       '<div class="reports-empty">' +
         '<div class="reports-empty-icon" aria-hidden="true">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -408,6 +438,8 @@ export async function renderReportsPage() {
   c.innerHTML =
     headHtml +
     _kpiTilesHtml() +
+    templateCatalogHtml +
+    '<div class="report-history-label">Generated Reports</div>' +
     _filterChipsHtml().replace('class="reports-filters"',
       'class="reports-filters" id="reports-filter-chips"') +
     '<div id="reports-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
@@ -449,12 +481,39 @@ export async function renderReportsPage() {
 }
 
 // -----------------------------------------------------------------
-// Generate Report modal — populated each open with the latest scans
+// Generate Report modal — template-driven (Phase 1: Threat Detection
+// Summary). The same modal handles "single scan" vs "recent activity"
+// scope via the radio group in index.html.
 // -----------------------------------------------------------------
 
-export async function openGenerateReportModal() {
+// Per-template metadata. Keys: title + subtitle shown in the modal,
+// endpoint path, optional scope_default (so the Recent radio can be
+// pre-selected for future templates that span a date range by default).
+var _TEMPLATES = {
+  threat_detection_summary: {
+    title:    'Generate Threat Detection Summary',
+    subtitle: 'Pulse rolls your finding data into a tactic-grouped ' +
+              'assessment with attack timeline and repeat offenders. ' +
+              'Saves to the Reports page and streams to your downloads.',
+  },
+};
+
+export async function openGenerateReportModal(templateSlug) {
   var modal = document.getElementById('generate-report-modal');
   if (!modal) return;
+  var slug = templateSlug || 'threat_detection_summary';
+  var tmpl = _TEMPLATES[slug] || _TEMPLATES.threat_detection_summary;
+  var titleEl = document.getElementById('genrep-title');
+  var subEl   = document.getElementById('genrep-subtitle');
+  var tmplEl  = document.getElementById('genrep-template');
+  if (titleEl) titleEl.textContent = tmpl.title;
+  if (subEl)   subEl.textContent   = tmpl.subtitle;
+  if (tmplEl)  tmplEl.value        = slug;
+  // Reset scope toggle to "A single scan" on every open.
+  var scanRadio = document.querySelector('input[name="genrep-scope"][value="scan"]');
+  if (scanRadio) scanRadio.checked = true;
+  onGenrepScopeChange();
+
   var sel = document.getElementById('genrep-scan');
   if (sel) sel.innerHTML = '<option>Loading scans…</option>';
   modal.classList.add('open');
@@ -479,33 +538,72 @@ export async function openGenerateReportModal() {
   }
 }
 
+export function onGenrepScopeChange() {
+  var scopeEl = document.querySelector('input[name="genrep-scope"]:checked');
+  var scope = scopeEl ? scopeEl.value : 'scan';
+  var scanRow = document.getElementById('genrep-scan-row');
+  var daysRow = document.getElementById('genrep-days-row');
+  if (scanRow) scanRow.style.display = (scope === 'scan') ? '' : 'none';
+  if (daysRow) daysRow.style.display = (scope === 'recent') ? '' : 'none';
+}
+
 export function closeGenerateReportModal() {
   var modal = document.getElementById('generate-report-modal');
   if (modal) modal.classList.remove('open');
 }
 
-export function submitGenerateReport() {
-  var sel = document.getElementById('genrep-scan');
-  var scanId = sel ? Number(sel.value) : 0;
-  if (!scanId) {
-    toastError('Pick a scan to generate from.');
-    return;
-  }
+export async function submitGenerateReport() {
+  var tmplEl = document.getElementById('genrep-template');
+  var template = tmplEl ? tmplEl.value : 'threat_detection_summary';
+  var scopeEl = document.querySelector('input[name="genrep-scope"]:checked');
+  var scopeKind = scopeEl ? scopeEl.value : 'scan';
   var fmtEl = document.querySelector('input[name="genrep-format"]:checked');
   var fmt = fmtEl ? fmtEl.value : 'pdf';
-  // downloadReport hits /api/export/{id} which now persists to DB AND
-  // returns the bytes for download. Mention persistence in the toast
-  // so users understand the report is also waiting on /reports.
-  downloadReport(scanId, fmt);
-  showToast('Report saved and downloaded. View it anytime on the Reports page.',
-            'success');
-  setTimeout(function () {
+  var scope = {};
+  if (scopeKind === 'scan') {
+    var sel = document.getElementById('genrep-scan');
+    var scanId = sel ? Number(sel.value) : 0;
+    if (!scanId) { toastError('Pick a scan to generate from.'); return; }
+    scope.scan_id = scanId;
+  } else {
+    var daysEl = document.getElementById('genrep-days');
+    scope.days = daysEl ? Number(daysEl.value) || 30 : 30;
+  }
+
+  showToast('Generating report…');
+  try {
+    var resp = await fetch('/api/reports/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: template, format: fmt, scope: scope }),
+    });
+    if (!resp.ok) {
+      var detail;
+      try { detail = (await resp.json()).detail; } catch (e) { detail = 'HTTP ' + resp.status; }
+      throw new Error(detail || 'Generate failed');
+    }
+    var blob = await resp.blob();
+    // Pull the filename out of Content-Disposition so the download
+    // matches what got saved to the Reports table.
+    var cd = resp.headers.get('content-disposition') || '';
+    var m = /filename="?([^";]+)/.exec(cd);
+    var filename = (m && m[1]) || 'pulse_report.' + fmt;
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    showToast('Report saved and downloaded. View it anytime on the Reports page.',
+              'success');
     closeGenerateReportModal();
     // Refresh the page if we're already on it so the new row appears.
-    if (location.pathname === '/reports' || location.hash === '#reports') {
+    if (location.pathname === '/reports' || location.hash === '#reports' ||
+        document.querySelector('.report-template-card')) {
       renderReportsPage();
     }
-  }, 800);
+  } catch (e) {
+    toastError('Could not generate report: ' + e.message);
+  }
 }
 
 // Click-outside-to-close + Escape — mirrors the upload modal pattern.

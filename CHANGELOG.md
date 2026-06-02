@@ -5,6 +5,24 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-02 — Report template catalog Phase 1: Threat Detection Summary
+
+The first entry in the new report-template catalog. This is the report a user generates right after their first scan — tactic-grouped findings, attack timeline, top rules, repeat offenders. Phase 1 of a 5-phase plan; future templates (Executive Summary, Compliance NIST/ISO, Incident Investigation, Fleet Health) plug into the same dispatch pattern proven here.
+
+- **Schema**: `reports.template_type` column added via `ALTER`. Legacy rows (pre-template) keep a NULL value; the UI displays them as generic "scan export".
+- **Data builder** in [`pulse/reports/threat_summary.py`](pulse/reports/threat_summary.py). One pure-Python function takes findings + scan metadata and returns a structured dict with: header (title, scope, hosts, generation time), summary band (totals, severity breakdown, score + grade), findings grouped by MITRE tactic in canonical kill-chain order, chronological attack timeline, top-N triggered rules, repeat-offender source IPs and hosts (with threat-intel scores when the intel cache has them), and a footer with the Pulse version + automated-assessment note.
+- **MITRE technique → tactic map** mirrors the JS map in [`pulse/static/js/rules.js`](pulse/static/js/rules.js) so the dashboard's MITRE coverage matrix and the report group findings the same way. An "Other" sink bucket keeps unmapped rules visible.
+- **Four format renderers** in [`pulse/reports/threat_summary_renderers.py`](pulse/reports/threat_summary_renderers.py) all consume the same dict so PDF and HTML can't disagree on the numbers:
+  - **JSON** — straight serialization, the canonical SIEM-ingest format.
+  - **CSV** — flat finding list with UTF-8 BOM so Excel opens it cleanly.
+  - **HTML** — standalone dark-themed page that mirrors the dashboard's look. Self-contained: every style inlined so the file shares / emails / opens offline cleanly.
+  - **PDF** — reuses the existing `pulse/reports/pdf_report.py` infrastructure (grade-colored score ring, severity pills, footer). New section builders for tactic, timeline, top rules, repeat-offender tables.
+- **`POST /api/reports/generate`** endpoint takes `{template, format, scope}` where scope is either `{scan_id}` or `{days}`. Persists the bytes to the `reports` table with the new `template_type` column, then returns the file as a download. Intel-cache lookup is best-effort (cache-only, no network) so the report never blocks on AbuseIPDB.
+- **Reports page UI**: new template catalog section above the history table. Card for "Threat Detection Summary" under a "Threat Detection" category heading, with the spec'd description and a Generate button. The existing Generate Report modal now supports a "Data scope" toggle (single scan vs recent N days) plus the four format radios. Generated file downloads via blob so the persisted filename matches what shows up in the history table. Toast: "Report saved and downloaded. View it anytime on the Reports page."
+- 29 tests in [`tests/test_threat_summary.py`](tests/test_threat_summary.py) cover the builder shape, tactic mapping, IP extraction, intel-failure tolerance, all four renderer formats, end-to-end API generation, scope handling, and template/format validation. Full suite: 923 tests pass.
+
+---
+
 ## 2026-06-02 — Role hierarchy (Phase 1+2) + Reports persistence
 
 ### Three-role hierarchy: admin > manager > analyst (Phase 1+2 of 8)

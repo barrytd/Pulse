@@ -206,6 +206,7 @@ import {
   openGenerateReportModal,
   closeGenerateReportModal,
   submitGenerateReport,
+  onGenrepScopeChange,
 } from './reports.js';
 import {
   toggleRuleEnabled,
@@ -473,6 +474,7 @@ const actions = {
   openGenerateReportModal,
   closeGenerateReportModal,
   submitGenerateReport,
+  onGenrepScopeChange,
 
   // rules
   toggleRuleEnabled,

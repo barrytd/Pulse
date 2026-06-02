@@ -3600,6 +3600,171 @@ def _register_routes(app: FastAPI) -> None:
     # Body: {"filenames": ["a.pdf", "b.html", ...]}. Registered before the
     # /{filename} route so "batch" isn't interpreted as a filename.
     # -------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # POST /api/reports/generate — template-driven report generation
+    # Body: { "template": "threat_detection_summary",
+    #         "format":   "pdf" | "html" | "json" | "csv",
+    #         "scope":    { "scan_id": N } | { "days": 30 } }
+    # Persists the bytes to the reports table and returns the file
+    # straight back as a download. Multi-format dispatch lives in the
+    # template module; this endpoint is the thin glue.
+    # -------------------------------------------------------------------
+    @app.post("/api/reports/generate")
+    async def generate_report(request: Request,
+                               user_id: int = Depends(require_login)):
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+
+        template = (body.get("template") or "").strip().lower()
+        fmt      = (body.get("format")   or "pdf").strip().lower()
+        scope    = body.get("scope") or {}
+
+        if fmt not in ("pdf", "html", "json", "csv"):
+            raise HTTPException(
+                400,
+                detail="format must be one of pdf | html | json | csv.",
+            )
+        if template != "threat_detection_summary":
+            # Phase 1 ships exactly one template. Future templates
+            # (executive_summary, compliance_nist, etc.) plug into
+            # the same dispatch.
+            raise HTTPException(
+                400,
+                detail=f"Unknown template {template!r}. "
+                       "Phase 1 supports: threat_detection_summary.",
+            )
+
+        # Resolve the data scope into a list of findings + scan rows.
+        # Two shapes: per-scan (scan_id) or rolling window (days).
+        scope_kw = _findings_scope_kwargs(app, user_id)
+        history  = get_history(app.state.db_path, limit=500, **scope_kw) or []
+        scans_in_scope: list[dict] = []
+        findings_in_scope: list[dict] = []
+        scope_label: str = ""
+
+        if "scan_id" in scope and scope["scan_id"] is not None:
+            try:
+                sid = int(scope["scan_id"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, detail="scope.scan_id must be an integer.")
+            row = next((s for s in history if s["id"] == sid), None)
+            if row is None:
+                raise HTTPException(404, detail=f"Scan {sid} not found.")
+            scans_in_scope = [row]
+            findings_in_scope = list(
+                get_scan_findings(app.state.db_path, sid, **scope_kw) or []
+            )
+            scope_label = (
+                f"Scan #{row.get('number') or row.get('id')}"
+                f" ({row.get('hostname') or 'unknown host'}, "
+                f"{(row.get('scanned_at') or '').split(' ')[0]})"
+            )
+        else:
+            try:
+                days = int(scope.get("days") or 30)
+            except (TypeError, ValueError):
+                days = 30
+            days = max(1, min(days, 365))
+            cutoff = (datetime.now() - timedelta(days=days)).strftime(
+                "%Y-%m-%d %H:%M:%S")
+            scans_in_scope = [s for s in history
+                               if (s.get("scanned_at") or "") >= cutoff]
+            for s in scans_in_scope:
+                findings_in_scope.extend(
+                    get_scan_findings(app.state.db_path, s["id"], **scope_kw)
+                    or []
+                )
+            host_count = len({(s.get("hostname") or "").strip()
+                               for s in scans_in_scope
+                               if s.get("hostname")})
+            scope_label = (
+                f"Last {days} day{'s' if days != 1 else ''} "
+                f"({len(scans_in_scope)} scan"
+                f"{'s' if len(scans_in_scope) != 1 else ''}"
+                f", {host_count} host{'s' if host_count != 1 else ''})"
+            )
+
+        # Build the template payload + render the chosen format. The
+        # threat-intel decorator is best-effort — bad cache rows or a
+        # missing column don't kill the report.
+        try:
+            from pulse.intel import lookup_ip as _intel_lookup_ip
+            def _intel(ip):
+                # api_key=None forces cache-only behavior so we never
+                # block on the AbuseIPDB API while building a report.
+                try:
+                    return _intel_lookup_ip(ip, app.state.db_path,
+                                             api_key=None)
+                except Exception:
+                    return None
+        except Exception:
+            _intel = None
+
+        from pulse.reports.threat_summary import build_summary
+        from pulse.reports.threat_summary_renderers import render
+
+        # attach_remediation so PDFs can render Remediation/Mitigation
+        # info if later templates want it. Cheap; idempotent.
+        attach_remediation(findings_in_scope)
+
+        summary = build_summary(
+            findings_in_scope, scans_in_scope,
+            scope_label=scope_label,
+            intel_lookup=_intel,
+        )
+        body_bytes = render(summary, fmt)
+
+        # Filename: include the template slug + format + timestamp so
+        # multiple generations stack up in history.
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = {"pdf": "pdf", "html": "html", "json": "json", "csv": "csv"}[fmt]
+        filename = f"pulse_threat_summary_{stamp}.{ext}"
+
+        # Persist to the DB. Best-effort: a save failure must not
+        # block the download path.
+        caller = (get_user_by_id(app.state.db_path, user_id)
+                  if user_id else None) or {}
+        try:
+            save_report(
+                app.state.db_path,
+                scan_id=(scans_in_scope[0]["id"] if len(scans_in_scope) == 1
+                          else None),
+                fmt=fmt,
+                filename=filename,
+                file_data=body_bytes,
+                generated_by=user_id or None,
+                organization_id=caller.get("organization_id"),
+                template_type="threat_detection_summary",
+            )
+        except Exception as exc:
+            from pulse.firewall import blocker
+            try:
+                blocker.log_audit(
+                    app.state.db_path,
+                    action="report_save_failed",
+                    source="api",
+                    user=caller.get("email"),
+                    detail=f"filename={filename} error={exc!s}",
+                )
+            except Exception:
+                pass
+
+        media_type = {
+            "pdf":  "application/pdf",
+            "html": "text/html; charset=utf-8",
+            "json": "application/json",
+            "csv":  "text/csv; charset=utf-8",
+        }[fmt]
+        return Response(
+            content=body_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.delete("/api/reports/batch")
     def delete_reports_batch(payload: dict = Body(...),
                              user_id: int = Depends(require_manager)):

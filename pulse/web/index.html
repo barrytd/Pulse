@@ -282,14 +282,42 @@
   <!-- ============================================================= -->
   <div class="modal-overlay" id="generate-report-modal">
     <div class="modal">
-      <h3>Generate Report</h3>
-      <p>Pick any completed scan and a format. The file streams to your
-        downloads folder — Pulse generates it on the fly from the saved
-        findings, so no copy lives on the server until you ask.</p>
+      <h3 id="genrep-title">Generate Report</h3>
+      <p id="genrep-subtitle">Pulse builds the report from your saved scan
+        data, saves it to the Reports page, and streams it to your downloads.</p>
 
-      <div class="form-row">
+      <input type="hidden" id="genrep-template" value="threat_detection_summary" />
+
+      <div class="form-row" style="align-items:flex-start;">
+        <label>Data scope</label>
+        <div class="genrep-format-group" role="radiogroup" aria-label="Data scope">
+          <label class="genrep-format-opt">
+            <input type="radio" name="genrep-scope" value="scan" checked
+                   data-action-change="onGenrepScopeChange" />
+            <span class="genrep-format-name">A single scan</span>
+            <span class="genrep-format-hint">Pick one completed scan</span>
+          </label>
+          <label class="genrep-format-opt">
+            <input type="radio" name="genrep-scope" value="recent"
+                   data-action-change="onGenrepScopeChange" />
+            <span class="genrep-format-name">Recent activity</span>
+            <span class="genrep-format-hint">Roll up a date range</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-row" id="genrep-scan-row">
         <label for="genrep-scan">Scan</label>
         <select id="genrep-scan"></select>
+      </div>
+
+      <div class="form-row" id="genrep-days-row" style="display:none;">
+        <label for="genrep-days">Time window</label>
+        <select id="genrep-days">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
       </div>
 
       <div class="form-row" style="align-items:flex-start;">
