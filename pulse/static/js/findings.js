@@ -1847,9 +1847,53 @@ export function _expandRow(f, colspan) {
     '</div>' +
     (desc ? '<div class="expand-field" style="margin-bottom:10px;"><div class="label">Description</div><div class="val">' + escapeHtml(desc) + '</div></div>' : '') +
     (details ? '<div class="expand-field" style="margin-bottom:10px;"><div class="label">Event Details</div><div class="val mono" style="white-space:pre-wrap;">' + escapeHtml(details) + '</div></div>' : '') +
+    _securityGuideBlock(f) +
     _remediationBlock(f) +
     xmlBtn +
   '</td></tr>';
+}
+
+// Render the Security Guide card — Pulse's audience often does not have
+// a SOC analyst on staff, so each finding gets a plain-language section
+// explaining what happened, why it matters, and what to do *right now*.
+// Payload comes from pulse/core/knowledge_base.py via attach_remediation.
+// Falls back silently when the finding lacks `knowledge` (older cached
+// responses that pre-date the Advisor work).
+export function _securityGuideBlock(f) {
+  var k = f.knowledge;
+  if (!k || !k.plain_language) return '';
+  var actions = (k.immediate_actions || []).map(function (s) {
+    return '<li>' + escapeHtml(s) + '</li>';
+  }).join('');
+  var fps = (k.common_false_positives || []).map(function (s) {
+    return '<li>' + escapeHtml(s) + '</li>';
+  }).join('');
+  var links = (k.learn_more || []).map(function (l) {
+    return '<a class="advisor-link" href="' + escapeHtml(l.url) + '" target="_blank" rel="noopener noreferrer">' +
+      escapeHtml(l.label) + ' ↗</a>';
+  }).join('');
+  var diff = (k.difficulty || 'medium').toLowerCase();
+  var diffLabel = diff.charAt(0).toUpperCase() + diff.slice(1);
+
+  return '<div class="advisor-card advisor-diff-' + diff + '">' +
+    '<div class="advisor-header">' +
+      '<span class="advisor-icon" aria-hidden="true">💡</span>' +
+      '<span class="advisor-title">Security Guide</span>' +
+      '<span class="advisor-diff-pill advisor-diff-' + diff + '" title="How hard is this attack to pull off?">' +
+        diffLabel + ' difficulty' +
+      '</span>' +
+    '</div>' +
+    '<div class="advisor-plain">' + escapeHtml(k.plain_language) + '</div>' +
+    (k.why_it_matters ? '<details class="advisor-details"><summary>Why this matters</summary>' +
+      '<div class="advisor-body">' + escapeHtml(k.why_it_matters) + '</div></details>' : '') +
+    (actions ? '<div class="advisor-section"><div class="advisor-section-label">What to do now</div>' +
+      '<ol class="advisor-steps">' + actions + '</ol></div>' : '') +
+    (k.prevention ? '<details class="advisor-details"><summary>How to prevent this</summary>' +
+      '<div class="advisor-body">' + escapeHtml(k.prevention) + '</div></details>' : '') +
+    (fps ? '<details class="advisor-details"><summary>Common false positives</summary>' +
+      '<ul class="advisor-fps">' + fps + '</ul></details>' : '') +
+    (links ? '<div class="advisor-links">' + links + '</div>' : '') +
+  '</div>';
 }
 
 // Render the remediation card. Findings carry `remediation` (array of step
@@ -2451,6 +2495,10 @@ export function openFindingDrawer(f) {
         '<div class="finding-drawer-details" style="max-height:320px; margin-top:8px;">' + escapeHtml(rawXml) + '</div>' +
       '</details>' +
     '</div>' : '') +
+
+    '<div class="finding-drawer-section">' +
+      _securityGuideBlock(f) +
+    '</div>' +
 
     '<div class="finding-drawer-section">' +
       '<div class="sec-label">Remediation</div>' +

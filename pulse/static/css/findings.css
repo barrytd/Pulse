@@ -748,6 +748,115 @@
   line-height: 1.5;
 }
 
+/* Security Guide card — plain-language explanation that sits above
+ * the (more technical) Remediation card. Blue-tinted border so it
+ * visually distinguishes itself from the orange-tinted remediation. */
+.advisor-card {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border-left: 3px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.55;
+}
+.advisor-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.advisor-icon { font-size: 14px; }
+.advisor-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #3b82f6;
+}
+.advisor-diff-pill {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.advisor-diff-pill.advisor-diff-low {
+  background: rgba(34, 197, 94, 0.18);
+  color: #16a34a;
+}
+.advisor-diff-pill.advisor-diff-medium {
+  background: rgba(245, 158, 11, 0.18);
+  color: #d97706;
+}
+.advisor-diff-pill.advisor-diff-high {
+  background: rgba(239, 68, 68, 0.18);
+  color: #dc2626;
+}
+.advisor-plain {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.advisor-section {
+  margin-top: 8px;
+}
+.advisor-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.advisor-steps {
+  margin: 4px 0 0;
+  padding-left: 22px;
+}
+.advisor-steps li { margin-bottom: 3px; }
+.advisor-steps li:last-child { margin-bottom: 0; }
+.advisor-details { margin-top: 8px; }
+.advisor-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.advisor-details summary:hover { color: var(--text); }
+.advisor-body { margin: 4px 0 0 0; padding-left: 4px; }
+.advisor-fps { margin: 4px 0 0; padding-left: 22px; font-size: 12px; }
+.advisor-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.advisor-link {
+  color: #3b82f6;
+  text-decoration: none;
+}
+.advisor-link:hover { text-decoration: underline; }
+
+/* Risk-shield icon in the findings table — quick visual cue for how
+ * easy this attack is to pull off. Pulse's audience is often making
+ * a "should I worry?" judgment in seconds, not minutes. */
+.risk-shield {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+  cursor: help;
+}
+.risk-shield.risk-low    { background: #16a34a; }
+.risk-shield.risk-medium { background: #d97706; }
+.risk-shield.risk-high   { background: #dc2626; }
+
 .remediation .rem-label {
   font-size: 10px;
   font-weight: 700;
