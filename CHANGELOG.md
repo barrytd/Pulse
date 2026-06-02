@@ -5,6 +5,31 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-01 — Security Advisor + project reorg
+
+### Security Advisor (Sprint 8 — Pulse positioning ticket)
+
+Pulse's audience is the small team without a SOC analyst: freelance IT admins, 3-person startups, nonprofits, students. Enterprise tools (CrowdStrike, Splunk) explain nothing because they assume their customers already know. Pulse now explains everything.
+
+- New [`pulse/core/knowledge_base.py`](pulse/core/knowledge_base.py) with plain-language entries for all 30 detection rules. Each entry: one-sentence explanation, why it matters, numbered immediate-actions list, prevention, learn-more links (MITRE + vendor docs), exploit-difficulty rating (low / medium / high), and common false positives. Editorial rule: no jargon — instead of "NTLM authentication downgrade detected via Event 4624 LogonType 3" we write "Someone logged into this computer from the network using an older, less secure authentication method."
+- `attach_remediation()` now also attaches the knowledge dict to every finding so the dashboard never needs a second round trip.
+- New **Security Guide** card in the finding drawer (and inline expand row) — blue-tinted left border to distinguish from the orange-tinted Remediation card. Plain-language explanation, difficulty pill, expandable Why this matters / Prevention / False positives, numbered immediate actions, learn-more links.
+- New **Security Advisor** sidebar page (`/advisor`) with: posture summary in one sentence ("Your network has 3 critical issues that need immediate attention. The most active host is SERVER-DC01."), top concerns ranked by severity × exploit difficulty × count, attack-concept explainers (Brute Force, Pass-the-Hash, Credential Dumping, etc.), and a hardening checklist where auto items are derived from open findings ("✓ Audit logging is on", "! Antivirus is enabled and tamper-protected") and manual items are reminders the user verifies themselves.
+- Risk-level shields on the findings table — a small green / orange / red square next to each rule name shows how easy that attack is to pull off. Hover tooltip: "Low/Medium/High exploitation difficulty".
+- Backlog entry added for **AI Security Advisor (live)** — live Anthropic API integration for contextual analysis of specific findings. Premium-tier feature; static knowledge base ships free.
+- 68 new tests: `tests/test_knowledge_base.py` (65) — every RULE_META entry has a knowledge entry (drift guard), entry shape validation, fallback behavior; `tests/test_advisor_api.py` (4) — `/api/advisor/overview` payload shape.
+
+### Project root reorganization
+
+Moved standalone utility scripts and ancillary docs out of the repo root into purpose-named directories. Only convention-expected files (README, LICENSE, requirements*, Dockerfile, etc.) stay at root.
+
+- `seed_demo_data.py`, `seed_fleet_demo.py`, `send_test_email.py` → `scripts/`
+- `BUSINESS.md` → `docs/`
+- `pulse-agent.spec` → `installer/`
+- Each moved script gained a `sys.path` tweak so `python scripts/foo.py` keeps working from the repo root. PyInstaller spec now resolves the project root via `SPECPATH` so the build works regardless of cwd.
+
+---
+
 ## 2026-05-28 — SIGMA rule import
 
 ### SIGMA rule import (Sprint 8 — "Up Next" High-priority ticket)
