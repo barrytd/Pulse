@@ -10,9 +10,9 @@ entire run with a message so real data is never overwritten.
 
 Run it::
 
-    python seed_demo_data.py                 # uses ./pulse.db
-    python seed_demo_data.py --db path/to/pulse.db
-    python seed_demo_data.py --force         # seed even if data exists
+    python scripts/seed_demo_data.py                 # uses ./pulse.db
+    python scripts/seed_demo_data.py --db path/to/pulse.db
+    python scripts/seed_demo_data.py --force         # seed even if data exists
 
 The four host profiles it creates:
 
@@ -41,6 +41,11 @@ import random
 import sqlite3
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Make the repo root importable so `from pulse import ...` works when
+# this script is run as `python scripts/seed_demo_data.py`.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 # Deterministic by default so screenshots look the same on two runs.

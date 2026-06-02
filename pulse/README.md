@@ -10,9 +10,9 @@ Entry points live **outside** this folder:
 
 - [`../main.py`](../main.py) — CLI entry point. Parses `--logs`, `--api`,
   `--watch`, etc. and dispatches into the functions below.
-- [`../seed_fleet_demo.py`](../seed_fleet_demo.py) — seeds a demo fleet
+- [`../scripts/seed_fleet_demo.py`](../scripts/seed_fleet_demo.py) — seeds a demo fleet
   (multiple hostnames) into `pulse.db` so the Fleet page has data.
-- [`../send_test_email.py`](../send_test_email.py) — one-shot SMTP sanity
+- [`../scripts/send_test_email.py`](../scripts/send_test_email.py) — one-shot SMTP sanity
   check for the email config in `pulse.yaml`.
 
 ---

@@ -3,13 +3,16 @@
 Safe to re-run: removes any prior demo rows (matched by the fake hostnames
 below) before re-inserting. Real scans are untouched.
 
-Run:  python seed_fleet_demo.py
-Undo: python seed_fleet_demo.py --undo
+Run:  python scripts/seed_fleet_demo.py
+Undo: python scripts/seed_fleet_demo.py --undo
 """
 
 import sqlite3
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pulse import database
 
@@ -128,7 +131,7 @@ def main():
     _seed()
     print(f"Seeded {len(DEMO_HOSTS)} demo hosts into {DB_PATH}.")
     print("Open the Pulse Fleet page to see them.")
-    print("Undo with: python seed_fleet_demo.py --undo")
+    print("Undo with: python scripts/seed_fleet_demo.py --undo")
 
 
 if __name__ == "__main__":

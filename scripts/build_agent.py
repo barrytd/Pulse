@@ -26,7 +26,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SPEC_FILE = REPO_ROOT / "pulse-agent.spec"
+SPEC_FILE = REPO_ROOT / "installer" / "pulse-agent.spec"
 
 
 def main() -> int:

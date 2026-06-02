@@ -1,7 +1,7 @@
 # PyInstaller spec for pulse-agent.exe.
 #
 # Build with:    python scripts/build_agent.py
-# Or directly:   pyinstaller --clean --noconfirm pulse-agent.spec
+# Or directly:   pyinstaller --clean --noconfirm installer/pulse-agent.spec
 #
 # Outputs `dist/pulse-agent/pulse-agent.exe` (one-folder build) or
 # `dist/pulse-agent.exe` (one-file, when --onefile is enabled below).
@@ -24,10 +24,16 @@ ONEFILE = False
 
 block_cipher = None
 
+# Resolve the project root from the spec's own location so the build
+# works whether you run `pyinstaller installer/pulse-agent.spec` from
+# the repo root or from anywhere else. SPECPATH is provided by
+# PyInstaller in the spec namespace.
+_REPO_ROOT = os.path.dirname(SPECPATH)
+
 
 a = Analysis(
-    ['scripts/agent_entry.py'],
-    pathex=[os.path.abspath('.')],
+    [os.path.join(_REPO_ROOT, 'scripts', 'agent_entry.py')],
+    pathex=[_REPO_ROOT],
     binaries=[],
     # No data files needed — the agent's config (agent.yaml) lives on
     # disk under %PROGRAMDATA% and is created by `enroll`. Detection

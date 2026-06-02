@@ -5,9 +5,13 @@
 #
 # Usage:
 #   1. Fill in your Gmail App Password in pulse.yaml
-#   2. Run: python send_test_email.py
+#   2. Run: python scripts/send_test_email.py
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from pulse.alerts.emailer import send_report, validate_email_config
 from pulse.reports.reporter import generate_report
 from main import load_config
