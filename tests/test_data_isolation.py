@@ -184,7 +184,7 @@ def isolation_client(tmp_path):
     client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     # Viewer id: fetch from the users list while we're still the admin.
     users = client.get("/api/users").json()
@@ -322,7 +322,7 @@ def test_create_user_with_explicit_org_joins_that_org():
     try:
         org_id = database.create_organization(path, name="Acme")
         uid = database.create_user(
-            path, "joiner@acme.test", "x", role="viewer",
+            path, "joiner@acme.test", "x", role="analyst",
             organization_id=org_id,
         )
         assert database.get_user_organization_id(path, uid) == org_id
@@ -430,12 +430,12 @@ def two_tenant_client(tmp_path):
     uid_a = database.create_user(
         str(db_path), "viewer-a@acme.test",
         hash_password("correct-horse-battery"),
-        role="viewer", organization_id=org_a,
+        role="analyst", organization_id=org_a,
     )
     uid_b = database.create_user(
         str(db_path), "viewer-b@initech.test",
         hash_password("another-long-password"),
-        role="viewer", organization_id=org_b,
+        role="analyst", organization_id=org_b,
     )
 
     sid_a = database.save_scan(

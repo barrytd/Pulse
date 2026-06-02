@@ -168,6 +168,25 @@ def require_admin(request: Request) -> int:
     return user_id
 
 
+def require_manager(request: Request) -> int:
+    """FastAPI dependency: 403s unless the session belongs to a user with
+    role 'admin' or 'manager'. Managers get most of admin's view (every
+    finding in the org) but cannot manage users / system settings."""
+    if getattr(request.app.state, "auth_required", True) is False:
+        return 0
+    user_id = _resolve_user_id(request)
+    if user_id is None:
+        raise HTTPException(401, detail="Authentication required.")
+    from pulse.database import get_user_by_id, role_is_at_least
+    db_path = getattr(request.app.state, "db_path", None)
+    user = get_user_by_id(db_path, user_id) if db_path else None
+    if not user or not user.get("active"):
+        raise HTTPException(401, detail="Authentication required.")
+    if not role_is_at_least(user.get("role"), "manager"):
+        raise HTTPException(403, detail="Manager role required.")
+    return user_id
+
+
 def _resolve_user_id(request: Request):
     """Shared helper: returns the signed-in user id, or None. Checks the
     session cookie first, then falls back to an `Authorization: Bearer`

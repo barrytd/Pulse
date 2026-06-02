@@ -87,7 +87,7 @@ def test_invite_user_flips_users_step(client):
     c.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     body = c.get("/api/me/onboarding").json()
     assert body["complete"]["users"] is True

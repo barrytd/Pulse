@@ -357,16 +357,22 @@ export async function renderSettingsPage() {
       '</a>'
     : '<span class="profile-name-hint muted">Ask an admin to change this</span>';
 
-  // Role surface — read-only here. Admins see "Full access…", viewers
-  // see "View access… contact your admin to change permissions." so the
-  // user always knows what they can and can't do.
-  var roleLabel = (me && me.role === 'admin') ? 'Admin'
-                : (me && me.role === 'viewer') ? 'Viewer (read-only)'
+  // Role surface — read-only here. Three-tier hierarchy: admin sees full
+  // access, manager sees team-level access (assign findings, view all
+  // org data), analyst sees the queue-oriented description. Legacy
+  // 'viewer' values map to analyst so older sessions render correctly.
+  var _meRole = (me && (me.role || '')).toLowerCase();
+  if (_meRole === 'viewer') _meRole = 'analyst';
+  var roleLabel = _meRole === 'admin'   ? 'Admin'
+                : _meRole === 'manager' ? 'Manager'
+                : _meRole === 'analyst' ? 'Analyst'
                 : 'Member';
-  var roleExplain = (me && me.role === 'admin')
+  var roleExplain = _meRole === 'admin'
     ? 'Full access to all settings, users, scans, and findings.'
-    : (me && me.role === 'viewer')
-    ? 'View access to scans and findings assigned to you. Contact your admin to change permissions.'
+    : _meRole === 'manager'
+    ? 'View every finding in the organization, assign work to analysts, and manage whitelist + firewall. Cannot manage users or system settings.'
+    : _meRole === 'analyst'
+    ? 'Work the findings assigned to you. Browse every finding in the organization read-only. Contact your manager to request a reassignment.'
     : 'Standard access. Contact your admin to change permissions.';
 
   var profileHtml =
@@ -825,14 +831,25 @@ function _renderUsersPanel(me, users) {
     // The self row still gets the menu so the admin can flip their own
     // role (the backend guards the last-admin case); Disable + Delete
     // are hidden since those would lock them out.
-    var menuItems = (
-      // Change role — always shown; wording flips based on current role.
-      '<a class="pulse-dropdown-item" data-action="toggleUserRole" data-arg="' +
-          u.id + '|' + (u.role === 'admin' ? 'viewer' : 'admin') + '">' +
-        '<i data-lucide="shield"></i>' +
-        '<span>Make ' + (u.role === 'admin' ? 'viewer' : 'admin') + '</span>' +
-      '</a>'
-    ) + (isSelf ? '' : (
+    // Role-change items — one per role except the user's current one.
+    // Legacy 'viewer' values display as 'analyst' so the menu reads
+    // consistently for older accounts. Backend enforces last-admin guard.
+    var _curRole = (u.role || '').toLowerCase();
+    if (_curRole === 'viewer') _curRole = 'analyst';
+    var _roleChoices = [
+      ['admin',   'Make admin'],
+      ['manager', 'Make manager'],
+      ['analyst', 'Make analyst'],
+    ];
+    var menuItems = _roleChoices
+      .filter(function (entry) { return entry[0] !== _curRole; })
+      .map(function (entry) {
+        return '<a class="pulse-dropdown-item" data-action="toggleUserRole" data-arg="' +
+                 u.id + '|' + entry[0] + '">' +
+                 '<i data-lucide="shield"></i>' +
+                 '<span>' + entry[1] + '</span>' +
+               '</a>';
+      }).join('') + (isSelf ? '' : (
       '<a class="pulse-dropdown-item" data-action="toggleUserActive" data-arg="' +
           u.id + '|' + (u.active ? '0' : '1') + '">' +
         '<i data-lucide="' + (u.active ? 'user-minus' : 'user-check') + '"></i>' +
@@ -895,8 +912,8 @@ function _renderUsersPanel(me, users) {
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Invite a User</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
-        'Admins can create additional accounts. Viewers can see scans and findings but cannot ' +
-        'change settings, block IPs, or manage users.' +
+        'Admins manage users + system settings. Managers see every finding, assign work ' +
+        'to analysts, and run reports. Analysts work the findings assigned to them.' +
       '</p>' +
       '<div class="form-row"><label>Display name</label>' +
         '<input type="text" id="new-user-display-name" placeholder="e.g. Robert Perez" ' +
@@ -907,7 +924,8 @@ function _renderUsersPanel(me, users) {
         '<input type="password" id="new-user-password" placeholder="at least 8 characters" autocomplete="new-password"/></div>' +
       '<div class="form-row"><label>Role</label>' +
         '<select id="new-user-role">' +
-          '<option value="viewer" selected>Viewer (read-only)</option>' +
+          '<option value="analyst" selected>Analyst (work assigned findings)</option>' +
+          '<option value="manager">Manager (assign work, view team)</option>' +
           '<option value="admin">Admin (full access)</option>' +
         '</select></div>' +
       '<div class="form-actions">' +
@@ -1560,7 +1578,7 @@ export async function deleteAgentConfirm(arg) {
 export async function createUser() {
   var email    = (document.getElementById('new-user-email').value || '').trim();
   var password = document.getElementById('new-user-password').value || '';
-  var role     = document.getElementById('new-user-role').value || 'viewer';
+  var role     = document.getElementById('new-user-role').value || 'analyst';
   var dnEl     = document.getElementById('new-user-display-name');
   var displayName = dnEl ? (dnEl.value || '').trim() : '';
   if (!email || !password) {

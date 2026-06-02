@@ -659,11 +659,11 @@ def test_admin_can_create_viewer(auth_client):
     r = auth_client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["role"] == "viewer"
+    assert body["role"] == "analyst"
     assert body["email"] == "viewer@example.com"
 
 
@@ -672,7 +672,7 @@ def test_viewer_cannot_list_users(auth_client):
     auth_client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     auth_client.post("/api/auth/logout")
     _login(auth_client, "viewer@example.com", "another-long-password")
@@ -685,20 +685,20 @@ def test_viewer_blocked_from_admin_endpoints(auth_client):
     auth_client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     auth_client.post("/api/auth/logout")
     _login(auth_client, "viewer@example.com", "another-long-password")
     # All three admin writes must be blocked.
     assert auth_client.post("/api/users", json={
-        "email": "x@y.com", "password": "long-password-ok", "role": "viewer",
+        "email": "x@y.com", "password": "long-password-ok", "role": "analyst",
     }).status_code == 403
 
 
 def test_admin_cannot_demote_last_admin(auth_client):
     _signup_admin(auth_client)
     me = auth_client.get("/api/me").json()
-    r = auth_client.put(f"/api/users/{me['id']}/role", json={"role": "viewer"})
+    r = auth_client.put(f"/api/users/{me['id']}/role", json={"role": "analyst"})
     assert r.status_code == 409
 
 
@@ -721,7 +721,7 @@ def test_deactivated_user_cannot_log_in(auth_client):
     created = auth_client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     }).json()
     # Admin deactivates the viewer.
     r = auth_client.put(f"/api/users/{created['id']}/active", json={"active": False})
@@ -740,7 +740,7 @@ def test_admin_can_promote_viewer(auth_client):
     created = auth_client.post("/api/users", json={
         "email": "promote@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     }).json()
     r = auth_client.put(f"/api/users/{created['id']}/role", json={"role": "admin"})
     assert r.status_code == 200
@@ -752,12 +752,12 @@ def test_create_user_duplicate_email_conflict(auth_client):
     auth_client.post("/api/users", json={
         "email": "dup@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     r = auth_client.post("/api/users", json={
         "email": "dup@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     assert r.status_code == 409
 
@@ -842,7 +842,7 @@ def test_api_token_user_cannot_revoke_someone_elses_token(auth_client):
 
     # A (admin) creates user B, then B logs in via a new client.
     r = auth_client.post("/api/users", json={
-        "email": "b@example.com", "password": "long-enough-password", "role": "viewer",
+        "email": "b@example.com", "password": "long-enough-password", "role": "analyst",
     })
     assert r.status_code == 200, r.text
     b_client = TestClient(auth_client.app)
@@ -871,7 +871,7 @@ def test_api_token_deactivated_user_bearer_rejected(auth_client):
     # Admin A creates viewer B and mints a token for B.
     _signup_admin(auth_client)
     auth_client.post("/api/users", json={
-        "email": "b@example.com", "password": "long-enough-password", "role": "viewer",
+        "email": "b@example.com", "password": "long-enough-password", "role": "analyst",
     })
     b_client = TestClient(auth_client.app)
     _login(b_client, "b@example.com", "long-enough-password")

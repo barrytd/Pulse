@@ -1798,15 +1798,19 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail="Body must be a JSON object.")
         email = str(body.get("email") or "").strip().lower()[:320]
         password = str(body.get("password") or "")
-        role = str(body.get("role") or "viewer").strip().lower()
+        from pulse.database import normalize_role, VALID_ROLES
+        role = normalize_role(body.get("role")) or "analyst"
         if "@" not in email or "." not in email:
             raise HTTPException(400, detail="Please enter a valid email address.")
         if len(password) < 8:
             raise HTTPException(400, detail="Password must be at least 8 characters.")
         if len(password) > 1024:
             raise HTTPException(400, detail="Password is too long.")
-        if role not in ("admin", "viewer"):
-            raise HTTPException(400, detail="Role must be 'admin' or 'viewer'.")
+        if role not in VALID_ROLES:
+            raise HTTPException(
+                400,
+                detail="Role must be one of: " + ", ".join(VALID_ROLES) + ".",
+            )
         if get_user_by_email(app.state.db_path, email):
             raise HTTPException(409, detail="A user with that email already exists.")
         # New users created by an admin join the admin's organization so
@@ -1826,15 +1830,19 @@ def _register_routes(app: FastAPI) -> None:
     @app.put("/api/users/{target_id}/role")
     async def api_update_user_role(target_id: int, request: Request,
                                    user_id: int = Depends(require_admin)):
+        from pulse.database import normalize_role, VALID_ROLES
         body = await request.json()
-        role = (body.get("role") or "").strip().lower()
-        if role not in ("admin", "viewer"):
-            raise HTTPException(400, detail="Role must be 'admin' or 'viewer'.")
+        role = normalize_role(body.get("role"))
+        if role not in VALID_ROLES:
+            raise HTTPException(
+                400,
+                detail="Role must be one of: " + ", ".join(VALID_ROLES) + ".",
+            )
         target = get_user_by_id(app.state.db_path, target_id)
         if not target:
             raise HTTPException(404, detail="User not found.")
         # Guard: demoting the last active admin would lock everyone out.
-        if target.get("role") == "admin" and role == "viewer":
+        if target.get("role") == "admin" and role != "admin":
             if count_admins(app.state.db_path, active_only=True) <= 1:
                 raise HTTPException(409, detail="Cannot demote the last active admin.")
         update_user_role(app.state.db_path, target_id, role)

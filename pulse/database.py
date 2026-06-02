@@ -547,6 +547,15 @@ def init_db(db_path):
     except db_backend.OperationalError:
         pass
 
+    # Sprint 8 — three-role hierarchy migration. Any user still tagged
+    # as the legacy 'viewer' role gets rewritten to 'analyst'. Idempotent
+    # because the WHERE clause excludes already-migrated rows.
+    try:
+        with _connect(db_path) as conn:
+            conn.execute("UPDATE users SET role = 'analyst' WHERE role = 'viewer'")
+    except db_backend.OperationalError:
+        pass
+
 
 def save_scan(db_path, findings, scan_stats=None, score=None, score_label=None, filename=None, scope=None, session_id=None, duration_sec=None, user_id=None, agent_id=None):
     """
@@ -2277,12 +2286,15 @@ def get_user_avatar(db_path, user_id):
     return row[0], row[1]
 
 
-def create_user(db_path, email, password_hash, role="viewer", *,
+def create_user(db_path, email, password_hash, role="analyst", *,
                 organization_id=None):
     """Insert a new user and return the row id. Email is lowercased and
-    stripped so lookups are consistent. `role` is 'admin' or 'viewer'; the
-    first user created (empty table) is always promoted to admin so there
-    is never a locked-out database.
+    stripped so lookups are consistent. `role` is one of 'admin',
+    'manager', or 'analyst'; the first user created (empty table) is
+    always promoted to admin so there is never a locked-out database.
+
+    Backwards compatibility: callers that still pass 'viewer' (the
+    legacy role name) get silently rewritten to 'analyst'.
 
     Multi-tenant behavior: if ``organization_id`` is omitted, the new
     user lands in their own brand-new "Personal" organization. The
@@ -2292,9 +2304,11 @@ def create_user(db_path, email, password_hash, role="viewer", *,
     email = (email or "").strip().lower()
     if not email:
         raise ValueError("email is required")
-    role = (role or "viewer").strip().lower()
-    if role not in ("admin", "viewer"):
-        raise ValueError("role must be 'admin' or 'viewer'")
+    role = normalize_role(role) or "analyst"
+    if role not in VALID_ROLES:
+        raise ValueError(
+            "role must be one of: " + ", ".join(sorted(VALID_ROLES))
+        )
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _connect(db_path) as conn:
         first = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
@@ -2365,10 +2379,13 @@ def update_user_password(db_path, user_id, password_hash):
 
 
 def update_user_role(db_path, user_id, role):
-    """Set the role ('admin'|'viewer') on a user."""
-    role = (role or "").strip().lower()
-    if role not in ("admin", "viewer"):
-        raise ValueError("role must be 'admin' or 'viewer'")
+    """Set the role on a user. Accepts 'admin', 'manager', or 'analyst'.
+    'viewer' is silently rewritten to 'analyst' for backwards compat."""
+    role = normalize_role(role)
+    if role not in VALID_ROLES:
+        raise ValueError(
+            "role must be one of: " + ", ".join(sorted(VALID_ROLES))
+        )
     with _connect(db_path) as conn:
         conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, int(user_id)))
 
@@ -2946,6 +2963,31 @@ def delete_waitlist_signup(db_path, signup_id):
 # block pushed. Capped to the last 100 per user via prune-on-insert so
 # the table never explodes on a long-running install.
 # ---------------------------------------------------------------------------
+
+# Three-role hierarchy: admin > manager > analyst.
+# The legacy 'viewer' role lives on as an alias for 'analyst' so older
+# callers, deployed databases, and test fixtures don't break on upgrade.
+VALID_ROLES = ("admin", "manager", "analyst")
+_LEGACY_ROLE_ALIASES = {"viewer": "analyst"}
+
+
+def normalize_role(role):
+    """Lowercase + trim + rewrite legacy values (e.g. 'viewer' -> 'analyst').
+    Returns a string from VALID_ROLES if recognized, otherwise the
+    cleaned input verbatim so callers can validate and raise. Safe to
+    call on None / empty input — returns ''."""
+    if not role:
+        return ""
+    cleaned = str(role).strip().lower()
+    return _LEGACY_ROLE_ALIASES.get(cleaned, cleaned)
+
+
+def role_is_at_least(role, required):
+    """Rank-aware comparison: ``role_is_at_least('manager', 'analyst')``
+    returns True. Anything outside ``VALID_ROLES`` ranks below analyst."""
+    rank = {"admin": 3, "manager": 2, "analyst": 1}
+    return rank.get(normalize_role(role), 0) >= rank.get(normalize_role(required), 0)
+
 
 NOTIFICATION_KINDS = (
     "scan_complete",

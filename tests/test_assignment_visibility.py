@@ -42,7 +42,7 @@ def two_user_app(tmp_path):
     viewer_id = database.create_user(
         str(db_path), "kwame@example.com",
         hash_password("correct-horse-battery"),
-        role="viewer", organization_id=other_org,
+        role="analyst", organization_id=other_org,
     )
     # The seeded viewer needs `email_verified_at` so the API treats them
     # as a real account (Sprint 8 verification gating).

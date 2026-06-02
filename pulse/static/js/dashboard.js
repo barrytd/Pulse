@@ -91,16 +91,19 @@ export function sevPillHtml(sev) {
   return '<span class="pill pill-' + lo + '">' + up + '</span>';
 }
 
-// Compact one-letter role badge — A for admin, V for viewer. Tooltip
-// expands to the full word so the visual reads at a glance but stays
-// accessible. `extraCls` lets callers tighten spacing inside their
-// containing surface (e.g. drawer assignee row vs. audit table cell).
-// Returns '' for unknown roles so callers don't have to guard.
+// Compact role badge — single-letter (A=admin) or two-letter (An=analyst,
+// Mg=manager) tag rendered next to the user's name. Tooltip expands to
+// the full word so the visual reads at a glance but stays accessible.
+// Treats the legacy 'viewer' value as 'analyst' so old API responses
+// still render with the right badge during the rollout window.
 export function roleBadgeHtml(role, extraCls) {
   var r = (role || '').toLowerCase();
-  if (r !== 'admin' && r !== 'viewer') return '';
-  var letter = r === 'admin' ? 'A' : 'V';
-  var label  = r === 'admin' ? 'Admin' : 'Viewer';
+  if (r === 'viewer') r = 'analyst';
+  var letter, label;
+  if (r === 'admin')        { letter = 'A';  label = 'Admin'; }
+  else if (r === 'manager') { letter = 'Mg'; label = 'Manager'; }
+  else if (r === 'analyst') { letter = 'An'; label = 'Analyst'; }
+  else { return ''; }
   var cls = 'role-badge role-badge-' + r + (extraCls ? ' ' + extraCls : '');
   return '<span class="' + cls + '" title="' + label + '">' + letter + '</span>';
 }

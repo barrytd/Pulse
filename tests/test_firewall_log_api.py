@@ -102,7 +102,7 @@ def test_get_requires_admin(fw_client, tmp_path):
         fw_client.post("/api/users", json={
             "email": "viewer@example.com",
             "password": "another-long-password",
-            "role": "viewer",
+            "role": "analyst",
         })
         fw_client.post("/api/auth/logout")
         fw_client.post("/api/auth/login", json={

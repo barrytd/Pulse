@@ -124,7 +124,7 @@ def test_notifications_scoped_to_caller(notif_client):
     client, db_path = notif_client
     me = client.get("/api/me").json()
     # Hand-craft a row owned by another user so we can prove isolation.
-    database.create_user(db_path, "other@example.com", "hash", role="viewer")
+    database.create_user(db_path, "other@example.com", "hash", role="analyst")
     other = database.get_user_by_email(db_path, "other@example.com")
     database.insert_notification(db_path, other["id"], "scan_complete", "not yours")
     database.insert_notification(db_path, me["id"], "scan_complete", "yours")
@@ -160,7 +160,7 @@ def test_finding_assignment_creates_notification(notif_client):
     client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     viewer = database.get_user_by_email(db_path, "viewer@example.com")
 

@@ -318,8 +318,10 @@ def _seed_workflow_and_assignments(db_path: str) -> None:
     print("[findings] assigning + workflow-state + notes…")
     # Get viewers we want to assign to.
     users = database.list_users(db_path)
-    viewers = [u for u in users if u.get("role") == "viewer" and u.get("active")]
-    if not viewers:
+    # Assign to analysts (post-rename role) and accept legacy 'viewer'.
+    analysts = [u for u in users
+                 if u.get("role") in ("analyst", "viewer") and u.get("active")]
+    if not analysts:
         return
 
     rng = random.Random(_DEFAULT_SEED)
@@ -335,13 +337,14 @@ def _seed_workflow_and_assignments(db_path: str) -> None:
     sample_ids = [r[0] for r in rows][:40]
     workflow_states = ["acknowledged", "investigating", "resolved"]
 
-    note_users = [u for u in users if u.get("role") in ("admin", "viewer")]
+    note_users = [u for u in users
+                   if u.get("role") in ("admin", "manager", "analyst", "viewer")]
 
     for idx, fid in enumerate(sample_ids):
-        # Round-robin assignee
-        viewer = viewers[idx % len(viewers)]
+        # Round-robin assignee across the analyst pool.
+        analyst = analysts[idx % len(analysts)]
         try:
-            database.set_finding_assignee(db_path, fid, viewer["id"])
+            database.set_finding_assignee(db_path, fid, analyst["id"])
         except Exception:
             pass
 

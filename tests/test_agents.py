@@ -341,7 +341,7 @@ def test_viewer_in_same_org_can_see_admin_agent(agent_client):
     client.post("/api/users", json={
         "email": "viewer@example.com",
         "password": "another-long-password",
-        "role": "viewer",
+        "role": "analyst",
     })
     client.post("/api/auth/logout")
     client.post("/api/auth/login", json={

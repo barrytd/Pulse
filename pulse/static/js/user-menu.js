@@ -69,8 +69,11 @@ export async function mountUserMenu() {
 function _paintRole(role) {
   var el = document.getElementById('user-dropdown-role');
   if (!el) return;
-  var label = role === 'admin' ? 'Admin'
-            : role === 'viewer' ? 'Viewer'
+  var r = (role || '').toLowerCase();
+  if (r === 'viewer') r = 'analyst';
+  var label = r === 'admin'   ? 'Admin'
+            : r === 'manager' ? 'Manager'
+            : r === 'analyst' ? 'Analyst'
             : 'Member';
   el.textContent = label;
 }

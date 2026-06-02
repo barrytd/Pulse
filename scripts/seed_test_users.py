@@ -42,22 +42,22 @@ from pulse.database import (            # noqa: E402
 # a couple of display names that include a middle initial so the "split
 # on space, take first word" greeting logic sees realistic shapes.
 SEED_USERS: list[dict] = [
-    {"email": "robert.perez@pulse.example",   "name": "Robert Perez",         "role": "admin",  "active": True},
-    {"email": "maya.chen@pulse.example",      "name": "Maya Chen",            "role": "admin",  "active": True},
-    {"email": "aiden.okafor@pulse.example",   "name": "Aiden Okafor",         "role": "viewer", "active": True},
-    {"email": "priya.iyer@pulse.example",     "name": "Priya Iyer",           "role": "viewer", "active": True},
-    {"email": "jordan.kim@pulse.example",     "name": "Jordan Kim",           "role": "viewer", "active": True},
-    {"email": "liam.odonnell@pulse.example",  "name": "Liam O'Donnell",       "role": "viewer", "active": True},
-    {"email": "sofia.ramirez@pulse.example",  "name": "Sofia Ramirez",        "role": "viewer", "active": True},
-    {"email": "hiroshi.tanaka@pulse.example", "name": "Hiroshi Tanaka",       "role": "admin",  "active": True},
-    {"email": "emma.schmidt@pulse.example",   "name": "Emma Schmidt",         "role": "viewer", "active": True},
-    {"email": "noah.williams@pulse.example",  "name": "Noah Williams",        "role": "viewer", "active": True},
-    {"email": "amelia.davies@pulse.example",  "name": "Amelia R. Davies",     "role": "viewer", "active": True},
-    {"email": "kwame.asante@pulse.example",   "name": "Kwame Asante",         "role": "viewer", "active": True},
+    {"email": "robert.perez@pulse.example",   "name": "Robert Perez",         "role": "admin",   "active": True},
+    {"email": "maya.chen@pulse.example",      "name": "Maya Chen",            "role": "admin",   "active": True},
+    {"email": "priya.iyer@pulse.example",     "name": "Priya Iyer",           "role": "manager", "active": True},
+    {"email": "jordan.kim@pulse.example",     "name": "Jordan Kim",           "role": "manager", "active": True},
+    {"email": "aiden.okafor@pulse.example",   "name": "Aiden Okafor",         "role": "analyst", "active": True},
+    {"email": "liam.odonnell@pulse.example",  "name": "Liam O'Donnell",       "role": "analyst", "active": True},
+    {"email": "sofia.ramirez@pulse.example",  "name": "Sofia Ramirez",        "role": "analyst", "active": True},
+    {"email": "hiroshi.tanaka@pulse.example", "name": "Hiroshi Tanaka",       "role": "admin",   "active": True},
+    {"email": "emma.schmidt@pulse.example",   "name": "Emma Schmidt",         "role": "analyst", "active": True},
+    {"email": "noah.williams@pulse.example",  "name": "Noah Williams",        "role": "analyst", "active": True},
+    {"email": "amelia.davies@pulse.example",  "name": "Amelia R. Davies",     "role": "analyst", "active": True},
+    {"email": "kwame.asante@pulse.example",   "name": "Kwame Asante",         "role": "analyst", "active": True},
     # Deactivated users test the "only active users show up in the picker"
     # branch — they'll appear in Settings > Users but NOT in the dropdown.
-    {"email": "zoe.morrison@pulse.example",   "name": "Zoe Morrison",         "role": "viewer", "active": False},
-    {"email": "taro.yamamoto@pulse.example",  "name": "Taro Yamamoto",        "role": "viewer", "active": False},
+    {"email": "zoe.morrison@pulse.example",   "name": "Zoe Morrison",         "role": "analyst", "active": False},
+    {"email": "taro.yamamoto@pulse.example",  "name": "Taro Yamamoto",        "role": "analyst", "active": False},
 ]
 
 
