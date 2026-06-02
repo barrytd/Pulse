@@ -678,6 +678,156 @@ def _load_enabled_sigma_rules(app, user_id):
         return []
 
 
+async def _generate_incident_report(app, user_id, fmt, scope,
+                                       filename_prefix):
+    """Dispatch path for the Incident Investigation Report. Scope is
+    ``{"host": <hostname>}`` or ``{"finding_ids": [N, ...]}`` — neither
+    of which matches the date-range generator above, so we route
+    through a dedicated helper.
+    """
+    from datetime import datetime as _dt
+    from pulse.firewall import blocker as _blocker
+    from pulse.reports.incident import build_incident
+    from pulse.reports.incident_renderers import render as _render_incident
+
+    host = (scope or {}).get("host")
+    finding_ids = (scope or {}).get("finding_ids")
+    if not host and not finding_ids:
+        raise HTTPException(
+            400,
+            detail="Incident report scope must include 'host' or 'finding_ids'.",
+        )
+
+    scope_kw = _findings_scope_kwargs(app, user_id)
+    caller = (get_user_by_id(app.state.db_path, user_id)
+              if user_id else None) or {}
+
+    # Collect findings.
+    findings_in_scope: list[dict] = []
+    if host:
+        history = get_history(app.state.db_path, limit=2000,
+                                **scope_kw) or []
+        for s in history:
+            if (s.get("hostname") or "").lower() != str(host).lower():
+                continue
+            rows = get_scan_findings(app.state.db_path, s["id"],
+                                       **scope_kw) or []
+            for f in rows:
+                # Per-host = unresolved findings only, per spec.
+                if (f.get("workflow_status") == "resolved"
+                        or f.get("false_positive")):
+                    continue
+                findings_in_scope.append(f)
+    if finding_ids:
+        try:
+            id_set = {int(i) for i in finding_ids}
+        except (TypeError, ValueError):
+            raise HTTPException(400, detail="finding_ids must be integers.")
+        if id_set:
+            # Pull findings the caller can access. Iterate scans they
+            # can see so the helper enforces tenant scoping.
+            history = get_history(app.state.db_path, limit=2000,
+                                    **scope_kw) or []
+            for s in history:
+                rows = get_scan_findings(app.state.db_path, s["id"],
+                                           **scope_kw) or []
+                for f in rows:
+                    if f.get("id") in id_set:
+                        findings_in_scope.append(f)
+
+    attach_remediation(findings_in_scope)
+
+    # Lookup helpers piped into the builder so the data module never
+    # imports the rest of pulse.
+    def _intel(ip):
+        try:
+            from pulse.intel import lookup_ip as _intel_lookup_ip
+            return _intel_lookup_ip(ip, app.state.db_path, api_key=None)
+        except Exception:
+            return None
+
+    def _notes(fid):
+        try:
+            return list_finding_notes(app.state.db_path, int(fid)) or []
+        except Exception:
+            return []
+
+    def _blocks():
+        try:
+            return _blocker.list_blocks(app.state.db_path) or []
+        except Exception:
+            return []
+
+    org_name = None
+    try:
+        org_id = caller.get("organization_id")
+        if org_id is not None:
+            with database._connect(app.state.db_path) as _conn:
+                row = _conn.execute(
+                    "SELECT name FROM organizations WHERE id = ?",
+                    (int(org_id),),
+                ).fetchone()
+            if row:
+                org_name = row[0]
+    except Exception:
+        pass
+
+    investigator_name = (caller.get("display_name")
+                          or (caller.get("email") or "").split("@")[0]
+                          or None)
+    payload = build_incident(
+        findings_in_scope,
+        host=host,
+        finding_ids=finding_ids,
+        investigator_email=caller.get("email"),
+        investigator_name=investigator_name,
+        org_name=org_name,
+        intel_lookup=_intel,
+        note_lookup=_notes,
+        block_lookup=_blocks,
+    )
+    body_bytes = _render_incident(payload, fmt)
+
+    stamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+    ext = {"pdf": "pdf", "html": "html", "json": "json", "csv": "csv"}[fmt]
+    filename = f"{filename_prefix}_{stamp}.{ext}"
+
+    try:
+        save_report(
+            app.state.db_path,
+            scan_id=None,
+            fmt=fmt,
+            filename=filename,
+            file_data=body_bytes,
+            generated_by=user_id or None,
+            organization_id=caller.get("organization_id"),
+            template_type="incident_investigation",
+        )
+    except Exception as exc:
+        try:
+            _blocker.log_audit(
+                app.state.db_path,
+                action="report_save_failed",
+                source="api",
+                user=caller.get("email"),
+                detail=f"filename={filename} error={exc!s}",
+            )
+        except Exception:
+            pass
+
+    media_type = {
+        "pdf":  "application/pdf",
+        "html": "text/html; charset=utf-8",
+        "json": "application/json",
+        "csv":  "text/csv; charset=utf-8",
+    }[fmt]
+    return Response(
+        content=body_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _audit_scan_delete(db_path, user_id, ids_int, deleted, *, source_page):
     """Record a scan-deletion in the audit log. Wrapped in try/except via
     blocker.log_audit so a logging failure never breaks the delete."""
@@ -3624,10 +3774,11 @@ def _register_routes(app: FastAPI) -> None:
         scope    = body.get("scope") or {}
 
         _TEMPLATE_REGISTRY = {
-            "threat_detection_summary": "pulse_threat_summary",
-            "executive_summary":        "pulse_executive_summary",
-            "nist_csf_coverage":        "pulse_nist_csf",
-            "iso_27001_annex_a":        "pulse_iso_27001",
+            "threat_detection_summary":     "pulse_threat_summary",
+            "executive_summary":            "pulse_executive_summary",
+            "nist_csf_coverage":            "pulse_nist_csf",
+            "iso_27001_annex_a":            "pulse_iso_27001",
+            "incident_investigation":       "pulse_incident",
         }
         if fmt not in ("pdf", "html", "json", "csv"):
             raise HTTPException(
@@ -3639,6 +3790,14 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(
                 400,
                 detail=f"Unknown template {template!r}. Supported: {supported}.",
+            )
+
+        # Incident Investigation has its own scope shape (host or
+        # finding_ids) so route it through a dedicated path *before*
+        # the date-range dispatch runs.
+        if template == "incident_investigation":
+            return await _generate_incident_report(
+                app, user_id, fmt, scope, _TEMPLATE_REGISTRY[template],
             )
 
         # Resolve the data scope into a list of findings + scan rows.

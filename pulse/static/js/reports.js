@@ -460,6 +460,21 @@ export async function renderReportsPage() {
                   'audit preparation.',
         }) +
       '</div>' +
+    '</div>' +
+    '<div class="report-catalog-section">' +
+      '<div class="report-category-label">Incident</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'incident_investigation',
+          name:   'Incident Investigation Report',
+          icon:   'siren',
+          accent: '#f97316',
+          desc:   'Detailed technical deep-dive on a single host or a ' +
+                  'selected set of findings, with full event data, ' +
+                  'timeline, and chain-of-custody integrity. For ' +
+                  'incident responders and forensic handoff.',
+        }) +
+      '</div>' +
     '</div>';
 
   // First-run empty state — KPIs + filters get rendered too so the
@@ -581,9 +596,47 @@ var _TEMPLATES = {
     scope_default: 'recent',
     scope_only:    'recent',
   },
+  incident_investigation: {
+    title:    'Generate Incident Investigation Report',
+    subtitle: 'Pick a host (the report covers all unresolved findings on ' +
+              'that host) or pre-select findings on the Findings page first. ' +
+              'Includes raw event data, timeline, and a SHA-256 manifest ' +
+              'for chain of custody.',
+    scope_default: 'incident_host',
+    scope_only:    'incident',  // hide both date-range radios
+  },
 };
 
-export async function openGenerateReportModal(templateSlug) {
+// Tracks a pre-selected set of finding IDs passed in via
+// generateIncidentReportForFindings() (called from the Findings page
+// bulk action bar). When non-empty, the modal renders a confirmation
+// line instead of the host picker.
+var _incidentPreselectedIds = null;
+
+// -----------------------------------------------------------------
+// Entry points from the Findings + Fleet pages.
+// -----------------------------------------------------------------
+
+/** Open the modal pre-scoped to a single host (Fleet page row action). */
+export function generateIncidentReportForHost(host) {
+  _incidentPreselectedIds = null;
+  openGenerateReportModal('incident_investigation', { host: host });
+}
+
+/** Open the modal pre-scoped to a set of finding IDs (Findings page
+ *  bulk action). Accepts an array of ids OR a delimited string. */
+export function generateIncidentReportForFindings(ids) {
+  if (typeof ids === 'string') {
+    ids = ids.split(/[\s,]+/).map(function (s) { return Number(s); })
+              .filter(function (n) { return Number.isFinite(n) && n > 0; });
+  } else if (!Array.isArray(ids)) {
+    ids = [];
+  }
+  _incidentPreselectedIds = ids;
+  openGenerateReportModal('incident_investigation', { finding_ids: ids });
+}
+
+export async function openGenerateReportModal(templateSlug, opts) {
   var modal = document.getElementById('generate-report-modal');
   if (!modal) return;
   var slug = templateSlug || 'threat_detection_summary';
@@ -594,6 +647,37 @@ export async function openGenerateReportModal(templateSlug) {
   if (titleEl) titleEl.textContent = tmpl.title;
   if (subEl)   subEl.textContent   = tmpl.subtitle;
   if (tmplEl)  tmplEl.value        = slug;
+
+  // Incident Investigation has its own scope rows (host picker or
+  // pre-selected findings); hide every other scope row and short-
+  // circuit the period-picker code below.
+  var isIncident = (slug === 'incident_investigation');
+  _setIncidentRowsVisibility(isIncident, opts || {});
+  if (isIncident) {
+    var dateRows = ['genrep-scan-row', 'genrep-days-row', 'genrep-custom-row'];
+    dateRows.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    // Hide both date-range scope radios for incident — neither applies.
+    var scopeGroup = document.querySelector(
+      'input[name="genrep-scope"]'
+    );
+    if (scopeGroup) {
+      [['scan', 'scope-scan'], ['recent', 'scope-recent']].forEach(function () {});
+      var allScope = document.querySelectorAll('input[name="genrep-scope"]');
+      allScope.forEach(function (r) {
+        var wrap = r.closest('label');
+        if (wrap) wrap.style.display = 'none';
+      });
+    }
+    modal.classList.add('open');
+    // Populate the host picker unless we're in preselected-findings mode.
+    if (!(opts && opts.finding_ids && opts.finding_ids.length)) {
+      await _populateIncidentHostPicker((opts || {}).host);
+    }
+    return;
+  }
 
   // Per-template scope behavior: some templates (executive summary)
   // only make sense over a date range, so we hide the per-scan radio
@@ -666,6 +750,61 @@ export function onGenrepScopeChange() {
   }
 }
 
+function _setIncidentRowsVisibility(isIncident, opts) {
+  var hostRow = document.getElementById('genrep-incident-host-row');
+  var preRow  = document.getElementById('genrep-incident-preselected-row');
+  if (hostRow) hostRow.style.display = 'none';
+  if (preRow)  preRow.style.display  = 'none';
+  if (!isIncident) return;
+  if (opts && opts.finding_ids && opts.finding_ids.length) {
+    if (preRow) {
+      preRow.style.display = '';
+      var note = document.getElementById('genrep-incident-preselected-note');
+      if (note) {
+        note.textContent = opts.finding_ids.length +
+          ' finding(s) pre-selected from the Findings page. Generate to ' +
+          'produce a report scoped to exactly those rows.';
+      }
+    }
+  } else if (hostRow) {
+    hostRow.style.display = '';
+  }
+}
+
+async function _populateIncidentHostPicker(preferHost) {
+  var sel = document.getElementById('genrep-incident-host');
+  if (!sel) return;
+  sel.innerHTML = '<option>Loading hosts…</option>';
+  try {
+    var resp = await fetch('/api/fleet');
+    var body = resp.ok ? await resp.json() : { hosts: [] };
+    var hosts = (body && body.hosts) || [];
+    if (!hosts.length) {
+      sel.innerHTML = '<option value="">No monitored hosts yet.</option>';
+      return;
+    }
+    sel.innerHTML = hosts.map(function (h) {
+      var name = (h.hostname || h.name || '').trim();
+      if (!name) return '';
+      var meta = ((h.latest_score != null)
+        ? ' · score ' + h.latest_score
+        : '');
+      return '<option value="' + escapeHtml(name) + '">' +
+             escapeHtml(name) + meta + '</option>';
+    }).filter(Boolean).join('');
+    if (preferHost) {
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === preferHost) {
+          sel.selectedIndex = i;
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">Failed to load hosts.</option>';
+  }
+}
+
 export function onGenrepDaysChange() {
   var daysEl = document.getElementById('genrep-days');
   var customRow = document.getElementById('genrep-custom-row');
@@ -686,7 +825,21 @@ export async function submitGenerateReport() {
   var fmtEl = document.querySelector('input[name="genrep-format"]:checked');
   var fmt = fmtEl ? fmtEl.value : 'pdf';
   var scope = {};
-  if (scopeKind === 'scan') {
+
+  // Incident scope short-circuits the date-range logic.
+  if (template === 'incident_investigation') {
+    if (_incidentPreselectedIds && _incidentPreselectedIds.length) {
+      scope.finding_ids = _incidentPreselectedIds.slice();
+    } else {
+      var hostEl = document.getElementById('genrep-incident-host');
+      var host = hostEl ? hostEl.value : '';
+      if (!host) {
+        toastError('Pick a host or pre-select findings first.');
+        return;
+      }
+      scope.host = host;
+    }
+  } else if (scopeKind === 'scan') {
     var sel = document.getElementById('genrep-scan');
     var scanId = sel ? Number(sel.value) : 0;
     if (!scanId) { toastError('Pick a scan to generate from.'); return; }

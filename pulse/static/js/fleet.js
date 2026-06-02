@@ -96,13 +96,33 @@ function _buildFleetTable(hosts) {
       '<td>' + h.scan_count + '</td>' +
       '<td>' + h.total_findings + '</td>' +
       '<td>' + relTimeHtml(h.last_scan_at) + '</td>' +
+      '<td class="col-actions" data-action="stopClickPropagation">' +
+        '<button class="btn btn-ghost btn-sm btn-icon" ' +
+          'title="Generate Incident Report for this host" ' +
+          'data-action="fleetGenerateIncidentReport" ' +
+          'data-arg="' + escapeHtml(h.hostname) + '">' +
+          '<i data-lucide="siren"></i>' +
+        '</button>' +
+      '</td>' +
       '</tr>';
   }).join('');
 
   return '<table class="findings-table"><thead><tr>' +
     '<th>Host</th><th>Latest Score</th><th>Worst Severity</th>' +
-    '<th>Scans</th><th>Findings</th><th>Last Scan</th>' +
+    '<th>Scans</th><th>Findings</th><th>Last Scan</th><th></th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+/**
+ * Row action that launches the Incident Investigation Report modal
+ * pre-scoped to a single host. Dynamic import keeps the report-side
+ * code lazy-loaded for users who never use this feature.
+ */
+export function fleetGenerateIncidentReport(host) {
+  if (!host) return;
+  import('./reports.js').then(function (m) {
+    m.generateIncidentReportForHost(host);
+  });
 }
 
 function _renderBody() {

@@ -64,6 +64,7 @@ import {
   bulkAssignToMe,
   bulkUnassign,
   bulkMarkReviewed,
+  bulkGenerateIncidentReport,
   toggleFpFromRow,
   stopClickPropagation,
   viewScanFromLink,
@@ -96,7 +97,8 @@ import {
   toggleHistorySelectAll,
   deleteSelectedHistory,
 } from './history.js';
-import { fleetOpenHost, exportFleetCsv, fleetFilterByKpi } from './fleet.js';
+import { fleetOpenHost, exportFleetCsv, fleetFilterByKpi,
+         fleetGenerateIncidentReport } from './fleet.js';
 import {
   setFirewallTab,
   firewallPushOne,
@@ -208,6 +210,8 @@ import {
   submitGenerateReport,
   onGenrepScopeChange,
   onGenrepDaysChange,
+  generateIncidentReportForHost,
+  generateIncidentReportForFindings,
 } from './reports.js';
 import {
   toggleRuleEnabled,
@@ -333,6 +337,7 @@ const actions = {
   bulkAssignToMe,
   bulkUnassign,
   bulkMarkReviewed,
+  bulkGenerateIncidentReport,
   toggleFpFromRow,
   stopClickPropagation,
   viewScanFromLink,
@@ -368,6 +373,7 @@ const actions = {
   fleetOpenHost,
   exportFleetCsv,
   fleetFilterByKpi,
+  fleetGenerateIncidentReport,
 
   // firewall
   setFirewallTab,
@@ -477,6 +483,8 @@ const actions = {
   submitGenerateReport,
   onGenrepScopeChange,
   onGenrepDaysChange,
+  generateIncidentReportForHost,
+  generateIncidentReportForFindings,
 
   // rules
   toggleRuleEnabled,

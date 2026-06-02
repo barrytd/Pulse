@@ -1383,9 +1383,32 @@ function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
       '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkUnassign"><i data-lucide="user-x"></i><span>Unassign</span></button>' +
       '<span class="bulk-bar-divider" aria-hidden="true"></span>' +
       '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkMarkReviewed"><i data-lucide="check-circle-2"></i><span>Mark reviewed</span></button>' +
+      '<span class="bulk-bar-divider" aria-hidden="true"></span>' +
+      '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkGenerateIncidentReport">' +
+        '<i data-lucide="siren"></i><span>Generate Incident Report</span></button>' +
       '<a class="bulk-bar-clear" data-action="clearFindingSelection">Clear selection</a>' +
     '</div>'
   );
+}
+
+/**
+ * Bulk action: take the currently-selected finding IDs and open the
+ * Incident Investigation Report modal pre-scoped to that set. The
+ * modal hides the host picker and renders a confirmation line instead.
+ */
+export function bulkGenerateIncidentReport() {
+  var ids = Object.keys(findingsState.selected || {})
+    .map(function (k) { return Number(k); })
+    .filter(function (n) { return Number.isFinite(n) && n > 0; });
+  if (!ids.length) {
+    toastError('Select at least one finding first.');
+    return;
+  }
+  // Calling through the global lets a future page (Audit, History)
+  // reuse the same entry point without importing reports.js directly.
+  import('./reports.js').then(function (m) {
+    m.generateIncidentReportForFindings(ids);
+  });
 }
 
 async function _mountBulkBarUsers() {
