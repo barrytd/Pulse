@@ -313,12 +313,18 @@ def get_mitigations(rule_name):
 def attach_remediation(findings):
     """
     Decorate every finding dict in-place with `remediation` (list of step
-    strings) and `mitigations` (list of {id, name} dicts) so the dashboard
-    and any JSON-consuming tool can read both directly from the finding.
+    strings), `mitigations` (list of {id, name} dicts), and `knowledge`
+    (plain-language Security Guide payload) so the dashboard and any
+    JSON-consuming tool can read all three directly from the finding.
     Returns the same list so call sites can chain it.
     """
+    # Lazy import — knowledge_base imports nothing heavy, but keeping
+    # the import local avoids a hard coupling cycle for older callers.
+    from pulse.core.knowledge_base import get_knowledge
+
     for f in findings or []:
         rule = f.get("rule", "")
         f["remediation"] = get_remediation(rule)
         f["mitigations"] = get_mitigations(rule)
+        f["knowledge"]   = get_knowledge(rule)
     return findings
