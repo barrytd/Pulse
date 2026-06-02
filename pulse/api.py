@@ -51,7 +51,8 @@ from pulse import __version__
 from pulse.auth import (
     SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS,
     ensure_session_secret, generate_api_token, hash_password,
-    issue_session_cookie, require_admin, require_login, verify_password,
+    issue_session_cookie, require_admin, require_login, require_manager,
+    verify_password,
 )
 from pulse.database import (
     count_admins, count_users, create_api_token, create_user,
@@ -2358,7 +2359,7 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     @app.get("/api/audit/export.csv")
-    def audit_export_csv(request: Request, user_id: int = Depends(require_admin)):
+    def audit_export_csv(request: Request, user_id: int = Depends(require_manager)):
         import csv
         import io
         from pulse.firewall import blocker
@@ -2385,7 +2386,7 @@ def _register_routes(app: FastAPI) -> None:
         )
 
     @app.get("/api/audit/export.json")
-    def audit_export_json(request: Request, user_id: int = Depends(require_admin)):
+    def audit_export_json(request: Request, user_id: int = Depends(require_manager)):
         from pulse.firewall import blocker
         rows = blocker.get_audit_log(app.state.db_path, limit=1000)
         rows = _audit_apply_filters(rows, **_audit_filter_params(request))
@@ -2399,7 +2400,7 @@ def _register_routes(app: FastAPI) -> None:
         )
 
     @app.get("/api/audit/export.ndjson")
-    def audit_export_ndjson(request: Request, user_id: int = Depends(require_admin)):
+    def audit_export_ndjson(request: Request, user_id: int = Depends(require_manager)):
         """Newline-delimited JSON — one event per line. Friendly to
         SIEM ingest (Splunk, ELK, Sentinel) and grep-style ad-hoc
         analysis. Same filter respect as the other two formats."""
@@ -2716,7 +2717,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/api/firewall/log")
     def firewall_log_get(path: Optional[str] = None,
-                         user_id: int = Depends(require_admin)):
+                         user_id: int = Depends(require_manager)):
         """Parse the Windows Firewall log at a server-side path.
 
         Security: even though this endpoint is admin-gated, in a hosted
@@ -2778,7 +2779,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.post("/api/firewall/log")
     async def firewall_log_upload(request: Request,
                                   file: UploadFile = File(...),
-                                  user_id: int = Depends(require_admin)):
+                                  user_id: int = Depends(require_manager)):
         """Stream the uploaded log to a temp file and parse it. The temp
         file is deleted before we return — Pulse never keeps raw firewall
         logs around once parsed."""
@@ -3527,7 +3528,7 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.delete("/api/reports/batch")
     def delete_reports_batch(payload: dict = Body(...),
-                             user_id: int = Depends(require_admin)):
+                             user_id: int = Depends(require_manager)):
         names = payload.get("filenames") if isinstance(payload, dict) else None
         if not isinstance(names, list) or not names:
             raise HTTPException(400, detail="Body must be {\"filenames\": [...]}")
@@ -3579,7 +3580,7 @@ def _register_routes(app: FastAPI) -> None:
     # DELETE /api/reports/{filename} — remove a persisted report from disk
     # -------------------------------------------------------------------
     @app.delete("/api/reports/{filename}")
-    def delete_report(filename: str, user_id: int = Depends(require_admin)):
+    def delete_report(filename: str, user_id: int = Depends(require_manager)):
         safe = os.path.basename(filename)
         if not safe or safe != filename:
             raise HTTPException(400, detail="Invalid filename.")
@@ -4164,7 +4165,7 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.delete("/api/whitelist/batch")
     def delete_whitelist_batch(payload: dict = Body(...),
-                               user_id: int = Depends(require_admin)):
+                               user_id: int = Depends(require_manager)):
         entries = payload.get("entries") if isinstance(payload, dict) else None
         if not isinstance(entries, list) or not entries:
             raise HTTPException(400, detail="Body must be {\"entries\": [{key,value},...]}")
@@ -4199,7 +4200,7 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.put("/api/config/whitelist")
     async def update_whitelist(request: Request,
-                               user_id: int = Depends(require_admin)):
+                               user_id: int = Depends(require_manager)):
         """Update the whitelist section in pulse.yaml."""
         body = await request.json()
 
