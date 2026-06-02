@@ -1,27 +1,40 @@
-// reports.js — Reports page. Lists every file in the server's
-// reports/ directory with Download + Delete controls. Search box
-// filters client-side by filename or generated date. Bulk-select
-// replicates the Scans page pattern: a per-row checkbox + select-all
-// header + sticky action bar with a single confirmation prompt.
+// reports.js — Reports page.
+//
+// Reports are now persisted in the DB (reports table, BLOB-backed). This
+// page lists every report visible to the caller's org, surfaces KPIs at
+// the top, lets the user filter by format / scan / generator / time
+// range, download from the DB, and bulk-delete.
 'use strict';
 
 import { apiDeleteReports, fetchScans } from './api.js';
-import { escapeHtml, showToast, toastError, relTimeHtml, downloadReport, formatRelativeTime } from './dashboard.js';
+import {
+  escapeHtml, showToast, toastError, relTimeHtml,
+  downloadReport, formatRelativeTime,
+} from './dashboard.js';
 
 var _reportsCache = [];
+var _kpisCache    = { total: 0, pdf: 0, this_week: 0, storage_bytes: 0 };
+var _retentionDays = 90;
 var _reportsQuery = '';
-// filename -> true. Keyed by filename since the backend identifies each
-// report by its on-disk name; no numeric id to hang selection on.
+// Active filter chips. Keyed by dimension; null means "no chip".
+var _filters = {
+  format:     null,  // 'pdf' | 'html' | 'json' | 'csv'
+  scan:       null,  // scan_id (number)
+  generator:  null,  // user_id (number)
+  timeRange:  null,  // '7d' | '30d' | '90d' | 'all'
+};
+// filename -> true
 var _selected = {};
 
 async function _fetchReports() {
   var resp = await fetch('/api/reports');
   if (!resp.ok) throw new Error('Failed to load reports: HTTP ' + resp.status);
   var body = await resp.json();
-  return body.reports || [];
+  return body;
 }
 
 function _formatBytes(n) {
+  n = n || 0;
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
@@ -37,13 +50,38 @@ function _formatBadgeClass(fmt) {
   return 'fmt-other';
 }
 
-function _applyQuery(rows, q) {
-  if (!q) return rows;
-  var needle = q.toLowerCase();
-  return rows.filter(function (r) {
-    var hay = (r.filename + ' ' + r.generated_at + ' ' + r.format).toLowerCase();
-    return hay.indexOf(needle) >= 0;
-  });
+function _timeRangeCutoff(range) {
+  // Returns a Date the row's generated_at must be >= for the row to pass.
+  if (!range || range === 'all') return null;
+  var days = parseInt(range.replace('d', ''), 10);
+  if (!days || days <= 0) return null;
+  var d = new Date();
+  d.setDate(d.getDate() - days);
+  return d;
+}
+
+function _passesFilters(r) {
+  if (_filters.format && (r.format || '').toLowerCase() !== _filters.format) return false;
+  if (_filters.scan != null && r.scan_id !== _filters.scan) return false;
+  if (_filters.generator != null && r.generated_by !== _filters.generator) return false;
+  if (_filters.timeRange) {
+    var cutoff = _timeRangeCutoff(_filters.timeRange);
+    if (cutoff) {
+      var t = new Date(String(r.generated_at || '').replace(' ', 'T'));
+      if (isNaN(t) || t < cutoff) return false;
+    }
+  }
+  if (_reportsQuery) {
+    var hay = ((r.filename || '') + ' ' + (r.generated_at || '') + ' ' +
+               (r.format || '') + ' ' + (r.generated_by_name || '') + ' ' +
+               (r.scan_hostname || '')).toLowerCase();
+    if (hay.indexOf(_reportsQuery.toLowerCase()) < 0) return false;
+  }
+  return true;
+}
+
+function _filteredRows() {
+  return _reportsCache.filter(_passesFilters);
 }
 
 function _selectedFilenames() {
@@ -64,38 +102,97 @@ function _updateDeleteBar() {
   }
 }
 
+function _kpiTilesHtml() {
+  var k = _kpisCache || {};
+  return '<div class="reports-kpi-strip">' +
+    '<div class="reports-kpi"><div class="reports-kpi-num">' + (k.total || 0) + '</div>' +
+      '<div class="reports-kpi-label">Total reports</div></div>' +
+    '<div class="reports-kpi"><div class="reports-kpi-num">' + (k.pdf || 0) + '</div>' +
+      '<div class="reports-kpi-label">PDF reports</div></div>' +
+    '<div class="reports-kpi"><div class="reports-kpi-num">' + (k.this_week || 0) + '</div>' +
+      '<div class="reports-kpi-label">This week</div></div>' +
+    '<div class="reports-kpi"><div class="reports-kpi-num">' + _formatBytes(k.storage_bytes) + '</div>' +
+      '<div class="reports-kpi-label">Storage used</div></div>' +
+  '</div>';
+}
+
+function _filterChipsHtml() {
+  // Build unique value lists from the cache so chips reflect what's
+  // actually available, not a hardcoded list.
+  var formats = {}, scans = {}, generators = {};
+  _reportsCache.forEach(function (r) {
+    if (r.format) formats[r.format.toLowerCase()] = true;
+    if (r.scan_id != null) scans[r.scan_id] = (r.scan_number != null ? r.scan_number : r.scan_id);
+    if (r.generated_by != null) generators[r.generated_by] = r.generated_by_name || ('user #' + r.generated_by);
+  });
+  var fmtOpts = Object.keys(formats).sort().map(function (f) {
+    var on = _filters.format === f;
+    return '<button class="filter-chip' + (on ? ' active' : '') + '" ' +
+      'data-action="setReportFilter" data-arg="format|' + f + '">' +
+      escapeHtml(f.toUpperCase()) + '</button>';
+  }).join('');
+  var scanOpts = Object.keys(scans).sort().map(function (sid) {
+    var on = _filters.scan === Number(sid);
+    return '<button class="filter-chip' + (on ? ' active' : '') + '" ' +
+      'data-action="setReportFilter" data-arg="scan|' + sid + '">' +
+      'Scan #' + escapeHtml(String(scans[sid])) + '</button>';
+  }).join('');
+  var genOpts = Object.keys(generators).sort().map(function (uid) {
+    var on = _filters.generator === Number(uid);
+    return '<button class="filter-chip' + (on ? ' active' : '') + '" ' +
+      'data-action="setReportFilter" data-arg="generator|' + uid + '">' +
+      escapeHtml(String(generators[uid])) + '</button>';
+  }).join('');
+  var ranges = [['7d', '7 days'], ['30d', '30 days'], ['90d', '90 days'], ['all', 'All time']];
+  var timeOpts = ranges.map(function (r) {
+    var on = _filters.timeRange === r[0] || (r[0] === 'all' && !_filters.timeRange);
+    return '<button class="filter-chip' + (on ? ' active' : '') + '" ' +
+      'data-action="setReportFilter" data-arg="timeRange|' + r[0] + '">' +
+      escapeHtml(r[1]) + '</button>';
+  }).join('');
+
+  // "Clear all" appears only when something is active.
+  var anyActive = !!(_filters.format || _filters.scan != null ||
+                      _filters.generator != null ||
+                      (_filters.timeRange && _filters.timeRange !== 'all'));
+  var clearBtn = anyActive
+    ? '<button class="filter-chip filter-chip-clear" data-action="clearReportFilters">Clear all</button>'
+    : '';
+
+  return '<div class="reports-filters">' +
+    (fmtOpts   ? '<div class="filter-group"><span class="filter-group-label">Format</span>' + fmtOpts + '</div>' : '') +
+    (scanOpts  ? '<div class="filter-group"><span class="filter-group-label">Scan</span>' + scanOpts + '</div>' : '') +
+    (genOpts   ? '<div class="filter-group"><span class="filter-group-label">Generated by</span>' + genOpts + '</div>' : '') +
+    '<div class="filter-group"><span class="filter-group-label">Time</span>' + timeOpts + '</div>' +
+    clearBtn +
+  '</div>';
+}
+
 function _renderTable() {
-  var rows = _applyQuery(_reportsCache, _reportsQuery);
-  // Drop selections that no longer match any visible row — otherwise
-  // the bulk bar keeps claiming rows that the user can't see.
+  var rows = _filteredRows();
+  var countEl = document.getElementById('reports-count');
+  if (countEl) {
+    countEl.textContent = rows.length + ' of ' + _reportsCache.length + ' reports';
+  }
+  // Prune selections that fell off the filtered view.
   var visible = {};
   rows.forEach(function (r) { visible[r.filename] = true; });
   Object.keys(_selected).forEach(function (k) {
     if (!visible[k]) delete _selected[k];
   });
-
-  var body = document.getElementById('reports-tbody');
-  var countEl = document.getElementById('reports-count');
-  if (countEl) {
-    countEl.textContent = rows.length + ' of ' + _reportsCache.length + ' reports';
-  }
-  // Header "select-all" reflects whether every currently-visible row is
-  // selected. Matches the scans pattern exactly.
   var headCb = document.getElementById('reports-select-all');
   if (headCb) {
     headCb.checked = rows.length > 0 && rows.every(function (r) { return _selected[r.filename]; });
   }
+  var body = document.getElementById('reports-tbody');
   if (!body) return;
 
   if (rows.length === 0) {
-    // Cache empty -> the renderShell already swapped in the on-page
-    // empty state outside the table; nothing to do here. Cache non-empty
-    // but query filtered everything out -> "no results" line is plenty.
     var msg = _reportsCache.length === 0
       ? ''
-      : 'No reports match your search.';
+      : 'No reports match your filters.';
     body.innerHTML = msg
-      ? '<tr><td colspan="6"><div class="dash-empty-note" style="margin:0;">' + msg + '</div></td></tr>'
+      ? '<tr><td colspan="7"><div class="dash-empty-note" style="margin:0;">' + msg + '</div></td></tr>'
       : '';
     _updateDeleteBar();
     return;
@@ -106,18 +203,30 @@ function _renderTable() {
     var fn = r.filename;
     var fnAttr = escapeHtml(fn);
     var checked = _selected[fn] ? 'checked' : '';
+    var scanCell = r.scan_id != null
+      ? '<a href="#" data-action="viewScan" data-arg="' + r.scan_id + '" ' +
+          'style="color:var(--accent); text-decoration:none;">' +
+          'Scan #' + escapeHtml(String(r.scan_number != null ? r.scan_number : r.scan_id)) +
+        '</a>' +
+        (r.scan_scanned_at
+          ? '<div style="font-size:10px; color:var(--text-muted);">' +
+            escapeHtml((r.scan_scanned_at || '').split(' ')[0] || '') + '</div>'
+          : '')
+      : '<span class="muted">—</span>';
+    var genName = escapeHtml(r.generated_by_name || (r.generated_by != null ? 'user #' + r.generated_by : '—'));
     return '<tr data-report-filename="' + fnAttr + '">' +
       '<td data-action="stopClickPropagation" style="width:32px;">' +
         '<input type="checkbox" ' + checked +
           ' data-action="toggleReportSelect" data-arg="' + fnAttr + '" ' +
           'aria-label="Select ' + fnAttr + '" /></td>' +
       '<td>' + relTimeHtml(r.generated_at) + '</td>' +
-      '<td class="mono">' + fnAttr + '</td>' +
+      '<td>' + scanCell + '</td>' +
       '<td><span class="fmt-badge ' + _formatBadgeClass(r.format) + '">' + escapeHtml((r.format || '?').toUpperCase()) + '</span></td>' +
-      '<td class="mono num">' + _formatBytes(r.size_bytes || 0) + '</td>' +
+      '<td class="mono num">' + _formatBytes(r.file_size || r.size_bytes || 0) + '</td>' +
+      '<td>' + genName + '</td>' +
       '<td class="col-actions">' +
-        '<a class="btn btn-sm btn-with-icon" href="' + href + '" data-default="allow" download><i data-lucide="download"></i><span>Download</span></a> ' +
-        '<button class="btn btn-sm btn-danger btn-with-icon" data-action="deleteReport" data-arg="' + fnAttr + '"><i data-lucide="trash-2"></i><span>Delete</span></button>' +
+        '<a class="btn btn-sm btn-icon" href="' + href + '" data-default="allow" download title="Download"><i data-lucide="download"></i></a> ' +
+        '<button class="btn btn-sm btn-icon btn-danger" data-action="deleteReport" data-arg="' + fnAttr + '" title="Delete"><i data-lucide="trash-2"></i></button>' +
       '</td>' +
     '</tr>';
   }).join('');
@@ -129,33 +238,50 @@ export function setReportsQueryFromInput(arg, target) {
   _renderTable();
 }
 
-// Per-row checkbox click. Stops propagation so the row itself doesn't
-// get interpreted as a click-to-open (reports don't have a row action
-// but the convention matches scans for consistency).
+export function setReportFilter(spec) {
+  if (!spec) return;
+  var parts = String(spec).split('|');
+  var dim = parts[0], val = parts.slice(1).join('|');
+  if (dim === 'format') {
+    _filters.format = (_filters.format === val) ? null : val;
+  } else if (dim === 'scan') {
+    var sid = Number(val);
+    _filters.scan = (_filters.scan === sid) ? null : sid;
+  } else if (dim === 'generator') {
+    var gid = Number(val);
+    _filters.generator = (_filters.generator === gid) ? null : gid;
+  } else if (dim === 'timeRange') {
+    _filters.timeRange = (val === 'all') ? null : val;
+  }
+  _rerender();
+}
+
+export function clearReportFilters() {
+  _filters = { format: null, scan: null, generator: null, timeRange: null };
+  _reportsQuery = '';
+  _rerender();
+}
+
 export function toggleReportSelect(filename, target, ev) {
   if (ev) ev.stopPropagation();
   if (!filename) return;
   if (_selected[filename]) delete _selected[filename];
   else _selected[filename] = true;
   _updateDeleteBar();
-  // Keep the select-all header in sync after a row toggle.
   var headCb = document.getElementById('reports-select-all');
   if (headCb) {
-    var rows = _applyQuery(_reportsCache, _reportsQuery);
+    var rows = _filteredRows();
     headCb.checked = rows.length > 0 && rows.every(function (r) { return _selected[r.filename]; });
   }
 }
 
-// Header checkbox.
 export function toggleReportSelectAll(arg, target) {
   var checked;
   if (target && typeof target.checked === 'boolean') checked = target.checked;
   else checked = (arg === true || arg === 'true');
   _selected = {};
   if (checked) {
-    _applyQuery(_reportsCache, _reportsQuery).forEach(function (r) {
-      _selected[r.filename] = true;
-    });
+    _filteredRows().forEach(function (r) { _selected[r.filename] = true; });
   }
   _renderTable();
 }
@@ -164,47 +290,73 @@ export async function deleteSelectedReports() {
   var names = _selectedFilenames();
   if (names.length === 0) return;
   var msg = 'Delete ' + names.length + ' report' + (names.length === 1 ? '' : 's') +
-            ' from disk? This cannot be undone.';
+            '? This cannot be undone.';
   if (!window.confirm(msg)) return;
   var result = await apiDeleteReports(names);
   if (!result.ok) {
     toastError('Delete failed: ' + ((result.data && result.data.detail) || 'network error'));
     return;
   }
-  var deleted = result.data && typeof result.data.deleted === 'number' ? result.data.deleted : names.length;
+  var deleted = result.data && typeof result.data.deleted === 'number'
+    ? result.data.deleted : names.length;
   showToast('Deleted ' + deleted + ' report' + (deleted === 1 ? '' : 's'), 'success');
   _selected = {};
-  _reportsCache = _reportsCache.filter(function (r) { return names.indexOf(r.filename) === -1; });
-  _renderTable();
+  // Refetch to keep KPIs accurate.
+  await _refresh();
 }
 
 export async function deleteReport(filename) {
   if (!filename) return;
-  if (!window.confirm('Delete "' + filename + '" from disk? This cannot be undone.')) return;
+  if (!window.confirm('Delete "' + filename + '"? This cannot be undone.')) return;
   try {
     var resp = await fetch('/api/reports/' + encodeURIComponent(filename), { method: 'DELETE' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     delete _selected[filename];
-    _reportsCache = _reportsCache.filter(function (r) { return r.filename !== filename; });
-    _renderTable();
     showToast('Report deleted.');
+    await _refresh();
   } catch (e) {
     toastError('Failed to delete report: ' + e.message);
   }
 }
 
+function _rerender() {
+  var chipsEl = document.getElementById('reports-filter-chips');
+  if (chipsEl) chipsEl.outerHTML = _filterChipsHtml().replace('class="reports-filters"',
+    'class="reports-filters" id="reports-filter-chips"');
+  if (window.lucide && window.lucide.createIcons) {
+    try { window.lucide.createIcons(); } catch (e) {}
+  }
+  _renderTable();
+}
+
+async function _refresh() {
+  try {
+    var body = await _fetchReports();
+    _reportsCache  = body.reports || [];
+    _kpisCache     = body.kpis || _kpisCache;
+    _retentionDays = body.retention_days || 90;
+  } catch (e) {
+    toastError(e.message);
+  }
+  renderReportsPage();
+}
+
 export async function renderReportsPage() {
   var c = document.getElementById('content');
-  c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading reports\u2026</div>';
+  if (!c) return;
+  c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading reports…</div>';
 
   try {
-    _reportsCache = await _fetchReports();
+    var body = await _fetchReports();
+    _reportsCache  = body.reports || [];
+    _kpisCache     = body.kpis || _kpisCache;
+    _retentionDays = body.retention_days || 90;
   } catch (e) {
     c.innerHTML = '<div class="card"><div class="dash-empty-note">' + escapeHtml(e.message) + '</div></div>';
     return;
   }
 
-  // Prune selections pointing at files that no longer exist on disk.
+  // Prune selections that no longer exist.
   var known = {};
   _reportsCache.forEach(function (r) { known[r.filename] = true; });
   Object.keys(_selected).forEach(function (k) {
@@ -214,8 +366,6 @@ export async function renderReportsPage() {
   var nSelected = _selectedFilenames().length;
   var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
-  // Page-head with a primary action \u2014 Reports is now generation-led
-  // rather than a passive listing of files-on-disk.
   var headHtml =
     '<div class="page-head">' +
       '<div class="page-head-title">Reports</div>' +
@@ -225,11 +375,12 @@ export async function renderReportsPage() {
       '</div>' +
     '</div>';
 
-  // First-run empty state \u2014 prominent CTA, no table chrome. Pulse-style
-  // empty card mirrors the Whitelist onboarding panel.
+  // First-run empty state — KPIs + filters get rendered too so the
+  // page still looks like itself even with zero data.
   if (_reportsCache.length === 0) {
     c.innerHTML =
       headHtml +
+      _kpiTilesHtml() +
       '<div class="reports-empty">' +
         '<div class="reports-empty-icon" aria-hidden="true">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -243,8 +394,8 @@ export async function renderReportsPage() {
         '<h3 class="reports-empty-title">No reports generated yet</h3>' +
         '<p class="reports-empty-subtitle">' +
           'Generate a report from any completed scan to create a downloadable ' +
-          'security assessment. Choose PDF for sharing, JSON for SIEM ingestion, ' +
-          'or CSV for spreadsheets.' +
+          'security assessment. Reports are saved here for ' + _retentionDays +
+          ' days so your team can access them anytime.' +
         '</p>' +
         '<div class="reports-empty-actions">' +
           '<button class="btn btn-primary btn-with-icon" data-action="openGenerateReportModal">' +
@@ -256,6 +407,9 @@ export async function renderReportsPage() {
 
   c.innerHTML =
     headHtml +
+    _kpiTilesHtml() +
+    _filterChipsHtml().replace('class="reports-filters"',
+      'class="reports-filters" id="reports-filter-chips"') +
     '<div id="reports-delete-bar" class="bulk-bar" style="display:' + deleteBarStyle + ';">' +
       '<span class="bulk-bar-count">' + nSelected + ' selected</span>' +
       '<button class="btn btn-danger" id="reports-delete-btn" data-action="deleteSelectedReports">' +
@@ -265,8 +419,8 @@ export async function renderReportsPage() {
     '</div>' +
     '<div class="card">' +
       '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
-        '<span>Generated Reports <span id="reports-count" style="color:var(--text-muted); font-weight:400; margin-left:8px; font-size:11px;"></span></span>' +
-        '<input type="search" id="reports-search" placeholder="Filter by filename or date\u2026" ' +
+        '<span>Saved reports <span id="reports-count" style="color:var(--text-muted); font-weight:400; margin-left:8px; font-size:11px;"></span></span>' +
+        '<input type="search" id="reports-search" placeholder="Filter by filename, host, or generator…" ' +
           'class="search-box" ' +
           'data-action-input="setReportsQueryFromInput" ' +
           'value="' + escapeHtml(_reportsQuery) + '" />' +
@@ -277,13 +431,17 @@ export async function renderReportsPage() {
             '<th style="width:32px;"><input type="checkbox" id="reports-select-all" ' +
               'data-action="toggleReportSelectAll" aria-label="Select all reports" /></th>' +
             '<th>Generated</th>' +
-            '<th>Filename</th>' +
+            '<th>Scan</th>' +
             '<th>Format</th>' +
             '<th>Size</th>' +
+            '<th>Generated by</th>' +
             '<th>Actions</th>' +
           '</tr></thead>' +
           '<tbody id="reports-tbody"></tbody>' +
         '</table>' +
+      '</div>' +
+      '<div style="margin-top:10px; font-size:11px; color:var(--text-muted);">' +
+        'Reports are retained for ' + _retentionDays + ' days.' +
       '</div>' +
     '</div>';
 
@@ -291,28 +449,26 @@ export async function renderReportsPage() {
 }
 
 // -----------------------------------------------------------------
-// Generate Report modal \u2014 populated each open with the latest scans
+// Generate Report modal — populated each open with the latest scans
 // -----------------------------------------------------------------
 
 export async function openGenerateReportModal() {
   var modal = document.getElementById('generate-report-modal');
   if (!modal) return;
   var sel = document.getElementById('genrep-scan');
-  if (sel) sel.innerHTML = '<option>Loading scans\u2026</option>';
+  if (sel) sel.innerHTML = '<option>Loading scans…</option>';
   modal.classList.add('open');
-  // Populate the dropdown after the modal animates in. Falls back to a
-  // friendly disabled state if the user has zero scans yet.
   try {
     var scans = await fetchScans(200);
     if (!scans.length) {
-      if (sel) sel.innerHTML = '<option value="">No completed scans yet \u2014 upload one first.</option>';
+      if (sel) sel.innerHTML = '<option value="">No completed scans yet — upload one first.</option>';
       return;
     }
     if (sel) {
       sel.innerHTML = scans.map(function (s) {
         var num = s.number != null ? s.number : s.id;
-        var label = '#' + num + ' \u00b7 ' + (s.filename || 'Unknown') + ' \u00b7 ' +
-                    formatRelativeTime(s.scanned_at) + ' \u00b7 ' +
+        var label = '#' + num + ' · ' + (s.filename || 'Unknown') + ' · ' +
+                    formatRelativeTime(s.scanned_at) + ' · ' +
                     (s.total_findings || 0) + ' finding' +
                     ((s.total_findings || 0) === 1 ? '' : 's');
         return '<option value="' + s.id + '">' + escapeHtml(label) + '</option>';
@@ -337,15 +493,22 @@ export function submitGenerateReport() {
   }
   var fmtEl = document.querySelector('input[name="genrep-format"]:checked');
   var fmt = fmtEl ? fmtEl.value : 'pdf';
-  // downloadReport handles the click-to-download flow. Modal stays open
-  // for ~1s so the user sees the format selection persist while the
-  // browser kicks off the file save, then closes itself cleanly.
+  // downloadReport hits /api/export/{id} which now persists to DB AND
+  // returns the bytes for download. Mention persistence in the toast
+  // so users understand the report is also waiting on /reports.
   downloadReport(scanId, fmt);
-  showToast('Report generated \u2014 check your downloads folder.');
-  setTimeout(closeGenerateReportModal, 600);
+  showToast('Report saved and downloaded. View it anytime on the Reports page.',
+            'success');
+  setTimeout(function () {
+    closeGenerateReportModal();
+    // Refresh the page if we're already on it so the new row appears.
+    if (location.pathname === '/reports' || location.hash === '#reports') {
+      renderReportsPage();
+    }
+  }, 800);
 }
 
-// Click-outside-to-close + Escape \u2014 mirrors the upload modal pattern.
+// Click-outside-to-close + Escape — mirrors the upload modal pattern.
 (function _wireGenerateReportModal() {
   var modal = document.getElementById('generate-report-modal');
   if (!modal) return;

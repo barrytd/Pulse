@@ -327,6 +327,28 @@ CREATE TABLE IF NOT EXISTS notifications (
 """
 
 
+# Sprint 8 — persisted reports. Generated reports used to live on disk
+# under reports/; this table moves them into the DB so a deploy / restart
+# doesn't lose history and a team can pull yesterday's PDF without
+# everyone needing access to the server filesystem. `file_data` is the
+# raw bytes (BLOB on SQLite, bytea on Postgres via db_backend's DDL
+# rewrite). Each filename is unique so the existing filename-keyed
+# /api/reports/{filename} URLs keep working transparently.
+_CREATE_REPORTS = """
+CREATE TABLE IF NOT EXISTS reports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id         INTEGER,
+    format          TEXT    NOT NULL,
+    filename        TEXT    NOT NULL UNIQUE,
+    file_data       BLOB    NOT NULL,
+    file_size       INTEGER NOT NULL,
+    generated_by    INTEGER,
+    generated_at    TEXT    NOT NULL,
+    organization_id INTEGER
+);
+"""
+
+
 # Sprint 8 — SIGMA rule import. One row per detection rule imported by an
 # admin from community SIGMA YAML (or pasted in by hand). Both the original
 # YAML source and the compiled JSON spec are stored so the UI can show the
@@ -407,6 +429,7 @@ def init_db(db_path):
         _CREATE_NOTIFICATIONS,
         _CREATE_ORGANIZATIONS,
         _CREATE_SIGMA_RULES,
+        _CREATE_REPORTS,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -553,6 +576,14 @@ def init_db(db_path):
     try:
         with _connect(db_path) as conn:
             conn.execute("UPDATE users SET role = 'analyst' WHERE role = 'viewer'")
+    except db_backend.OperationalError:
+        pass
+
+    # Sprint 8 — persisted-report retention. Drop reports older than the
+    # default retention window (90 days). Safe to run on every boot;
+    # the operation is a bounded DELETE, not a full table scan.
+    try:
+        purge_old_reports(db_path, days=90)
     except db_backend.OperationalError:
         pass
 
@@ -3263,3 +3294,209 @@ def delete_sigma_rule(db_path, rule_id, *, organization_id=None):
                 (int(rule_id),),
             )
         return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Persisted reports (Sprint 8)
+# ---------------------------------------------------------------------------
+#
+# Generated reports used to live on disk under ``reports/`` and disappear
+# whenever a hosted deploy restarted with an ephemeral filesystem. Moving
+# the bytes into the DB means a team that generated a PDF on Monday can
+# still grab it on Friday without anyone needing shell access to the
+# server. Filenames stay the public identifier so the existing
+# /api/reports/{filename} URLs work unchanged.
+
+# Metadata-only column projection. Lists never need the BLOB, and pulling
+# multi-MB payloads back for a list view would dominate the response.
+_REPORT_META_COLS = (
+    "id, scan_id, format, filename, file_size, generated_by,"
+    " generated_at, organization_id"
+)
+
+
+def _row_to_report_meta(row):
+    if row is None:
+        return None
+    return {
+        "id":              row[0],
+        "scan_id":         row[1],
+        "format":          row[2],
+        "filename":        row[3],
+        "file_size":       row[4],
+        "generated_by":    row[5],
+        "generated_at":    row[6],
+        "organization_id": row[7],
+    }
+
+
+def save_report(db_path, *, scan_id, fmt, filename, file_data,
+                 generated_by=None, organization_id=None):
+    """Persist a generated report. ``file_data`` is the raw bytes; on
+    Postgres the db_backend layer rewrites BLOB -> bytea so callers
+    don't need to know which engine they're talking to. Returns the
+    new row id. Raises ValueError on missing required arguments.
+
+    Idempotency: ``filename`` is UNIQUE. A retry with the same filename
+    overwrites the prior row's bytes so the user-facing flow never sees
+    a "filename taken" error mid-download.
+    """
+    if not filename:
+        raise ValueError("filename is required")
+    if not isinstance(file_data, (bytes, bytearray, memoryview)):
+        raise ValueError("file_data must be bytes")
+    if not fmt:
+        raise ValueError("fmt is required (pdf|html|json|csv)")
+    blob = bytes(file_data)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        # Check-then-write keeps this portable across SQLite + Postgres
+        # without relying on a backend-specific UPSERT clause. The race
+        # window between the check and the write is tolerable here:
+        # filenames carry the scan id + a UTC timestamp so two concurrent
+        # generations don't collide in practice.
+        existing = conn.execute(
+            "SELECT id FROM reports WHERE filename = ?", (filename,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE reports SET"
+                "  scan_id = ?, format = ?, file_data = ?, file_size = ?,"
+                "  generated_by = ?, generated_at = ?, organization_id = ?"
+                " WHERE filename = ?",
+                (
+                    int(scan_id) if scan_id is not None else None,
+                    str(fmt).lower(),
+                    blob,
+                    len(blob),
+                    int(generated_by) if generated_by is not None else None,
+                    now,
+                    int(organization_id) if organization_id is not None else None,
+                    filename,
+                ),
+            )
+            return existing[0]
+        cursor = conn.execute(
+            "INSERT INTO reports"
+            " (scan_id, format, filename, file_data, file_size,"
+            "  generated_by, generated_at, organization_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(scan_id) if scan_id is not None else None,
+                str(fmt).lower(),
+                filename,
+                blob,
+                len(blob),
+                int(generated_by) if generated_by is not None else None,
+                now,
+                int(organization_id) if organization_id is not None else None,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def list_reports_db(db_path, *, organization_id=None, limit=500):
+    """Newest-first list of report metadata (no blob). ``organization_id``
+    scopes to a single tenant; ``None`` is admin scope (every tenant)."""
+    sql = f"SELECT {_REPORT_META_COLS} FROM reports"
+    params = []
+    if organization_id is not None:
+        sql += " WHERE organization_id = ?"
+        params.append(int(organization_id))
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(int(limit))
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [_row_to_report_meta(r) for r in rows]
+
+
+def get_report_meta(db_path, filename, *, organization_id=None):
+    """Fetch metadata for one report by filename. None if missing or
+    cross-tenant when org scope is supplied."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"SELECT {_REPORT_META_COLS} FROM reports WHERE filename = ?",
+            (filename,),
+        ).fetchone()
+    meta = _row_to_report_meta(row)
+    if meta is None:
+        return None
+    if (organization_id is not None
+            and meta["organization_id"] != int(organization_id)):
+        return None
+    return meta
+
+
+def get_report_bytes(db_path, filename, *, organization_id=None):
+    """Return ``(file_data, meta)`` for a stored report or ``(None, None)``
+    when missing. Splits the metadata lookup from the BLOB fetch so the
+    caller does the size check (org-scope, 404) without pulling the
+    payload into memory needlessly."""
+    meta = get_report_meta(db_path, filename, organization_id=organization_id)
+    if meta is None:
+        return None, None
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT file_data FROM reports WHERE filename = ?", (filename,),
+        ).fetchone()
+    if row is None or row[0] is None:
+        return None, None
+    blob = row[0]
+    if isinstance(blob, memoryview):
+        blob = blob.tobytes()
+    return blob, meta
+
+
+def delete_report_by_filename(db_path, filename, *, organization_id=None):
+    """Delete one report by filename. Scoped by org when provided.
+    Returns True if a row was deleted."""
+    with _connect(db_path) as conn:
+        if organization_id is not None:
+            cursor = conn.execute(
+                "DELETE FROM reports WHERE filename = ? AND organization_id = ?",
+                (filename, int(organization_id)),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM reports WHERE filename = ?", (filename,),
+            )
+        return cursor.rowcount > 0
+
+
+def delete_reports_by_filenames(db_path, filenames, *, organization_id=None):
+    """Bulk delete. Returns ``(deleted_count, missing_filenames)``."""
+    deleted = 0
+    missing = []
+    for name in filenames or []:
+        if delete_report_by_filename(db_path, name,
+                                      organization_id=organization_id):
+            deleted += 1
+        else:
+            missing.append(name)
+    return deleted, missing
+
+
+def purge_old_reports(db_path, *, days=90):
+    """Drop reports older than ``days`` days. Returns the row count.
+    Called from init_db's daily cleanup; safe to invoke ad-hoc."""
+    if days <= 0:
+        return 0
+    cutoff = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            "DELETE FROM reports WHERE generated_at < ?", (cutoff,),
+        )
+        return cursor.rowcount or 0
+
+
+def reports_storage_total(db_path, *, organization_id=None):
+    """Sum of file_size across all stored reports. Used by the dashboard
+    KPI tile."""
+    sql = "SELECT COALESCE(SUM(file_size), 0) FROM reports"
+    params = []
+    if organization_id is not None:
+        sql += " WHERE organization_id = ?"
+        params.append(int(organization_id))
+    with _connect(db_path) as conn:
+        row = conn.execute(sql, tuple(params)).fetchone()
+    return int(row[0] if row and row[0] is not None else 0)

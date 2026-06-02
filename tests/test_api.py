@@ -799,7 +799,10 @@ def test_export_pdf_returns_pdf_bytes(client):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/pdf")
     assert "attachment" in r.headers["content-disposition"]
-    assert "pulse_scan_1.pdf" in r.headers["content-disposition"]
+    # Filenames now embed a timestamp so multiple historical exports of
+    # the same scan can coexist in the DB without colliding.
+    assert "pulse_scan_1_" in r.headers["content-disposition"]
+    assert ".pdf" in r.headers["content-disposition"]
     # Every PDF begins with the %PDF- magic bytes; this is the cheapest
     # integrity check that reportlab actually produced a valid file.
     assert r.content[:5] == b"%PDF-"

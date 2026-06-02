@@ -31,7 +31,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 # Upload guards. .evtx files begin with the ASCII bytes "ElfFile" followed by
@@ -79,6 +79,9 @@ from pulse.database import (
     is_email_verified, mark_user_email_verified,
     save_sigma_rule, list_sigma_rules, get_sigma_rule,
     set_sigma_rule_enabled, delete_sigma_rule,
+    save_report, list_reports_db, get_report_meta, get_report_bytes,
+    delete_report_by_filename, delete_reports_by_filenames,
+    reports_storage_total, purge_old_reports,
 )
 from pulse.core.sigma import (
     parse_sigma, SigmaParseError, SigmaUnsupported,
@@ -3425,10 +3428,15 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/export/{scan_id}")
     def export_report(scan_id: int, format: str = "html", user_id: int = Depends(require_login)):
-        """Download a formatted report for a past scan (html | json | pdf).
+        """Generate a formatted report for a past scan (html | json | pdf),
+        persist it to the reports table, and return the bytes as a
+        download. Each generation creates a new row even if the same
+        scan was exported earlier; the filename embeds the generation
+        timestamp so the user can see history (e.g. "today's PDF vs.
+        the one from last Tuesday").
 
         Assignment-visibility widening applies the same way the JSON
-        report endpoint does — a viewer can export the PDF / HTML
+        report endpoint does — an analyst can export the PDF / HTML
         report for a scan they were assigned findings on."""
         if format not in ("html", "json", "pdf"):
             raise HTTPException(400, detail="format must be 'html', 'json', or 'pdf'.")
@@ -3457,25 +3465,55 @@ def _register_routes(app: FastAPI) -> None:
 
         if format == "json":
             content = _build_json_report(findings, sev_counts, scan_stats)
-            return Response(
-                content=content,
-                media_type="application/json",
-                headers={"Content-Disposition": f"attachment; filename=pulse_scan_{display_num}.json"},
-            )
-
-        if format == "pdf":
+            body_bytes = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+            media_type = "application/json"
+        elif format == "pdf":
             from pulse.reports.pdf_report import build_pdf
-            pdf_bytes = build_pdf(attach_remediation(findings), scan_meta=scan_row)
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="pulse_scan_{display_num}.pdf"'},
-            )
+            body_bytes = build_pdf(attach_remediation(findings), scan_meta=scan_row)
+            media_type = "application/pdf"
+        else:
+            content = _build_html_report(findings, sev_counts, scan_stats)
+            body_bytes = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+            media_type = "text/html; charset=utf-8"
 
-        content = _build_html_report(findings, sev_counts, scan_stats)
-        return HTMLResponse(
-            content=content,
-            headers={"Content-Disposition": f"attachment; filename=pulse_scan_{display_num}.html"},
+        # Timestamp the filename so multiple generations for the same
+        # scan stack up in history instead of overwriting each other.
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"pulse_scan_{display_num}_{stamp}.{format}"
+
+        # Persist to the DB before returning so the user sees the new
+        # entry on the Reports page even if the download path fails. The
+        # save is best-effort: a DB hiccup must not block the download.
+        caller = (get_user_by_id(app.state.db_path, user_id)
+                  if user_id else None) or {}
+        try:
+            save_report(
+                app.state.db_path,
+                scan_id=int(scan_id),
+                fmt=format,
+                filename=filename,
+                file_data=body_bytes,
+                generated_by=user_id or None,
+                organization_id=caller.get("organization_id"),
+            )
+        except Exception as exc:
+            # Log via the audit channel; never break the download.
+            from pulse.firewall import blocker
+            try:
+                blocker.log_audit(
+                    app.state.db_path,
+                    action="report_save_failed",
+                    source="api",
+                    user=caller.get("email"),
+                    detail=f"filename={filename} error={exc!s}",
+                )
+            except Exception:
+                pass
+
+        return Response(
+            content=body_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     # -------------------------------------------------------------------
@@ -3483,43 +3521,79 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     @app.get("/api/reports")
     def list_reports(user_id: int = Depends(require_login)):
+        """List persisted reports for the caller's org.
+
+        Returns per-row metadata (filename, format, size, scan_id,
+        scan_number, scan_date, generated_at, generated_by_id +
+        generated_by_name) plus aggregate KPI tiles so the Reports
+        page can render its header in one round trip. The blob is
+        never included in this payload — that's fetched on demand by
+        the download endpoint.
         """
-        List every file in the ``reports/`` directory. Returns filename,
-        format (extension), byte size, and generated timestamp derived
-        either from the filename (pulse_report_YYYYMMDD_HHMMSS.ext) or
-        the file's mtime. No database tracking yet — this is a straight
-        directory listing.
-        """
-        reports_dir = "reports"
-        items: list[dict] = []
-        if os.path.isdir(reports_dir):
-            for name in os.listdir(reports_dir):
-                path = os.path.join(reports_dir, name)
-                if not os.path.isfile(path):
-                    continue
-                try:
-                    st = os.stat(path)
-                except OSError:
-                    continue
-                ext = os.path.splitext(name)[1].lstrip(".").lower() or "?"
-                # Best-effort: parse pulse_*_YYYYMMDD_HHMMSS into ISO
-                ts = None
-                import re as _re
-                m = _re.search(r"(\d{8})_(\d{6})", name)
-                if m:
-                    d, t = m.group(1), m.group(2)
-                    ts = f"{d[:4]}-{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}:{t[4:6]}"
-                if not ts:
-                    import datetime as _dt
-                    ts = _dt.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-                items.append({
-                    "filename": name,
-                    "format": ext,
-                    "size_bytes": st.st_size,
-                    "generated_at": ts,
-                })
-        items.sort(key=lambda r: r["generated_at"], reverse=True)
-        return {"reports": items}
+        scope = _read_scope_kwargs(app, user_id)
+        org_id = scope.get("organization_id") if scope else None
+        rows = list_reports_db(app.state.db_path, organization_id=org_id)
+
+        # Resolve generator display names in bulk so the table doesn't
+        # need a Users lookup per row.
+        user_ids = sorted({r["generated_by"] for r in rows
+                            if r.get("generated_by") is not None})
+        users_by_id = {}
+        for uid in user_ids:
+            u = get_user_by_id(app.state.db_path, uid)
+            if u:
+                users_by_id[uid] = (u.get("display_name")
+                                     or (u.get("email") or "").split("@")[0]
+                                     or f"user #{uid}")
+
+        # Same with scan numbers so the scan-link column reads "Scan #N"
+        # instead of an internal id.
+        scan_ids = sorted({r["scan_id"] for r in rows
+                            if r.get("scan_id") is not None})
+        scan_meta = {}
+        if scan_ids:
+            try:
+                history = get_history(app.state.db_path, limit=1000,
+                                       **_findings_scope_kwargs(app, user_id))
+                for h in history or []:
+                    scan_meta[h.get("id")] = {
+                        "number":     h.get("number") or h.get("id"),
+                        "scanned_at": h.get("scanned_at"),
+                        "hostname":   h.get("hostname"),
+                    }
+            except Exception:
+                pass
+
+        items = []
+        kpi_pdf = kpi_week = 0
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        for r in rows:
+            r["generated_by_name"] = users_by_id.get(r.get("generated_by"))
+            meta = scan_meta.get(r.get("scan_id")) or {}
+            r["scan_number"]    = meta.get("number")
+            r["scan_scanned_at"] = meta.get("scanned_at")
+            r["scan_hostname"]   = meta.get("hostname")
+            # Backwards-compat: the old shape exposed size_bytes; keep
+            # both keys so existing UI code reading either name works.
+            r["size_bytes"] = r.get("file_size")
+            if (r.get("format") or "").lower() == "pdf":
+                kpi_pdf += 1
+            if (r.get("generated_at") or "") >= week_ago:
+                kpi_week += 1
+            items.append(r)
+
+        return {
+            "reports":  items,
+            "kpis": {
+                "total":         len(items),
+                "pdf":           kpi_pdf,
+                "this_week":     kpi_week,
+                "storage_bytes": reports_storage_total(
+                    app.state.db_path, organization_id=org_id),
+            },
+            "retention_days": int(getattr(app.state, "reports_retention_days",
+                                           90) or 90),
+        }
 
     # -------------------------------------------------------------------
     # DELETE /api/reports/batch — remove many persisted reports at once
@@ -3532,47 +3606,44 @@ def _register_routes(app: FastAPI) -> None:
         names = payload.get("filenames") if isinstance(payload, dict) else None
         if not isinstance(names, list) or not names:
             raise HTTPException(400, detail="Body must be {\"filenames\": [...]}")
-        deleted = 0
-        failed: list[dict] = []
-        root = os.path.realpath("reports")
-        for raw in names:
-            safe = os.path.basename(str(raw))
-            if not safe or safe != str(raw):
-                failed.append({"filename": str(raw), "message": "Invalid filename."})
-                continue
-            path = os.path.realpath(os.path.join("reports", safe))
-            if not path.startswith(root + os.sep) and path != root:
-                failed.append({"filename": safe, "message": "Invalid filename."})
-                continue
-            if not os.path.isfile(path):
-                failed.append({"filename": safe, "message": "Report not found."})
-                continue
-            try:
-                os.remove(path)
-                deleted += 1
-            except OSError as e:
-                failed.append({"filename": safe, "message": str(e)})
-        return {"deleted": deleted, "failed": failed}
+        scope = _read_scope_kwargs(app, user_id)
+        org_id = scope.get("organization_id") if scope else None
+        deleted, missing = delete_reports_by_filenames(
+            app.state.db_path, [str(n) for n in names], organization_id=org_id,
+        )
+        return {
+            "deleted": deleted,
+            "failed":  [{"filename": n, "message": "Report not found."}
+                         for n in missing],
+        }
 
     # -------------------------------------------------------------------
     # GET /api/reports/{filename} — download a persisted report
     # -------------------------------------------------------------------
     @app.get("/api/reports/{filename}")
     def download_report(filename: str, user_id: int = Depends(require_login)):
-        # Defence in depth: os.path.basename strips any path, then we
-        # re-check the resolved path is still inside reports/ so a
-        # crafted filename cannot escape the directory.
+        # Filenames are the public identifier so we still defensively
+        # strip any path component; the DB lookup then resolves to the
+        # actual bytes. Cross-tenant access is blocked at the helper.
         safe = os.path.basename(filename)
         if not safe or safe != filename:
             raise HTTPException(400, detail="Invalid filename.")
-        path = os.path.realpath(os.path.join("reports", safe))
-        root = os.path.realpath("reports")
-        if not path.startswith(root + os.sep) and path != root:
-            raise HTTPException(400, detail="Invalid filename.")
-        if not os.path.isfile(path):
+        scope = _read_scope_kwargs(app, user_id)
+        org_id = scope.get("organization_id") if scope else None
+        blob, meta = get_report_bytes(app.state.db_path, safe,
+                                        organization_id=org_id)
+        if blob is None:
             raise HTTPException(404, detail="Report not found.")
-        return FileResponse(
-            path,
+        fmt = (meta.get("format") or "").lower()
+        media_type = {
+            "pdf":  "application/pdf",
+            "html": "text/html; charset=utf-8",
+            "json": "application/json",
+            "csv":  "text/csv; charset=utf-8",
+        }.get(fmt, "application/octet-stream")
+        return Response(
+            content=blob,
+            media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{safe}"'},
         )
 
@@ -3584,17 +3655,12 @@ def _register_routes(app: FastAPI) -> None:
         safe = os.path.basename(filename)
         if not safe or safe != filename:
             raise HTTPException(400, detail="Invalid filename.")
-        path = os.path.realpath(os.path.join("reports", safe))
-        root = os.path.realpath("reports")
-        if not path.startswith(root + os.sep) and path != root:
-            raise HTTPException(400, detail="Invalid filename.")
-        if not os.path.isfile(path):
+        scope = _read_scope_kwargs(app, user_id)
+        org_id = scope.get("organization_id") if scope else None
+        if not delete_report_by_filename(app.state.db_path, safe,
+                                           organization_id=org_id):
             raise HTTPException(404, detail="Report not found.")
-        try:
-            os.remove(path)
-        except OSError as e:
-            raise HTTPException(500, detail=f"Could not delete: {e}")
-        return {"deleted": safe}
+        return {"status": "ok", "filename": safe}
 
     # -------------------------------------------------------------------
     # GET /api/config — read current whitelist + settings + email + alerts

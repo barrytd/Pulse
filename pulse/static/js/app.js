@@ -197,6 +197,8 @@ import {
 } from './settings.js';
 import {
   setReportsQueryFromInput,
+  setReportFilter,
+  clearReportFilters,
   deleteReport,
   toggleReportSelect,
   toggleReportSelectAll,
@@ -462,6 +464,8 @@ const actions = {
 
   // reports
   setReportsQueryFromInput,
+  setReportFilter,
+  clearReportFilters,
   deleteReport,
   toggleReportSelect,
   toggleReportSelectAll,
