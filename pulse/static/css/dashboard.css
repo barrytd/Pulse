@@ -1741,22 +1741,43 @@
 }
 .btn-icon i { width: 14px; height: 14px; }
 
-/* KPI strip */
+/* KPI strip — matches the layout used on Findings + Fleet so the
+ * Reports page reads as part of the same app, not a one-off. Icon
+ * on the left, number + label stacked on the right, breathing
+ * margin against the section below. */
 .reports-kpi-strip {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 .reports-kpi {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  text-align: center;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.reports-kpi-num   { font-size: 22px; font-weight: 700; }
-.reports-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-top: 2px; }
+.reports-kpi-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.reports-kpi-icon i { width: 18px; height: 18px; }
+.reports-kpi-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reports-kpi-num   { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.reports-kpi-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
 
 /* Filter chip bar */
 .reports-filters {
@@ -1800,9 +1821,16 @@
   border-style: dashed;
 }
 
-/* Report template catalog (Phase 1 of report templates) */
+/* Report template catalog
+ * --------------------------------------------------------------------
+ * Vertical card layout: icon at top, title below, description spans the
+ * full card width (no narrow column wrapping), Generate button anchored
+ * at the bottom. Category accent border on the left so different
+ * sections (Threat Detection vs. Executive vs. Compliance) read at a
+ * glance. min-height keeps cards in the same row visually aligned even
+ * when descriptions differ in length. */
 .report-catalog-section {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 .report-category-label {
   font-size: 11px;
@@ -1810,58 +1838,69 @@
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 .report-catalog-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
 }
 .report-template-card {
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  flex-direction: column;
   background: var(--card-bg);
   border: 1px solid var(--border);
+  border-left: 4px solid var(--report-accent, #ef4444);
   border-radius: 8px;
-  padding: 16px;
+  padding: 18px;
+  min-height: 200px;
   transition: border-color 0.12s ease, transform 0.12s ease;
 }
 .report-template-card:hover {
   border-color: var(--accent);
+  border-left-color: var(--report-accent, #ef4444);
 }
 .report-template-icon {
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-bottom: 12px;
 }
-.report-template-icon i { width: 18px; height: 18px; }
-.report-template-body { flex: 1; min-width: 0; }
+.report-template-icon i { width: 20px; height: 20px; }
 .report-template-name {
   font-weight: 600;
-  font-size: 14px;
-  margin-bottom: 4px;
+  font-size: 15px;
+  line-height: 1.3;
+  margin-bottom: 6px;
 }
 .report-template-desc {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
-  line-height: 1.45;
+  line-height: 1.5;
+  /* Span the full card width — no neighboring column to squeeze it. */
+  width: 100%;
 }
-.report-template-actions { flex: 0 0 auto; align-self: center; }
+/* Generate button anchored at the bottom: margin-top:auto pushes it
+ * down inside the flex column, so cards with longer/shorter
+ * descriptions still line their CTAs up at the same vertical position. */
+.report-template-actions {
+  margin-top: auto;
+  padding-top: 14px;
+}
 
 .report-history-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-muted);
-  margin: 6px 0 10px;
+  margin: 18px 0 10px;
 }
 
 /* -----------------------------------------------------------------

@@ -104,15 +104,22 @@ function _updateDeleteBar() {
 
 function _kpiTilesHtml() {
   var k = _kpisCache || {};
+  // Icon + number + label, matching the Findings + Fleet KPI tile
+  // component so the Reports page reads as part of the same app.
+  function tile(icon, num, label) {
+    return '<div class="reports-kpi">' +
+      '<div class="reports-kpi-icon"><i data-lucide="' + icon + '"></i></div>' +
+      '<div class="reports-kpi-text">' +
+        '<div class="reports-kpi-num">' + num + '</div>' +
+        '<div class="reports-kpi-label">' + label + '</div>' +
+      '</div>' +
+    '</div>';
+  }
   return '<div class="reports-kpi-strip">' +
-    '<div class="reports-kpi"><div class="reports-kpi-num">' + (k.total || 0) + '</div>' +
-      '<div class="reports-kpi-label">Total reports</div></div>' +
-    '<div class="reports-kpi"><div class="reports-kpi-num">' + (k.pdf || 0) + '</div>' +
-      '<div class="reports-kpi-label">PDF reports</div></div>' +
-    '<div class="reports-kpi"><div class="reports-kpi-num">' + (k.this_week || 0) + '</div>' +
-      '<div class="reports-kpi-label">This week</div></div>' +
-    '<div class="reports-kpi"><div class="reports-kpi-num">' + _formatBytes(k.storage_bytes) + '</div>' +
-      '<div class="reports-kpi-label">Storage used</div></div>' +
+    tile('file-text',        (k.total || 0),          'Total reports') +
+    tile('file-badge',       (k.pdf || 0),            'PDF reports') +
+    tile('calendar-days',    (k.this_week || 0),      'This week') +
+    tile('database',         _formatBytes(k.storage_bytes), 'Storage used') +
   '</div>';
 }
 
@@ -378,29 +385,43 @@ export async function renderReportsPage() {
   // Template catalog — Phase 1 ships exactly one template. The
   // markup is structured so dropping in more templates later (and
   // grouping them under more category headers) is a copy-paste job.
+  //
+  // Vertical card layout: icon -> title -> description (full width) ->
+  // Generate button anchored at the bottom. The card's left-border
+  // accent comes from a CSS custom property so each category can have
+  // its own color without duplicating selectors.
+  function templateCardHtml(opts) {
+    var styleAttr = opts.accent
+      ? ' style="--report-accent:' + opts.accent + ';"'
+      : '';
+    return '<div class="report-template-card"' + styleAttr + '>' +
+      '<div class="report-template-icon" aria-hidden="true">' +
+        '<i data-lucide="' + opts.icon + '"></i>' +
+      '</div>' +
+      '<div class="report-template-name">' + opts.name + '</div>' +
+      '<div class="report-template-desc">' + opts.desc + '</div>' +
+      '<div class="report-template-actions">' +
+        '<button class="btn btn-primary btn-with-icon" ' +
+          'data-action="openGenerateReportModal" data-arg="' + opts.slug + '">' +
+          '<i data-lucide="file-plus-2"></i><span>Generate</span>' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
   var templateCatalogHtml =
     '<div class="report-catalog-section">' +
       '<div class="report-category-label">Threat Detection</div>' +
       '<div class="report-catalog-grid">' +
-        '<div class="report-template-card">' +
-          '<div class="report-template-icon" aria-hidden="true">' +
-            '<i data-lucide="shield-alert"></i>' +
-          '</div>' +
-          '<div class="report-template-body">' +
-            '<div class="report-template-name">Threat Detection Summary</div>' +
-            '<div class="report-template-desc">' +
-              'Complete summary of detected threats grouped by MITRE tactic, ' +
-              'with attack timeline and repeat offenders. ' +
-              'For security analysts and teams.' +
-            '</div>' +
-          '</div>' +
-          '<div class="report-template-actions">' +
-            '<button class="btn btn-primary btn-with-icon" ' +
-              'data-action="openGenerateReportModal" data-arg="threat_detection_summary">' +
-              '<i data-lucide="file-plus-2"></i><span>Generate</span>' +
-            '</button>' +
-          '</div>' +
-        '</div>' +
+        templateCardHtml({
+          slug:   'threat_detection_summary',
+          name:   'Threat Detection Summary',
+          icon:   'shield-alert',
+          accent: '#ef4444',
+          desc:   'Complete summary of detected threats grouped by MITRE tactic, ' +
+                  'with attack timeline and repeat offenders. ' +
+                  'For security analysts and teams.',
+        }) +
       '</div>' +
     '</div>';
 

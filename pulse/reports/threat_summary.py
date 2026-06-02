@@ -120,6 +120,37 @@ def _tactic_for_rule(rule_name: str) -> str:
 # is too high for this report's purpose.
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
+# Extract <TimeCreated SystemTime="…"/> out of an event's raw XML so we
+# can fall back to the event-time when the detection didn't set
+# `finding["timestamp"]` explicitly. Per-event detections (brute force,
+# kerberoasting, etc.) historically don't stamp the finding dict; the
+# correlation rules do. Without this fallback the Attack Timeline column
+# is empty for every per-event row, which defeats the section's purpose.
+_RAW_XML_TIME_RE = re.compile(
+    r'TimeCreated[^>]*SystemTime\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+
+def _finding_timestamp(finding: Dict[str, Any]) -> Optional[str]:
+    """Best-effort timestamp resolution. Order:
+      1. explicit ``timestamp`` field (correlation rules + tests)
+      2. SystemTime extracted from raw_xml (every per-event finding
+         carries the original event payload)
+      3. ``scanned_at`` if the caller attached the parent scan as
+         ``_scan_scanned_at`` (decoration applied during scope build)
+    Returns a string or None.
+    """
+    ts = finding.get("timestamp")
+    if ts:
+        return ts
+    raw = finding.get("raw_xml") or ""
+    if raw:
+        m = _RAW_XML_TIME_RE.search(raw)
+        if m:
+            return m.group(1).strip()
+    return finding.get("_scan_scanned_at")
+
 
 def _extract_ip(finding: Dict[str, Any]) -> Optional[str]:
     """Best-effort source-IP extraction. Findings already carry parsed
@@ -245,12 +276,12 @@ def build_summary(findings: List[Dict[str, Any]],
         })
 
     # ---- Attack timeline (chronological) ----------------------------
-    def _ts_key(f):
-        ts = f.get("timestamp") or ""
-        return str(ts)
+    # Resolve timestamp through the multi-source fallback so the column
+    # is populated even for findings that don't set `timestamp` on the
+    # dict (most per-event detections — only correlation rules stamp it).
     timeline = sorted(
         ({
-            "timestamp": f.get("timestamp"),
+            "timestamp": _finding_timestamp(f),
             "severity":  (f.get("severity") or "LOW").upper(),
             "rule":      f.get("rule"),
             "hostname":  f.get("hostname"),
@@ -294,7 +325,7 @@ def build_summary(findings: List[Dict[str, Any]],
             entry["count"] += 1
             if f.get("rule"):
                 entry["rules"].add(f["rule"])
-            ts = f.get("timestamp")
+            ts = _finding_timestamp(f)
             if ts:
                 if not entry["first_seen"] or ts < entry["first_seen"]:
                     entry["first_seen"] = ts

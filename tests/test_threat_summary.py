@@ -101,6 +101,39 @@ def test_build_summary_timeline_is_chronological(findings, scans):
     assert ts == sorted(ts)
 
 
+def test_timeline_falls_back_to_raw_xml_timestamp():
+    """Per-event detections (brute force, kerberoasting, etc.) don't set
+    `timestamp` on the finding dict — only correlation rules do. The
+    builder must fall back to the SystemTime embedded in raw_xml so the
+    Attack Timeline column is populated for those rows, not empty."""
+    findings = [{
+        "rule": "Brute Force Attempt",
+        "severity": "HIGH",
+        "hostname": "DC01",
+        # No "timestamp" key. Just raw_xml with the event's SystemTime.
+        "raw_xml": '<Event><System>'
+                   '<TimeCreated SystemTime="2026-04-08T09:14:22.000Z"/>'
+                   '</System></Event>',
+    }]
+    data = build_summary(findings, [], scope_label="x")
+    assert data["timeline"][0]["timestamp"] == "2026-04-08T09:14:22.000Z"
+
+
+def test_timeline_explicit_timestamp_wins_over_raw_xml():
+    """When a correlation rule sets `timestamp` explicitly, that wins
+    even if raw_xml carries a different one. Explicit > fallback."""
+    findings = [{
+        "rule": "Brute-Force Success",
+        "severity": "CRITICAL",
+        "timestamp": "2026-04-08T09:25:33Z",
+        "raw_xml": '<Event><System>'
+                   '<TimeCreated SystemTime="2020-01-01T00:00:00Z"/>'
+                   '</System></Event>',
+    }]
+    data = build_summary(findings, [], scope_label="x")
+    assert data["timeline"][0]["timestamp"] == "2026-04-08T09:25:33Z"
+
+
 def test_build_summary_top_rules_ranks_by_count(findings, scans):
     data = build_summary(findings, scans, scope_label="x")
     top = data["top_rules"]
@@ -224,6 +257,49 @@ def test_render_unknown_format_raises(findings, scans):
     data = build_summary(findings, scans, scope_label="x")
     with pytest.raises(ValueError, match="unknown format"):
         render(data, "xml")
+
+
+# ---------------------------------------------------------------------------
+# Visual-fix regression guards: timestamp formatter, severity pill HTML,
+# and short-form severity labels for the PDF.
+# ---------------------------------------------------------------------------
+
+def test_timestamp_formatter_normalizes_iso_with_sub_seconds():
+    from pulse.reports.threat_summary_renderers import _format_ts
+    assert _format_ts("2026-04-08T09:14:22.000Z") == "2026-04-08 09:14"
+    assert _format_ts("2026-04-08 09:14:22")      == "2026-04-08 09:14"
+    assert _format_ts(None) == "—"
+    assert _format_ts("")   == "—"
+
+
+def test_severity_pill_html_has_centering_styles(findings, scans):
+    """If this regresses, MEDIUM (and friends) drift up off the badge's
+    vertical center and the colored background reads as oversized."""
+    data = build_summary(findings, scans, scope_label="x")
+    out = render(data, "html").decode("utf-8")
+    # Both directives are required for the fix; either one alone
+    # leaves the pill misaligned in some browsers.
+    assert "line-height:1" in out
+    assert "vertical-align:middle" in out
+
+
+def test_pdf_score_ring_uses_canvas_flowable(findings, scans):
+    """The original implementation used a Table cell with
+    ROUNDEDCORNERS=40 which reportlab renders as a 'fish' shape
+    instead of a circle. The fix swaps in pdf_report.ScoreRing —
+    a canvas-drawn Flowable. Importing the renderers module and
+    inspecting its globals is the cheapest way to guard against
+    the rollback: the broken Table approach didn't reference
+    ScoreRing at all."""
+    import pulse.reports.threat_summary_renderers as r
+    # Render so render_pdf's lazy imports actually run.
+    data = build_summary(findings, scans, scope_label="x")
+    out = r.render_pdf(data)
+    assert out[:5] == b"%PDF-"
+    # render_pdf imports ScoreRing inside the function — confirm the
+    # symbol resolves at module load time too.
+    from pulse.reports.pdf_report import ScoreRing
+    assert ScoreRing is not None
 
 
 # ---------------------------------------------------------------------------

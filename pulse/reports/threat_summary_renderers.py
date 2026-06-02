@@ -72,10 +72,50 @@ def _esc(s: Any) -> str:
     return html.escape(str(s) if s is not None else "")
 
 
+# Normalize whatever timestamp shape the finding carried (ISO 8601 from
+# the parser, "YYYY-MM-DD HH:MM:SS" from the DB, or a sub-second Z-suffix
+# string from a correlation rule) into a single "YYYY-MM-DD HH:MM" form.
+# Returns "—" for falsy input so the column never reads as suspiciously
+# empty: anyone scanning the report sees the placeholder and knows the
+# row's event time wasn't recoverable, instead of wondering whether the
+# renderer is broken.
+def _format_ts(value: Any) -> str:
+    if not value:
+        return "—"
+    s = str(value).strip()
+    if not s:
+        return "—"
+    # Drop sub-second / trailing Z so "2026-04-08T09:14:22.123Z" reads
+    # as "2026-04-08 09:14".
+    s = s.replace("T", " ")
+    if "." in s:
+        s = s.split(".", 1)[0]
+    if s.endswith("Z"):
+        s = s[:-1]
+    return s.strip()[:16]
+
+
+_SEV_SHORT = {"CRITICAL": "CRIT", "HIGH": "HIGH",
+               "MEDIUM": "MED",  "LOW": "LOW"}
+
+
+def _short_sev(sev: str) -> str:
+    """Severity column is narrow (0.55"), so we render compact labels.
+    Keeps the colored pill from clipping or pushing other columns
+    out of alignment when MEDIUM finds its way in."""
+    return _SEV_SHORT.get((sev or "").upper(), sev or "")
+
+
 def _severity_pill(sev: str) -> str:
     color = _SEVERITY_COLOR.get(sev, "#6b7280")
+    # Tweak: equal top + bottom padding plus an explicit line-height
+    # matching the badge's vertical extent. Without the line-height,
+    # the default 1.55 inherited from `body` pushes "MEDIUM" up off the
+    # vertical center because the font ascender + descender room is
+    # uneven inside the 2px padding box.
     return (f'<span class="pill" style="background:{color}1f;'
-            f'color:{color};border:1px solid {color}4d;">'
+            f'color:{color};border:1px solid {color}4d;'
+            f'padding:3px 9px;line-height:1;vertical-align:middle;">'
             f'{_esc(sev)}</span>')
 
 
@@ -130,7 +170,7 @@ def render_html(summary: Dict[str, Any]) -> bytes:
     timeline_rows = ""
     for row in timeline[:200]:  # cap so very large reports stay openable
         timeline_rows += (
-            f'<tr><td class="mono small">{_esc(row.get("timestamp"))}</td>'
+            f'<tr><td class="mono small">{_esc(_format_ts(row.get("timestamp")))}</td>'
             f'<td>{_severity_pill(row.get("severity"))}</td>'
             f'<td>{_esc(row.get("rule"))}</td>'
             f'<td>{_esc(row.get("hostname"))}</td></tr>'
@@ -361,6 +401,7 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
         GRADE_COLORS, DEFAULT_GRADE_COLOR, PILL_BG, PILL_FG,
         GRAY_PILL_BG, GRAY_PILL_FG,
         CONTENT_WIDTH, LEFT_MARGIN, RIGHT_MARGIN,
+        ScoreRing,
         _draw_footer, _pill,
     )
 
@@ -410,25 +451,16 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
                               color=COLOR_BORDER, spaceAfter=10))
 
     # -- Summary band ---------------------------------------------------
-    grade = s.get("grade") or "?"
-    grade_color = GRADE_COLORS.get(grade, DEFAULT_GRADE_COLOR)
-
-    score_text = s.get("score")
+    # Reuse the dashboard's ScoreRing Flowable instead of rolling our own
+    # Table cell — Table cells with ROUNDEDCORNERS render as an oddly-
+    # shaped "fish" in reportlab when the radius exceeds the cell's half-
+    # side. ScoreRing draws a real circle via canvas primitives and
+    # exactly matches the dashboard look.
+    score_text  = s.get("score")
     score_label = s.get("score_label") or ""
     sev = s["by_severity"]
 
-    grade_cell = Table(
-        [[Paragraph(f'<font color="white" size="22"><b>{grade}</b></font>',
-                     ParagraphStyle("g", parent=body_style,
-                                     alignment=1, textColor=colors.white))]],
-        colWidths=[0.65 * inch], rowHeights=[0.65 * inch],
-    )
-    grade_cell.setStyle(TableStyle([
-        ("BACKGROUND",     (0, 0), (-1, -1), grade_color),
-        ("ROUNDEDCORNERS", [40, 40, 40, 40]),
-        ("ALIGN",          (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
-    ]))
+    ring = ScoreRing(score_text, score_label, size=72, border=6)
 
     summary_text = (
         f"<b>{s.get('total_findings', 0)}</b> findings · "
@@ -441,8 +473,8 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
         f"<font color='{PILL_FG['LOW'].hexval()}'>{sev['LOW']} low</font>"
     )
     band = Table(
-        [[grade_cell, Paragraph(summary_text, body_style)]],
-        colWidths=[0.85 * inch, CONTENT_WIDTH - 0.85 * inch],
+        [[ring, Paragraph(summary_text, body_style)]],
+        colWidths=[0.95 * inch, CONTENT_WIDTH - 0.95 * inch],
     )
     band.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -485,16 +517,29 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
     if timeline:
         # Cap at 60 rows for the PDF — anything more is unreadable and
         # the SIEM-ingest user wants the JSON anyway.
+        # Pre-build the severity-pill renderer once so each row gets a
+        # snug, vertically-centered badge instead of bare text with
+        # only the cell's background color filled in. Equal top/bottom
+        # padding in the cell style plus VALIGN=MIDDLE keeps it
+        # centered for every severity, not just the longest one.
         rows = [["Timestamp", "Sev", "Rule", "Host"]]
         for r in timeline[:60]:
+            sev = (r.get("severity") or "LOW").upper()
+            pill_style = ParagraphStyle(
+                f"TS_TL_Pill_{sev}", parent=body_style,
+                alignment=1,  # TA_CENTER
+                fontName="Helvetica-Bold", fontSize=8,
+                textColor=PILL_FG.get(sev, COLOR_MUTED),
+                leading=10,
+            )
             rows.append([
-                (r.get("timestamp") or "")[:19],
-                r.get("severity") or "",
+                _format_ts(r.get("timestamp")),
+                Paragraph(_short_sev(sev), pill_style),
                 r.get("rule") or "",
                 r.get("hostname") or "",
             ])
-        tbl = Table(rows, colWidths=[1.5 * inch, 0.55 * inch,
-                                       CONTENT_WIDTH - 3.55 * inch,
+        tbl = Table(rows, colWidths=[1.45 * inch, 0.55 * inch,
+                                       CONTENT_WIDTH - 3.5 * inch,
                                        1.5 * inch],
                      repeatRows=1)
         tstyle = [
@@ -506,13 +551,20 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
             ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING",   (0, 0), (-1, -1), 6),
             ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+            # Equal top + bottom padding so the colored pill background
+            # sits with even breathing room around the text glyphs.
+            ("TOPPADDING",    (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            # Severity column gets a hair more vertical padding so the
+            # pill background reads as a proper badge, not a bare fill.
+            ("TOPPADDING",    (1, 1), (1, -1), 5),
+            ("BOTTOMPADDING", (1, 1), (1, -1), 5),
         ]
         # Severity column colorization
         for i, r in enumerate(timeline[:60], start=1):
             sev = (r.get("severity") or "LOW").upper()
             if sev in PILL_BG:
                 tstyle.append(("BACKGROUND", (1, i), (1, i), PILL_BG[sev]))
-                tstyle.append(("TEXTCOLOR",  (1, i), (1, i), PILL_FG[sev]))
         tbl.setStyle(TableStyle(tstyle))
         story.append(tbl)
         if len(timeline) > 60:
@@ -530,9 +582,17 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
     if top_rules:
         rows = [["Rule", "Sev", "MITRE", "Hits"]]
         for r in top_rules:
+            sev = (r.get("severity") or "LOW").upper()
+            pill_style = ParagraphStyle(
+                f"TS_TR_Pill_{sev}", parent=body_style,
+                alignment=1,
+                fontName="Helvetica-Bold", fontSize=8,
+                textColor=PILL_FG.get(sev, COLOR_MUTED),
+                leading=10,
+            )
             rows.append([
                 r.get("rule") or "",
-                r.get("severity") or "LOW",
+                Paragraph(_short_sev(sev), pill_style),
                 r.get("mitre") or "—",
                 str(r["count"]),
             ])
@@ -547,12 +607,15 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
             ("LINEBELOW",     (0, 0), (-1, -1), 0.25, COLOR_BORDER),
             ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN",         (3, 0), (3, -1), "RIGHT"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING",    (1, 1), (1, -1), 5),
+            ("BOTTOMPADDING", (1, 1), (1, -1), 5),
         ]
         for i, r in enumerate(top_rules, start=1):
             sev = (r.get("severity") or "LOW").upper()
             if sev in PILL_BG:
                 tstyle.append(("BACKGROUND", (1, i), (1, i), PILL_BG[sev]))
-                tstyle.append(("TEXTCOLOR",  (1, i), (1, i), PILL_FG[sev]))
         tbl.setStyle(TableStyle(tstyle))
         story.append(tbl)
     else:
