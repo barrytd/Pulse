@@ -56,3 +56,4 @@ pulse.yaml
 # source repo.
 build/
 dist/
+_qa_check.pdf
