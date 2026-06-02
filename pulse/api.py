@@ -3626,6 +3626,8 @@ def _register_routes(app: FastAPI) -> None:
         _TEMPLATE_REGISTRY = {
             "threat_detection_summary": "pulse_threat_summary",
             "executive_summary":        "pulse_executive_summary",
+            "nist_csf_coverage":        "pulse_nist_csf",
+            "iso_27001_annex_a":        "pulse_iso_27001",
         }
         if fmt not in ("pdf", "html", "json", "csv"):
             raise HTTPException(
@@ -3771,6 +3773,41 @@ def _register_routes(app: FastAPI) -> None:
                 scope_label=scope_label,
                 prev_findings=prev_findings,
                 prev_scans=prev_scans,
+                org_name=org_name,
+            )
+            body_bytes = _render(payload, fmt)
+
+        elif template in ("nist_csf_coverage", "iso_27001_annex_a"):
+            # Resolve disabled-rules list so the compliance summary
+            # reflects the user's actual rule policy, not just the
+            # theoretical full coverage.
+            from pulse.core.rules_config import get_disabled_rules as _gdr
+            try:
+                disabled = _gdr(_read_config(app.state.config_path))
+            except Exception:
+                disabled = []
+            org_name = None
+            try:
+                org_id = caller.get("organization_id")
+                if org_id is not None:
+                    with database._connect(app.state.db_path) as _conn:
+                        row = _conn.execute(
+                            "SELECT name FROM organizations WHERE id = ?",
+                            (int(org_id),),
+                        ).fetchone()
+                    if row:
+                        org_name = row[0]
+            except Exception:
+                pass
+            from pulse.reports.compliance import build_nist_csf, build_iso_27001
+            from pulse.reports.compliance_renderers import render as _render
+            builder = (build_nist_csf if template == "nist_csf_coverage"
+                       else build_iso_27001)
+            payload = builder(
+                findings_in_scope, scans_in_scope,
+                period_days=period_days,
+                scope_label=scope_label,
+                disabled_rules=disabled,
                 org_name=org_name,
             )
             body_bytes = _render(payload, fmt)

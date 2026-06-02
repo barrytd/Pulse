@@ -436,6 +436,30 @@ export async function renderReportsPage() {
                   'leadership and stakeholders. No technical jargon.',
         }) +
       '</div>' +
+    '</div>' +
+    '<div class="report-catalog-section">' +
+      '<div class="report-category-label">Compliance</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'nist_csf_coverage',
+          name:   'NIST CSF Coverage Report',
+          icon:   'list-checks',
+          accent: '#3b82f6',
+          desc:   'Detection coverage mapped to the five NIST ' +
+                  'Cybersecurity Framework functions, with findings ' +
+                  'per function and coverage gaps. For compliance ' +
+                  'officers and auditors.',
+        }) +
+        templateCardHtml({
+          slug:   'iso_27001_annex_a',
+          name:   'ISO 27001 Annex A Report',
+          icon:   'badge-check',
+          accent: '#3b82f6',
+          desc:   'Detection coverage and findings mapped to ISO 27001 ' +
+                  'Annex A controls. For ISO 27001 certification and ' +
+                  'audit preparation.',
+        }) +
+      '</div>' +
     '</div>';
 
   // First-run empty state — KPIs + filters get rendered too so the
@@ -540,6 +564,22 @@ var _TEMPLATES = {
               'period of the same length.',
     scope_default: 'recent',
     scope_only:    'recent',  // hide the per-scan radio for this template
+  },
+  nist_csf_coverage: {
+    title:    'Generate NIST CSF Coverage Report',
+    subtitle: 'Detection coverage mapped to the five NIST Cybersecurity ' +
+              'Framework functions, with findings per function and ' +
+              'coverage gaps. Pick the reporting period and format.',
+    scope_default: 'recent',
+    scope_only:    'recent',
+  },
+  iso_27001_annex_a: {
+    title:    'Generate ISO 27001 Annex A Report',
+    subtitle: 'Detection coverage mapped to ISO 27001 Annex A controls, ' +
+              'with findings per control and clauses lacking coverage. ' +
+              'Pick the reporting period and format.',
+    scope_default: 'recent',
+    scope_only:    'recent',
   },
 };
 
