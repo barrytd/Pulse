@@ -423,6 +423,19 @@ export async function renderReportsPage() {
                   'For security analysts and teams.',
         }) +
       '</div>' +
+    '</div>' +
+    '<div class="report-catalog-section">' +
+      '<div class="report-category-label">Executive</div>' +
+      '<div class="report-catalog-grid">' +
+        templateCardHtml({
+          slug:   'executive_summary',
+          name:   'Executive Summary',
+          icon:   'briefcase',
+          accent: '#8b5cf6',
+          desc:   'One-page security overview in plain language for ' +
+                  'leadership and stakeholders. No technical jargon.',
+        }) +
+      '</div>' +
     '</div>';
 
   // First-run empty state — KPIs + filters get rendered too so the
@@ -508,14 +521,25 @@ export async function renderReportsPage() {
 // -----------------------------------------------------------------
 
 // Per-template metadata. Keys: title + subtitle shown in the modal,
-// endpoint path, optional scope_default (so the Recent radio can be
-// pre-selected for future templates that span a date range by default).
+// scope_default ("scan" or "recent") for which radio gets pre-selected,
+// scope_only set when a template only makes sense over a time window
+// (executive summary needs comparison periods, so per-scan is hidden).
 var _TEMPLATES = {
   threat_detection_summary: {
     title:    'Generate Threat Detection Summary',
     subtitle: 'Pulse rolls your finding data into a tactic-grouped ' +
               'assessment with attack timeline and repeat offenders. ' +
               'Saves to the Reports page and streams to your downloads.',
+    scope_default: 'scan',
+  },
+  executive_summary: {
+    title:    'Generate Executive Summary',
+    subtitle: 'A one-page plain-language overview for leadership: ' +
+              'overall grade, what it means, top risks, and recommendations. ' +
+              'Pick the reporting period; Pulse compares it to the previous ' +
+              'period of the same length.',
+    scope_default: 'recent',
+    scope_only:    'recent',  // hide the per-scan radio for this template
   },
 };
 
@@ -530,9 +554,34 @@ export async function openGenerateReportModal(templateSlug) {
   if (titleEl) titleEl.textContent = tmpl.title;
   if (subEl)   subEl.textContent   = tmpl.subtitle;
   if (tmplEl)  tmplEl.value        = slug;
-  // Reset scope toggle to "A single scan" on every open.
-  var scanRadio = document.querySelector('input[name="genrep-scope"][value="scan"]');
-  if (scanRadio) scanRadio.checked = true;
+
+  // Per-template scope behavior: some templates (executive summary)
+  // only make sense over a date range, so we hide the per-scan radio
+  // entirely for those. Others default to per-scan but allow switching.
+  var defaultScope = tmpl.scope_default || 'scan';
+  var scopeOnly    = tmpl.scope_only;       // optional pin
+  var scanLabelEl = document.querySelector(
+    'input[name="genrep-scope"][value="scan"]'
+  );
+  var recentLabelEl = document.querySelector(
+    'input[name="genrep-scope"][value="recent"]'
+  );
+  if (scanLabelEl) {
+    var scanWrap = scanLabelEl.closest('label');
+    if (scanWrap) {
+      scanWrap.style.display = (scopeOnly === 'recent') ? 'none' : '';
+    }
+  }
+  if (recentLabelEl) {
+    var recentWrap = recentLabelEl.closest('label');
+    if (recentWrap) {
+      recentWrap.style.display = (scopeOnly === 'scan') ? 'none' : '';
+    }
+  }
+  var pick = document.querySelector(
+    'input[name="genrep-scope"][value="' + defaultScope + '"]'
+  );
+  if (pick) pick.checked = true;
   onGenrepScopeChange();
 
   var sel = document.getElementById('genrep-scan');
@@ -564,8 +613,24 @@ export function onGenrepScopeChange() {
   var scope = scopeEl ? scopeEl.value : 'scan';
   var scanRow = document.getElementById('genrep-scan-row');
   var daysRow = document.getElementById('genrep-days-row');
-  if (scanRow) scanRow.style.display = (scope === 'scan') ? '' : 'none';
-  if (daysRow) daysRow.style.display = (scope === 'recent') ? '' : 'none';
+  var customRow = document.getElementById('genrep-custom-row');
+  if (scanRow)   scanRow.style.display   = (scope === 'scan') ? '' : 'none';
+  if (daysRow)   daysRow.style.display   = (scope === 'recent') ? '' : 'none';
+  if (customRow) customRow.style.display = 'none';
+  // When in recent mode, the days dropdown might already be on "custom".
+  if (scope === 'recent') {
+    var daysEl = document.getElementById('genrep-days');
+    if (daysEl && daysEl.value === 'custom' && customRow) {
+      customRow.style.display = '';
+    }
+  }
+}
+
+export function onGenrepDaysChange() {
+  var daysEl = document.getElementById('genrep-days');
+  var customRow = document.getElementById('genrep-custom-row');
+  if (!customRow) return;
+  customRow.style.display = (daysEl && daysEl.value === 'custom') ? '' : 'none';
 }
 
 export function closeGenerateReportModal() {
@@ -588,7 +653,18 @@ export async function submitGenerateReport() {
     scope.scan_id = scanId;
   } else {
     var daysEl = document.getElementById('genrep-days');
-    scope.days = daysEl ? Number(daysEl.value) || 30 : 30;
+    var rawDays = daysEl ? daysEl.value : '30';
+    if (rawDays === 'custom') {
+      var customEl = document.getElementById('genrep-custom-days');
+      var customDays = customEl ? Number(customEl.value) : 0;
+      if (!customDays || customDays < 1 || customDays > 365) {
+        toastError('Custom range must be 1 to 365 days.');
+        return;
+      }
+      scope.days = customDays;
+    } else {
+      scope.days = Number(rawDays) || 30;
+    }
   }
 
   showToast('Generating report…');

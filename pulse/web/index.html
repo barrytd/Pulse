@@ -313,11 +313,19 @@
 
       <div class="form-row" id="genrep-days-row" style="display:none;">
         <label for="genrep-days">Time window</label>
-        <select id="genrep-days">
+        <select id="genrep-days" data-action-change="onGenrepDaysChange">
           <option value="7">Last 7 days</option>
           <option value="30" selected>Last 30 days</option>
           <option value="90">Last 90 days</option>
+          <option value="custom">Custom range…</option>
         </select>
+      </div>
+
+      <div class="form-row" id="genrep-custom-row" style="display:none;">
+        <label for="genrep-custom-days">Custom (days)</label>
+        <input type="number" id="genrep-custom-days"
+               min="1" max="365" step="1" value="60"
+               style="width:120px;" />
       </div>
 
       <div class="form-row" style="align-items:flex-start;">

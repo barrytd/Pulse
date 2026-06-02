@@ -3623,28 +3623,30 @@ def _register_routes(app: FastAPI) -> None:
         fmt      = (body.get("format")   or "pdf").strip().lower()
         scope    = body.get("scope") or {}
 
+        _TEMPLATE_REGISTRY = {
+            "threat_detection_summary": "pulse_threat_summary",
+            "executive_summary":        "pulse_executive_summary",
+        }
         if fmt not in ("pdf", "html", "json", "csv"):
             raise HTTPException(
                 400,
                 detail="format must be one of pdf | html | json | csv.",
             )
-        if template != "threat_detection_summary":
-            # Phase 1 ships exactly one template. Future templates
-            # (executive_summary, compliance_nist, etc.) plug into
-            # the same dispatch.
+        if template not in _TEMPLATE_REGISTRY:
+            supported = ", ".join(sorted(_TEMPLATE_REGISTRY))
             raise HTTPException(
                 400,
-                detail=f"Unknown template {template!r}. "
-                       "Phase 1 supports: threat_detection_summary.",
+                detail=f"Unknown template {template!r}. Supported: {supported}.",
             )
 
         # Resolve the data scope into a list of findings + scan rows.
         # Two shapes: per-scan (scan_id) or rolling window (days).
         scope_kw = _findings_scope_kwargs(app, user_id)
-        history  = get_history(app.state.db_path, limit=500, **scope_kw) or []
+        history  = get_history(app.state.db_path, limit=1000, **scope_kw) or []
         scans_in_scope: list[dict] = []
         findings_in_scope: list[dict] = []
         scope_label: str = ""
+        period_days: int = 30
 
         if "scan_id" in scope and scope["scan_id"] is not None:
             try:
@@ -3665,11 +3667,11 @@ def _register_routes(app: FastAPI) -> None:
             )
         else:
             try:
-                days = int(scope.get("days") or 30)
+                period_days = int(scope.get("days") or 30)
             except (TypeError, ValueError):
-                days = 30
-            days = max(1, min(days, 365))
-            cutoff = (datetime.now() - timedelta(days=days)).strftime(
+                period_days = 30
+            period_days = max(1, min(period_days, 365))
+            cutoff = (datetime.now() - timedelta(days=period_days)).strftime(
                 "%Y-%m-%d %H:%M:%S")
             scans_in_scope = [s for s in history
                                if (s.get("scanned_at") or "") >= cutoff]
@@ -3682,52 +3684,107 @@ def _register_routes(app: FastAPI) -> None:
                                for s in scans_in_scope
                                if s.get("hostname")})
             scope_label = (
-                f"Last {days} day{'s' if days != 1 else ''} "
+                f"Last {period_days} day{'s' if period_days != 1 else ''} "
                 f"({len(scans_in_scope)} scan"
                 f"{'s' if len(scans_in_scope) != 1 else ''}"
                 f", {host_count} host{'s' if host_count != 1 else ''})"
             )
 
-        # Build the template payload + render the chosen format. The
-        # threat-intel decorator is best-effort — bad cache rows or a
-        # missing column don't kill the report.
-        try:
-            from pulse.intel import lookup_ip as _intel_lookup_ip
-            def _intel(ip):
-                # api_key=None forces cache-only behavior so we never
-                # block on the AbuseIPDB API while building a report.
-                try:
-                    return _intel_lookup_ip(ip, app.state.db_path,
-                                             api_key=None)
-                except Exception:
-                    return None
-        except Exception:
-            _intel = None
-
-        from pulse.reports.threat_summary import build_summary
-        from pulse.reports.threat_summary_renderers import render
-
-        # attach_remediation so PDFs can render Remediation/Mitigation
-        # info if later templates want it. Cheap; idempotent.
+        # attach_remediation enriches each finding with remediation +
+        # mitigations + Security Advisor knowledge so templates that
+        # pull plain-language text (executive_summary, advisor) don't
+        # need to re-call the knowledge base per row.
         attach_remediation(findings_in_scope)
 
-        summary = build_summary(
-            findings_in_scope, scans_in_scope,
-            scope_label=scope_label,
-            intel_lookup=_intel,
-        )
-        body_bytes = render(summary, fmt)
+        caller = (get_user_by_id(app.state.db_path, user_id)
+                  if user_id else None) or {}
+
+        # Build + render the chosen template.
+        if template == "threat_detection_summary":
+            try:
+                from pulse.intel import lookup_ip as _intel_lookup_ip
+                def _intel(ip):
+                    # api_key=None forces cache-only behavior so we never
+                    # block on the AbuseIPDB API while building a report.
+                    try:
+                        return _intel_lookup_ip(ip, app.state.db_path,
+                                                 api_key=None)
+                    except Exception:
+                        return None
+            except Exception:
+                _intel = None
+
+            from pulse.reports.threat_summary import build_summary
+            from pulse.reports.threat_summary_renderers import render as _render
+            payload = build_summary(
+                findings_in_scope, scans_in_scope,
+                scope_label=scope_label,
+                intel_lookup=_intel,
+            )
+            body_bytes = _render(payload, fmt)
+
+        elif template == "executive_summary":
+            # Executive Summary needs the previous period for trend +
+            # "What Changed". Fetch the same-length window starting
+            # period_days * 2 back. Per-scan scope ("scan_id") doesn't
+            # have a meaningful "previous period" so the prev_* lists
+            # stay empty in that case.
+            prev_findings: list[dict] = []
+            prev_scans: list[dict] = []
+            if not scope.get("scan_id"):
+                prev_cutoff_end = (datetime.now() -
+                                    timedelta(days=period_days)).strftime(
+                                        "%Y-%m-%d %H:%M:%S")
+                prev_cutoff_start = (datetime.now() -
+                                      timedelta(days=period_days * 2)).strftime(
+                                          "%Y-%m-%d %H:%M:%S")
+                prev_scans = [
+                    s for s in history
+                    if (s.get("scanned_at") or "") >= prev_cutoff_start
+                    and (s.get("scanned_at") or "") < prev_cutoff_end
+                ]
+                for s in prev_scans:
+                    prev_findings.extend(
+                        get_scan_findings(app.state.db_path, s["id"],
+                                           **scope_kw) or []
+                    )
+
+            org_name = None
+            try:
+                org_id = caller.get("organization_id")
+                if org_id is not None:
+                    with database._connect(app.state.db_path) as _conn:
+                        row = _conn.execute(
+                            "SELECT name FROM organizations WHERE id = ?",
+                            (int(org_id),),
+                        ).fetchone()
+                    if row:
+                        org_name = row[0]
+            except Exception:
+                pass
+
+            from pulse.reports.executive_summary import build_executive
+            from pulse.reports.executive_summary_renderers import render as _render
+            payload = build_executive(
+                findings_in_scope, scans_in_scope,
+                period_days=period_days,
+                scope_label=scope_label,
+                prev_findings=prev_findings,
+                prev_scans=prev_scans,
+                org_name=org_name,
+            )
+            body_bytes = _render(payload, fmt)
+        else:  # pragma: no cover — registry already filtered
+            raise HTTPException(500, detail="template dispatch error")
 
         # Filename: include the template slug + format + timestamp so
         # multiple generations stack up in history.
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ext = {"pdf": "pdf", "html": "html", "json": "json", "csv": "csv"}[fmt]
-        filename = f"pulse_threat_summary_{stamp}.{ext}"
+        filename = f"{_TEMPLATE_REGISTRY[template]}_{stamp}.{ext}"
 
         # Persist to the DB. Best-effort: a save failure must not
         # block the download path.
-        caller = (get_user_by_id(app.state.db_path, user_id)
-                  if user_id else None) or {}
         try:
             save_report(
                 app.state.db_path,
@@ -3738,7 +3795,7 @@ def _register_routes(app: FastAPI) -> None:
                 file_data=body_bytes,
                 generated_by=user_id or None,
                 organization_id=caller.get("organization_id"),
-                template_type="threat_detection_summary",
+                template_type=template,
             )
         except Exception as exc:
             from pulse.firewall import blocker

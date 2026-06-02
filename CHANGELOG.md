@@ -5,6 +5,26 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-02 — Report template catalog Phase 2: Executive Summary
+
+The board-ready report. Phase 2 of the 5-phase catalog plan. Same dispatch pattern proven in Phase 1; the API endpoint now selects builder + renderer based on `template_type` so future templates (Compliance, Incident Investigation, Fleet Health) drop in without further refactoring.
+
+What this report is for: the one-pager an admin forwards to their boss. Every section is written for someone who does *not* read security logs for a living. No event IDs, no MITRE technique codes, no rule slugs in the body text.
+
+- **Builder** in [`pulse/reports/executive_summary.py`](pulse/reports/executive_summary.py). `build_executive(findings, scans, *, period_days, prev_findings, prev_scans, scope_label, org_name)` returns a structured payload with: header (title, org name, period range, generation time), posture at a glance (letter grade A–F + one-sentence interpretation + score out of 100 + trend vs. previous period), a 2-3 sentence plain-language narrative generated from the actual counts and top host, top 3 unresolved risks (with what-happened / why-it-matters / recommended-action pulled from the Security Advisor knowledge base), activity overview tiles (total / open / resolved / machines monitored / machines at risk), "What Changed" comparison vs. previous period, 3-5 forward-looking recommendations, and a footer pointing technical readers to the Threat Detection Summary.
+- **Renderers** in [`pulse/reports/executive_summary_renderers.py`](pulse/reports/executive_summary_renderers.py). All four formats consume the same dict so the PDF and HTML can't disagree on the numbers.
+  - **PDF**: light theme, polished. 24pt title, big colored grade circle on the cover, generous whitespace, board-ready. New helper flowables: `_BigGradeChip` (canvas-drawn colored circle with centered letter) and `_RankChip` (numbered rank circle for the Top Risks header). `KeepTogether` on each risk card so a card never splits across pages.
+  - **HTML**: light theme, print-friendly with `@page` + `@media print` rules. Self-contained styles so the file emails / prints cleanly. Big colored grade circle on the cover band, the narrative paragraph rendered as a yellow-tinted callout, severity-colored stat tiles.
+  - **JSON**: pretty-printed payload for SIEM-side parsing.
+  - **CSV**: section + field + value KV layout plus separate Top Risks and Recommendations blocks at the bottom (the use case is "paste sections into a quarterly compliance tracker", not "open as a table").
+- **API**: `POST /api/reports/generate` now dispatches on `template` — `threat_detection_summary` and `executive_summary` are both recognized; unknown values return 400 with the full supported list. Executive Summary requests with a `{days: N}` scope also fetch the previous N-day window so the trend indicator + "What Changed" can populate; per-scan scope still works but doesn't yield a comparison period. Filename prefix is `pulse_executive_summary_` so history rows are easy to scan.
+- **Reports page UI**: new "Executive" category section under "Threat Detection", with a purple (`#8b5cf6`) left-border accent. Card description: "One-page security overview in plain language for leadership and stakeholders. No technical jargon." The Generate modal now uses per-template metadata (`_TEMPLATES`) to set the title and subtitle, default scope, and which scope radios show. Executive Summary defaults to "Recent activity" and hides the per-scan radio because period comparison is its whole point. Time-window dropdown gains a "Custom range…" option with a 1–365 day input.
+- **Knowledge-base integration**: the Top Risks section pulls `plain_language`, `why_it_matters`, and the first `immediate_actions` step from `pulse/core/knowledge_base.py` so the risk cards read in the same voice as the Security Advisor drawer. Findings without a knowledge entry fall back to their own `description` / `details` so the section never goes empty.
+- **What This Means**: rule-based narrative generator. Same inputs always produce the same paragraph — a reader who memorizes one report's wording can spot the next period's deltas instantly.
+- **Tests**: 44 new in [`tests/test_executive_summary.py`](tests/test_executive_summary.py) covering grade thresholds, resolved-finding classification (including the legacy `reviewed` flag), header + posture + trend + activity + What Changed shape, top-risks ranking and dedup, recommendation dedup + fallback, all four renderers, and end-to-end API generation including a regression guard that Phase 1's `threat_detection_summary` template still round-trips through the new dispatch. Plus one updated assertion in `test_threat_summary.py` for the new dispatcher error message. **972 tests pass overall (up from 928).**
+
+---
+
 ## 2026-06-02 — Report template catalog Phase 1: Threat Detection Summary
 
 The first entry in the new report-template catalog. This is the report a user generates right after their first scan — tactic-grouped findings, attack timeline, top rules, repeat offenders. Phase 1 of a 5-phase plan; future templates (Executive Summary, Compliance NIST/ISO, Incident Investigation, Fleet Health) plug into the same dispatch pattern proven here.

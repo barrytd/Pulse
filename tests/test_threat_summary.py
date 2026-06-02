@@ -391,14 +391,19 @@ def test_generate_with_days_scope(client):
 
 
 def test_generate_rejects_unknown_template(client):
+    """Phase 2 added executive_summary to the registry, so the unknown
+    case is now any other slug. The error lists every supported
+    template so the API user can self-correct."""
     c, _ = client
     r = c.post("/api/reports/generate", json={
-        "template": "executive_summary",  # Phase 2 — not yet shipped
+        "template": "compliance_nist_v1",  # Phase 3 — not yet shipped
         "format":   "pdf",
         "scope":    {"days": 7},
     })
     assert r.status_code == 400
-    assert "threat_detection_summary" in r.json()["detail"].lower()
+    detail = r.json()["detail"].lower()
+    assert "threat_detection_summary" in detail
+    assert "executive_summary" in detail
 
 
 def test_generate_rejects_unknown_format(client):
