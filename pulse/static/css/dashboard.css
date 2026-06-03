@@ -1823,27 +1823,31 @@
 
 /* Report template catalog
  * --------------------------------------------------------------------
- * Vertical card layout: icon at top, title below, description spans the
- * full card width (no narrow column wrapping), Generate button anchored
- * at the bottom. Category accent border on the left so different
- * sections (Threat Detection vs. Executive vs. Compliance) read at a
- * glance. min-height keeps cards in the same row visually aligned even
- * when descriptions differ in length. */
-.report-catalog-section {
-  margin-bottom: 24px;
+ * Flat, filterable grid (Tenable-style). All templates live in one
+ * grid; a chip filter bar above scopes by category. Each card carries
+ * its category color on the left border + a small category tag at the
+ * top, so the "All" view still reads clearly. min-height keeps cards
+ * in the same row visually aligned regardless of description length. */
+.report-catalog-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
 }
-.report-category-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-muted);
-  margin-bottom: 14px;
+.report-catalog-filters .filter-chip { font-size: 12px; padding: 5px 12px; }
+.report-catalog-filters .filter-chip-count {
+  margin-left: 4px;
+  opacity: 0.7;
+  font-weight: 500;
 }
 .report-catalog-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 14px;
+  /* repeat(auto-fill, minmax(340px, 380px)) caps the upper width so
+   * cards never stretch to fill a wide viewport — the Tenable look is
+   * a uniform brick wall, not edge-to-edge billboards. */
+  grid-template-columns: repeat(auto-fill, minmax(340px, 380px));
+  gap: 16px;
+  margin-bottom: 24px;
 }
 .report-template-card {
   display: flex;
@@ -1856,9 +1860,15 @@
   min-height: 200px;
   transition: border-color 0.12s ease, transform 0.12s ease;
 }
-.report-template-card:hover {
-  border-color: var(--accent);
-  border-left-color: var(--report-accent, #ef4444);
+.report-template-card:hover { border-color: var(--accent); }
+
+/* Head row: icon left, category tag right. */
+.report-template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 .report-template-icon {
   flex: 0 0 auto;
@@ -1870,25 +1880,45 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
 }
 .report-template-icon i { width: 20px; height: 20px; }
+
+/* Category tag pill — uses inline accent color so each category
+ * (Compliance blue, Fleet green, etc.) renders with the right tint. */
+.report-template-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
 .report-template-name {
   font-weight: 600;
   font-size: 15px;
   line-height: 1.3;
   margin-bottom: 6px;
 }
+/* Description: 2-3 lines with ellipsis. WebKit line-clamp is widely
+ * supported now; the fallback overflow:hidden keeps Firefox-pre-128
+ * from cropping mid-character. */
 .report-template-desc {
   font-size: 13px;
   color: var(--text-muted);
   line-height: 1.5;
-  /* Span the full card width — no neighboring column to squeeze it. */
   width: 100%;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-/* Generate button anchored at the bottom: margin-top:auto pushes it
- * down inside the flex column, so cards with longer/shorter
- * descriptions still line their CTAs up at the same vertical position. */
+/* Generate button anchored at the bottom. */
 .report-template-actions {
   margin-top: auto;
   padding-top: 14px;

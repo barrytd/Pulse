@@ -26,6 +26,75 @@ var _filters = {
 // filename -> true
 var _selected = {};
 
+// Template catalog — single source of truth for both the chip filter
+// counts and the grid render. Order matches the dashboard's category
+// reading order (Threat Detection first, Fleet last); the flat-grid
+// "All" view keeps that order so the visual color flow is preserved.
+var TEMPLATE_CATEGORY_ORDER = [
+  'Threat Detection', 'Executive', 'Compliance', 'Incident', 'Fleet',
+];
+
+var TEMPLATE_CATALOG = [
+  { slug: 'threat_detection_summary',
+    name: 'Threat Detection Summary', category: 'Threat Detection',
+    icon: 'shield-alert', accent: '#ef4444',
+    desc: 'Complete summary of detected threats grouped by MITRE tactic, ' +
+          'with attack timeline and repeat offenders. ' +
+          'For security analysts and teams.' },
+  { slug: 'mitre_attack_coverage',
+    name: 'MITRE ATT&CK Coverage Report', category: 'Threat Detection',
+    icon: 'grid-3x3', accent: '#ef4444',
+    desc: 'Which ATT&CK techniques Pulse detected activity for, mapped ' +
+          'onto the tactic matrix, with finding counts per technique. ' +
+          'For threat hunters and detection engineers.' },
+  { slug: 'executive_summary',
+    name: 'Executive Summary', category: 'Executive',
+    icon: 'briefcase', accent: '#8b5cf6',
+    desc: 'One-page security overview in plain language for leadership ' +
+          'and stakeholders. No technical jargon.' },
+  { slug: 'board_ready_posture',
+    name: 'Board-Ready Posture Report', category: 'Executive',
+    icon: 'presentation', accent: '#8b5cf6',
+    desc: 'Quarterly-style posture report with score trends, fleet ' +
+          'overview, compliance coverage, and forward-looking ' +
+          'recommendations. For board presentations and quarterly reviews.' },
+  { slug: 'nist_csf_coverage',
+    name: 'NIST CSF Coverage Report', category: 'Compliance',
+    icon: 'list-checks', accent: '#3b82f6',
+    desc: 'Detection coverage mapped to the five NIST Cybersecurity ' +
+          'Framework functions, with findings per function and coverage ' +
+          'gaps. For compliance officers and auditors.' },
+  { slug: 'iso_27001_annex_a',
+    name: 'ISO 27001 Annex A Report', category: 'Compliance',
+    icon: 'badge-check', accent: '#3b82f6',
+    desc: 'Detection coverage and findings mapped to ISO 27001 Annex A ' +
+          'controls. For ISO 27001 certification and audit preparation.' },
+  { slug: 'compliance_gap_analysis',
+    name: 'Compliance Gap Analysis', category: 'Compliance',
+    icon: 'target', accent: '#3b82f6',
+    desc: 'Prioritized roadmap of detection gaps: uncovered MITRE ' +
+          'techniques, silent rules, and noisy rules needing tuning. ' +
+          'For improving detection coverage over time.' },
+  { slug: 'incident_investigation',
+    name: 'Incident Investigation Report', category: 'Incident',
+    icon: 'siren', accent: '#f97316',
+    desc: 'Detailed technical deep-dive on a single host or a selected ' +
+          'set of findings, with full event data, timeline, and ' +
+          'chain-of-custody integrity. For incident responders and ' +
+          'forensic handoff.' },
+  { slug: 'fleet_health',
+    name: 'Fleet Health Report', category: 'Fleet',
+    icon: 'server', accent: '#10b981',
+    desc: 'Security posture across all monitored hosts, ranked by ' +
+          'risk, with scan recency and at-risk machines highlighted. ' +
+          'For teams managing multiple endpoints.' },
+];
+
+// Active category chip on the template catalog grid. null/"" means
+// "All". Persists across re-renders within the same page mount so a
+// user who switches chips and triggers a refresh keeps their filter.
+var _templateCategoryFilter = null;
+
 async function _fetchReports() {
   var resp = await fetch('/api/reports');
   if (!resp.ok) throw new Error('Failed to load reports: HTTP ' + resp.status);
@@ -269,6 +338,18 @@ export function clearReportFilters() {
   _rerender();
 }
 
+// Template catalog chip handler. Single-select; "All" clears the
+// filter. Re-renders the whole page so the chip count + active state
+// + grid contents all stay consistent.
+export function setTemplateCategory(category) {
+  if (!category || category === 'All') {
+    _templateCategoryFilter = null;
+  } else {
+    _templateCategoryFilter = category;
+  }
+  renderReportsPage();
+}
+
 export function toggleReportSelect(filename, target, ev) {
   if (ev) ev.stopPropagation();
   if (!filename) return;
@@ -390,163 +471,78 @@ export async function renderReportsPage() {
   // Generate button anchored at the bottom. The card's left-border
   // accent comes from a CSS custom property so each category can have
   // its own color without duplicating selectors.
-  function templateCardHtml(opts) {
-    var styleAttr = opts.accent
-      ? ' style="--report-accent:' + opts.accent + ';"'
+  // Flat-grid card renderer. Each card carries its category in a
+  // data attribute so the template-category filter can scope without
+  // requiring per-category sub-grids. The card also gets a small
+  // colored tag at the top so the "All" view stays readable.
+  function templateCardHtml(t) {
+    var styleAttr = t.accent
+      ? ' style="--report-accent:' + t.accent + ';"'
       : '';
-    return '<div class="report-template-card"' + styleAttr + '>' +
-      '<div class="report-template-icon" aria-hidden="true">' +
-        '<i data-lucide="' + opts.icon + '"></i>' +
+    // ~13% alpha background + 30% alpha border using hex-with-alpha
+    // (#RRGGBBAA). Avoids needing a separate palette object since the
+    // accent color is the single source of truth.
+    var tagStyle = ' style="background:' + t.accent + '22;color:' +
+                   t.accent + ';border-color:' + t.accent + '4d;"';
+    return '<div class="report-template-card" ' +
+              'data-template-category="' + escapeHtml(t.category) + '"' +
+              styleAttr + '>' +
+      '<div class="report-template-head">' +
+        '<div class="report-template-icon" aria-hidden="true">' +
+          '<i data-lucide="' + t.icon + '"></i>' +
+        '</div>' +
+        '<span class="report-template-tag"' + tagStyle + '>' +
+          escapeHtml(t.category) +
+        '</span>' +
       '</div>' +
-      '<div class="report-template-name">' + opts.name + '</div>' +
-      '<div class="report-template-desc">' + opts.desc + '</div>' +
+      '<div class="report-template-name">' + t.name + '</div>' +
+      '<div class="report-template-desc">' + t.desc + '</div>' +
       '<div class="report-template-actions">' +
         '<button class="btn btn-primary btn-with-icon" ' +
-          'data-action="openGenerateReportModal" data-arg="' + opts.slug + '">' +
+          'data-action="openGenerateReportModal" data-arg="' + t.slug + '">' +
           '<i data-lucide="file-plus-2"></i><span>Generate</span>' +
         '</button>' +
       '</div>' +
     '</div>';
   }
 
+  // Chip bar — counts are derived from TEMPLATE_CATALOG so adding a
+  // new template never requires a manual sync. "All" sits first and
+  // is the default. Single-select; clicking the active chip is a
+  // no-op (no toggle to off — "All" is always the way back).
+  var counts = { All: TEMPLATE_CATALOG.length };
+  TEMPLATE_CATALOG.forEach(function (t) {
+    counts[t.category] = (counts[t.category] || 0) + 1;
+  });
+  var chipOrder = ['All'].concat(TEMPLATE_CATEGORY_ORDER);
+  var chipBar = chipOrder.map(function (cat) {
+    var on = (_templateCategoryFilter === cat) ||
+             (cat === 'All' && !_templateCategoryFilter);
+    return '<button class="filter-chip' + (on ? ' active' : '') + '" ' +
+           'data-action="setTemplateCategory" data-arg="' +
+           escapeHtml(cat) + '">' +
+           escapeHtml(cat) +
+           ' <span class="filter-chip-count">(' + (counts[cat] || 0) + ')</span>' +
+           '</button>';
+  }).join('');
+
+  // Filtered card list. "All" / empty filter shows every card in
+  // catalog order so the visual grouping (red -> purple -> blue ->
+  // orange -> green) is preserved as the default sort.
+  var visibleTemplates = TEMPLATE_CATALOG.filter(function (t) {
+    if (!_templateCategoryFilter || _templateCategoryFilter === 'All') return true;
+    return t.category === _templateCategoryFilter;
+  });
+
   var templateCatalogHtml =
-    '<div class="report-catalog-section">' +
-      '<div class="report-category-label">Threat Detection</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'threat_detection_summary',
-          name:   'Threat Detection Summary',
-          icon:   'shield-alert',
-          accent: '#ef4444',
-          desc:   'Complete summary of detected threats grouped by MITRE tactic, ' +
-                  'with attack timeline and repeat offenders. ' +
-                  'For security analysts and teams.',
-        }) +
-      '</div>' +
-    '</div>' +
-    '<div class="report-catalog-section">' +
-      '<div class="report-category-label">Executive</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'executive_summary',
-          name:   'Executive Summary',
-          icon:   'briefcase',
-          accent: '#8b5cf6',
-          desc:   'One-page security overview in plain language for ' +
-                  'leadership and stakeholders. No technical jargon.',
-        }) +
-      '</div>' +
-    '</div>' +
-    '<div class="report-catalog-section">' +
-      '<div class="report-category-label">Compliance</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'nist_csf_coverage',
-          name:   'NIST CSF Coverage Report',
-          icon:   'list-checks',
-          accent: '#3b82f6',
-          desc:   'Detection coverage mapped to the five NIST ' +
-                  'Cybersecurity Framework functions, with findings ' +
-                  'per function and coverage gaps. For compliance ' +
-                  'officers and auditors.',
-        }) +
-        templateCardHtml({
-          slug:   'iso_27001_annex_a',
-          name:   'ISO 27001 Annex A Report',
-          icon:   'badge-check',
-          accent: '#3b82f6',
-          desc:   'Detection coverage and findings mapped to ISO 27001 ' +
-                  'Annex A controls. For ISO 27001 certification and ' +
-                  'audit preparation.',
-        }) +
-      '</div>' +
-    '</div>' +
-    '<div class="report-catalog-section">' +
-      '<div class="report-category-label">Incident</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'incident_investigation',
-          name:   'Incident Investigation Report',
-          icon:   'siren',
-          accent: '#f97316',
-          desc:   'Detailed technical deep-dive on a single host or a ' +
-                  'selected set of findings, with full event data, ' +
-                  'timeline, and chain-of-custody integrity. For ' +
-                  'incident responders and forensic handoff.',
-        }) +
-      '</div>' +
-    '</div>' +
-    '<div class="report-catalog-section">' +
-      '<div class="report-category-label">Fleet</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'fleet_health',
-          name:   'Fleet Health Report',
-          icon:   'server',
-          accent: '#10b981',
-          desc:   'Security posture across all monitored hosts, ranked ' +
-                  'by risk, with scan recency and at-risk machines ' +
-                  'highlighted. For teams managing multiple endpoints.',
-        }) +
-      '</div>' +
+    '<div class="report-catalog-filters">' + chipBar + '</div>' +
+    '<div class="report-catalog-grid">' +
+      (visibleTemplates.length
+        ? visibleTemplates.map(templateCardHtml).join('')
+        : '<div class="dash-empty-note" style="grid-column:1/-1;">' +
+          'No templates in this category.</div>') +
     '</div>';
 
-  // Append a second card to each category that gets a new entry in
-  // Phase 5 — we keep the section blocks separate above for clarity
-  // but stitch the new cards into the existing markup so categories
-  // don't get split across the page.
-  templateCatalogHtml = templateCatalogHtml
-    // Threat Detection gets a second card: MITRE Coverage.
-    .replace(
-      '<div class="report-category-label">Threat Detection</div>' +
-      '<div class="report-catalog-grid">',
-      '<div class="report-category-label">Threat Detection</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'mitre_attack_coverage',
-          name:   'MITRE ATT&CK Coverage Report',
-          icon:   'grid-3x3',
-          accent: '#ef4444',
-          desc:   'Which ATT&CK techniques Pulse detected activity for, ' +
-                  'mapped onto the tactic matrix, with finding counts ' +
-                  'per technique. For threat hunters and detection ' +
-                  'engineers.',
-        }),
-    )
-    // Executive gets a second card: Board-Ready Posture.
-    .replace(
-      '<div class="report-category-label">Executive</div>' +
-      '<div class="report-catalog-grid">',
-      '<div class="report-category-label">Executive</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'board_ready_posture',
-          name:   'Board-Ready Posture Report',
-          icon:   'presentation',
-          accent: '#8b5cf6',
-          desc:   'Quarterly-style posture report with score trends, ' +
-                  'fleet overview, compliance coverage, and forward-' +
-                  'looking recommendations. For board presentations ' +
-                  'and quarterly reviews.',
-        }),
-    )
-    // Compliance gets a third card: Gap Analysis.
-    .replace(
-      '<div class="report-category-label">Compliance</div>' +
-      '<div class="report-catalog-grid">',
-      '<div class="report-category-label">Compliance</div>' +
-      '<div class="report-catalog-grid">' +
-        templateCardHtml({
-          slug:   'compliance_gap_analysis',
-          name:   'Compliance Gap Analysis',
-          icon:   'target',
-          accent: '#3b82f6',
-          desc:   'Prioritized roadmap of detection gaps: uncovered ' +
-                  'MITRE techniques, silent rules, and noisy rules ' +
-                  'needing tuning. For improving detection coverage ' +
-                  'over time.',
-        }),
-    );
 
   // First-run empty state — KPIs + filters get rendered too so the
   // page still looks like itself even with zero data.
