@@ -281,39 +281,39 @@
   <!-- GENERATE REPORT MODAL                                           -->
   <!-- ============================================================= -->
   <div class="modal-overlay" id="generate-report-modal">
-    <div class="modal">
+    <div class="modal genrep-modal">
+
+      <!-- Header -->
       <h3 id="genrep-title">Generate Report</h3>
       <p id="genrep-subtitle">Pulse builds the report from your saved scan
         data, saves it to the Reports page, and streams it to your downloads.</p>
 
       <input type="hidden" id="genrep-template" value="threat_detection_summary" />
 
-      <div class="form-row" style="align-items:flex-start;">
-        <label>Data scope</label>
-        <div class="genrep-format-group" role="radiogroup" aria-label="Data scope">
-          <label class="genrep-format-opt">
-            <input type="radio" name="genrep-scope" value="scan" checked
-                   data-action-change="onGenrepScopeChange" />
-            <span class="genrep-format-name">A single scan</span>
-            <span class="genrep-format-hint">Pick one completed scan</span>
-          </label>
-          <label class="genrep-format-opt">
-            <input type="radio" name="genrep-scope" value="recent"
-                   data-action-change="onGenrepScopeChange" />
-            <span class="genrep-format-name">Recent activity</span>
-            <span class="genrep-format-hint">Roll up a date range</span>
-          </label>
-        </div>
+      <!-- ── Data scope ─────────────────────────────────────── -->
+      <div class="genrep-section-label">Data scope</div>
+      <div class="genrep-scope-grid" role="radiogroup" aria-label="Data scope">
+        <label class="genrep-scope-opt">
+          <input type="radio" name="genrep-scope" value="scan" checked
+                 data-action-change="onGenrepScopeChange" />
+          <span class="genrep-scope-name">A single scan</span>
+          <span class="genrep-scope-hint">Pick one completed scan</span>
+        </label>
+        <label class="genrep-scope-opt">
+          <input type="radio" name="genrep-scope" value="recent"
+                 data-action-change="onGenrepScopeChange" />
+          <span class="genrep-scope-name">Recent activity</span>
+          <span class="genrep-scope-hint">Roll up a date range</span>
+        </label>
       </div>
 
-      <div class="form-row" id="genrep-scan-row">
-        <label for="genrep-scan">Scan</label>
-        <select id="genrep-scan"></select>
+      <!-- Conditional scope controls (only one visible at a time) -->
+      <div id="genrep-scan-row" class="genrep-scope-control">
+        <select id="genrep-scan" class="genrep-select"></select>
       </div>
 
-      <div class="form-row" id="genrep-days-row" style="display:none;">
-        <label for="genrep-days">Time window</label>
-        <select id="genrep-days" data-action-change="onGenrepDaysChange">
+      <div id="genrep-days-row" class="genrep-scope-control" style="display:none;">
+        <select id="genrep-days" class="genrep-select" data-action-change="onGenrepDaysChange">
           <option value="7">Last 7 days</option>
           <option value="30" selected>Last 30 days</option>
           <option value="90">Last 90 days</option>
@@ -321,55 +321,55 @@
         </select>
       </div>
 
-      <div class="form-row" id="genrep-custom-row" style="display:none;">
-        <label for="genrep-custom-days">Custom (days)</label>
-        <input type="number" id="genrep-custom-days"
+      <div id="genrep-custom-row" class="genrep-scope-control" style="display:none;">
+        <input type="number" id="genrep-custom-days" class="genrep-select"
                min="1" max="365" step="1" value="60"
-               style="width:120px;" />
+               placeholder="Number of days (1–365)" />
       </div>
 
-      <!-- Incident Investigation scope: pick a host -->
-      <div class="form-row" id="genrep-incident-host-row" style="display:none;">
-        <label for="genrep-incident-host">Host</label>
-        <select id="genrep-incident-host"></select>
+      <!-- Incident Investigation scope (host picker or preselected note) -->
+      <div id="genrep-incident-host-row" class="genrep-scope-control" style="display:none;">
+        <select id="genrep-incident-host" class="genrep-select"></select>
       </div>
 
-      <!-- Incident Investigation scope: pre-selected findings note -->
-      <div class="form-row" id="genrep-incident-preselected-row" style="display:none;">
-        <label>Findings</label>
-        <div id="genrep-incident-preselected-note" class="muted"
-             style="font-size:12px;"></div>
+      <div id="genrep-incident-preselected-row" class="genrep-scope-control" style="display:none;">
+        <div id="genrep-incident-preselected-note"
+             class="muted" style="font-size:13px; padding:4px 0;"></div>
       </div>
 
-      <div class="form-row" style="align-items:flex-start;">
-        <label>Format</label>
-        <div class="genrep-format-group" role="radiogroup" aria-label="Report format">
-          <label class="genrep-format-opt">
-            <input type="radio" name="genrep-format" value="pdf" checked />
-            <span class="genrep-format-name">PDF</span>
-            <span class="genrep-format-hint">Printable, full report</span>
-          </label>
-          <label class="genrep-format-opt">
-            <input type="radio" name="genrep-format" value="html" />
-            <span class="genrep-format-name">HTML</span>
-            <span class="genrep-format-hint">Browser-rendered, shareable</span>
-          </label>
-          <label class="genrep-format-opt">
-            <input type="radio" name="genrep-format" value="json" />
-            <span class="genrep-format-name">JSON</span>
-            <span class="genrep-format-hint">Machine-readable for SIEM ingestion</span>
-          </label>
-          <label class="genrep-format-opt">
-            <input type="radio" name="genrep-format" value="csv" />
-            <span class="genrep-format-name">CSV</span>
-            <span class="genrep-format-hint">Spreadsheet for analysts</span>
-          </label>
-        </div>
+      <!-- ── Format ─────────────────────────────────────────── -->
+      <div class="genrep-section-label">Format</div>
+      <div class="genrep-format-grid" role="radiogroup" aria-label="Report format">
+        <label class="genrep-format-card">
+          <input type="radio" name="genrep-format" value="pdf" checked />
+          <span class="genrep-format-name">PDF</span>
+          <span class="genrep-format-hint">Printable, full report</span>
+        </label>
+        <label class="genrep-format-card">
+          <input type="radio" name="genrep-format" value="html" />
+          <span class="genrep-format-name">HTML</span>
+          <span class="genrep-format-hint">Browser-rendered, shareable</span>
+        </label>
+        <label class="genrep-format-card">
+          <input type="radio" name="genrep-format" value="json" />
+          <span class="genrep-format-name">JSON</span>
+          <span class="genrep-format-hint">Machine-readable for SIEM</span>
+        </label>
+        <label class="genrep-format-card">
+          <input type="radio" name="genrep-format" value="csv" />
+          <span class="genrep-format-name">CSV</span>
+          <span class="genrep-format-hint">Spreadsheet for analysts</span>
+        </label>
       </div>
 
-      <div class="modal-actions">
-        <button class="btn btn-with-icon" data-action="closeGenerateReportModal"><i data-lucide="x"></i><span>Cancel</span></button>
-        <button class="btn btn-primary btn-with-icon" data-action="submitGenerateReport"><i data-lucide="download"></i><span>Generate</span></button>
+      <!-- ── Footer ─────────────────────────────────────────── -->
+      <div class="genrep-footer">
+        <button class="btn btn-with-icon" data-action="closeGenerateReportModal">
+          <i data-lucide="x"></i><span>Cancel</span>
+        </button>
+        <button class="btn btn-primary btn-with-icon" data-action="submitGenerateReport">
+          <i data-lucide="download"></i><span>Generate</span>
+        </button>
       </div>
     </div>
   </div>

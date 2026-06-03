@@ -2970,6 +2970,145 @@ tr.pending-flash {
 .reports-empty-actions { display: flex; gap: 10px; }
 
 /* Generate Report modal — format radio buttons styled as picker tiles. */
+/* ------------------------------------------------------------------
+ * Report generation modal — genrep-modal
+ *
+ * Wider than the default .modal (560px). Three clear sections:
+ *   1. Data scope — two side-by-side selectable cards
+ *   2. Scope control — a single conditional dropdown/input
+ *   3. Format — 2×2 grid of equal-height selectable cards
+ * Footer buttons are right-aligned with a top separator.
+ * ------------------------------------------------------------------ */
+.genrep-modal {
+  width: 560px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Section label — the small uppercase heading above each group */
+.genrep-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin: 20px 0 10px;
+}
+.genrep-section-label:first-of-type { margin-top: 4px; }
+
+/* ── Scope cards ── */
+.genrep-scope-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.genrep-scope-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.genrep-scope-opt:hover {
+  border-color: var(--text-muted);
+}
+.genrep-scope-opt input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.genrep-scope-opt:has(input:checked) {
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.07);
+}
+.genrep-scope-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.genrep-scope-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Scope control (conditional dropdown/input) ── */
+.genrep-scope-control {
+  margin-top: 10px;
+}
+.genrep-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.genrep-select:focus {
+  outline: none;
+  border-color: var(--accent, #58a6ff);
+}
+
+/* ── Format cards (2×2 grid) ── */
+.genrep-format-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.genrep-format-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  /* Uniform height regardless of description length */
+  min-height: 72px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.genrep-format-card:hover {
+  border-color: var(--text-muted);
+}
+.genrep-format-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.genrep-format-card:has(input:checked) {
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.07);
+}
+.genrep-format-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.genrep-format-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Footer ── */
+.genrep-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Legacy class kept for any remaining callers so nothing breaks */
 .genrep-format-group {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2986,10 +3125,7 @@ tr.pending-flash {
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s;
 }
-.genrep-format-opt:hover {
-  border-color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.02);
-}
+.genrep-format-opt:hover { border-color: var(--text-muted); }
 .genrep-format-opt input[type="radio"] {
   position: absolute;
   opacity: 0;
@@ -2998,15 +3134,6 @@ tr.pending-flash {
 .genrep-format-opt:has(input:checked) {
   border-color: var(--accent, #58a6ff);
   background: rgba(88, 166, 255, 0.06);
-}
-.genrep-format-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-.genrep-format-hint {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* History page — per-row quick PDF action, only visible on row hover. */
