@@ -1,10 +1,10 @@
 # Pulse
 
-> Open-source Windows event log analyzer and threat detection tool for SOC triage.
+> Open-source Windows threat detection and security reporting for teams without a SOC.
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-689%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1057%20passing-brightgreen)
 ![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
 ![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
 
@@ -14,7 +14,7 @@
 
 ## What Pulse does
 
-Pulse parses Windows `.evtx` event logs, runs 25 detection rules mapped to MITRE ATT&CK, scores your security posture A through F, and gives you a web dashboard for triage. It supports fleet monitoring across multiple hosts, IP blocking through Windows Firewall, email + Slack + Discord alerts, PDF reports, a REST API, and a downloadable Windows agent for continuous monitoring.
+Pulse parses Windows `.evtx` event logs, runs 30 detection rules mapped to MITRE ATT&CK, scores your security posture A through F, and gives you a web dashboard for triage. Every finding explains itself in plain language — what happened, why it matters, and what to do right now. Generate professional reports in one click (PDF, HTML, JSON, CSV) from a catalog of 9 templates covering threat detection, executive summaries, compliance mapping, and incident investigation.
 
 ---
 
@@ -52,35 +52,41 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 
 | Area | Capability |
 |---|---|
-| **Detection** | 25 rules mapped to MITRE ATT&CK · NIST CSF + ISO 27001 control IDs · multi-event attack chains · custom whitelist + 100+ built-in known-good entries · baseline diff for new accounts / services / tasks |
-| **Dashboard** | Single-page app with live monitor (SSE) · finding drawer with notes thread · workflow states (new → ack → investigating → resolved) · assignment · Ctrl+K command palette · dark mode |
-| **Alerting** | SMTP email · Slack + Discord webhooks · per-rule cooldown · threshold-tripped · live monitor email alerts with interval gating |
-| **Fleet** | Per-host security score · last-scan timestamp · severity mix · drill-into-host view · CSV export |
-| **Firewall** | `pfirewall.log` parser · port-scan + sensitive-port probe detection · Pulse-managed IP block list via `netsh advfirewall` · one-click block from finding drawer |
-| **Compliance** | NIST CSF coverage by Function (Identify/Protect/Detect/Respond/Recover) · ISO 27001 Annex A mapping per rule · coverage-gap report (uncovered techniques, silent rules, noisy rules) |
-| **API** | FastAPI surface with Swagger at `/docs` · Bearer-token auth (Settings → API Tokens) · REST endpoints for scan upload, history, reports, agent transport |
-| **Agent** | Packaged `pulse-agent.exe` (37 MB) · two-token enrollment (single-use enrollment → long-lived bearer) · 60s heartbeat + 30min scan cadence · auto-update probe · ACL self-audit |
-| **Multi-tenant** | Every owned row scoped to `organization_id` · self-signup mints fresh org · email verification · admin invites join the admin's org |
-| **Reports** | Text / HTML / JSON / CSV / PDF · grade-coloured score ring · per-finding remediation steps · MITRE mitigation IDs |
+| **Detection** | 30 rules mapped to MITRE ATT&CK · 4 time-based correlation rules (Brute-Force Success, Impossible Travel, Privilege Escalation Chain, Lateral Spray) · NIST CSF + ISO 27001 control IDs · SIGMA rule import · custom whitelist |
+| **Security Advisor** | Every finding ships a plain-language Security Guide — what happened, why it matters, immediate actions, exploit difficulty, false-positive tips. Security Advisor sidebar page with posture summary, top concerns, attack-concept explainers, hardening checklist. |
+| **Reports** | 9 templates (Threat Detection Summary, Executive Summary, NIST CSF, ISO 27001, Incident Investigation, Fleet Health, Board-Ready Posture, MITRE Coverage, Compliance Gap) · 4 formats each (PDF/HTML/JSON/CSV) · DB-backed persistence with 90-day retention |
+| **Dashboard** | Single-page app · live monitor (SSE) · finding drawer with notes, workflow states, assignment · Ctrl+K palette · dark mode |
+| **Alerting** | SMTP email · Slack + Discord webhooks · per-rule cooldown · live monitor email alerts |
+| **Fleet** | Per-host security score · risk tier · stale-host spotlight · severity mix · drill-into-host view · CSV export |
+| **Firewall** | `pfirewall.log` parser · port-scan detection · Pulse-managed IP block list via `netsh advfirewall` · one-click block from finding drawer |
+| **Compliance** | NIST CSF + ISO 27001 control coverage · coverage-gap report (uncovered techniques, silent rules, noisy rules) |
+| **Roles** | Three-role hierarchy: admin · manager · analyst. Manager assigns work; analyst works their queue. |
+| **API** | FastAPI surface with Swagger at `/docs` · Bearer-token auth · REST endpoints for scan upload, history, reports, agent transport |
+| **Agent** | Packaged `pulse-agent.exe` · two-token enrollment · 60s heartbeat + 30min scan cadence · auto-update probe · ACL self-audit |
+| **Multi-tenant** | Every row scoped to `organization_id` · self-signup mints fresh org · email verification · admin invites |
 
 ---
 
 ## Detection rules
 
-All 25 rules, sorted by severity. Sub-detections (DCSync, Suspicious Child Process) emit under their parent rule. Full source: [`pulse/core/rules_config.py`](pulse/core/rules_config.py).
+30 rules (26 event-based + 4 time-based correlation), sorted by severity. Full source: [`pulse/core/rules_config.py`](pulse/core/rules_config.py).
 
 | Rule | Event ID(s) | Severity | MITRE |
 |---|---|---|---|
 | Account Takeover Chain | (correlated) | 🔴 CRITICAL | T1078 |
+| Brute-Force Success | (correlated) | 🔴 CRITICAL | T1110 |
 | Credential Dumping | 4656 · 4663 | 🔴 CRITICAL | T1003.001 |
 | Golden Ticket | 4768 | 🔴 CRITICAL | T1558.001 |
+| Lateral Spray | (correlated) | 🔴 CRITICAL | T1021 |
 | Malware Persistence Chain | (correlated) | 🔴 CRITICAL | T1543.003 |
+| Privilege Escalation Chain | (correlated) | 🔴 CRITICAL | T1548 |
 | Account Lockout | 4740 | 🟠 HIGH | T1110 |
 | Antivirus Disabled | 5001 | 🟠 HIGH | T1562.001 |
 | Audit Log Cleared | 1102 | 🟠 HIGH | T1070.001 |
 | Brute Force Attempt | 4625 | 🟠 HIGH | T1110 |
 | Firewall Disabled | 4950 | 🟠 HIGH | T1562.004 |
 | Firewall Profile Disabled | (config) | 🟠 HIGH | T1562.004 |
+| Impossible Travel | (correlated) | 🟠 HIGH | T1078 |
 | Kerberoasting | 4769 | 🟠 HIGH | T1558.003 |
 | Lateral Movement via Network Share | 5140 · 5145 | 🟠 HIGH | T1021.002 |
 | Pass-the-Hash Attempt | 4624 | 🟠 HIGH | T1550.002 |

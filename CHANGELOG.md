@@ -5,6 +5,46 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## v1.8.0 — Security Advisor, Report Catalog, Role Hierarchy (2026-06-02)
+
+The release that puts plain language and reporting front and center. Pulse's audience is small teams without a SOC — v1.8 is built around that premise: every detection now explains itself, every report is one click away, and the role model finally matches how real teams work.
+
+### Security Advisor + per-rule knowledge base
+Every finding now ships with a plain-language **Security Guide** card in the drawer. Covers all 30 built-in detection rules. Each entry has: what happened (no jargon), why it matters, numbered immediate actions, exploit difficulty rating (Low/Medium/High), common false positives, and learn-more links. A new **Security Advisor** sidebar page (`/advisor`) translates the current posture into one sentence, ranks the top concerns by severity × difficulty × count, explains common attack types in plain language, and shows a hardening checklist where some items are auto-verified from open findings. Risk-level shields (green/orange/red) on the findings table give a quick at-a-glance difficulty signal. 68 new tests.
+
+### Report template catalog (9 templates, 4 formats each)
+All generated reports are now saved to the database (90-day retention) and listed on the redesigned Reports page. Every template produces PDF, HTML, JSON, and CSV.
+
+- **Threat Detection Summary** — tactic-grouped findings, attack timeline, repeat-offender IPs with intel scores, chain-of-custody SHA-256 manifest. (Phase 1)
+- **Executive Summary** — plain-language posture overview for leadership: letter grade, trend vs. previous period, top 3 risks written in non-technical language, activity tiles, recommendations. (Phase 2)
+- **NIST CSF Coverage Report** — theoretical coverage + observed detection activity per CSF function, gap section listing uncovered subcategories. (Phase 3)
+- **ISO 27001 Annex A Report** — same treatment for ISO 27001 Annex A controls. (Phase 3)
+- **Incident Investigation Report** — per-finding deep-dive with raw event XML, threat-intel decoration, analyst notes, firewall blocks, and a SHA-256 chain-of-custody manifest for IR handoff. Entry points from the Findings bulk action bar and Fleet host rows. (Phase 4)
+- **Fleet Health Report** — every monitored host ranked by risk tier, stale-host spotlight. (Phase 5)
+- **Board-Ready Posture Report** — quarterly executive view with inline SVG score trend chart, fleet overview, compliance percentages, strategic recommendations. (Phase 5)
+- **MITRE ATT&CK Coverage Report** — techniques laid out in canonical tactic order with finding counts, top-fired techniques, uncovered-tactic gaps. (Phase 5)
+- **Compliance Gap Analysis** — uncovered MITRE techniques, silent rules, noisy rules — each framed as an actionable improvement item. (Phase 5)
+
+**Reports page redesign:** flat 9-template grid with category chip filter (All / Threat Detection / Executive / Compliance / Incident / Fleet), KPI tiles (Total / PDF / This Week / Storage Used), and a polished generate modal (560px, side-by-side scope cards, 2×2 format grid, right-aligned footer).
+
+### Three-role hierarchy (admin > manager > analyst)
+The old binary admin/viewer split is gone. Three roles with distinct permissions:
+- **Admin** — system settings, users, agents, API tokens.
+- **Manager** — sees every org finding, assigns work to analysts, manages whitelist + firewall + reports + audit log exports.
+- **Analyst** — works the queue of assigned findings; browses every org finding read-only.
+
+Role badges updated (A / Mg / An). Settings > Users role dropdown has all three options. Legacy `viewer` rows migrated to `analyst` at boot. Backwards-compatible: `viewer` is accepted everywhere and silently rewritten. Phases 3–8 (My Queue page, Team Workload section, priority + due-date columns) deferred to v1.9.
+
+### SIGMA rule import
+Paste community SIGMA YAML into the dashboard and Pulse evaluates it alongside every built-in rule. Parser covers the pragmatic subset (selection blocks, `|contains` / `|startswith` / `|endswith` / `|re`, `and` / `or` / `not`). Unsupported aggregations fail loud at import time. `sigma_rules` table is org-scoped. New **SIGMA Import** tab on the Rules page with preview, import, toggle, delete. 63 new tests.
+
+### Project root reorganization
+`scripts/`, `docs/`, `installer/` subdirectories created. Standalone utilities and ancillary docs moved out of the root.
+
+**Tests:** 1057 passing (up from ~870 at v1.7.0).
+
+---
+
 ## 2026-06-02 — Report template catalog Phases 3, 4, and 5 (full catalog shipped)
 
 The catalog is complete. Seven new templates land across three phases, totaling nine templates with the two from earlier. All share the same dispatch pattern proven in Phase 1.

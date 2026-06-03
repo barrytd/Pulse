@@ -100,20 +100,26 @@ Flat status board organized by category, sorted by priority within each section.
 ## ✅ Shipped
 
 <details>
-<summary><strong>Post-v1.7.0 work (May 2026) — click to expand</strong></summary>
+<summary><strong>v1.8.0 — Security Advisor, Report Catalog, Role Hierarchy (June 2026) — click to expand</strong></summary>
 
-Work that landed after the v1.7.0 tag.
+- **Security Advisor + per-rule knowledge base** — plain-language Security Guide card in every finding drawer for all 30 detection rules. Security Advisor sidebar page with posture sentence, top concerns, attack-concept explainers, hardening checklist. Risk-level shields on the findings table. 68 new tests.
+- **Report template catalog (9 templates)** — Threat Detection Summary, Executive Summary, NIST CSF Coverage, ISO 27001 Annex A, Incident Investigation (with chain-of-custody SHA-256 manifest), Fleet Health, Board-Ready Posture, MITRE ATT&CK Coverage, Compliance Gap Analysis. All four formats (PDF/HTML/JSON/CSV). DB-backed persistence with 90-day retention. Flat-grid catalog UI with category chip filter. Polished 560px generate modal (scope cards + 2×2 format grid). 1057 tests passing.
+- **Three-role hierarchy** — admin > manager > analyst. Legacy viewer rows migrated to analyst at boot. Role badges (A/Mg/An). Manager-level endpoint gating (whitelist, firewall, reports, audit exports).
+- **SIGMA rule import** — paste community SIGMA YAML; evaluated alongside built-in rules. SIGMA Import tab on Rules page. 63 new tests.
+- **Time-based correlation engine** — Brute-Force Success, Impossible Travel, Privilege Escalation Chain, Lateral Spray. 25 new tests.
+- **Project root reorganization** — scripts/, docs/, installer/ subdirectories.
+- **Bug fixes** — sign-in cache bug, viewer assignment visibility, Findings page filter state in URL.
 
-- **Email verification on signup** — every new tenant gets a verification email; user lands unverified until they click the `/verify?token=…` link. Single-user installs without SMTP auto-verify. `email_verified_at` column + idempotent backfill. Resend endpoint, rate-limited. Unblocks turning on `PULSE_HOSTED_SIGNUP=1` for real customers. (2026-05-13)
-- **Agent tamper resistance** — `pulse-agent harden` subcommand wraps `icacls /inheritance:r /grant:r SYSTEM:(R,W) Administrators:(F)`. `AgentRuntime` startup audits the bearer-token file ACL and logs WARNING on loose principals (Everyone / BUILTIN\\Users / Authenticated Users + SID forms). (2026-05-13)
-- **Full security audit + hardening pass** — SQL injection / input validation / path traversal / auth / XSS / sensitive data / rate limits / CORS / dependencies / error handling. Eight issues fixed: path traversal in `/api/firewall/log?path=…`, XSS in upload.js, login lockout returning 423, scan-upload rate limit, scrubbed SQL exception text, `is_admin` redaction in production, audit-log silent-swallow logging, `/verify` rate limit. 12 new security tests. (2026-05-14)
-- **Dependency pinning + automated CVE scan** — `requirements-lock.txt` for prod; `requirements-dev.txt` for dev tooling. New test `test_no_known_cves_in_dependencies` runs `pip-audit --strict` against the live env (marked `@pytest.mark.network`). First run caught + fixed CVEs in pip / pytest / python-multipart. (2026-05-14)
-- **Documentation refresh** — README test count + email-verification mention, `pulse/README.md` module index extended with `pulse/agent/` subpackage + `rate_limit.py` / `intel.py` / `agents.py`, BACKLOG.md folded into this ROADMAP. (2026-05-14)
-- **Release polish** — sample data bundle (4 synthetic `.evtx` scenarios + generator script), Dockerfile + docker-compose, CONTRIBUTING.md, full README rewrite. Pulse-synthetic `.evtx` format (`ElfFile\\x00` magic + `PULSE-SYNTH-v1\\n` sentinel + JSON event list) lets samples ship without a Windows host. (2026-05-27)
-- **Three bug fixes from live UI testing** — (1) sign-in flow appeared to "close" because browser cached the landing-page response for `/` and served stale HTML after the cookie was set; `Cache-Control: no-store` on `/`, `/login`, `/welcome`. (2) findings assigned to a viewer were invisible because the scope filter excluded out-of-org scans; new `assignee_user_id` widening + `_findings_scope_kwargs` helper plumbed through 6 endpoints. (3) Findings page filters reset on F5; filter state now round-trips through URL query params (`?severity=CRITICAL&assignee=16`). 5 new regression tests. (2026-05-28)
-- **Security Advisor + per-rule knowledge base** — Pulse's audience often does not have a SOC analyst on staff, so every finding now ships with a plain-language Security Guide (what happened, why it matters, what to do right now, exploit difficulty) sourced from `pulse/core/knowledge_base.py`. New **Security Advisor** sidebar page (`/advisor`) summarizes posture in one sentence, lists the top concerns ranked by severity × exploit difficulty × count, includes attack-concept explainers, and renders a hardening checklist where some items are auto-derived from open findings. Risk-level shields (green / orange / red) on the findings table give a quick "should I worry?" cue. 30 detection rules covered. 68 new tests. (2026-06-01)
-- **SIGMA rule import** — admins can paste community SIGMA YAML straight into the dashboard and Pulse evaluates it against every scan alongside the built-in detections. Parser covers the pragmatic subset (selection blocks; `|contains` / `|startswith` / `|endswith` / `|re` modifiers; `and` / `or` / `not` / parens conditions) and rejects aggregations / `1 of them` so unsupported features fail loud at import time. `sigma_rules` table stores the original YAML + compiled JSON spec with org-scoping for multi-tenant isolation. REST API under `/api/rules/sigma` (admin-only writes, rate-limited at 200 uploads/hr). New **SIGMA Import** tab on the Rules page with preview, import, enable/disable toggle, and delete. 3 sample SIGMA rules ship in `samples/sigma/` (encoded PowerShell, mimikatz CLI, rundll32 from temp). 63 new unit + API tests. (2026-05-28)
-- **Time-based correlation engine** — 4 new sequence-aware detections: **Brute-Force Success** (5+ failed → 1 successful logon from same source IP within 10 min, CRITICAL), **Impossible Travel** (same user, two hosts/IPs within 60 s, HIGH), **Privilege Escalation Chain** (4720 → 4728/4732 within 5 min, same actor, CRITICAL), **Lateral Spray** (1 source IP → 3+ distinct hosts via LogonType=3 within 5 min, CRITICAL). All four ship with `RULE_META` + remediation steps + MITRE mitigations. 25 new unit tests, all 4 rules wired into `run_all_detections`. The existing `brute-force-server.evtx` sample now also fires Brute-Force Success — confirms the rule works against realistic synthetic data, not just hand-built unit tests. (2026-05-28)
+</details>
+
+<details>
+<summary><strong>Post-v1.7.0 interim work (May 2026) — click to expand</strong></summary>
+
+- **Email verification on signup** (2026-05-13)
+- **Agent tamper resistance** — `pulse-agent harden` + ACL audit at startup. (2026-05-13)
+- **Full security audit + hardening pass** — 8 issues fixed, 12 new security tests. (2026-05-14)
+- **Dependency pinning + automated CVE scan** — `requirements-lock.txt`, `pip-audit` test. (2026-05-14)
+- **Documentation refresh** + README rewrite, Dockerfile, CONTRIBUTING.md. (2026-05-14 / 2026-05-27)
 
 </details>
 
