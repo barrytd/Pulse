@@ -66,7 +66,9 @@ from pulse.database import (
     mark_onboarding_dismissed, mark_first_finding_viewed, count_user_scans,
     list_monitor_sessions, list_users,
     revoke_api_token, save_scan, set_finding_review, set_finding_workflow,
-    set_finding_assignee, set_user_avatar,
+    set_finding_assignee, set_finding_priority, set_user_avatar,
+    get_user_queue, count_resolved_today, get_team_workload,
+    FINDING_PRIORITIES, SEVERITY_DEFAULT_PRIORITY,
     batch_set_finding_assignee, batch_set_finding_review,
     update_user_active, update_user_display_name,
     update_user_email, update_user_password,
@@ -4976,6 +4978,87 @@ def _register_routes(app: FastAPI) -> None:
             },
             "rules": rows,
         }
+
+    # -------------------------------------------------------------------
+    # GET /api/queue — the signed-in user's analyst work queue. Every
+    # unresolved finding assigned to them, sorted priority -> severity ->
+    # oldest, plus KPI tiles (in queue / overdue / due today / resolved
+    # in the last 24h). This is the analyst's day-to-day landing surface.
+    # -------------------------------------------------------------------
+    @app.get("/api/queue")
+    def my_queue(user_id: int = Depends(require_login)):
+        # In auth-disabled (test/CLI) mode there is no real user; return an
+        # empty queue rather than guessing an id.
+        if not getattr(app.state, "auth_required", True) or not user_id:
+            return {"queue": [], "kpis": {"in_queue": 0, "overdue": 0,
+                                           "due_today": 0, "resolved_today": 0}}
+        rows = get_user_queue(app.state.db_path, user_id) or []
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        overdue = due_today = 0
+        for r in rows:
+            due = r.get("due_date")
+            if not due:
+                continue
+            due_day = str(due)[:10]
+            if due_day == today:
+                due_today += 1
+            elif str(due) < now_s:
+                overdue += 1
+        return {
+            "queue": rows,
+            "kpis": {
+                "in_queue":       len(rows),
+                "overdue":        overdue,
+                "due_today":      due_today,
+                "resolved_today": count_resolved_today(app.state.db_path, user_id),
+            },
+        }
+
+    # -------------------------------------------------------------------
+    # GET /api/team-workload — per-analyst workload board for managers +
+    # admins. One card per analyst: open count, avg time-to-resolve,
+    # oldest unresolved age, severity mix. Manager-or-above only.
+    # -------------------------------------------------------------------
+    @app.get("/api/team-workload")
+    def team_workload(user_id: int = Depends(require_manager)):
+        org = _read_scope_kwargs(app, user_id).get("organization_id")
+        return {"analysts": get_team_workload(app.state.db_path,
+                                               organization_id=org)}
+
+    # -------------------------------------------------------------------
+    # PUT /api/findings/{id}/priority — set a finding's triage priority +
+    # due date. Manager-or-above only (analysts work the queue; managers
+    # set the priorities). Body: {"priority": "P1".."P4"|null,
+    #                             "due_date": "YYYY-MM-DD"|null}
+    # -------------------------------------------------------------------
+    @app.put("/api/findings/{finding_id}/priority")
+    async def update_finding_priority(finding_id: int, request: Request,
+                                       user_id: int = Depends(require_manager)):
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        _UNSET = object()
+        priority = body.get("priority", _UNSET)
+        due_date = body.get("due_date", _UNSET)
+        if priority is not _UNSET and priority is not None \
+                and priority not in FINDING_PRIORITIES:
+            raise HTTPException(
+                400, detail="priority must be one of " + ", ".join(FINDING_PRIORITIES))
+        from pulse.database import _NOTE_UNCHANGED as _UNCH
+        ok = set_finding_priority(
+            app.state.db_path, finding_id,
+            priority=(priority if priority is not _UNSET else _UNCH),
+            due_date=(due_date if due_date is not _UNSET else _UNCH),
+        )
+        if not ok:
+            raise HTTPException(404, detail="Finding not found.")
+        _audit_user_action(user_id, "set_finding_priority",
+                           target=str(finding_id),
+                           detail=f"priority={priority} due={due_date}")
+        return {"status": "ok"}
 
     # -------------------------------------------------------------------
     # GET /api/compliance — per-framework coverage summary, used by the

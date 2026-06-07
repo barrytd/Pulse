@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Team role hierarchy Phase 3: priority schema + My Queue
+
+Continues the admin > manager > analyst hierarchy so a small team can divide the work — a super-admin owns the org, a manager assigns + prioritizes, and analysts work their queue day to day.
+
+- **Findings schema**: new `priority` (P1–P4), `due_date`, and `assigned_by` columns. `set_finding_assignee` now records who made the assignment; new `set_finding_priority(finding_id, priority, due_date)` helper. `FINDING_PRIORITIES` + `SEVERITY_DEFAULT_PRIORITY` constants (Critical→P1 … Low→P4) for the assignment-dialog default.
+- **`get_user_queue(user_id)`** — an analyst's unresolved assigned findings, sorted **priority → severity → oldest-first** (P1 beats an unset CRITICAL). Each row carries the parent scan's number/date/host + who assigned it, so the page renders without a second query. `count_resolved_today(user_id)` powers the "resolved today" KPI.
+- **`get_team_workload(org)`** — per-analyst board for managers: open count, avg time-to-resolve (30 days), oldest-unresolved age, severity mix, busiest-first.
+- **`GET /api/queue`** — the analyst's queue + KPI tiles (in queue / overdue / due today / resolved today). **`GET /api/team-workload`** (manager-or-above). **`PUT /api/findings/{id}/priority`** (manager-or-above) sets priority + due date with an audit-log entry.
+- **My Queue page** (sidebar, under General): KPI strip + a priority-sorted table (priority badge, severity, rule + scan/assigned-by, host, due-date with overdue/today color cues, status). Rows deep-link to the source scan. Empty state when the queue is clear.
+- 17 new tests in `test_team_queue.py`. 1156 tests pass.
+
+*Still to come (next):* Team Workload dashboard section, the assignment dialog (pick analyst + priority + due date) from the drawer + bulk bar, and sidebar role-gating so analysts land on My Queue.
+
+---
+
 ## 2026-06-07 — Rule performance dashboard
 
 New **Performance** tab on the Rules page — an operational health view distinct from the configuration-oriented Rules table.

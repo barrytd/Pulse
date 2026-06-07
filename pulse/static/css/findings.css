@@ -188,6 +188,80 @@
   word-break: break-word;
 }
 
+/* ------------------------------------------------------------------
+ * My Queue page — analyst daily work surface
+ * ------------------------------------------------------------------ */
+.q-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.q-kpi {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.q-kpi-icon {
+  flex: 0 0 auto;
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.q-kpi-icon i { width: 18px; height: 18px; }
+.q-kpi-text { display: flex; flex-direction: column; gap: 2px; }
+.q-kpi-num   { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.q-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+.q-kpi-red   .q-kpi-icon { background: rgba(248,81,73,0.15);  color: #f85149; }
+.q-kpi-red   .q-kpi-num  { color: #f85149; }
+.q-kpi-amber .q-kpi-icon { background: rgba(210,153,34,0.15); color: #d29922; }
+.q-kpi-amber .q-kpi-num  { color: #d29922; }
+.q-kpi-green .q-kpi-icon { background: rgba(63,185,80,0.15);  color: #3fb950; }
+
+/* Priority badge (P1 worst -> P4) */
+.q-pri {
+  display: inline-block;
+  min-width: 30px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.q-pri-p1 { background: rgba(248,81,73,0.15);  color: #f85149; }
+.q-pri-p2 { background: rgba(240,136,62,0.15); color: #f0883e; }
+.q-pri-p3 { background: rgba(210,153,34,0.15); color: #d29922; }
+.q-pri-p4 { background: rgba(88,166,255,0.12); color: var(--accent); }
+.q-pri-none { color: var(--text-light); }
+
+.q-rule { font-weight: 500; font-size: 13px; }
+.q-sub  { font-size: 11px; margin-top: 2px; }
+
+.q-due-over  { color: #f85149; font-weight: 600; }
+.q-due-today { color: #d29922; font-weight: 600; }
+
+.q-status {
+  font-size: 11px;
+  text-transform: capitalize;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--hover-row);
+  color: var(--text-muted);
+}
+.q-status-investigating { color: #d29922; }
+.q-status-acknowledged  { color: var(--accent); }
+
+@media (max-width: 900px) {
+  .q-kpi-strip { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* Collapsible "Technical details" — collapsed by default so the drawer
    opens on the human-readable summary. The summary row reuses .sec-label
    styling and gets a subtle disclosure affordance. */

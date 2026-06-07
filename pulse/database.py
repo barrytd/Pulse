@@ -465,6 +465,14 @@ def init_db(db_path):
         # recent change so the UI can show "assigned to X, 4h ago".
         "ALTER TABLE findings ADD COLUMN assigned_to INTEGER",
         "ALTER TABLE findings ADD COLUMN assigned_at TEXT",
+        # Sprint 9 team queue — manager-set triage priority + due date, and
+        # who made the assignment. priority is P1 (work now) .. P4 (whenever)
+        # or NULL (unset). due_date is an ISO datetime or NULL. assigned_by
+        # records the manager/admin who assigned the finding so the analyst
+        # and the audit trail know where the work came from.
+        "ALTER TABLE findings ADD COLUMN priority TEXT",
+        "ALTER TABLE findings ADD COLUMN due_date TEXT",
+        "ALTER TABLE findings ADD COLUMN assigned_by INTEGER",
         # Sprint 6 user identity — admin-editable display name so analysts
         # can surface their real name instead of an email prefix. NULL
         # means "fall back to the email local-part" at render time.
@@ -1063,6 +1071,7 @@ def get_scan_findings(db_path, scan_id, user_id=None, organization_id=None,
                       f.reviewed, f.false_positive, f.review_note, f.reviewed_at,
                       f.workflow_status, f.workflow_updated_at,
                       f.assigned_to, f.assigned_at,
+                      f.priority, f.due_date, f.assigned_by,
                       u.email AS assignee_email,
                       u.display_name AS assignee_display_name
                FROM findings f
@@ -1172,9 +1181,11 @@ def set_finding_review(db_path, finding_id, reviewed, false_positive, note=_NOTE
 _WORKFLOW_STATES = ("new", "acknowledged", "investigating", "resolved")
 
 
-def set_finding_assignee(db_path, finding_id, assignee_user_id):
+def set_finding_assignee(db_path, finding_id, assignee_user_id,
+                          assigned_by=None):
     """Assign (or unassign) a finding. Pass ``None`` for ``assignee_user_id``
-    to clear the assignment.
+    to clear the assignment. ``assigned_by`` records the manager/admin who
+    made the assignment (NULL = self-assignment / unattributed).
 
     Returns the updated finding as a dict with ``assignee_email`` joined in,
     or ``None`` if no such finding id exists.
@@ -1182,8 +1193,11 @@ def set_finding_assignee(db_path, finding_id, assignee_user_id):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _connect(db_path) as conn:
         if assignee_user_id is None:
+            # Clearing the assignment also clears who assigned it; priority
+            # + due date stay (a finding can be prioritized without an owner).
             conn.execute(
-                "UPDATE findings SET assigned_to = NULL, assigned_at = NULL WHERE id = ?",
+                "UPDATE findings SET assigned_to = NULL, assigned_at = NULL, "
+                "assigned_by = NULL WHERE id = ?",
                 (int(finding_id),),
             )
         else:
@@ -1196,8 +1210,11 @@ def set_finding_assignee(db_path, finding_id, assignee_user_id):
             if not urow:
                 raise ValueError("Assignee user is not an active account.")
             conn.execute(
-                "UPDATE findings SET assigned_to = ?, assigned_at = ? WHERE id = ?",
-                (int(assignee_user_id), ts, int(finding_id)),
+                "UPDATE findings SET assigned_to = ?, assigned_at = ?, "
+                "assigned_by = ? WHERE id = ?",
+                (int(assignee_user_id), ts,
+                 int(assigned_by) if assigned_by is not None else None,
+                 int(finding_id)),
             )
         row = conn.execute(
             """SELECT f.id, f.ref_id, f.scan_id, f.timestamp, f.event_id, f.severity,
@@ -1224,6 +1241,196 @@ def set_finding_assignee(db_path, finding_id, assignee_user_id):
         d["false_positive"] = bool(d["false_positive"])
         d["workflow_status"] = d.get("workflow_status") or "new"
         return d
+
+
+# Valid triage priorities, worst-first. P1 = work immediately, P4 = whenever.
+FINDING_PRIORITIES = ("P1", "P2", "P3", "P4")
+
+# Severity -> default priority used when a manager assigns without choosing
+# one explicitly. Critical work is P1, and so on down the line.
+SEVERITY_DEFAULT_PRIORITY = {
+    "CRITICAL": "P1", "HIGH": "P2", "MEDIUM": "P3", "LOW": "P4",
+}
+
+
+def set_finding_priority(db_path, finding_id, priority=_NOTE_UNCHANGED,
+                          due_date=_NOTE_UNCHANGED):
+    """Set a finding's triage priority and/or due date. Either argument left
+    at its sentinel default is untouched; pass ``None`` to clear one.
+    ``priority`` must be one of FINDING_PRIORITIES or None. ``due_date`` is
+    an ISO date/datetime string or None. Returns True if a row was updated."""
+    sets, params = [], []
+    if priority is not _NOTE_UNCHANGED:
+        if priority is not None and priority not in FINDING_PRIORITIES:
+            raise ValueError(
+                "priority must be one of " + ", ".join(FINDING_PRIORITIES))
+        sets.append("priority = ?")
+        params.append(priority)
+    if due_date is not _NOTE_UNCHANGED:
+        sets.append("due_date = ?")
+        params.append(due_date)
+    if not sets:
+        return False
+    params.append(int(finding_id))
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            f"UPDATE findings SET {', '.join(sets)} WHERE id = ?", tuple(params))
+        return (cur.rowcount or 0) > 0
+
+
+# Priority-sort fragment reused by the queue + any prioritized list. P1
+# first, NULL (unset) last, then severity, then oldest-first within a band.
+_QUEUE_ORDER_SQL = """
+    CASE f.priority
+        WHEN 'P1' THEN 1 WHEN 'P2' THEN 2
+        WHEN 'P3' THEN 3 WHEN 'P4' THEN 4 ELSE 5
+    END,
+    CASE f.severity
+        WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2
+        WHEN 'MEDIUM' THEN 3 WHEN 'LOW' THEN 4 ELSE 5
+    END,
+    f.timestamp ASC
+"""
+
+
+def get_user_queue(db_path, user_id):
+    """Return the analyst's work queue: every UNRESOLVED finding assigned to
+    ``user_id``, sorted priority -> severity -> oldest-first. "Unresolved"
+    means workflow_status != 'resolved' and not flagged false_positive.
+
+    Each row carries the parent scan's number + date + hostname so the My
+    Queue page can render the source without a second query, plus the
+    manager (assigned_by) display name."""
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            f"""SELECT f.id, f.ref_id, f.rule, f.severity, f.timestamp,
+                       f.hostname, f.workflow_status, f.priority, f.due_date,
+                       f.assigned_at, f.assigned_by,
+                       s.id AS scan_id,
+                       (SELECT COUNT(*) FROM scans s2 WHERE s2.id <= s.id) AS scan_number,
+                       s.scanned_at AS scan_date,
+                       ab.email AS assigned_by_email,
+                       ab.display_name AS assigned_by_name
+                FROM findings f
+                JOIN scans s ON s.id = f.scan_id
+                LEFT JOIN users ab ON ab.id = f.assigned_by
+                WHERE f.assigned_to = ?
+                  AND COALESCE(f.workflow_status, 'new') != 'resolved'
+                  AND COALESCE(f.false_positive, 0) = 0
+                ORDER BY {_QUEUE_ORDER_SQL}""",
+            (int(user_id),),
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def count_resolved_today(db_path, user_id):
+    """How many findings this analyst resolved in the last 24h — drives the
+    'Resolved today' KPI on My Queue. Counts rows assigned to the user whose
+    workflow flipped to resolved within the window (uses workflow_updated_at,
+    falling back to reviewed_at)."""
+    cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) FROM findings
+               WHERE assigned_to = ?
+                 AND workflow_status = 'resolved'
+                 AND COALESCE(workflow_updated_at, reviewed_at, '') >= ?""",
+            (int(user_id), cutoff),
+        ).fetchone()
+    return int(row[0] or 0)
+
+
+def get_team_workload(db_path, organization_id=None):
+    """Per-analyst workload for the manager's Team Workload view. Returns one
+    row per active analyst/manager with: open (unresolved assigned) count,
+    average time-to-resolve over the last 30 days (hours), the age of their
+    oldest unresolved finding (hours), and a severity breakdown of their
+    open queue. Scoped to ``organization_id`` when supplied."""
+    org_clause = ""
+    org_params = ()
+    if organization_id is not None:
+        org_clause = " AND u.organization_id = ?"
+        org_params = (int(organization_id),)
+
+    with _connect(db_path) as conn:
+        # Candidate users: active analysts + managers (admins can be assigned
+        # work too, but the workload board is about the people who triage).
+        users = conn.execute(
+            f"""SELECT id, email, display_name, role FROM users u
+                WHERE active = 1 AND role IN ('analyst', 'manager'){org_clause}
+                ORDER BY COALESCE(display_name, email)""",
+            org_params,
+        ).fetchall()
+
+        out = []
+        now = datetime.now()
+        for uid, email, dname, role in users:
+            open_rows = conn.execute(
+                """SELECT f.severity, f.timestamp, f.assigned_at
+                   FROM findings f
+                   WHERE f.assigned_to = ?
+                     AND COALESCE(f.workflow_status, 'new') != 'resolved'
+                     AND COALESCE(f.false_positive, 0) = 0""",
+                (uid,),
+            ).fetchall()
+            sev_mix = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            oldest_hours = None
+            for sev, ts, assigned_at in open_rows:
+                s = (sev or "LOW").upper()
+                if s in sev_mix:
+                    sev_mix[s] += 1
+                stamp = assigned_at or ts
+                if stamp:
+                    try:
+                        dt = datetime.strptime(str(stamp)[:19], "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        try:
+                            dt = datetime.fromisoformat(
+                                str(stamp).replace("Z", "+00:00")).replace(tzinfo=None)
+                        except ValueError:
+                            dt = None
+                    if dt:
+                        age_h = (now - dt).total_seconds() / 3600.0
+                        if oldest_hours is None or age_h > oldest_hours:
+                            oldest_hours = age_h
+
+            # Average time-to-resolve (assigned_at -> workflow_updated_at) for
+            # this user's findings resolved in the last 30 days.
+            cutoff = (now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+            resolved = conn.execute(
+                """SELECT assigned_at, COALESCE(workflow_updated_at, reviewed_at)
+                   FROM findings
+                   WHERE assigned_to = ? AND workflow_status = 'resolved'
+                     AND COALESCE(workflow_updated_at, reviewed_at, '') >= ?""",
+                (uid, cutoff),
+            ).fetchall()
+            deltas = []
+            for a, r in resolved:
+                if not a or not r:
+                    continue
+                try:
+                    da = datetime.strptime(str(a)[:19], "%Y-%m-%d %H:%M:%S")
+                    dr = datetime.strptime(str(r)[:19], "%Y-%m-%d %H:%M:%S")
+                    if dr >= da:
+                        deltas.append((dr - da).total_seconds() / 3600.0)
+                except ValueError:
+                    continue
+            avg_resolve_h = round(sum(deltas) / len(deltas), 1) if deltas else None
+
+            out.append({
+                "user_id":        uid,
+                "email":          email,
+                "display_name":   dname or (email or "").split("@")[0],
+                "role":           role,
+                "open_count":     len(open_rows),
+                "by_severity":    sev_mix,
+                "oldest_hours":   round(oldest_hours, 1) if oldest_hours is not None else None,
+                "avg_resolve_hours": avg_resolve_h,
+            })
+        # Busiest analyst first so the manager sees who's swamped.
+        out.sort(key=lambda r: r["open_count"], reverse=True)
+        return out
 
 
 def set_finding_workflow(db_path, finding_id, workflow_status):
