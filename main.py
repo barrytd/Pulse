@@ -853,20 +853,32 @@ def main():
             os.makedirs(report_folder)
 
     # --- STEP 2: FIND LOG FILES ---
-    log_files = [f for f in os.listdir(log_folder) if f.endswith(".evtx")]
-
-    if not log_files:
-        log(f"  No .evtx files found in '{log_folder}'.")
-        log("  Drop your Windows event log files there and run again.")
-        log()
-        log("  Export logs from Event Viewer:")
-        log("  Windows Logs > Security > Save All Events As...")
-        log()
-        # In --json-only mode still emit an empty findings envelope so
-        # downstream pipelines always get valid JSON.
-        if args.json_only:
-            print(json.dumps({"findings": [], "summary": {"total": 0}}, indent=2))
-        return
+    # --logs accepts EITHER a directory (scan every .evtx inside) OR a
+    # single .evtx file (scan just that one). The single-file form is the
+    # natural thing to reach for when testing one sample.
+    if os.path.isfile(log_folder):
+        if not log_folder.lower().endswith(".evtx"):
+            log(f"  '{log_folder}' is not a .evtx file.")
+            if args.json_only:
+                print(json.dumps({"findings": [], "summary": {"total": 0}}, indent=2))
+            return
+        log_files  = [os.path.basename(log_folder)]
+        file_paths = [log_folder]
+    else:
+        log_files = [f for f in os.listdir(log_folder) if f.endswith(".evtx")]
+        if not log_files:
+            log(f"  No .evtx files found in '{log_folder}'.")
+            log("  Drop your Windows event log files there and run again.")
+            log()
+            log("  Export logs from Event Viewer:")
+            log("  Windows Logs > Security > Save All Events As...")
+            log()
+            # In --json-only mode still emit an empty findings envelope so
+            # downstream pipelines always get valid JSON.
+            if args.json_only:
+                print(json.dumps({"findings": [], "summary": {"total": 0}}, indent=2))
+            return
+        file_paths = [os.path.join(log_folder, f) for f in log_files]
 
     # --- STEP 3: PARSE EACH LOG FILE ---
     # Files are parsed in parallel using multiple CPU cores.
@@ -874,7 +886,8 @@ def main():
     import multiprocessing
     from pulse.animations import HeartbeatMonitor
 
-    file_paths = [os.path.join(log_folder, f) for f in log_files]
+    # file_paths was resolved in STEP 2 (handles both the directory and
+    # single-file forms of --logs).
     cpu_count  = multiprocessing.cpu_count()
     workers    = min(cpu_count, len(file_paths))
 
