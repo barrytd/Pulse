@@ -2011,6 +2011,49 @@
   box-shadow: 0 1px 2px rgba(0,0,0,0.08);
 }
 
+/* Performance tab — health summary tiles + per-rule health dots. */
+.perf-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin: 16px 0 18px;
+}
+.perf-tile {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.perf-tile-num { font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--text); }
+.perf-tile-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.perf-tile-green .perf-tile-num { color: #3fb950; }
+.perf-tile-amber .perf-tile-num { color: #d29922; }
+.perf-tile-red   .perf-tile-num { color: #f85149; }
+
+/* Health status dot in the per-rule rows. */
+.rule-health {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.rule-health-healthy  { background: #3fb950; }
+.rule-health-watch    { background: #d29922; }
+.rule-health-noisy    { background: #f85149; }
+.rule-health-disabled { background: var(--text-light); }
+
+@media (max-width: 900px) {
+  .perf-strip { grid-template-columns: repeat(3, 1fr); }
+}
+
 .rules-filter-banner {
   margin: 12px 0 8px 0;
   padding: 8px 12px;

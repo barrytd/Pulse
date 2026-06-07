@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Rule performance dashboard
+
+New **Performance** tab on the Rules page — an operational health view distinct from the configuration-oriented Rules table.
+
+- **`GET /api/rules/performance`** classifies every detection rule into a health band, server-side so the UI (and any future report) agree: **noisy/red** (≥30 hits AND ≥30% false-positive rate — drowning analysts, needs tuning), **watch/amber** (silent — enabled but never fired, or 15-30% FP), **healthy/green** (firing with an acceptable FP rate), **disabled/grey**. Each rule carries a one-line `health_reason`.
+- Returns aggregate summary: counts per band, a `silent` subset, average scan duration (`duration_sec`), and scans analyzed.
+- **Performance tab UI**: six header tiles (Healthy / Need a look / Noisy / Silent / Avg scan time / Scans analyzed), then a per-rule table sorted problems-first — health dot, rule + reason, severity, 24h hits sparkline, FP rate with TP/FP breakdown, last fired. Reuses the existing sparkline + severity-tone helpers.
+- 9 new tests in `test_rules_performance.py`. 1139 tests pass.
+
+---
+
 ## 2026-06-07 — Finding drawer redesign + first-run hero + UI polish
 
 ### Finding drawer redesign (less redundancy, clearer hierarchy)
@@ -23,6 +34,9 @@ A brand-new account with no scans used to open to an empty dashboard that read a
 ### UI polish
 - Findings KPI relabeled: **"New findings" → "Untriaged"** with tightened sublabels ("all unresolved" vs "not yet reviewed") so the Open/Untriaged distinction is obvious.
 - Dashboard data-reduction funnel boxes are now equal height (the "Crit + High" label no longer wraps and pushes its box taller).
+
+### CLI
+- `--logs` now accepts a single `.evtx` file, not just a directory. Passing a file previously raised `NotADirectoryError`; it now scans that one file, while a directory still scans every `.evtx` inside.
 
 ---
 

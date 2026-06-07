@@ -9,9 +9,10 @@ import { escapeHtml, showToast, toastError, mitreMap } from './dashboard.js';
 import { apiGetMe } from './api.js';
 
 var _rulesCache = [];
-var _activeTab  = 'rules';          // 'rules' | 'coverage' | 'sigma'
+var _activeTab  = 'rules';          // 'rules' | 'performance' | 'coverage' | 'sigma'
 var _activeTechniqueFilter = null;  // e.g. "T1110" to restrict the Rules table
 var _sigmaCache = [];
+var _perfCache  = null;             // {summary, rules} from /api/rules/performance
 var _sigmaIsAdmin = false;
 
 // Technique -> tactic mapping for the techniques Pulse rules reference.
@@ -254,9 +255,107 @@ function _clearTechniqueFilter() {
 export function rulesShowTab(tab) {
   if (tab === 'coverage') _activeTab = 'coverage';
   else if (tab === 'sigma') _activeTab = 'sigma';
+  else if (tab === 'performance') _activeTab = 'performance';
   else _activeTab = 'rules';
   _renderPage();
   if (_activeTab === 'sigma') _refreshSigmaTab();
+  if (_activeTab === 'performance') _refreshPerformanceTab();
+}
+
+// -----------------------------------------------------------------
+// Performance tab — operational health view. The Rules tab is for
+// configuration (what's enabled, what each rule is); this tab is for
+// running the detection program: which rules are noisy and need tuning,
+// which are silent and need verifying, which are healthy. Data + the
+// health classification come from /api/rules/performance.
+// -----------------------------------------------------------------
+async function _fetchPerformance() {
+  var resp = await fetch('/api/rules/performance');
+  if (!resp.ok) throw new Error('Failed to load performance: HTTP ' + resp.status);
+  return await resp.json();
+}
+
+async function _refreshPerformanceTab() {
+  var mount = document.getElementById('rules-perf-mount');
+  if (!mount) return;
+  try {
+    _perfCache = await _fetchPerformance();
+  } catch (e) {
+    mount.innerHTML = '<div class="dash-empty-note">' + escapeHtml(e.message) + '</div>';
+    return;
+  }
+  mount.innerHTML = _performanceBodyHtml(_perfCache);
+  if (window.lucide && window.lucide.createIcons) {
+    try { window.lucide.createIcons(); } catch (e) {}
+  }
+}
+
+function _healthDot(health) {
+  // green / amber / red / grey health states.
+  return '<span class="rule-health rule-health-' + escapeHtml(health) + '" ' +
+         'title="' + escapeHtml(health) + '"></span>';
+}
+
+function _fmtScanTime(sec) {
+  if (sec == null) return '—';
+  if (sec < 60) return sec + 's';
+  return (sec / 60).toFixed(1) + 'm';
+}
+
+function _performanceBodyHtml(data) {
+  if (!data || !data.rules) return '<div class="dash-empty-note">No performance data.</div>';
+  var s = data.summary || {};
+
+  // Header stat tiles.
+  function tile(num, label, cls) {
+    return '<div class="perf-tile' + (cls ? ' ' + cls : '') + '">' +
+      '<div class="perf-tile-num">' + num + '</div>' +
+      '<div class="perf-tile-label">' + escapeHtml(label) + '</div></div>';
+  }
+  var tiles =
+    tile(s.healthy || 0,  'Healthy',  'perf-tile-green') +
+    tile(s.watch || 0,    'Need a look', 'perf-tile-amber') +
+    tile(s.noisy || 0,    'Noisy',    'perf-tile-red') +
+    tile(s.silent || 0,   'Silent',   '') +
+    tile(_fmtScanTime(s.avg_scan_seconds), 'Avg scan time', '') +
+    tile(s.scans_analyzed || 0, 'Scans analyzed', '');
+
+  // Per-rule rows, already health-sorted server-side.
+  var rows = data.rules.map(function (r) {
+    var tone = _severityTone(r.severity);
+    var spark = _sparkline(r.spark_24h || [], 'var(--severity-' + tone + ')');
+    var total = (r.fp_count || 0) + (r.tp_count || 0);
+    var fpCell = total
+      ? '<span class="fp-rate ' + (r.fp_rate > 30 ? 'fp-hot' : (r.fp_rate > 10 ? 'fp-warm' : 'fp-cold')) + '">' +
+        r.fp_rate + '%</span> <span class="muted" style="font-size:11px;">(' +
+        (r.tp_count || 0) + ' TP / ' + (r.fp_count || 0) + ' FP)</span>'
+      : '<span class="muted">—</span>';
+    return '<tr class="rule-row sev-edge-' + tone + (r.enabled ? '' : ' rule-row-disabled') + '">' +
+      '<td>' + _healthDot(r.health) + '</td>' +
+      '<td class="rule-name-cell"><div class="rule-name">' + escapeHtml(r.name) + '</div>' +
+        '<div class="rule-subline muted">' + escapeHtml(r.health_reason || '') + '</div></td>' +
+      '<td><span class="pill pill-' + tone + '">' + escapeHtml(r.severity || 'LOW') + '</span></td>' +
+      '<td class="hits-cell"><div class="hits-row"><span class="hits-num">' + (r.hits_24h || 0) + '</span>' + spark + '</div>' +
+        '<div class="hits-sub muted">24h • ' + (r.hits_total || 0) + ' total</div></td>' +
+      '<td>' + fpCell + '</td>' +
+      '<td>' + _relativeTime(r.last_fired) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  return '<div class="perf-strip">' + tiles + '</div>' +
+    '<div style="overflow-x:auto;">' +
+      '<table class="data-table rules-table">' +
+        '<thead><tr>' +
+          '<th style="width:28px;"></th>' +
+          '<th>Rule</th>' +
+          '<th>Severity</th>' +
+          '<th>Hits (24h)</th>' +
+          '<th>FP rate</th>' +
+          '<th>Last fired</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>';
 }
 
 // -----------------------------------------------------------------
@@ -439,6 +538,7 @@ function _renderPage() {
   if (!c) return;
   var enabledCount = _rulesCache.filter(function (r) { return r.enabled; }).length;
   var tabRulesCls = 'rules-tab' + (_activeTab === 'rules' ? ' active' : '');
+  var tabPerfCls  = 'rules-tab' + (_activeTab === 'performance' ? ' active' : '');
   var tabCovCls   = 'rules-tab' + (_activeTab === 'coverage' ? ' active' : '');
   var tabSigmaCls = 'rules-tab' + (_activeTab === 'sigma' ? ' active' : '');
   var filterBanner = '';
@@ -453,6 +553,13 @@ function _renderPage() {
     body = _coverageHtml();
   } else if (_activeTab === 'sigma') {
     body = '';  // SIGMA tab renders its own cards below
+  } else if (_activeTab === 'performance') {
+    // Mount point; _refreshPerformanceTab fills it after fetch. Show
+    // cached content immediately on re-render so the tab doesn't flash.
+    body = '<div id="rules-perf-mount">' +
+      (_perfCache ? _performanceBodyHtml(_perfCache)
+                  : '<div style="text-align:center; padding:32px; color:var(--text-muted);">Loading performance…</div>') +
+      '</div>';
   } else {
     body =
       '<div style="overflow-x:auto;">' +
@@ -478,6 +585,7 @@ function _renderPage() {
         '</span></span>' +
         '<div class="rules-tabs">' +
           '<button class="' + tabRulesCls + '" data-action="rulesShowTab" data-arg="rules">Rules</button>' +
+          '<button class="' + tabPerfCls + '" data-action="rulesShowTab" data-arg="performance">Performance</button>' +
           '<button class="' + tabCovCls + '" data-action="rulesShowTab" data-arg="coverage">MITRE Coverage</button>' +
           '<button class="' + tabSigmaCls + '" data-action="rulesShowTab" data-arg="sigma">SIGMA Import</button>' +
         '</div>' +

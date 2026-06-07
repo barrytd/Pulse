@@ -18,9 +18,7 @@ Flat status board organized by category, sorted by priority within each section.
 
 > The next things to pull into **In Progress**. Top-of-list ships next.
 
-| Priority | Item | Notes |
-|---|---|---|
-| 🟡 Medium | **Rule performance dashboard** | Performance tab on Rules page: per-rule total hits, 24h sparkline, TP vs FP ratio, average scan time, health indicator (green/amber/red). |
+> Nothing queued — pull the next item from the Development Backlog below.
 
 ---
 
@@ -99,6 +97,10 @@ Flat status board organized by category, sorted by priority within each section.
 <details>
 <summary><strong>Post-v1.8.0 work (June 2026) — click to expand</strong></summary>
 
+- **Rule performance dashboard** — new **Performance** tab on the Rules page. Per-rule health view (`GET /api/rules/performance`) that classifies every rule green/amber/red: **noisy** (≥30 hits AND ≥30% false-positive rate — needs tuning), **watch** (silent/never-fired, or 15-30% FP), **healthy** (firing cleanly), **disabled**. Header tiles for healthy / need-a-look / noisy / silent counts + average scan time + scans analyzed. Rows sorted problems-first with a health dot, 24h sparkline, TP/FP breakdown, and last-fired. 9 new tests. (2026-06-07)
+- **Finding drawer redesign** — restructured for the non-expert: leads with the plain-language summary + difficulty, a single "What to do now" action list, a compact "Framework references" line (MITRE pills only), raw event data deduplicated into a collapsed "Technical details" section, and a "Tracking" separator over the workflow/notes controls. (2026-06-07)
+- **First-run hero** — new accounts with zero scans open to a focused "Run your first scan" call to action instead of an empty dashboard. (2026-06-07)
+- **CLI + UI polish** — `--logs` accepts a single `.evtx` file; "New findings" KPI relabeled "Untriaged"; equal-height data-reduction funnel boxes. (2026-06-07)
 - **Sysmon log support** — full coverage of the four high-value Sysmon event types. Parser fetches the Sysmon channel (Event IDs 1, 3, 10, 22), all detections provider-gated. Four new rules: **Suspicious Process Creation** (Event 1 — command-line analysis for encoded PowerShell, LOLBins, credential tooling, Office-spawns-shell), **LSASS Memory Access** (Event 10 — credential dumping via memory-read handle to lsass.exe, allow-list + access-mask gated, CRITICAL), **Suspicious Network Connection** (Event 3 — LOLBin outbound + C2 ports), **Suspicious DNS Query** (Event 22 — tunneling via long subdomain labels). Knowledge-base entries + compliance mappings for all four. New `sysmon-execution-chain.evtx` sample. 65 new tests. Also defanged the literal Mimikatz module strings out of every `.evtx` sample so cloning the repo no longer trips endpoint AV's `HackTool:Win32/Mimikatz` content signature on synthetic test data. (2026-06-03)
 
 </details>

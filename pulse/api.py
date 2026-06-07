@@ -4881,6 +4881,103 @@ def _register_routes(app: FastAPI) -> None:
         return {"rules": rows}
 
     # -------------------------------------------------------------------
+    # GET /api/rules/performance — operational health view for the Rules
+    # page's Performance tab. Layers a health classification on top of the
+    # per-rule stats so a detection engineer can spot rules that need
+    # tuning (noisy), verification (silent), or are running cleanly.
+    #
+    # Health bands (server-side so the UI and any future report agree):
+    #   - noisy  (red)   : >= 30 total hits AND >= 30% false-positive rate
+    #   - watch  (amber) : enabled-but-never-fired (silent), OR 15-30% FP
+    #   - healthy(green) : firing with an acceptable FP rate
+    #   - disabled(grey) : turned off in pulse.yaml
+    # -------------------------------------------------------------------
+    @app.get("/api/rules/performance")
+    def rules_performance(user_id: int = Depends(require_login)):
+        config = _read_config(app.state.config_path)
+        disabled = set(get_disabled_rules(config))
+        scope = _read_scope_kwargs(app, user_id)
+        stats = get_rule_stats(app.state.db_path, **scope)
+
+        def _fp_rate(st):
+            tp = st.get("tp_count", 0) or 0
+            fp = st.get("fp_count", 0) or 0
+            total = tp + fp
+            return (fp / total) if total else 0.0
+
+        def _classify(name, st):
+            if name in disabled:
+                return "disabled", "Turned off in configuration"
+            hits = st.get("hits_total", 0) or 0
+            rate = _fp_rate(st)
+            if hits >= 30 and rate >= 0.30:
+                return "noisy", (
+                    f"{round(rate * 100)}% false-positive rate over "
+                    f"{hits} hits — needs tuning"
+                )
+            if hits == 0:
+                return "watch", "Enabled but has never fired — verify it works"
+            if rate >= 0.15:
+                return "watch", (
+                    f"Elevated false-positive rate ({round(rate * 100)}%)"
+                )
+            return "healthy", "Firing cleanly"
+
+        ordered = sorted(_get_rule_names(), key=rule_sort_key)
+        rows = []
+        counts = {"healthy": 0, "watch": 0, "noisy": 0, "disabled": 0}
+        silent = 0
+        for name in ordered:
+            meta = RULE_META.get(name, {})
+            st = stats.get(name, {})
+            health, reason = _classify(name, st)
+            counts[health] = counts.get(health, 0) + 1
+            if health == "watch" and (st.get("hits_total", 0) or 0) == 0 \
+                    and name not in disabled:
+                silent += 1
+            rows.append({
+                "name":        name,
+                "severity":    meta.get("severity", "LOW"),
+                "mitre":       meta.get("mitre"),
+                "enabled":     name not in disabled,
+                "hits_total":  st.get("hits_total", 0),
+                "hits_24h":    st.get("hits_24h", 0),
+                "spark_24h":   st.get("spark_24h", [0] * 24),
+                "tp_count":    st.get("tp_count", 0),
+                "fp_count":    st.get("fp_count", 0),
+                "fp_rate":     round(_fp_rate(st) * 100),
+                "last_fired":  st.get("last_fired"),
+                "health":      health,
+                "health_reason": reason,
+            })
+
+        # Sort: problems first (noisy -> watch -> healthy -> disabled),
+        # then by hit volume within a band so the loudest rule leads.
+        band_rank = {"noisy": 0, "watch": 1, "healthy": 2, "disabled": 3}
+        rows.sort(key=lambda r: (band_rank.get(r["health"], 9),
+                                  -(r["hits_total"] or 0), r["name"]))
+
+        # Average scan duration across scans in scope.
+        history = get_history(app.state.db_path, limit=500, **scope) or []
+        durations = [s["duration_sec"] for s in history
+                     if s.get("duration_sec") is not None]
+        avg_scan = round(sum(durations) / len(durations), 1) if durations else None
+
+        return {
+            "summary": {
+                "total_rules":      len(rows),
+                "healthy":          counts.get("healthy", 0),
+                "watch":            counts.get("watch", 0),
+                "noisy":            counts.get("noisy", 0),
+                "disabled":         counts.get("disabled", 0),
+                "silent":           silent,
+                "avg_scan_seconds": avg_scan,
+                "scans_analyzed":   len(history),
+            },
+            "rules": rows,
+        }
+
+    # -------------------------------------------------------------------
     # GET /api/compliance — per-framework coverage summary, used by the
     # Compliance page on the dashboard. Groups rules by NIST CSF function
     # (Identify / Protect / Detect / Respond / Recover) and ISO 27001
