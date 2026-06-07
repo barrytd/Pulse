@@ -61,7 +61,7 @@
   gap: 0;
   padding: 0 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-high, #f3f4f6);
+  color: #f3f4f6;
   text-decoration: none;
   cursor: pointer;
   transition: opacity 120ms ease;
@@ -86,7 +86,7 @@
   /* Tighter tracking — the prior 1.2px pushed "PULSE" too far from
      the separator and made the whole brand feel airy. */
   letter-spacing: 0.8px;
-  color: var(--text-high, #f3f4f6);
+  color: #f3f4f6;
   line-height: 1;
 }
 .sidebar-brand-sep {
@@ -100,7 +100,7 @@
 }
 .sidebar-brand-sub {
   font-size: 10px;
-  color: var(--text-muted, #8b949e);
+  color: #8b949e;
   letter-spacing: 0.3px;
   white-space: nowrap;
   line-height: 1;
@@ -137,7 +137,7 @@
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  color: var(--text-muted, #8b949e);
+  color: #8b949e;
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -147,7 +147,7 @@
 .sidebar-search:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.14);
-  color: var(--text-body, #d1d5db);
+  color: #d1d5db;
 }
 .sidebar-search:focus {
   outline: none;
@@ -181,7 +181,10 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  color: var(--text-dim, #6b7280);
+  /* Hard-coded dark-theme muted so group labels stay readable on the
+     fixed navy sidebar in BOTH themes (the themed token flips dark in
+     light mode and vanishes). */
+  color: #6b7280;
   user-select: none;
 }
 
@@ -197,7 +200,7 @@
   gap: 10px;
   height: 32px;
   padding: 0 12px 0 8px;
-  color: var(--text-body, #d1d5db);
+  color: #d1d5db;
   text-decoration: none;
   font-size: 13px;
   font-weight: 400;
@@ -208,13 +211,15 @@
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 .sidebar-nav:hover {
-  color: var(--text-high, #f3f4f6);
+  color: #f3f4f6;
   background: rgba(255, 255, 255, 0.04);
 }
 .sidebar-nav.active {
-  color: var(--text-high, #f3f4f6);
+  color: #f3f4f6;
   background: rgba(255, 255, 255, 0.06);
-  border-left-color: var(--accent, #58a6ff);
+  /* Dark-theme accent blue, fixed — the active rail must read the same
+     in both themes against the navy sidebar. */
+  border-left-color: #58a6ff;
   font-weight: 600;
 }
 

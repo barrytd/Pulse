@@ -129,6 +129,48 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Dark-mode pill toggle (Appearance section of the account dropdown)   */
+/* ON = dark theme active (green track, knob right). OFF = light theme  */
+/* (gray track, knob left). The visual state is driven purely by the    */
+/* <html data-theme> attribute, so it always reflects the live theme    */
+/* the moment the dropdown opens — no JS sync needed for the look.       */
+/* ------------------------------------------------------------------ */
+.theme-toggle-row { cursor: pointer; }
+
+/* The label keeps its normal text color on hover (the row is a control,
+   not a navigation link) — but we leave the inherited accent-on-hover so
+   it still feels interactive, matching every other dropdown item. */
+.theme-switch {
+  margin-left: auto;          /* pin the switch to the right of the row */
+  flex: 0 0 auto;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.15);   /* OFF — light mode (white dropdown) */
+  transition: background 150ms ease;
+}
+.theme-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 150ms ease;
+}
+/* ON state — dark theme active. #3fb950 is the sanctioned pulse green
+   (LOW row-accent + the sidebar brand mark). */
+[data-theme="dark"] .theme-switch {
+  background: #3fb950;
+}
+[data-theme="dark"] .theme-switch-knob {
+  transform: translateX(16px);   /* 36 − 16 knob − 2 − 2 padding = 16 */
+}
+
+/* ------------------------------------------------------------------ */
 /* Settings page — left tab nav + right content                         */
 /* ------------------------------------------------------------------ */
 .settings-layout {

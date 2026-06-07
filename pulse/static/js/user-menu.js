@@ -6,7 +6,7 @@
 
 import { apiGetAuthStatus, apiGetMe } from './api.js';
 import { navigate } from './navigation.js';
-import { toggleTheme } from './theme.js';
+import { toggleTheme, getTheme } from './theme.js';
 import { signOut, setActiveSettingsTab } from './settings.js';
 import { openFeedbackModal } from './feedback.js';
 
@@ -116,6 +116,7 @@ export function toggleUserMenu(arg, target, event) {
   var dd = document.getElementById('user-dropdown');
   if (!dd) return;
   dd.hidden = !dd.hidden;
+  if (!dd.hidden) _syncThemeToggle();   // reflect live theme on open
 }
 
 export function openProfile() {
@@ -149,8 +150,18 @@ export function logOutFromMenu() {
 
 export function toggleDarkModeFromMenu() {
   toggleTheme();
+  _syncThemeToggle();
   // Don't close the dropdown — users often want to flip the toggle and
   // immediately confirm the change visually.
+}
+
+// Keep the toggle row's aria-checked in sync with the live theme. The
+// visual on/off is pure CSS (driven by <html data-theme>), so this is
+// only for assistive tech — but we run it on every menu open so a screen
+// reader always announces the correct state.
+function _syncThemeToggle() {
+  var row = document.getElementById('dark-mode-toggle-row');
+  if (row) row.setAttribute('aria-checked', getTheme() === 'dark' ? 'true' : 'false');
 }
 
 function _closeUserMenu() {

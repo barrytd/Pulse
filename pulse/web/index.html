@@ -74,10 +74,12 @@
               <div class="pulse-dropdown-divider"></div>
               <div class="pulse-dropdown-section">
                 <div class="pulse-dropdown-header">Appearance</div>
-                <a class="pulse-dropdown-item" data-action="toggleDarkModeFromMenu">
+                <div class="pulse-dropdown-item theme-toggle-row" id="dark-mode-toggle-row"
+                     data-action="toggleDarkModeFromMenu" role="switch" aria-checked="true" tabindex="0">
                   <i data-lucide="moon"></i>
                   <span>Dark Mode</span>
-                </a>
+                  <span class="theme-switch" aria-hidden="true"><span class="theme-switch-knob"></span></span>
+                </div>
               </div>
               <div class="pulse-dropdown-divider"></div>
               <div class="pulse-dropdown-section">
