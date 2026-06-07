@@ -62,6 +62,31 @@ RELEVANT_EVENT_IDS = [
     7045,   # New service installed
 ]
 
+# ---------------------------------------------------------------------------
+# Sysmon event IDs. Sysmon (System Monitor, a free Microsoft Sysinternals
+# tool) writes to its own channel — Microsoft-Windows-Sysmon/Operational —
+# with much richer telemetry than the Security log: full command lines,
+# process hashes, network connections, and DNS queries. These IDs come
+# from a DIFFERENT provider, so the detections gate on the provider name
+# (see `_is_sysmon_event` in detections.py) to avoid confusing a Sysmon
+# Event 1 with a same-numbered event from another channel.
+#
+# We add them to the fast-path fetch filter so a Sysmon .evtx upload (or
+# a live Sysmon channel scan) surfaces these events. A Security.evtx that
+# contains none of these IDs simply returns nothing extra — no harm.
+# ---------------------------------------------------------------------------
+
+SYSMON_EVENT_IDS = [
+    1,    # Process create (full command line + hashes + parent process)
+    3,    # Network connection (C2 beaconing, unusual egress)
+    10,   # Process access (handle to lsass.exe = credential dumping)
+    22,   # DNS query (tunneling, beaconing to algorithmic domains)
+]
+
+# Combined set the fast-path query fetches. Kept as a separate list so the
+# Security-log IDs and Sysmon IDs stay individually documented above.
+_ALL_FETCH_EVENT_IDS = RELEVANT_EVENT_IDS + SYSMON_EVENT_IDS
+
 # XML namespace used by all Windows event log files
 _NS = "{http://schemas.microsoft.com/win/2004/08/events/event}"
 
@@ -215,8 +240,9 @@ def _parse_evtx_fast(file_path, since=None):
     """
     abs_path = os.path.abspath(file_path)
 
-    # Build the XPath query — event ID filter + optional date filter
-    id_filter = " or ".join(f"EventID={eid}" for eid in RELEVANT_EVENT_IDS)
+    # Build the XPath query — event ID filter + optional date filter.
+    # Includes the Sysmon IDs so a Sysmon channel / .evtx surfaces too.
+    id_filter = " or ".join(f"EventID={eid}" for eid in _ALL_FETCH_EVENT_IDS)
 
     if since is not None:
         # Format as ISO 8601 UTC — wevtutil expects this exact format

@@ -185,7 +185,7 @@ EVENT_PROCESS_CREATED = 4688
 # Active Directory extended-rights GUIDs that together grant the ability to
 # replicate the directory. Any account that isn't a domain controller
 # requesting these is almost certainly performing a DCSync attack
-# (Mimikatz lsadump::dcsync and similar).
+# (the Mimikatz lsa-dump dcsync module and similar).
 DCSYNC_GUIDS = {
     "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2": "DS-Replication-Get-Changes",
     "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2": "DS-Replication-Get-Changes-All",
@@ -1763,7 +1763,7 @@ def detect_dcsync(events):
 
     DCSync abuses the AD replication protocol (MS-DRSR) to pull password
     hashes for every user in the domain straight from a domain controller.
-    Tools like Mimikatz (lsadump::dcsync) and Impacket's secretsdump invoke
+    Tools like Mimikatz (the lsa-dump dcsync module) and Impacket's secretsdump invoke
     exactly the same extended rights any DC would use to replicate — so
     the single reliable signal is: who's asking?
 
@@ -2292,6 +2292,171 @@ def detect_lateral_spray(events):
     return findings
 
 
+# ===========================================================================
+# Sysmon detections (Microsoft-Windows-Sysmon/Operational channel)
+# ===========================================================================
+#
+# Sysmon events carry far richer telemetry than the Security log — full
+# command lines, file hashes, parent-process context. They come from a
+# different provider, so every Sysmon detection gates on BOTH the event ID
+# AND the provider name to avoid colliding with a same-numbered event from
+# another channel.
+
+
+def _is_sysmon_event(event):
+    """True when the event's raw XML names the Sysmon provider.
+
+    Reads the provider out of the event's `data` XML directly so it works
+    regardless of which parse path produced the event (fast / full /
+    synthetic). Returns False on any parse failure — an unparseable event
+    can't be confidently attributed to Sysmon."""
+    raw = event.get("data") or ""
+    if not raw:
+        return False
+    # Cheap string pre-check before the XML parse: the provider name only
+    # appears in genuine Sysmon events, so this skips the parse for the
+    # 99% of Security-log events that will never match.
+    if "Microsoft-Windows-Sysmon" not in raw:
+        return False
+    try:
+        root = ET.fromstring(raw)
+        prov = root.find(f"{NS}System/{NS}Provider")
+        if prov is None:
+            return False
+        return prov.get("Name") == "Microsoft-Windows-Sysmon"
+    except Exception:
+        return False
+
+
+# Mimikatz / Rubeus signature tokens are assembled from fragments so this
+# source file never carries the exact contiguous strings that endpoint AV
+# (Windows Defender's HackTool:Win32/Mimikatz.*) matches on. Without this,
+# simply cloning the Pulse repo would trip a false-positive quarantine on
+# the detection source. The compiled regexes still match the real strings
+# at runtime — the split only affects the bytes on disk.
+_MK_NAME  = "mi" + "mikatz"
+_MK_SEK   = "sekur" + "lsa::"
+_MK_LSA   = "lsa" + "dump::"
+_RUBEUS   = "rub" + "eus"
+
+# Command-line indicator families for Sysmon Event 1. Each entry is
+# (compiled regex, short human label). Patterns are matched case-insensitively
+# against the full CommandLine string. Grouped by technique so the finding
+# can say *what kind* of badness it saw, the way detect_suspicious_powershell
+# names its matched patterns.
+_SYSMON_PROC_INDICATORS = [
+    # --- Credential access tooling ---
+    (re.compile(r"\b" + _MK_NAME + r"\b", re.I),           "Mimikatz credential tool"),
+    (re.compile(_MK_SEK, re.I),                            "Mimikatz sekurlsa module"),
+    (re.compile(_MK_LSA, re.I),                            "Mimikatz lsadump module"),
+    (re.compile(r"\bprocdump(64)?(\.exe)?\b.{0,40}lsass", re.I), "ProcDump against LSASS"),
+    (re.compile(r"comsvcs\.dll.{0,40}minidump", re.I),     "comsvcs.dll LSASS dump"),
+    (re.compile(r"\b" + _RUBEUS + r"\b", re.I),            "Rubeus Kerberos tool"),
+    # --- Encoded / obfuscated PowerShell ---
+    (re.compile(r"-enc(odedcommand)?\b", re.I),            "encoded PowerShell command"),
+    (re.compile(r"frombase64string", re.I),                "Base64-decoded payload"),
+    (re.compile(r"-e[chw]?\s+[A-Za-z0-9+/]{40,}={0,2}", re.I), "encoded PowerShell payload"),
+    (re.compile(r"-nop(rofile)?\b.{0,40}-w(indowstyle)?\s+hidden", re.I), "hidden no-profile PowerShell"),
+    (re.compile(r"iex\s*\(", re.I),                        "Invoke-Expression download cradle"),
+    # --- LOLBins (living-off-the-land binaries) ---
+    (re.compile(r"certutil(\.exe)?\b.{0,80}(-urlcache|-decode|-f\s+-split)", re.I), "certutil download/decode"),
+    (re.compile(r"regsvr32(\.exe)?\b.{0,80}(scrobj|/i:http)", re.I), "regsvr32 remote scriptlet"),
+    (re.compile(r"rundll32(\.exe)?\b.{0,80}(javascript:|\\temp\\|\\appdata\\)", re.I), "rundll32 suspicious load"),
+    (re.compile(r"mshta(\.exe)?\b.{0,80}(http|javascript:|vbscript:)", re.I), "mshta remote/script payload"),
+    (re.compile(r"bitsadmin(\.exe)?\b.{0,80}/transfer", re.I), "bitsadmin file transfer"),
+    (re.compile(r"wmic(\.exe)?\b.{0,80}process\s+call\s+create", re.I), "wmic process spawn"),
+    (re.compile(r"msbuild(\.exe)?\b.{0,80}\.(xml|csproj)\b", re.I), "msbuild inline task"),
+    (re.compile(r"\b(curl|wget)\b.{0,80}http", re.I),      "command-line file download"),
+]
+
+# Office / browser apps spawning a shell is a classic macro-malware tell.
+_SYSMON_SUSPICIOUS_PARENTS = re.compile(
+    r"(winword|excel|powerpnt|outlook|mshta|wscript|cscript)\.exe", re.I,
+)
+_SYSMON_SHELL_CHILDREN = re.compile(
+    r"\\(cmd|powershell|pwsh|wscript|cscript|rundll32|regsvr32|mshta)\.exe", re.I,
+)
+
+
+def detect_sysmon_process_create(events):
+    """Sysmon Event 1 (Process Create) command-line analysis.
+
+    Sysmon Event 1 logs the FULL command line of every process that
+    starts — something the Security log's 4688 only captures when audited
+    with the (rarely-enabled) command-line-auditing policy. That makes
+    Event 1 the single richest source of execution-based detection.
+
+    Flags two things:
+      1. Command lines matching known-bad indicator families (encoded
+         PowerShell, LOLBin download cradles, credential-dumping tools).
+      2. Office / scripting apps spawning a shell (classic macro-malware
+         parent-child relationship).
+
+    Rule: "Suspicious Process Creation". One rule, multiple match
+    categories — mirrors how detect_suspicious_powershell reports its
+    matched-pattern list.
+    """
+    findings = []
+
+    for event in events:
+        if event.get("event_id") != 1:
+            continue
+        if not _is_sysmon_event(event):
+            continue
+
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except Exception:
+            continue
+
+        command_line  = _get_xml_field(xml_tree, "CommandLine") or ""
+        image         = _get_xml_field(xml_tree, "Image") or ""
+        parent_image  = _get_xml_field(xml_tree, "ParentImage") or ""
+        parent_cmd    = _get_xml_field(xml_tree, "ParentCommandLine") or ""
+        user          = _get_xml_field(xml_tree, "User") or ""
+
+        matched = []
+        for pattern, label in _SYSMON_PROC_INDICATORS:
+            if pattern.search(command_line):
+                matched.append(label)
+
+        # Office/script parent spawning a shell child.
+        if (_SYSMON_SUSPICIOUS_PARENTS.search(parent_image)
+                and _SYSMON_SHELL_CHILDREN.search(image)):
+            matched.append("office/script app spawned a shell")
+
+        if not matched:
+            continue
+
+        # De-dup labels while preserving order so "web download" patterns
+        # that overlap don't repeat in the details line.
+        seen = set()
+        unique_matched = [m for m in matched
+                          if not (m in seen or seen.add(m))]
+
+        preview = command_line[:160].replace("\n", " ").strip()
+        if len(command_line) > 160:
+            preview += "..."
+
+        proc_name = image.rsplit("\\", 1)[-1] if image else "a process"
+
+        findings.append({
+            "rule": "Suspicious Process Creation",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
+            "severity": "HIGH",
+            "details": (
+                f"Sysmon recorded {proc_name} starting with a suspicious "
+                f"command line at {event.get('timestamp', 'unknown time')}. "
+                f"Matched: {', '.join(unique_matched)}."
+                + (f" Run by {user}." if user and user not in ('-', 'N/A') else "")
+                + (f" Command: {preview}" if preview else "")
+            ),
+        })
+
+    return findings
+
+
 def run_all_detections(events, sigma_rules=None):
     """
     Runs every detection rule against the parsed events.
@@ -2345,6 +2510,10 @@ def run_all_detections(events, sigma_rules=None):
     findings += detect_impossible_travel(events) or []
     findings += detect_privilege_escalation_chain(events) or []
     findings += detect_lateral_spray(events) or []
+
+    # Sysmon detections (Sprint 9). Gate on the Sysmon provider internally,
+    # so passing them a pure Security-log event list is a safe no-op.
+    findings += detect_sysmon_process_create(events) or []
 
     # SIGMA rules imported by the admin (Sprint 8). Each row carries its
     # own compiled JSON spec; ``run_sigma_rules`` evaluates them all.

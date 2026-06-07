@@ -607,6 +607,45 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         ],
     },
 
+    "Suspicious Process Creation": {
+        "plain_language": (
+            "A program started with a command line that matches a known "
+            "attacker technique — like a built-in Windows tool being used "
+            "to download a file, or an Office app launching a command "
+            "prompt."
+        ),
+        "why_it_matters": (
+            "Attackers prefer to 'live off the land' — abusing tools that "
+            "ship with Windows (certutil, rundll32, mshta) so antivirus "
+            "doesn't flag a new file. The command line is the giveaway. "
+            "This detection needs Sysmon, which records the full command "
+            "line that the standard Windows log usually leaves out."
+        ),
+        "immediate_actions": [
+            "Read the full command line to see what the process was doing.",
+            "Check what the process's parent was — an Office app or browser "
+            "spawning a shell is a strong malware signal.",
+            "Look at what files or network connections followed it.",
+            "If it pulled down or ran a payload, isolate the host.",
+        ],
+        "prevention": (
+            "Deploy Sysmon with a tuned config (the SwiftOnSecurity baseline "
+            "is a good start) on every host. Block or restrict the common "
+            "living-off-the-land binaries where your environment doesn't "
+            "need them, and enable attack-surface-reduction rules."
+        ),
+        "learn_more": [
+            _mitre("T1059", "Command and Scripting Interpreter"),
+            _mitre("T1218", "System Binary Proxy Execution (LOLBins)"),
+        ],
+        "difficulty": "medium",
+        "common_false_positives": [
+            "Software-deployment tools and installers that legitimately use "
+            "certutil, msbuild, or encoded PowerShell.",
+            "Admin automation that spawns shells from scripting hosts.",
+        ],
+    },
+
     # -------------------------------------------------------------
     # Credential access
     # -------------------------------------------------------------

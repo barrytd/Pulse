@@ -61,6 +61,10 @@ RULE_META = {
     "Impossible Travel":            {"event_id": 4624, "severity": "HIGH",     "mitre": "T1078",     "nist_csf": "DE.AE-2",  "iso_27001": "A.9.4.2"},
     "Privilege Escalation Chain":   {"event_id": None, "severity": "CRITICAL", "mitre": "T1098",     "nist_csf": "DE.AE-3",  "iso_27001": "A.9.2.5"},
     "Lateral Spray":                {"event_id": 4624, "severity": "CRITICAL", "mitre": "T1021",     "nist_csf": "DE.AE-3",  "iso_27001": "A.13.1.3"},
+    # Sprint 9 — Sysmon detections. Sysmon Event 1 (process create) carries
+    # the full command line, so this rule sees execution-based attacks the
+    # Security log's 4688 misses unless command-line auditing is enabled.
+    "Suspicious Process Creation":  {"event_id": 1,    "severity": "HIGH",     "mitre": "T1059",     "nist_csf": "DE.CM-7",  "iso_27001": "A.12.4.1"},
 }
 
 

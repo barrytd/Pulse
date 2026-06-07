@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-03 — Sysmon support (Phase 1: process-create analysis)
+
+First slice of Sysmon (System Monitor) support. Sysmon writes to its own channel with far richer telemetry than the Security log — full command lines, file hashes, parent-process context. Phase 1 wires the parser to read Sysmon events and adds the highest-value detection: command-line analysis of process-create events.
+
+- **Parser** ([`pulse/core/parser.py`](pulse/core/parser.py)): new `SYSMON_EVENT_IDS` (1, 3, 10, 22) merged into the fast-path fetch filter so a Sysmon `.evtx` or live channel surfaces alongside Security-log events. Detections gate on the provider name, so a Security-log-only scan is a safe no-op.
+- **New rule — "Suspicious Process Creation"** ([`detect_sysmon_process_create`](pulse/core/detections.py), Sysmon Event 1, HIGH, T1059): analyzes the full command line that Sysmon records but the Security log's 4688 usually omits. Flags encoded/obfuscated PowerShell, living-off-the-land binaries (certutil download, regsvr32 remote scriptlet, rundll32/mshta/bitsadmin/wmic abuse), credential-dumping tools, and Office/scripting apps spawning a shell. Provider-gated so it never confuses a same-numbered event from another channel.
+- **Knowledge base + RULE_META**: full Security Advisor guide entry (plain language, why it matters, immediate actions, prevention, difficulty) and compliance mappings (DE.CM-7 / A.12.4.1).
+- **Sample**: new `samples/sysmon-execution-chain.evtx` — a phishing-doc → encoded-PowerShell → certutil-download → LSASS-dump chain, all as Sysmon Event 1.
+- **Tests**: 31 new in `test_sysmon_detections.py` covering provider gating, every command-line indicator family, parent-child relationships, benign cases, and end-to-end sample firing.
+- **AV-signature hygiene**: defanged the literal Mimikatz module command strings (`sekurlsa::` / `lsadump::`) out of every `.evtx` sample and the detection source so cloning the repo no longer trips endpoint AV's `HackTool:Win32/Mimikatz` content signature on harmless synthetic test data. Detection regexes are assembled from fragments — they still match the real strings at runtime; only the bytes on disk are split. The `samples/sigma/` rule files keep the strings by necessity (a rule that detects Mimikatz must contain its signature, like an AV database).
+
+1090 tests passing.
+
+---
+
 ## v1.8.0 — Security Advisor, Report Catalog, Role Hierarchy (2026-06-02)
 
 The release that puts plain language and reporting front and center. Pulse's audience is small teams without a SOC — v1.8 is built around that premise: every detection now explains itself, every report is one click away, and the role model finally matches how real teams work.

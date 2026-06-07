@@ -20,7 +20,7 @@ Flat status board organized by category, sorted by priority within each section.
 
 | Priority | Item | Notes |
 |---|---|---|
-| 🟠 High | **Sysmon log support** | Parse Sysmon channel events: Event 1 (process create with cmdline — Mimikatz / encoded PowerShell / LOLBin detection), Event 3 (network connections for C2 beaconing), Event 10 (process access for LSASS credential dumping), Event 22 (DNS queries for tunneling). |
+| 🟠 High | **Sysmon log support — Phase 2** | Phase 1 shipped (2026-06-03): parser plumbing + Event 1 process-create command-line analysis ("Suspicious Process Creation" rule). Remaining: Event 3 (network connections for C2 beaconing), Event 10 (process access for LSASS credential dumping), Event 22 (DNS queries for tunneling). Parser already fetches all four IDs; Phase 2 adds the three remaining detections. |
 | 🟡 Medium | **Rule performance dashboard** | Performance tab on Rules page: per-rule total hits, 24h sparkline, TP vs FP ratio, average scan time, health indicator (green/amber/red). |
 
 ---
@@ -74,8 +74,6 @@ Flat status board organized by category, sorted by priority within each section.
 | **Sidebar filter configs (other pages)** | Per-page sidebar-filter framework already exists (`pulse/static/js/sidebar-filters.js`). Findings page is wired; wire each of Dashboard / Monitor / Fleet / Audit Log / Firewall with the right dimensions for that surface. |
 | **Findings sidebar — Rule filter** | Top-N (10–15 rules) + "Show all" affordance — current list overflows the sidebar on noisy installs. |
 | **Public landing page polish** | Live-demo link with read-only viewer + pre-loaded sample data, GitHub stars badge, test-count badge, social-proof section. |
-| **Reports page UI polish** | Template cards squish into a narrow column on the live dashboard — description text wraps after every 1-2 words instead of using available width. KPI tile spacing also reads cramped against the filter chip row. Targets [`pulse/static/css/dashboard.css`](pulse/static/css/dashboard.css) `.report-template-card` (widen body column, give the description more horizontal space) and the `.reports-kpi-strip` margin-bottom. Also review category-label vertical rhythm: "Threat Detection" sits too close to the card grid below it. Quick visual pass; no API changes. |
-| **Report generation modal redesign** | The shared Generate Report modal (`#generate-report-modal` in [`pulse/web/index.html`](pulse/web/index.html), styled via [`pulse/static/css/modals.css`](pulse/static/css/modals.css)) is cramped: option boxes are too narrow so text wraps into tall awkward columns. Fixes needed: (1) widen modal to ~560–600px, (2) Data scope selector as two equal-width side-by-side selectable cards (title + muted description, accent border + tint on selection) — only show scan picker OR time-window dropdown below, not both at once, (3) format selector as a 2×2 grid of equal-height selectable cards (PDF "Printable, full report" / HTML "Browser-rendered, shareable" / JSON "Machine-readable for SIEM" / CSV "Spreadsheet for analysts") with consistent gaps and accent border on selected state, (4) clear section labels + consistent vertical spacing between all three sections, (5) Cancel/Generate buttons right-aligned in the footer with a top separator. Modal should be vertically centered with `max-height` + internal scroll so it doesn't overflow on smaller screens. All nine report templates share this modal, so the fix improves every Generate dialog at once. |
 
 ---
 
