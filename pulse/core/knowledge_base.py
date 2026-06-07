@@ -646,6 +646,117 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         ],
     },
 
+    "LSASS Memory Access": {
+        "plain_language": (
+            "A program tried to read the memory of LSASS — the Windows "
+            "process that holds everyone's passwords, password hashes, and "
+            "login tickets — and it wasn't one of the few programs that's "
+            "supposed to."
+        ),
+        "why_it_matters": (
+            "This is one of the most reliable signs of an active attack. "
+            "Reading LSASS memory is how attackers harvest credentials to "
+            "move from one machine to the rest of your network. If this "
+            "fired, assume the passwords and hashes on this host are "
+            "already in the attacker's hands."
+        ),
+        "immediate_actions": [
+            "Isolate the host from the network immediately.",
+            "Identify the program that accessed LSASS and where it came from.",
+            "Force-reset passwords for every account that logged into this "
+            "host recently — especially admins.",
+            "Rotate the computer account and any cached service-account "
+            "credentials.",
+        ],
+        "prevention": (
+            "Turn on LSASS protection (RunAsPPL / Credential Guard). Keep "
+            "Sysmon deployed so you see these handle requests. Limit which "
+            "accounts have admin rights, since reading LSASS requires them."
+        ),
+        "learn_more": [
+            _mitre("T1003.001", "OS Credential Dumping: LSASS Memory"),
+        ],
+        "difficulty": "low",
+        "common_false_positives": [
+            "Some endpoint-protection and backup agents read LSASS; if you "
+            "recognize the source program, add it to your allow-list.",
+        ],
+    },
+
+    # -------------------------------------------------------------
+    # Command and control
+    # -------------------------------------------------------------
+    "Suspicious Network Connection": {
+        "plain_language": (
+            "A program that normally has no reason to talk to the internet "
+            "made an outbound connection — or a connection went to a port "
+            "commonly used by hacking tools."
+        ),
+        "why_it_matters": (
+            "After breaking in, attackers need a way to control the machine "
+            "remotely and pull down more tools. When a utility like "
+            "PowerShell or rundll32 reaches out to the internet, it's often "
+            "phoning home to the attacker's server."
+        ),
+        "immediate_actions": [
+            "Look up the destination address — check its reputation.",
+            "Identify the program that opened the connection and what "
+            "started it.",
+            "Block the destination at the firewall and isolate the host if "
+            "the connection looks like command-and-control.",
+        ],
+        "prevention": (
+            "Restrict outbound traffic so only approved programs reach the "
+            "internet. Block the common command-and-control ports at the "
+            "perimeter. Keep an eye on tools that shouldn't make network "
+            "connections."
+        ),
+        "learn_more": [
+            _mitre("T1071", "Application Layer Protocol"),
+        ],
+        "difficulty": "medium",
+        "common_false_positives": [
+            "Admin scripts that legitimately download updates or call an "
+            "internal API over PowerShell.",
+        ],
+    },
+
+    "Suspicious DNS Query": {
+        "plain_language": (
+            "A program looked up a domain name that's abnormally long or "
+            "random-looking, which is how attackers sneak data out of a "
+            "network or hide their command channel inside ordinary-looking "
+            "DNS traffic."
+        ),
+        "why_it_matters": (
+            "DNS is allowed out of almost every network, so attackers abuse "
+            "it to tunnel stolen data or talk to their servers without "
+            "tripping firewalls. Very long or gibberish domain names are a "
+            "classic tunneling signature."
+        ),
+        "immediate_actions": [
+            "Identify the program making the queries and the parent domain.",
+            "Check whether large amounts of DNS traffic are going to one "
+            "domain — a sign of tunneling.",
+            "Block the domain and isolate the host if it looks like active "
+            "exfiltration.",
+        ],
+        "prevention": (
+            "Route DNS through a filtering resolver that blocks known-bad "
+            "and newly-registered domains. Alert on abnormally long query "
+            "names. Restrict which hosts can query external DNS directly."
+        ),
+        "learn_more": [
+            _mitre("T1071.004", "Application Layer Protocol: DNS"),
+            _mitre("T1572", "Protocol Tunneling"),
+        ],
+        "difficulty": "medium",
+        "common_false_positives": [
+            "Some content-delivery networks and security products use long, "
+            "auto-generated subdomains that can look like tunneling.",
+        ],
+    },
+
     # -------------------------------------------------------------
     # Credential access
     # -------------------------------------------------------------

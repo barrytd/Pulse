@@ -55,6 +55,7 @@
 #    because it gives them a full GUI session on the target machine.
 
 
+import ipaddress
 import platform
 import re
 import xml.etree.ElementTree as ET          # Built-in XML parser
@@ -2457,6 +2458,289 @@ def detect_sysmon_process_create(events):
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Sysmon Event 10 — Process Access (LSASS credential dumping)
+# ---------------------------------------------------------------------------
+
+# Processes that legitimately open a handle to lsass.exe as part of normal
+# Windows operation. A handle from anything OUTSIDE this set with credential-
+# read access is the strongest single signal of credential theft there is —
+# and unlike the Security-log path, Sysmon shows the exact access mask and
+# the source process, so the false-positive rate is very low.
+_LSASS_LEGIT_ACCESSORS = {
+    "wininit.exe", "services.exe", "svchost.exe", "lsass.exe",
+    "csrss.exe", "wmiprvse.exe", "msmpeng.exe",       # Defender
+    "mssense.exe", "sensendr.exe",                    # Defender for Endpoint
+    "taskmgr.exe", "procexp.exe", "procexp64.exe",    # interactive tools
+    "system",
+}
+
+# GrantedAccess masks that include the rights needed to read process memory
+# for credential extraction. 0x10 = PROCESS_VM_READ, 0x0400 =
+# PROCESS_QUERY_INFORMATION. These specific combined masks are the ones the
+# common dumping tools request, and they're what defensive Sysmon configs
+# (SwiftOnSecurity, Olaf Hartong) key on.
+_LSASS_DUMP_MASKS = {
+    "0x1010", "0x1410", "0x1438", "0x143a", "0x1f1fff", "0x1fffff",
+    "0x1f3fff", "0x0010", "0x0810",
+}
+
+
+def detect_sysmon_lsass_access(events):
+    """Sysmon Event 10 (Process Access) against lsass.exe — the highest-
+    fidelity credential-dumping signal Pulse has.
+
+    Credential dumping reads the LSASS process's memory to extract
+    passwords, hashes, and Kerberos tickets. The Security log's 4656 path
+    sees a handle request but not much else; Sysmon Event 10 shows the
+    exact access mask AND the source process, so we can flag a memory-read
+    handle from any process outside the small set that legitimately touches
+    LSASS — with almost no false positives.
+
+    CRITICAL: an unexpected memory-read handle to LSASS means an attacker
+    is most likely already harvesting credentials right now.
+    """
+    findings = []
+
+    for event in events:
+        if event.get("event_id") != 10:
+            continue
+        if not _is_sysmon_event(event):
+            continue
+
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except Exception:
+            continue
+
+        target_image = (_get_xml_field(xml_tree, "TargetImage") or "").strip()
+        if not target_image.lower().endswith("lsass.exe"):
+            continue
+
+        source_image  = (_get_xml_field(xml_tree, "SourceImage") or "").strip()
+        granted        = (_get_xml_field(xml_tree, "GrantedAccess") or "").strip().lower()
+        source_base    = source_image.rsplit("\\", 1)[-1].lower()
+
+        # Legit accessor → not a finding.
+        if source_base in _LSASS_LEGIT_ACCESSORS:
+            continue
+
+        # Require a credential-read access mask. An unknown/odd mask from a
+        # non-legit process is still worth flagging, but a mask WITHOUT any
+        # read/query right (e.g. pure 0x1000 = QUERY_LIMITED) is benign and
+        # noisy, so we gate on the known dump masks.
+        if granted and granted not in _LSASS_DUMP_MASKS:
+            # Allow any mask that includes VM_READ (0x10) bit even if not in
+            # the explicit set — covers tool variants. Parse defensively.
+            try:
+                if not (int(granted, 16) & 0x10):
+                    continue
+            except (ValueError, TypeError):
+                continue
+
+        src_name = source_base or "an unknown process"
+        findings.append({
+            "rule": "LSASS Memory Access",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
+            "severity": "CRITICAL",
+            "details": (
+                f"{src_name} opened a memory-read handle to LSASS "
+                f"(access {granted or 'unknown'}) at "
+                f"{event.get('timestamp', 'unknown time')}. Reading LSASS "
+                f"memory is how attackers steal passwords, hashes, and "
+                f"Kerberos tickets — this process is not one that normally "
+                f"touches LSASS."
+            ),
+        })
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Sysmon Event 3 — Network Connection (C2 / suspicious egress)
+# ---------------------------------------------------------------------------
+
+# Binaries that almost never make a legitimate outbound network connection.
+# When one of these reaches out to the internet it's very often a download
+# cradle, a C2 callback, or data exfiltration.
+_NET_SUSPICIOUS_IMAGES = {
+    "powershell.exe", "pwsh.exe", "cmd.exe", "rundll32.exe",
+    "regsvr32.exe", "mshta.exe", "certutil.exe", "wscript.exe",
+    "cscript.exe", "wmic.exe", "installutil.exe", "msbuild.exe",
+    "bitsadmin.exe", "hh.exe", "msdt.exe",
+}
+
+# Ports strongly associated with offensive tooling / C2 frameworks.
+# 4444/4445 = Metasploit default, 1337/31337 = leetspeak backdoors,
+# 6666/6667 = IRC (classic botnet C2), 5555 = ADB / various RATs.
+_C2_PORTS = {"1337", "31337", "4444", "4445", "5555", "6666", "6667"}
+
+
+def _is_public_ipv4(ip):
+    """True only for public, routable addresses. Mirrors intel._is_public_ip
+    but kept local so detections.py doesn't import the intel/network layer."""
+    if not ip or not isinstance(ip, str):
+        return False
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except (ValueError, TypeError):
+        return False
+    return not (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_multicast or addr.is_reserved or addr.is_unspecified)
+
+
+def detect_sysmon_network_connection(events):
+    """Sysmon Event 3 (Network Connection) — flags two C2/egress signals:
+
+      1. A living-off-the-land binary (powershell, rundll32, mshta,
+         certutil, …) making an outbound connection to a public IP. These
+         tools rarely talk to the internet legitimately.
+      2. A connection to a port strongly tied to offensive tooling
+         (4444 Metasploit, 6667 IRC botnet C2, etc.), regardless of which
+         process opened it.
+    """
+    findings = []
+
+    for event in events:
+        if event.get("event_id") != 3:
+            continue
+        if not _is_sysmon_event(event):
+            continue
+
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except Exception:
+            continue
+
+        image     = (_get_xml_field(xml_tree, "Image") or "").strip()
+        dest_ip   = (_get_xml_field(xml_tree, "DestinationIp") or "").strip()
+        dest_port = (_get_xml_field(xml_tree, "DestinationPort") or "").strip()
+        dest_host = (_get_xml_field(xml_tree, "DestinationHostname") or "").strip()
+        initiated = (_get_xml_field(xml_tree, "Initiated") or "").strip().lower()
+        image_base = image.rsplit("\\", 1)[-1].lower()
+
+        # Only outbound connections interest us — inbound is a different
+        # detection surface (and Sysmon marks server-side as Initiated=false).
+        is_outbound = initiated in ("true", "")  # absent → assume outbound
+
+        reasons = []
+        if dest_port in _C2_PORTS:
+            reasons.append(f"connection to known C2 port {dest_port}")
+        if (is_outbound and image_base in _NET_SUSPICIOUS_IMAGES
+                and _is_public_ipv4(dest_ip)):
+            reasons.append(
+                f"{image_base} made an outbound connection to a public address"
+            )
+
+        if not reasons:
+            continue
+
+        where = dest_host or dest_ip or "an external host"
+        findings.append({
+            "rule": "Suspicious Network Connection",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
+            "severity": "HIGH",
+            "details": (
+                f"{image_base or 'A process'} connected to {where}"
+                + (f":{dest_port}" if dest_port else "")
+                + f" at {event.get('timestamp', 'unknown time')}. "
+                + "; ".join(r.capitalize() for r in reasons) + ". "
+                + "This pattern is common to command-and-control callbacks "
+                + "and malware downloads."
+            ),
+        })
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Sysmon Event 22 — DNS Query (tunneling / beaconing)
+# ---------------------------------------------------------------------------
+
+# A single DNS label this long almost never occurs in legitimate traffic —
+# DNS tunneling encodes stolen data into the subdomain, producing very long,
+# high-entropy labels.
+_DNS_TUNNEL_LABEL_LEN = 50
+# Full query names beyond this with many labels also suggest tunneling.
+_DNS_TUNNEL_TOTAL_LEN = 100
+
+
+def detect_sysmon_dns_query(events):
+    """Sysmon Event 22 (DNS Query) — flags two tunneling/C2 signals:
+
+      1. DNS tunneling: an abnormally long subdomain label (data encoded
+         into the query name) or an overall very long multi-label query.
+      2. A living-off-the-land binary (rundll32, mshta, certutil,
+         powershell, …) resolving an external domain — these rarely make
+         their own DNS queries outside of malware activity.
+    """
+    findings = []
+
+    for event in events:
+        if event.get("event_id") != 22:
+            continue
+        if not _is_sysmon_event(event):
+            continue
+
+        try:
+            xml_tree = ET.fromstring(event["data"])
+        except Exception:
+            continue
+
+        query_name = (_get_xml_field(xml_tree, "QueryName") or "").strip()
+        image      = (_get_xml_field(xml_tree, "Image") or "").strip()
+        image_base = image.rsplit("\\", 1)[-1].lower()
+        if not query_name:
+            continue
+
+        labels = query_name.split(".")
+        longest_label = max((len(l) for l in labels), default=0)
+
+        reasons = []
+        is_tunnel = False  # tracked explicitly — drives severity below
+        if longest_label >= _DNS_TUNNEL_LABEL_LEN:
+            is_tunnel = True
+            reasons.append(
+                f"abnormally long DNS label ({longest_label} chars) — a "
+                f"hallmark of data being smuggled out over DNS"
+            )
+        elif len(query_name) >= _DNS_TUNNEL_TOTAL_LEN and len(labels) >= 4:
+            is_tunnel = True
+            reasons.append(
+                f"unusually long multi-part domain ({len(query_name)} chars) "
+                f"suggesting DNS tunneling"
+            )
+
+        if image_base in _NET_SUSPICIOUS_IMAGES:
+            reasons.append(
+                f"{image_base} issued the DNS query — this tool rarely "
+                f"resolves domains except during malware activity"
+            )
+
+        if not reasons:
+            continue
+
+        # For a long-label tunnel show only the start so a 200-char query
+        # doesn't blow out the details line.
+        shown = query_name if len(query_name) <= 80 else query_name[:80] + "..."
+        # Tunneling is HIGH; a lone suspicious-process DNS query is MEDIUM.
+        findings.append({
+            "rule": "Suspicious DNS Query",
+            "raw_xml": event["data"],
+            "event_id": event["event_id"],
+            "severity": "HIGH" if is_tunnel else "MEDIUM",
+            "details": (
+                f"DNS query for '{shown}' at "
+                f"{event.get('timestamp', 'unknown time')}. "
+                + "; ".join(r[0].upper() + r[1:] for r in reasons) + "."
+            ),
+        })
+
+    return findings
+
+
 def run_all_detections(events, sigma_rules=None):
     """
     Runs every detection rule against the parsed events.
@@ -2514,6 +2798,9 @@ def run_all_detections(events, sigma_rules=None):
     # Sysmon detections (Sprint 9). Gate on the Sysmon provider internally,
     # so passing them a pure Security-log event list is a safe no-op.
     findings += detect_sysmon_process_create(events) or []
+    findings += detect_sysmon_lsass_access(events) or []
+    findings += detect_sysmon_network_connection(events) or []
+    findings += detect_sysmon_dns_query(events) or []
 
     # SIGMA rules imported by the admin (Sprint 8). Each row carries its
     # own compiled JSON spec; ``run_sigma_rules`` evaluates them all.

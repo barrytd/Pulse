@@ -14,7 +14,7 @@
 
 ## What Pulse does
 
-Pulse parses Windows `.evtx` event logs, runs 30 detection rules mapped to MITRE ATT&CK, scores your security posture A through F, and gives you a web dashboard for triage. Every finding explains itself in plain language — what happened, why it matters, and what to do right now. Generate professional reports in one click (PDF, HTML, JSON, CSV) from a catalog of 9 templates covering threat detection, executive summaries, compliance mapping, and incident investigation.
+Pulse parses Windows `.evtx` event logs (Security log + Sysmon), runs 33 detection rules mapped to MITRE ATT&CK, scores your security posture A through F, and gives you a web dashboard for triage. Every finding explains itself in plain language — what happened, why it matters, and what to do right now. Generate professional reports in one click (PDF, HTML, JSON, CSV) from a catalog of 9 templates covering threat detection, executive summaries, compliance mapping, and incident investigation.
 
 ---
 
@@ -52,7 +52,7 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 
 | Area | Capability |
 |---|---|
-| **Detection** | 30 rules mapped to MITRE ATT&CK · 4 time-based correlation rules (Brute-Force Success, Impossible Travel, Privilege Escalation Chain, Lateral Spray) · NIST CSF + ISO 27001 control IDs · SIGMA rule import · custom whitelist |
+| **Detection** | 33 rules mapped to MITRE ATT&CK · 4 time-based correlation rules · 4 Sysmon-based rules (command-line analysis, LSASS access, C2 network, DNS tunneling) · NIST CSF + ISO 27001 control IDs · SIGMA rule import · custom whitelist |
 | **Security Advisor** | Every finding ships a plain-language Security Guide — what happened, why it matters, immediate actions, exploit difficulty, false-positive tips. Security Advisor sidebar page with posture summary, top concerns, attack-concept explainers, hardening checklist. |
 | **Reports** | 9 templates (Threat Detection Summary, Executive Summary, NIST CSF, ISO 27001, Incident Investigation, Fleet Health, Board-Ready Posture, MITRE Coverage, Compliance Gap) · 4 formats each (PDF/HTML/JSON/CSV) · DB-backed persistence with 90-day retention |
 | **Dashboard** | Single-page app · live monitor (SSE) · finding drawer with notes, workflow states, assignment · Ctrl+K palette · dark mode |
@@ -69,7 +69,7 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 
 ## Detection rules
 
-30 rules (26 event-based + 4 time-based correlation), sorted by severity. Full source: [`pulse/core/rules_config.py`](pulse/core/rules_config.py).
+33 rules — event-based, time-based correlation, and Sysmon-based — sorted by severity. Full source: [`pulse/core/rules_config.py`](pulse/core/rules_config.py).
 
 | Rule | Event ID(s) | Severity | MITRE |
 |---|---|---|---|
@@ -78,6 +78,7 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 | Credential Dumping | 4656 · 4663 | 🔴 CRITICAL | T1003.001 |
 | Golden Ticket | 4768 | 🔴 CRITICAL | T1558.001 |
 | Lateral Spray | (correlated) | 🔴 CRITICAL | T1021 |
+| LSASS Memory Access | Sysmon 10 | 🔴 CRITICAL | T1003.001 |
 | Malware Persistence Chain | (correlated) | 🔴 CRITICAL | T1543.003 |
 | Privilege Escalation Chain | (correlated) | 🔴 CRITICAL | T1548 |
 | Account Lockout | 4740 | 🟠 HIGH | T1110 |
@@ -91,7 +92,10 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 | Lateral Movement via Network Share | 5140 · 5145 | 🟠 HIGH | T1021.002 |
 | Pass-the-Hash Attempt | 4624 | 🟠 HIGH | T1550.002 |
 | Privilege Escalation | 4732 | 🟠 HIGH | T1548 |
+| Suspicious DNS Query | Sysmon 22 | 🟠 HIGH | T1071.004 |
+| Suspicious Network Connection | Sysmon 3 | 🟠 HIGH | T1071 |
 | Suspicious PowerShell | 4104 | 🟠 HIGH | T1059.001 |
+| Suspicious Process Creation | Sysmon 1 | 🟠 HIGH | T1059 |
 | Suspicious Registry Modification | 4657 | 🟠 HIGH | T1547.001 |
 | After-Hours Logon | 4624 | 🟡 MEDIUM | T1078 |
 | Firewall Any-Any Allow Rule | (config) | 🟡 MEDIUM | T1562.004 |

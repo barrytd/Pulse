@@ -65,6 +65,10 @@ RULE_META = {
     # the full command line, so this rule sees execution-based attacks the
     # Security log's 4688 misses unless command-line auditing is enabled.
     "Suspicious Process Creation":  {"event_id": 1,    "severity": "HIGH",     "mitre": "T1059",     "nist_csf": "DE.CM-7",  "iso_27001": "A.12.4.1"},
+    # Sprint 9 Phase 2 — the network/credential-access Sysmon events.
+    "LSASS Memory Access":          {"event_id": 10,   "severity": "CRITICAL", "mitre": "T1003.001", "nist_csf": "DE.CM-7",  "iso_27001": "A.9.4.4"},
+    "Suspicious Network Connection":{"event_id": 3,    "severity": "HIGH",     "mitre": "T1071",     "nist_csf": "DE.CM-1",  "iso_27001": "A.13.1.1"},
+    "Suspicious DNS Query":         {"event_id": 22,   "severity": "HIGH",     "mitre": "T1071.004", "nist_csf": "DE.CM-1",  "iso_27001": "A.13.1.1"},
 }
 
 

@@ -20,7 +20,6 @@ Flat status board organized by category, sorted by priority within each section.
 
 | Priority | Item | Notes |
 |---|---|---|
-| 🟠 High | **Sysmon log support — Phase 2** | Phase 1 shipped (2026-06-03): parser plumbing + Event 1 process-create command-line analysis ("Suspicious Process Creation" rule). Remaining: Event 3 (network connections for C2 beaconing), Event 10 (process access for LSASS credential dumping), Event 22 (DNS queries for tunneling). Parser already fetches all four IDs; Phase 2 adds the three remaining detections. |
 | 🟡 Medium | **Rule performance dashboard** | Performance tab on Rules page: per-rule total hits, 24h sparkline, TP vs FP ratio, average scan time, health indicator (green/amber/red). |
 
 ---
@@ -96,6 +95,13 @@ Flat status board organized by category, sorted by priority within each section.
 ---
 
 ## ✅ Shipped
+
+<details>
+<summary><strong>Post-v1.8.0 work (June 2026) — click to expand</strong></summary>
+
+- **Sysmon log support** — full coverage of the four high-value Sysmon event types. Parser fetches the Sysmon channel (Event IDs 1, 3, 10, 22), all detections provider-gated. Four new rules: **Suspicious Process Creation** (Event 1 — command-line analysis for encoded PowerShell, LOLBins, credential tooling, Office-spawns-shell), **LSASS Memory Access** (Event 10 — credential dumping via memory-read handle to lsass.exe, allow-list + access-mask gated, CRITICAL), **Suspicious Network Connection** (Event 3 — LOLBin outbound + C2 ports), **Suspicious DNS Query** (Event 22 — tunneling via long subdomain labels). Knowledge-base entries + compliance mappings for all four. New `sysmon-execution-chain.evtx` sample. 65 new tests. Also defanged the literal Mimikatz module strings out of every `.evtx` sample so cloning the repo no longer trips endpoint AV's `HackTool:Win32/Mimikatz` content signature on synthetic test data. (2026-06-03)
+
+</details>
 
 <details>
 <summary><strong>v1.8.0 — Security Advisor, Report Catalog, Role Hierarchy (June 2026) — click to expand</strong></summary>

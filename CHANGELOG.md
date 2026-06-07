@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-03 — Sysmon support (Phase 2: network + credential access)
+
+Completes Sysmon support. Phase 1 added process-create command-line analysis; Phase 2 adds the three remaining high-value Sysmon event types — and the parser already fetched all four IDs, so this is pure detection logic.
+
+- **New rule — "LSASS Memory Access"** (Sysmon Event 10, CRITICAL, T1003.001): the highest-fidelity credential-dumping signal Pulse has. Flags a memory-read handle to `lsass.exe` from any process outside a small allow-list of legitimate accessors (wininit, services, Defender, Task Manager, …), gated on credential-dump access masks (0x1410, 0x1010, …) or any mask carrying the `PROCESS_VM_READ` bit. Unlike the Security-log 4656 path, Sysmon shows the exact access mask and source process, so false positives are rare.
+- **New rule — "Suspicious Network Connection"** (Sysmon Event 3, HIGH, T1071): flags (a) living-off-the-land binaries (powershell, rundll32, mshta, certutil, …) making outbound connections to public IPs, and (b) connections to ports tied to offensive tooling (4444 Metasploit, 6667 IRC botnet C2, 1337/31337, …) regardless of process.
+- **New rule — "Suspicious DNS Query"** (Sysmon Event 22, HIGH/MEDIUM, T1071.004): flags DNS tunneling (abnormally long subdomain labels encoding exfiltrated data) and LOLBins issuing their own DNS queries. Tunneling is HIGH; a lone suspicious-process query is MEDIUM.
+- Knowledge-base entries (plain-language guide, immediate actions, prevention) for all three. RULE_META + compliance mappings. New techniques (T1059, T1071, T1071.004, T1572) added to the MITRE coverage report's tactic map (Execution / Command and Control).
+- The `sysmon-execution-chain.evtx` sample extended into a complete chain: process-create stages → LSASS memory access → C2 beacon on 4444 → DNS-tunnel exfiltration. Now fires all four Sysmon rules.
+- 34 new tests in `test_sysmon_phase2.py` covering each detection's positive + benign cases, the LSASS allow-list, public-IP gating, C2 ports, DNS tunneling thresholds, provider gating, and the full sample chain.
+
+Pulse now ships **33 detection rules** (4 of them Sysmon-based). 1130 tests passing.
+
+---
+
 ## 2026-06-03 — Sysmon support (Phase 1: process-create analysis)
 
 First slice of Sysmon (System Monitor) support. Sysmon writes to its own channel with far richer telemetry than the Security log — full command lines, file hashes, parent-process context. Phase 1 wires the parser to read Sysmon events and adds the highest-value detection: command-line analysis of process-create events.

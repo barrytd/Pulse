@@ -639,6 +639,53 @@ def scenario_sysmon_execution(base: datetime) -> List[Event]:
         },
     ))
 
+    # 5. Event 10 (Process Access) — rundll32 opens a memory-read handle to
+    #    LSASS. GrantedAccess 0x1410 = the classic credential-dump mask.
+    #    Fires "LSASS Memory Access" (CRITICAL).
+    out.append(Event(
+        event_id=10, when=base + timedelta(minutes=4, seconds=1), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "SourceImage":   r"C:\Windows\System32\rundll32.exe",
+            "TargetImage":   r"C:\Windows\System32\lsass.exe",
+            "GrantedAccess": "0x1410",
+            "SourceProcessId": "4812",
+            "TargetProcessId": "624",
+        },
+    ))
+
+    # 6. Event 3 (Network Connection) — the stager beacons out to the
+    #    attacker's server on the Metasploit default port 4444. Fires
+    #    "Suspicious Network Connection" (HIGH).
+    out.append(Event(
+        event_id=3, when=base + timedelta(minutes=5), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "Image":               r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "Initiated":           "true",
+            "SourceIp":            "10.0.7.44",
+            "DestinationIp":       "185.220.101.34",
+            "DestinationPort":     "4444",
+            "DestinationHostname": "",
+        },
+    ))
+
+    # 7. Event 22 (DNS Query) — DNS tunneling: data encoded into an
+    #    abnormally long subdomain label. Fires "Suspicious DNS Query"
+    #    (HIGH).
+    out.append(Event(
+        event_id=22, when=base + timedelta(minutes=6), computer=host,
+        channel=ch, provider=prov,
+        data={
+            "Image":     r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "QueryName": (
+                "a8f3e1c9b27d4f60a1e5c8b39f02d74e6a9c1b8f35e07d2a4c6b9"
+                "f18e3a05d7.exfil.attacker-c2.net"
+            ),
+            "QueryStatus": "0",
+        },
+    ))
+
     return out
 
 

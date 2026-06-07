@@ -68,6 +68,10 @@ TECHNIQUE_TO_TACTIC: Dict[str, str] = {
     "T1548":     "Privilege Escalation",
     "T1098":     "Persistence",
     "T1218.011": "Defense Evasion",
+    "T1059":     "Execution",
+    "T1071":     "Command and Control",
+    "T1071.004": "Command and Control",
+    "T1572":     "Command and Control",
 }
 
 # Canonical tactic ordering — same order the MITRE ATT&CK matrix uses
