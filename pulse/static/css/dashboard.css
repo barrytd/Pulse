@@ -4699,6 +4699,55 @@ tr.pending-flash {
    Subtle elevated card with a 3px accent left border so it reads as a
    suggestion rather than a regular Dashboard panel.
 ------------------------------------------------------------------- */
+/* ------------------------------------------------------------------
+ * Team Workload card — manager oversight (one row per analyst)
+ * ------------------------------------------------------------------ */
+.tw-card .tw-rows { display: flex; flex-direction: column; gap: 2px; }
+.tw-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.tw-row:hover { background: var(--hover-row); }
+.tw-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tw-avatar {
+  flex: 0 0 auto;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px;
+}
+.tw-who { flex: 1 1 auto; min-width: 0; }
+.tw-name {
+  font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+}
+.tw-sub { margin-top: 6px; }
+.tw-sevbar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--hover-row);
+  max-width: 220px;
+}
+.tw-sevbar-empty { opacity: 0.4; }
+.tw-seg { height: 100%; }
+.tw-seg-crit { background: #f85149; }
+.tw-seg-high { background: #f0883e; }
+.tw-seg-med  { background: #d29922; }
+.tw-seg-low  { background: var(--accent); }
+.tw-stat { flex: 0 0 auto; text-align: center; min-width: 48px; }
+.tw-stat-num { font-size: 16px; font-weight: 700; line-height: 1.1; }
+.tw-stat-num.tw-stale { color: #f85149; }
+.tw-stat-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); margin-top: 2px; }
+
 /* First-run hero — the empty-dashboard call to action for new accounts. */
 .first-run-hero {
   text-align: center;

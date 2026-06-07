@@ -34,6 +34,7 @@ import {
   clickStatCard,
   dismissOnboarding,
   navigateOnboarding,
+  viewAnalystQueue,
 } from './dashboard.js';
 import {
   viewScan,
@@ -314,6 +315,7 @@ const actions = {
   openUnreviewedCriticalHigh,
   dismissOnboarding,
   navigateOnboarding,
+  viewAnalystQueue,
 
   // findings + scan-detail
   closeAssignDialog,

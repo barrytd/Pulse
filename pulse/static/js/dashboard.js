@@ -1024,6 +1024,87 @@ export function _initScoreLineChart(dailyScores) {
 // ---------------------------------------------------------------
 // PAGE: Dashboard
 // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// Team Workload — manager oversight card
+// ---------------------------------------------------------------
+// One row per active analyst: open (unresolved assigned) count, a
+// severity mini-bar, avg time-to-resolve, and oldest-unresolved age.
+// Busiest analyst first. Clicking a row deep-links to that analyst's
+// findings (Findings page filtered by assignee).
+
+async function _fetchTeamWorkload() {
+  var r = await fetch('/api/team-workload');
+  if (!r.ok) return null;          // 403 for analysts -> card hidden
+  var data = await r.json();
+  return (data && data.analysts) || [];
+}
+
+// Compact "Nh" / "Nd" age label from a float hour count.
+function _fmtAge(hours) {
+  if (hours == null) return '—';
+  if (hours < 1) return '<1h';
+  if (hours < 48) return Math.round(hours) + 'h';
+  return Math.round(hours / 24) + 'd';
+}
+
+// A four-segment severity bar (crit/high/med/low) scaled to the row's open
+// count. Zero-width segments collapse cleanly.
+function _sevBarHtml(mix, total) {
+  if (!total) return '<div class="tw-sevbar tw-sevbar-empty"></div>';
+  var order = [['CRITICAL', 'crit'], ['HIGH', 'high'], ['MEDIUM', 'med'], ['LOW', 'low']];
+  var segs = order.map(function (o) {
+    var n = mix[o[0]] || 0;
+    if (!n) return '';
+    var pct = (n / total) * 100;
+    return '<span class="tw-seg tw-seg-' + o[1] + '" style="width:' + pct + '%;" ' +
+           'title="' + n + ' ' + o[0].toLowerCase() + '"></span>';
+  }).join('');
+  return '<div class="tw-sevbar">' + segs + '</div>';
+}
+
+function _teamWorkloadCardHtml(analysts) {
+  // Hide entirely when there's nothing to oversee (solo account, or an
+  // analyst who got a 403). Only show people who have open work OR exist
+  // as analysts — we render everyone returned so a manager can see who's
+  // idle too, but suppress the whole card if the list is empty.
+  if (!analysts || !analysts.length) return '';
+
+  var rows = analysts.map(function (a) {
+    var initials = (a.display_name || '?').trim().charAt(0).toUpperCase() || '?';
+    var overdueCls = (a.oldest_hours != null && a.oldest_hours > 72) ? ' tw-stale' : '';
+    return '<div class="tw-row" data-action="viewAnalystQueue" data-arg="' + a.user_id + '" ' +
+        'role="button" tabindex="0" title="View ' + escapeHtml(a.display_name) + '’s findings">' +
+      '<div class="tw-avatar">' + escapeHtml(initials) + '</div>' +
+      '<div class="tw-who">' +
+        '<div class="tw-name">' + escapeHtml(a.display_name) + roleBadgeHtml(a.role) + '</div>' +
+        '<div class="tw-sub">' + _sevBarHtml(a.by_severity || {}, a.open_count) + '</div>' +
+      '</div>' +
+      '<div class="tw-stat"><div class="tw-stat-num">' + (a.open_count || 0) + '</div>' +
+        '<div class="tw-stat-lbl">open</div></div>' +
+      '<div class="tw-stat"><div class="tw-stat-num' + overdueCls + '">' +
+        _fmtAge(a.oldest_hours) + '</div><div class="tw-stat-lbl">oldest</div></div>' +
+      '<div class="tw-stat"><div class="tw-stat-num">' +
+        (a.avg_resolve_hours != null ? _fmtAge(a.avg_resolve_hours) : '—') +
+        '</div><div class="tw-stat-lbl">avg fix</div></div>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="card tw-card">' +
+    '<div class="section-label">Team Workload' +
+      '<span style="color:var(--text-muted); font-weight:400; margin-left:8px; font-size:11px;">' +
+      analysts.length + ' analyst' + (analysts.length === 1 ? '' : 's') + '</span></div>' +
+    '<div class="tw-rows">' + rows + '</div>' +
+  '</div>';
+}
+
+// Deep-link to an analyst's findings. Lazy-import navigation.js to avoid a
+// module cycle (navigation.js imports this module).
+export function viewAnalystQueue(userId) {
+  if (!userId) return;
+  window.history.replaceState(null, '', '/findings?assignee=' + encodeURIComponent(userId));
+  import('./navigation.js').then(function (m) { m.navigate('findings'); });
+}
+
 export async function renderDashboardPage() {
   var c = document.getElementById('content');
   parseDashFiltersFromURL();
@@ -1041,6 +1122,15 @@ export async function renderDashboardPage() {
     _onboardingState = await apiGetOnboarding();
   } catch (e) {
     _onboardingState = null;
+  }
+
+  // Team Workload — manager-only oversight. Best-effort: analysts get a
+  // 403 and solo accounts get an empty list, both of which hide the card.
+  var teamWorkload = null;
+  try {
+    teamWorkload = await _fetchTeamWorkload();
+  } catch (e) {
+    teamWorkload = null;
   }
 
   var scans       = filterScansByDashState(allScans);
@@ -1288,6 +1378,8 @@ export async function renderDashboardPage() {
   var onboardingHtml = hasAnyScan ? _onboardingCardHtml(_onboardingState) : '';
   var firstRunHtml   = hasAnyScan ? '' : _firstRunHeroHtml();
   if (!hasAnyScan) emptyBannerHtml = '';
+  // Team Workload card — only when there's data to show and scans exist.
+  var teamHtml = hasAnyScan ? _teamWorkloadCardHtml(teamWorkload) : '';
 
   c.innerHTML =
     firstRunHtml +
@@ -1298,6 +1390,7 @@ export async function renderDashboardPage() {
     attentionHtml +
     kpiHtml +
     standupHtml +
+    teamHtml +
     chartsHtml +
     topRulesCardHtml +
     findingsHtml;

@@ -60,7 +60,7 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 | **Fleet** | Per-host security score · risk tier · stale-host spotlight · severity mix · drill-into-host view · CSV export |
 | **Firewall** | `pfirewall.log` parser · port-scan detection · Pulse-managed IP block list via `netsh advfirewall` · one-click block from finding drawer |
 | **Compliance** | NIST CSF + ISO 27001 control coverage · coverage-gap report (uncovered techniques, silent rules, noisy rules) |
-| **Roles** | Three-role hierarchy: admin · manager · analyst. Manager assigns work; analyst works their queue. |
+| **Team & roles** | Three-role hierarchy: admin · manager · analyst. **My Queue** page (analyst's assigned, unresolved findings sorted by priority → severity → age, with in-queue / overdue / due-today / resolved-today tiles) · **assignment dialog** (pick analyst + P1–P4 priority + due date + note, from the finding drawer or the Findings bulk bar) · **Team Workload** card (per-analyst open count, severity mix, oldest-unresolved age, avg fix time, click-through to their findings). |
 | **API** | FastAPI surface with Swagger at `/docs` · Bearer-token auth · REST endpoints for scan upload, history, reports, agent transport |
 | **Agent** | Packaged `pulse-agent.exe` · two-token enrollment · 60s heartbeat + 30min scan cadence · auto-update probe · ACL self-audit |
 | **Multi-tenant** | Every row scoped to `organization_id` · self-signup mints fresh org · email verification · admin invites |

@@ -5,6 +5,18 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Team role hierarchy Phase 5: Team Workload card
+
+The manager's "who's working on what" view — the *organize the team* half of the hierarchy.
+
+- **Team Workload card** on the Dashboard (`/api/team-workload`): one row per active analyst with their **open (unresolved assigned) count**, a **severity mini-bar** (crit/high/med/low proportions of their queue), **oldest-unresolved age** (turns red past 72h), and **average time-to-resolve** (30-day). Busiest analyst first.
+- **Click an analyst → their findings** — deep-links to the Findings page filtered by assignee (`/findings?assignee=<id>`), so a manager can drill from "Ana has 9 open" straight into Ana's list.
+- **Auto role-gated**: the card fetches best-effort and hides itself when the caller isn't a manager/admin (403) or there are no analysts (solo account) — no explicit role check needed in the UI.
+
+*Remaining (Phase 6, next):* sidebar role-gating so analysts land on My Queue by default and don't see admin-only nav.
+
+---
+
 ## 2026-06-07 — Team role hierarchy Phase 4: assignment dialog
 
 The piece that actually gets prioritized work into an analyst's queue. A manager now hands findings over with a priority + due date + context note in one step, instead of the quick dropdown that only set an owner.
