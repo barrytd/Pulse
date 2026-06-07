@@ -65,11 +65,13 @@ import {
   bulkUnassign,
   bulkMarkReviewed,
   bulkGenerateIncidentReport,
+  bulkOpenAssignDialog,
   toggleFpFromRow,
   stopClickPropagation,
   viewScanFromLink,
   toggleFindingExpand,
   openFindingsPageDrawerByUid,
+  openDrawerAssignDialog,
   closeFindingDrawer,
   openScanDetailFindingByIdx,
   markFindingReviewed,
@@ -269,6 +271,10 @@ import {
   openNotifTarget,
   mountNotifBell,
 } from './notifications.js';
+import {
+  closeAssignDialog,
+  submitAssignDialog,
+} from './assign-dialog.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -310,6 +316,8 @@ const actions = {
   navigateOnboarding,
 
   // findings + scan-detail
+  closeAssignDialog,
+  submitAssignDialog,
   viewScan,
   setFindingsSort,
   setFindingsQueryFromInput,
@@ -339,11 +347,13 @@ const actions = {
   bulkUnassign,
   bulkMarkReviewed,
   bulkGenerateIncidentReport,
+  bulkOpenAssignDialog,
   toggleFpFromRow,
   stopClickPropagation,
   viewScanFromLink,
   toggleFindingExpand,
   openFindingsPageDrawerByUid,
+  openDrawerAssignDialog,
   closeFindingDrawer,
   openScanDetailFindingByIdx,
   markFindingReviewed,

@@ -39,6 +39,43 @@
   overflow-y: auto;
 }
 
+/* Assignment dialog fields */
+.assign-field { margin-top: 14px; }
+.assign-field > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+.assign-optional { font-weight: 400; color: var(--text-light); }
+.assign-row { display: flex; gap: 12px; }
+.assign-row .assign-field { flex: 1; margin-top: 14px; }
+.assign-select,
+.assign-textarea {
+  width: 100%;
+  background: var(--input-bg, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+.assign-select:focus,
+.assign-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.assign-textarea { resize: vertical; min-height: 38px; }
+.assign-status {
+  min-height: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.assign-status-err { color: #f85149; }
+
 .help-link {
   display: inline-block;
   margin-top: 12px;

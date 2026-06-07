@@ -282,6 +282,54 @@
   </div>
 
   <!-- ============================================================= -->
+  <!-- ASSIGN FINDING(S) MODAL                                         -->
+  <!-- Manager hands work to an analyst with a priority + due date in   -->
+  <!-- one step. Opened from the finding drawer and the bulk bar.       -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="assign-modal">
+    <div class="modal">
+      <h3>Assign finding<span id="assign-modal-plural"></span></h3>
+      <p id="assign-modal-sub">Hand this finding to an analyst and set its priority.</p>
+
+      <div class="assign-field">
+        <label for="assign-assignee">Assign to</label>
+        <select id="assign-assignee" class="assign-select"></select>
+      </div>
+
+      <div class="assign-row">
+        <div class="assign-field">
+          <label for="assign-priority">Priority</label>
+          <select id="assign-priority" class="assign-select">
+            <option value="__auto__">Auto (from severity)</option>
+            <option value="P1">P1 — work now</option>
+            <option value="P2">P2 — high</option>
+            <option value="P3">P3 — normal</option>
+            <option value="P4">P4 — whenever</option>
+            <option value="">None</option>
+          </select>
+        </div>
+        <div class="assign-field">
+          <label for="assign-due">Due date</label>
+          <input type="date" id="assign-due" class="assign-select" />
+        </div>
+      </div>
+
+      <div class="assign-field">
+        <label for="assign-note">Note <span class="assign-optional">(optional)</span></label>
+        <textarea id="assign-note" class="assign-textarea" rows="2"
+                  placeholder="Context for the analyst — what to check first, why it matters…"></textarea>
+      </div>
+
+      <div class="assign-status" id="assign-status"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-with-icon" data-action="closeAssignDialog"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-primary btn-with-icon" id="assign-submit-btn" data-action="submitAssignDialog"><i data-lucide="user-check"></i><span>Assign</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
   <!-- GENERATE REPORT MODAL                                           -->
   <!-- ============================================================= -->
   <div class="modal-overlay" id="generate-report-modal">

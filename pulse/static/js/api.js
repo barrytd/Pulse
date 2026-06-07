@@ -653,9 +653,18 @@ export async function apiDeleteFindingNote(findingId, noteId) {
 // Bulk assign / unassign / review-toggle across many findings. `op` is
 // one of 'assign' | 'unassign' | 'review' | 'unreview'. For op='assign'
 // pass assigneeUserId. Returns {updated, skipped}.
-export async function apiFindingsBatch(op, findingIds, assigneeUserId) {
+export async function apiFindingsBatch(op, findingIds, assigneeUserId, opts) {
   var body = { op: op, finding_ids: (findingIds || []).map(Number) };
   if (op === 'assign') body.assignee_user_id = Number(assigneeUserId);
+  // Optional triage priority + due date handed over with the assignment.
+  // Only sent when explicitly provided so the server leaves them untouched
+  // otherwise (a quick-assign from the dropdown shouldn't wipe a due date).
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'priority')) {
+    body.priority = opts.priority;   // 'P1'..'P4' or null
+  }
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'due_date')) {
+    body.due_date = opts.due_date;   // 'YYYY-MM-DD' or null
+  }
   var resp = await fetch('/api/findings/batch', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

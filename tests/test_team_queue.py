@@ -240,6 +240,58 @@ def test_priority_endpoint_sets_value(client):
     assert row == ("P1", "2026-06-08")
 
 
+def _seed_finding(dbp, sev="HIGH"):
+    import sqlite3
+    with sqlite3.connect(dbp) as conn:
+        conn.execute("INSERT INTO users (email,password_hash,created_at,role,active,display_name) "
+                     "VALUES ('an@x.com','h','2026-01-01','analyst',1,'Ana')")
+        uid = conn.execute("SELECT id FROM users WHERE email='an@x.com'").fetchone()[0]
+        conn.execute("INSERT INTO scans (scanned_at,files_scanned,score,score_label,filename) "
+                     "VALUES ('2026-06-07 10:00:00',1,40,'High','x.evtx')")
+        sid = conn.execute("SELECT MAX(id) FROM scans").fetchone()[0]
+        conn.execute("INSERT INTO findings (scan_id,severity,rule,timestamp) VALUES (?,?,?,?)",
+                     (sid, sev, "Brute Force Attempt", "2026-06-07T09:00:00Z"))
+        fid = conn.execute("SELECT MAX(id) FROM findings").fetchone()[0]
+        conn.commit()
+    return fid, uid
+
+
+def test_batch_assign_sets_priority_and_due(client):
+    c, dbp = client
+    fid, uid = _seed_finding(dbp)
+    r = c.put("/api/findings/batch", json={
+        "finding_ids": [fid], "op": "assign", "assignee_user_id": uid,
+        "priority": "P1", "due_date": "2026-06-08",
+    })
+    assert r.status_code == 200
+    import sqlite3
+    with sqlite3.connect(dbp) as conn:
+        row = conn.execute("SELECT assigned_to, priority, due_date FROM findings WHERE id=?",
+                           (fid,)).fetchone()
+    assert row == (uid, "P1", "2026-06-08")
+
+
+def test_batch_assign_records_assigned_by(client):
+    # auth-disabled mode -> assigned_by is NULL (no real caller); still assigns.
+    c, dbp = client
+    fid, uid = _seed_finding(dbp)
+    r = c.put("/api/findings/batch", json={
+        "finding_ids": [fid], "op": "assign", "assignee_user_id": uid,
+    })
+    assert r.status_code == 200
+    assert r.json()["updated"] == 1
+
+
+def test_batch_assign_rejects_bad_priority(client):
+    c, dbp = client
+    fid, uid = _seed_finding(dbp)
+    r = c.put("/api/findings/batch", json={
+        "finding_ids": [fid], "op": "assign", "assignee_user_id": uid,
+        "priority": "URGENT",
+    })
+    assert r.status_code == 400
+
+
 def test_priority_endpoint_rejects_bad_value(client):
     c, dbp = client
     import sqlite3

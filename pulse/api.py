@@ -3233,10 +3233,24 @@ def _register_routes(app: FastAPI) -> None:
                 assignee = int(raw)
             except (TypeError, ValueError):
                 raise HTTPException(400, detail="assignee_user_id must be an integer.")
+            # Optional triage priority + due date handed over with the
+            # assignment (the assignment dialog sets these in one call).
+            from pulse.database import _NOTE_UNCHANGED as _UNCH
+            prio = body.get("priority", "__unset__")
+            if prio == "__unset__":
+                prio_arg = _UNCH
+            elif prio is not None and prio not in FINDING_PRIORITIES:
+                raise HTTPException(
+                    400, detail="priority must be one of " + ", ".join(FINDING_PRIORITIES))
+            else:
+                prio_arg = prio
+            due = body.get("due_date", "__unset__")
+            due_arg = _UNCH if due == "__unset__" else due
             try:
                 result = batch_set_finding_assignee(
                     app.state.db_path, finding_ids, assignee, scope,
                     scope_organization_id=org_scope,
+                    assigned_by=user_id, priority=prio_arg, due_date=due_arg,
                 )
             except ValueError as exc:
                 raise HTTPException(400, detail=str(exc))

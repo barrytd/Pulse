@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Team role hierarchy Phase 4: assignment dialog
+
+The piece that actually gets prioritized work into an analyst's queue. A manager now hands findings over with a priority + due date + context note in one step, instead of the quick dropdown that only set an owner.
+
+- **Assignment dialog** (`assign-dialog.js` + modal): pick an analyst, set priority (defaults to **Auto**, which resolves from severity — Critical→P1 … Low→P4), set an optional due date, and add an optional note that lands in the finding's notes thread. Opens from **two places**: the finding drawer ("Assign + priority…") and the Findings **bulk bar** ("Assign + priority…") for many findings at once.
+- **One round-trip**: extended `PUT /api/findings/batch` (`op=assign`) + `batch_set_finding_assignee` to set assignee + `assigned_by` + priority + due date in a single scoped update. The optional note is posted per finding afterward (best-effort).
+- The drawer's Assigned-to section now **shows the current priority + due date** (with overdue/today color cues) when set.
+- 3 new tests (batch assign sets priority/due, records the assigner, rejects a bad priority). 1159 tests pass.
+
+---
+
 ## 2026-06-07 — Team role hierarchy Phase 3: priority schema + My Queue
 
 Continues the admin > manager > analyst hierarchy so a small team can divide the work — a super-admin owns the org, a manager assigns + prioritizes, and analysts work their queue day to day.

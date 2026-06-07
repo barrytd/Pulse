@@ -1508,10 +1508,21 @@ def _scope_filter_finding_ids(db_path, finding_ids, scope_user_id,
 
 
 def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id,
-                               scope_user_id, scope_organization_id=None):
+                               scope_user_id, scope_organization_id=None,
+                               assigned_by=None, priority=_NOTE_UNCHANGED,
+                               due_date=_NOTE_UNCHANGED):
     """Bulk assignment. Only findings whose parent scan is in the caller's
     scope are updated. Returns ``{updated, skipped}``. ``scope_organization_id``
-    supersedes ``scope_user_id`` for multi-tenant deployments."""
+    supersedes ``scope_user_id`` for multi-tenant deployments.
+
+    When assigning (``assignee_user_id`` is not None) the caller can also set
+    ``assigned_by`` (the manager making the assignment) and, optionally, a
+    triage ``priority`` (P1..P4) + ``due_date`` in the same scoped update, so
+    the assignment dialog hands work over with priority attached in one call.
+    A ``priority``/``due_date`` left at its sentinel is untouched."""
+    if priority is not _NOTE_UNCHANGED and priority is not None \
+            and priority not in FINDING_PRIORITIES:
+        raise ValueError("priority must be one of " + ", ".join(FINDING_PRIORITIES))
     eligible = _scope_filter_finding_ids(
         db_path, finding_ids, scope_user_id,
         scope_organization_id=scope_organization_id,
@@ -1523,7 +1534,8 @@ def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id,
     with _connect(db_path) as conn:
         if assignee_user_id is None:
             conn.execute(
-                "UPDATE findings SET assigned_to = NULL, assigned_at = NULL "
+                "UPDATE findings SET assigned_to = NULL, assigned_at = NULL, "
+                "assigned_by = NULL "
                 "WHERE id IN (" + placeholders + ")",
                 tuple(eligible),
             )
@@ -1534,10 +1546,19 @@ def batch_set_finding_assignee(db_path, finding_ids, assignee_user_id,
             ).fetchone()
             if not urow:
                 raise ValueError("Assignee user is not an active account.")
+            sets = ["assigned_to = ?", "assigned_at = ?", "assigned_by = ?"]
+            params = [int(assignee_user_id), ts,
+                      int(assigned_by) if assigned_by is not None else None]
+            if priority is not _NOTE_UNCHANGED:
+                sets.append("priority = ?")
+                params.append(priority)
+            if due_date is not _NOTE_UNCHANGED:
+                sets.append("due_date = ?")
+                params.append(due_date)
             conn.execute(
-                "UPDATE findings SET assigned_to = ?, assigned_at = ? "
-                "WHERE id IN (" + placeholders + ")",
-                (int(assignee_user_id), ts) + tuple(eligible),
+                "UPDATE findings SET " + ", ".join(sets) +
+                " WHERE id IN (" + placeholders + ")",
+                tuple(params) + tuple(eligible),
             )
     return {"updated": len(eligible), "skipped": len(finding_ids) - len(eligible)}
 

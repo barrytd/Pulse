@@ -39,6 +39,7 @@ import {
   roleBadgeHtml,
 } from './dashboard.js';
 import { navigate } from './navigation.js';
+import { openAssignDialog } from './assign-dialog.js';
 
 // ---------------------------------------------------------------
 // Scan-detail (`/scans/{id}`) — the sole survivor of the old standalone
@@ -1380,6 +1381,7 @@ function _renderBulkBarHtml(visibleCount, totalCount, filtered) {
         '</div>' +
       '</div>' +
       '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkAssignToMe"><i data-lucide="user-check"></i><span>Assign to me</span></button>' +
+      '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkOpenAssignDialog"><i data-lucide="list-checks"></i><span>Assign + priority…</span></button>' +
       '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkUnassign"><i data-lucide="user-x"></i><span>Unassign</span></button>' +
       '<span class="bulk-bar-divider" aria-hidden="true"></span>' +
       '<button class="btn btn-secondary btn-sm btn-with-icon" data-action="bulkMarkReviewed"><i data-lucide="check-circle-2"></i><span>Mark reviewed</span></button>' +
@@ -1534,6 +1536,41 @@ export async function bulkMarkReviewed() {
   showToast('Marked ' + result.updated + ' finding' +
             (result.updated === 1 ? '' : 's') + ' reviewed');
   await _reconcileAfterBulk(function () { return { reviewed: true }; });
+}
+
+// Open the full assignment dialog for the current bulk selection — pick an
+// analyst + priority + due date + note in one step (vs. the quick-assign
+// dropdown which only sets the assignee). Severity is mixed across a bulk
+// selection so we leave it null and let the dialog default priority to P3.
+export function bulkOpenAssignDialog() {
+  var ids = _selectedFindingIds();
+  if (!ids.length) return;
+  openAssignDialog({
+    findingIds: ids,
+    severity: null,
+    onDone: function (res) {
+      _reconcileAfterBulk(function () { return { assigned_to: res.assignee }; });
+    },
+  });
+}
+
+// Open the assignment dialog for the finding currently in the drawer.
+export function openDrawerAssignDialog() {
+  if (!_drawerFinding || _drawerFinding.id == null) return;
+  var f = _drawerFinding;
+  openAssignDialog({
+    findingIds: [f.id],
+    severity: f.severity,
+    currentAssignee: f.assigned_to,
+    onDone: function (res) {
+      // Reflect the new assignment/priority on the open drawer without a
+      // full refetch. The assignee display name is refreshed by _loadDrawerAssign.
+      f.assigned_to = res.assignee;
+      f.priority = res.priority;
+      f.due_date = res.due_date;
+      _loadDrawerAssign(f);
+    },
+  });
 }
 
 // After a successful bulk op, refresh cached finding rows so the visible
@@ -2773,6 +2810,26 @@ async function _loadDrawerAssign(f) {
   var meBtn = (me && me.id && current !== String(me.id))
     ? '<button type="button" class="btn-link-sm btn-with-icon" data-action="assignFindingToMe"><i data-lucide="user-check"></i><span>Assign to me</span></button>'
     : '';
+  // Full assignment dialog (analyst + priority + due date + note).
+  var assignBtn = '<button type="button" class="btn-link-sm btn-with-icon" ' +
+    'data-action="openDrawerAssignDialog"><i data-lucide="list-checks"></i>' +
+    '<span>Assign + priority…</span></button>';
+  // Current priority + due-date line, shown only when set.
+  var prioLine = '';
+  if (f.priority || f.due_date) {
+    var bits = [];
+    if (f.priority) {
+      bits.push('<span class="q-pri q-pri-' + escapeHtml(String(f.priority).toLowerCase()) +
+                '">' + escapeHtml(String(f.priority).toUpperCase()) + '</span>');
+    }
+    if (f.due_date) {
+      var dueDay = String(f.due_date).slice(0, 10);
+      var todayStr = new Date().toISOString().slice(0, 10);
+      var dueCls = dueDay < todayStr ? 'q-due-over' : (dueDay === todayStr ? 'q-due-today' : '');
+      bits.push('<span class="' + dueCls + '">Due ' + escapeHtml(dueDay) + '</span>');
+    }
+    prioLine = '<div class="assign-meta" style="margin-top:6px;">' + bits.join(' · ') + '</div>';
+  }
 
   // Options are display_name primary, email secondary (muted) so a team
   // with real names reads clean. A <select> can't render rich HTML inside
@@ -2828,7 +2885,9 @@ async function _loadDrawerAssign(f) {
         '</select>' +
       '</div>' +
       meBtn +
+      assignBtn +
     '</div>' +
+    prioLine +
     assignedAt;
 }
 
