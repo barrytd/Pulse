@@ -3495,7 +3495,10 @@ tr.pending-flash {
 
 .dash-funnel {
   display: flex;
-  align-items: center;
+  /* stretch (not center) so every stage box is the same height even if a
+     label wraps — otherwise "Crit + High" grows taller than its neighbors
+     and breaks the row alignment. */
+  align-items: stretch;
   gap: var(--space-3);
   margin-top: var(--space-3);
   flex-wrap: wrap;
@@ -3524,6 +3527,10 @@ tr.pending-flash {
   text-transform: uppercase;
   color: var(--text-dim);
   font-weight: 600;
+  /* keep "Crit + High" on a single line so every box stays the same
+     height; the letter-spacing is trimmed enough that it still fits the
+     90px min-width box. */
+  white-space: nowrap;
 }
 .funnel-stage.tone-info  .funnel-value { color: var(--severity-low); }
 .funnel-stage.tone-warn  .funnel-value { color: var(--severity-high); }
