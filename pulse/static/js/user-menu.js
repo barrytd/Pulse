@@ -154,14 +154,16 @@ export function toggleDarkModeFromMenu() {
 }
 
 // Keep the toggle row in sync with the live theme: aria-checked (for
-// assistive tech) and the leading icon — a moon when dark mode is active,
-// a sun when light mode is active. Run on every menu open and immediately
-// after the toggle is flipped so the icon swaps the moment the theme does.
+// assistive tech), the label ("Dark Mode" / "Light Mode"), and the leading
+// icon (moon / sun) all reflect the active theme so they never disagree.
+// Run on every menu open and immediately after the toggle is flipped.
 function _syncThemeToggle() {
   var row = document.getElementById('dark-mode-toggle-row');
   if (!row) return;
   var isDark = getTheme() === 'dark';
   row.setAttribute('aria-checked', isDark ? 'true' : 'false');
+  var label = document.getElementById('dark-mode-toggle-label');
+  if (label) label.textContent = isDark ? 'Dark Mode' : 'Light Mode';
   // Swap the leading icon. Lucide turns the <i data-lucide> into an <svg>
   // on first paint, so we replace the element with a fresh placeholder and
   // re-run createIcons. The new <i> inherits the dropdown-row icon size +
