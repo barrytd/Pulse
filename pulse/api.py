@@ -3186,11 +3186,15 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail=str(exc))
         if updated is None:
             raise HTTPException(404, detail=f"Finding {finding_id} not found.")
-        _audit_finding_action(
-            app, user_id, "set_workflow_state",
-            finding_id=finding_id,
-            detail={"to": state, "from": prev_state},
-        )
+        # 'new' is the implicit untouched state — clearing back to it is not a
+        # workflow *update*, so we don't write an audit entry. Only the three
+        # real states (acknowledged/investigating/resolved) are logged.
+        if state != "new":
+            _audit_finding_action(
+                app, user_id, "set_workflow_state",
+                finding_id=finding_id,
+                detail={"to": state, "from": prev_state},
+            )
         return updated
 
     # -------------------------------------------------------------------

@@ -1444,7 +1444,11 @@ def set_finding_workflow(db_path, finding_id, workflow_status):
         raise ValueError(
             "workflow_status must be one of: " + ", ".join(_WORKFLOW_STATES)
         )
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 'new' is the implicit untouched state — setting it back to 'new' is a
+    # *clear*, so we also null out workflow_updated_at. That makes the finding
+    # read as pristine again (no "Updated …" line, no highlighted pill). The
+    # three real states stamp the change time as usual.
+    ts = None if workflow_status == "new" else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _connect(db_path) as conn:
         conn.execute(
             """UPDATE findings

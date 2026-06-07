@@ -2049,7 +2049,7 @@ export function _drawerFrameworkRefs(f) {
   }).join('');
   return '<div class="finding-drawer-section">' +
     '<div class="sec-label">Framework references</div>' +
-    '<div class="mitre-chips">' + chips + '</div>' +
+    '<div class="mitre-chips fw-ref-chips">' + chips + '</div>' +
   '</div>';
 }
 
@@ -2105,6 +2105,13 @@ export function _expandField(label, htmlVal, extraCls) {
 // buttons can mutate its review flags without needing the caller to
 // thread the id through every handler invocation.
 let _drawerFinding = null;
+
+// Single-step undo target for the workflow selector: the state the finding
+// held immediately before the most recent pill selection. Reset to null on
+// each drawer open so the first click on an already-active pill clears the
+// state (reverts to the untouched/no-pill condition) rather than reverting
+// to something from a previous drawer session.
+let _wfRevertTo = null;
 
 // `reviewed` and `false_positive` are independent booleans — a finding
 // can be either, both, or neither. Every consumer reads these helpers
@@ -2596,6 +2603,7 @@ let _firstFindingViewBeaconed = false;
 export function openFindingDrawer(f) {
   if (!f) return;
   _drawerFinding = f;
+  _wfRevertTo = null;   // fresh single-step undo target per drawer session
   if (!_firstFindingViewBeaconed) {
     _firstFindingViewBeaconed = true;
     apiMarkFirstFindingViewed();
@@ -2652,11 +2660,11 @@ export function openFindingDrawer(f) {
 
     _renderReviewSection(f);
 
-  // (Previously called _updateReviewButtonStates here — that helper was
-  // removed when the review buttons stopped persisting an .active state.
-  // The buttons render in their default visual state on every drawer
-  // open; the brief 3s confirmation flash is fired by _flashReviewConfirm
-  // from inside _submitReview, not on drawer mount.)
+  // The review buttons hydrate their persistent highlighted state directly
+  // in _renderReviewSection (the is-active class), reading the finding's
+  // saved reviewed / false_positive flags — so reopening a finding shows
+  // the correct checked state. _paintReviewToggles keeps them in sync after
+  // each toggle inside _submitReview.
 
   document.getElementById('finding-drawer').classList.add('open');
   // Push layout: the table stays interactive (clicking another row
@@ -2691,6 +2699,12 @@ const _WF_STATES = [
   { id: 'investigating', label: 'Investigating' },
   { id: 'resolved',      label: 'Resolved' },
 ];
+
+// The selector only ever offers the three actionable states. 'new' is the
+// implicit untouched state — it is never a pill, never labeled, and never
+// written as a workflow update (see setFindingWorkflow). A finding in 'new'
+// simply shows no highlighted pill.
+const _WF_PILL_STATES = _WF_STATES.filter(function (w) { return w.id !== 'new'; });
 
 export function _workflowChipHtml(state) {
   var s = (state || 'new').toLowerCase();
@@ -3108,10 +3122,11 @@ document.addEventListener('input', function (e) {
 
 function _renderWorkflowSection(f) {
   var current = (f && f.workflow_status) || 'new';
-  var updatedLine = f && f.workflow_updated_at
+  // 'new' (untouched) highlights no pill and shows no "Updated" line.
+  var updatedLine = (f && f.workflow_updated_at && current !== 'new')
     ? '<div class="wf-meta">Updated <strong>' + relTimeHtml(f.workflow_updated_at) + '</strong></div>'
     : '';
-  var pills = _WF_STATES.map(function (w) {
+  var pills = _WF_PILL_STATES.map(function (w) {
     var on = (w.id === current);
     return '<button type="button" class="wf-pill wf-pill-' + w.id + (on ? ' is-selected' : '') + '" ' +
              'data-action="setFindingWorkflow" data-arg="' + w.id + '" ' +
@@ -3137,22 +3152,23 @@ function _renderReviewSection(f) {
       '</div>'
     : '<div class="review-meta-prominent" id="drawer-review-meta" style="display:none;"></div>';
 
-  // The buttons stay in their default visual state across renders.
-  // Clicking either flashes a brief 3s confirmation (.is-confirming)
-  // that fades back via opacity transition — see _flashReviewConfirm.
-  // The persistent "is this finding reviewed?" indicator lives in the
-  // reviewedAtHtml strip above and on the row pill in the table.
+  // Each button carries a persistent .is-active highlight when its flag is
+  // set, hydrated here from the finding's saved reviewed / false_positive
+  // values so reopening the drawer shows the correct checked state. The
+  // "Last reviewed" strip above and the row pill reinforce it.
   return '<div class="finding-drawer-section">' +
     '<div class="sec-label">Review</div>' +
     reviewedAtHtml +
     '<div class="review-toggles">' +
-      '<button type="button" class="review-toggle review-toggle-reviewed" ' +
+      '<button type="button" class="review-toggle review-toggle-reviewed' +
+        (reviewed ? ' is-active' : '') + '" ' +
         'data-action="markFindingReviewed" id="btn-review-reviewed" ' +
         'aria-pressed="' + (reviewed ? 'true' : 'false') + '">' +
         '<span class="review-check" aria-hidden="true"></span>' +
         '<span class="review-label">Mark reviewed</span>' +
       '</button>' +
-      '<button type="button" class="review-toggle review-toggle-fp" ' +
+      '<button type="button" class="review-toggle review-toggle-fp' +
+        (fp ? ' is-active' : '') + '" ' +
         'data-action="markFindingFalsePositive" id="btn-review-fp" ' +
         'aria-pressed="' + (fp ? 'true' : 'false') + '">' +
         '<span class="review-check" aria-hidden="true"></span>' +
@@ -3162,42 +3178,21 @@ function _renderReviewSection(f) {
   '</div>';
 }
 
-// Briefly flash the just-clicked button as a confirmation, then fade
-// it back to default. Only the button whose flag was JUST flipped on
-// gets the flash — flipping a flag off (or no change) leaves both
-// buttons in their default state.
-//
-// 3s window matches the toast lifetime; CSS handles the 300ms opacity
-// fade via the .is-confirming class.
-var _reviewFlashTimers = { reviewed: null, fp: null };
-function _flashReviewConfirm(nextReviewed, nextFalsePositive) {
-  function flash(buttonId, key, on) {
-    var btn = document.getElementById(buttonId);
-    if (!btn) return;
-    if (_reviewFlashTimers[key]) {
-      clearTimeout(_reviewFlashTimers[key]);
-      _reviewFlashTimers[key] = null;
-    }
-    if (!on) {
-      btn.classList.remove('is-confirming', 'is-fading');
-      btn.setAttribute('aria-pressed', 'false');
-      return;
-    }
-    btn.classList.remove('is-fading');
-    btn.classList.add('is-confirming');
-    btn.setAttribute('aria-pressed', 'true');
-    _reviewFlashTimers[key] = setTimeout(function () {
-      btn.classList.add('is-fading');
-      // Wait for the 300ms opacity transition to finish, then drop both
-      // classes so the next click starts from a clean slate.
-      _reviewFlashTimers[key] = setTimeout(function () {
-        btn.classList.remove('is-confirming', 'is-fading');
-        _reviewFlashTimers[key] = null;
-      }, 320);
-    }, 3000);
+// Paint the review toggles to match the finding's saved flags — a filled,
+// highlighted "checked" state that PERSISTS (unlike the old 3s flash) so the
+// drawer hydrates correctly every time it opens. Called on render (via the
+// is-active class above) and after each toggle.
+function _paintReviewToggles(reviewed, falsePositive) {
+  var rb = document.getElementById('btn-review-reviewed');
+  if (rb) {
+    rb.classList.toggle('is-active', !!reviewed);
+    rb.setAttribute('aria-pressed', reviewed ? 'true' : 'false');
   }
-  flash('btn-review-reviewed', 'reviewed', !!nextReviewed);
-  flash('btn-review-fp',       'fp',       !!nextFalsePositive);
+  var fb = document.getElementById('btn-review-fp');
+  if (fb) {
+    fb.classList.toggle('is-active', !!falsePositive);
+    fb.setAttribute('aria-pressed', falsePositive ? 'true' : 'false');
+  }
 }
 
 // Rebuild the prominent "Last reviewed at" line in place so the drawer
@@ -3253,7 +3248,7 @@ async function _submitReview(nextReviewed, nextFalsePositive) {
     if (badgeHtml) sevLine.insertAdjacentHTML('beforeend', badgeHtml);
   }
 
-  _flashReviewConfirm(nextReviewed, nextFalsePositive);
+  _paintReviewToggles(_drawerFinding.reviewed, _drawerFinding.false_positive);
   _updateReviewMeta(_drawerFinding.reviewed_at, isTouched(_drawerFinding));
   _notifyFindingStatusChanged(_drawerFinding.id, {
     reviewed: _drawerFinding.reviewed,
@@ -3294,26 +3289,44 @@ export function markFindingFalsePositive() {
 
 // Workflow-state pill click handler. Registered via data-action in the
 // drawer; `state` is the pill's data-arg value.
-export async function setFindingWorkflow(state) {
+export async function setFindingWorkflow(clicked) {
   if (!_drawerFinding) return;
   if (!_drawerFinding.id) return;
   var current = (_drawerFinding.workflow_status || 'new');
-  if (current === state) return;
+
+  // Single-step toggle/revert. Clicking the already-active pill undoes the
+  // most recent selection: it restores the value the finding held right
+  // before that selection (_wfRevertTo). If there was no prior value it reverts
+  // to 'new' (the untouched, no-pill state). Clicking any other pill selects
+  // it and records the value being replaced as the revert target.
+  var target;
+  if (clicked === current) {
+    target = _wfRevertTo || 'new';
+    _wfRevertTo = current;              // keep the undo reversible
+  } else {
+    _wfRevertTo = current;
+    target = clicked;
+  }
+  if (target === current) return;       // nothing to do
+
+  var prevUpdatedAt = _drawerFinding.workflow_updated_at;
   // Optimistic update — flip the UI first so the click feels instant,
-  // then reconcile with the server's canonical response.
-  _drawerFinding.workflow_status = state;
-  _repaintWorkflowPills(state, _drawerFinding.workflow_updated_at);
-  var r = await apiSetFindingWorkflow(_drawerFinding.id, state);
+  // then reconcile with the server's canonical response. Reverting to 'new'
+  // clears the "Updated" line (pass empty).
+  _drawerFinding.workflow_status = target;
+  _repaintWorkflowPills(target, target === 'new' ? '' : prevUpdatedAt);
+  var r = await apiSetFindingWorkflow(_drawerFinding.id, target);
   if (!r || !r.ok || !r.data) {
     // Roll back on failure.
     _drawerFinding.workflow_status = current;
-    _repaintWorkflowPills(current, _drawerFinding.workflow_updated_at);
+    _repaintWorkflowPills(current, prevUpdatedAt);
     toastError('Could not update workflow state.');
     return;
   }
-  _drawerFinding.workflow_status = r.data.workflow_status || state;
+  _drawerFinding.workflow_status = r.data.workflow_status || target;
   _drawerFinding.workflow_updated_at = r.data.workflow_updated_at || '';
   _repaintWorkflowPills(_drawerFinding.workflow_status, _drawerFinding.workflow_updated_at);
+  var state = _drawerFinding.workflow_status;
   // Broadcast so list rows can repaint their chip without a full refetch.
   document.dispatchEvent(new CustomEvent('pulse:workflow-changed', {
     detail: {
@@ -3322,8 +3335,8 @@ export async function setFindingWorkflow(state) {
       workflow_updated_at: _drawerFinding.workflow_updated_at,
     },
   }));
-  showToast('Marked ' + (state === 'new' ? 'New' :
-                         state === 'acknowledged' ? 'Acknowledged' :
+  showToast(state === 'new' ? 'Workflow cleared' :
+            'Marked ' + (state === 'acknowledged' ? 'Acknowledged' :
                          state === 'investigating' ? 'Investigating' :
                          'Resolved'));
 }
@@ -3335,7 +3348,9 @@ function _repaintWorkflowPills(state, updatedAt) {
     p.classList.toggle('is-selected', on);
     p.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
-  // Refresh the "Updated ..." meta line if present.
+  // Refresh the "Updated ..." meta line. When cleared (no updatedAt — the
+  // untouched/'new' state) remove the line entirely so the section reads
+  // pristine again.
   var wrap = document.querySelector('.finding-drawer-section .wf-pill-row');
   if (!wrap) return;
   var meta = wrap.parentElement.querySelector('.wf-meta');
@@ -3346,6 +3361,8 @@ function _repaintWorkflowPills(state, updatedAt) {
       wrap.parentElement.appendChild(meta);
     }
     meta.innerHTML = 'Updated <strong>' + relTimeHtml(updatedAt) + '</strong>';
+  } else if (meta) {
+    meta.remove();
   }
 }
 

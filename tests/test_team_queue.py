@@ -148,6 +148,35 @@ def test_count_resolved_today(seeded):
     assert count_resolved_today(path, analyst) == 1
 
 
+def _workflow_row(path, fid):
+    import sqlite3
+    with sqlite3.connect(path) as c:
+        return c.execute(
+            "SELECT workflow_status, workflow_updated_at FROM findings WHERE id=?",
+            (fid,),
+        ).fetchone()
+
+
+def test_workflow_real_state_stamps_updated_at(seeded):
+    path, _, fids = seeded
+    db.set_finding_workflow(path, fids[0], "acknowledged")
+    status, updated = _workflow_row(path, fids[0])
+    assert status == "acknowledged"
+    assert updated is not None      # real states record the change time
+
+
+def test_workflow_clear_to_new_nulls_updated_at(seeded):
+    # Reverting to 'new' is a clear: workflow_updated_at must be NULLed so
+    # the finding reads as untouched again (no "Updated …" line).
+    path, _, fids = seeded
+    db.set_finding_workflow(path, fids[0], "investigating")
+    assert _workflow_row(path, fids[0])[1] is not None
+    db.set_finding_workflow(path, fids[0], "new")
+    status, updated = _workflow_row(path, fids[0])
+    assert status == "new"
+    assert updated is None
+
+
 def test_team_workload_shape(seeded):
     path, analyst, fids = seeded
     wl = get_team_workload(path)

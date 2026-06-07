@@ -5,6 +5,15 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Finding drawer + theme-toggle polish
+
+- **Workflow selector** — dropped the "New" button. The selector now offers only **Acknowledged / Investigating / Resolved**; an untouched finding shows no highlighted pill (the implicit "new" state is never labeled or logged). Clicking a pill sets + saves + audits it; clicking the **active** pill again is a single-step undo that reverts to the value held right before that selection (a prior pill re-highlights; no prior → back to no pill). Reverting to the untouched state clears `workflow_status` + `workflow_updated_at` **without** writing an audit entry. The "Updated …" line tracks the most recent real change.
+- **Review checkboxes now hydrate on reopen (bug fix)** — marking a finding *Reviewed* or *False positive*, closing the drawer, and reopening it left the checkboxes blank. They now carry a **persistent highlighted state** read from the finding's saved `reviewed` / `false_positive` flags on every open (replacing the old 3-second confirmation flash). The "Last reviewed" line is unchanged. Save path untouched — only the load/display path.
+- **Framework references pills** — fixed the jammed `M1027Password Policies` rendering: each pill now reads `M1027 Password Policies` (ID, space, name) and the pills lay out in a wrapping flex row (8px gap) with consistent tag-pill padding (4×10px), radius, and a subtle border.
+- **Dark-mode toggle icon** — the Appearance row now shows a **moon when dark mode is active and a sun when light**, swapping the instant the toggle is flipped (label stays "Dark Mode").
+
+---
+
 ## 2026-06-07 — Team role hierarchy Phase 5: Team Workload card
 
 The manager's "who's working on what" view — the *organize the team* half of the hierarchy.

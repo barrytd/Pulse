@@ -155,13 +155,38 @@ export function toggleDarkModeFromMenu() {
   // immediately confirm the change visually.
 }
 
-// Keep the toggle row's aria-checked in sync with the live theme. The
-// visual on/off is pure CSS (driven by <html data-theme>), so this is
-// only for assistive tech — but we run it on every menu open so a screen
-// reader always announces the correct state.
+// Keep the toggle row in sync with the live theme: aria-checked (for
+// assistive tech) and the leading icon — a moon when dark mode is active,
+// a sun when light mode is active. Run on every menu open and immediately
+// after the toggle is flipped so the icon swaps the moment the theme does.
 function _syncThemeToggle() {
   var row = document.getElementById('dark-mode-toggle-row');
-  if (row) row.setAttribute('aria-checked', getTheme() === 'dark' ? 'true' : 'false');
+  if (!row) return;
+  var isDark = getTheme() === 'dark';
+  row.setAttribute('aria-checked', isDark ? 'true' : 'false');
+  // Swap the leading icon. Lucide turns the <i data-lucide> into an <svg>
+  // on first paint, so we replace the element with a fresh placeholder and
+  // re-run createIcons. The new <i> inherits the dropdown-row icon size +
+  // color from .pulse-dropdown-item styles.
+  var icon = row.querySelector('[data-lucide], svg');
+  var wantName = isDark ? 'moon' : 'sun';
+  // A converted Lucide icon is an <svg class="lucide lucide-moon">; an
+  // un-converted one is <i data-lucide="moon">. Read whichever applies so
+  // we only rebuild when the icon actually needs to change.
+  var currentName = '';
+  if (icon) {
+    currentName = icon.getAttribute('data-lucide') ||
+      (icon.classList && icon.classList.contains('lucide-moon') ? 'moon' :
+       icon.classList && icon.classList.contains('lucide-sun')  ? 'sun'  : '');
+  }
+  if (icon && currentName !== wantName) {
+    var fresh = document.createElement('i');
+    fresh.setAttribute('data-lucide', wantName);
+    icon.replaceWith(fresh);
+    if (window.lucide && window.lucide.createIcons) {
+      try { window.lucide.createIcons(); } catch (e) { /* icons stay as-is */ }
+    }
+  }
 }
 
 function _closeUserMenu() {
