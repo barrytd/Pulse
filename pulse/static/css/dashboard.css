@@ -4656,6 +4656,82 @@ tr.pending-flash {
    Subtle elevated card with a 3px accent left border so it reads as a
    suggestion rather than a regular Dashboard panel.
 ------------------------------------------------------------------- */
+/* First-run hero — the empty-dashboard call to action for new accounts. */
+.first-run-hero {
+  text-align: center;
+  padding: 40px 28px;
+  margin-bottom: 16px;
+}
+.first-run-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 14px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.first-run-icon svg { width: 30px; height: 30px; }
+.first-run-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.first-run-sub {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  max-width: 560px;
+  margin: 0 auto 22px;
+}
+.first-run-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.first-run-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+.first-run-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.first-run-step-arrow { color: var(--text-muted); font-size: 14px; }
+.first-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.first-run-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .onboard-card {
   margin-bottom: 16px;
   padding: 16px 18px;

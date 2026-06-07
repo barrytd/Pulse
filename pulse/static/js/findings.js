@@ -697,8 +697,8 @@ function _findingsKpiRowHtml() {
   // workflow_status values so the filter chip lands cleanly.
   var open = counts.new + counts.acknowledged + counts.investigating;
   return '<div class="kpi-row">' +
-    _kpiTileHtml('open',     'Open findings',     open,                 'all open workflow states') +
-    _kpiTileHtml('new',      'New findings',      counts.new,           'untriaged') +
+    _kpiTileHtml('open',     'Open findings',     open,                 'all unresolved') +
+    _kpiTileHtml('new',      'Untriaged',         counts.new,           'not yet reviewed') +
     _kpiTileHtml('active',   'Active findings',   counts.investigating, 'currently being investigated') +
     _kpiTileHtml('resolved', 'Resolved findings', counts.resolved,      'closed out') +
   '</div>';
@@ -1897,9 +1897,27 @@ export function _riskShield(f) {
 // Payload comes from pulse/core/knowledge_base.py via attach_remediation.
 // Falls back silently when the finding lacks `knowledge` (older cached
 // responses that pre-date the Advisor work).
+// The lead "understanding" block — the first thing a non-expert reads.
+// Order: plain-language summary (+ difficulty pill) → "What to do now"
+// action list → collapsible Why this matters / How to prevent / Common
+// false positives → learn-more links. This is the single source of the
+// action list; the Remediation section no longer repeats it.
+//
+// When a finding has no knowledge-base entry (SIGMA imports, edge rules),
+// falls back to the finding's own description so the drawer still leads
+// with something human-readable instead of opening empty.
 export function _securityGuideBlock(f) {
   var k = f.knowledge;
-  if (!k || !k.plain_language) return '';
+
+  // ---- Fallback: no knowledge entry -------------------------------
+  if (!k || !k.plain_language) {
+    var fallbackText = (f.description || f.details || '').trim();
+    if (!fallbackText) return '';
+    return '<div class="advisor-card advisor-diff-medium">' +
+      '<div class="advisor-plain">' + escapeHtml(fallbackText) + '</div>' +
+    '</div>';
+  }
+
   var actions = (k.immediate_actions || []).map(function (s) {
     return '<li>' + escapeHtml(s) + '</li>';
   }).join('');
@@ -1916,21 +1934,85 @@ export function _securityGuideBlock(f) {
   return '<div class="advisor-card advisor-diff-' + diff + '">' +
     '<div class="advisor-header">' +
       '<span class="advisor-icon" aria-hidden="true">💡</span>' +
-      '<span class="advisor-title">Security Guide</span>' +
+      '<span class="advisor-title">What happened</span>' +
       '<span class="advisor-diff-pill advisor-diff-' + diff + '" title="How hard is this attack to pull off?">' +
         diffLabel + ' difficulty' +
       '</span>' +
     '</div>' +
     '<div class="advisor-plain">' + escapeHtml(k.plain_language) + '</div>' +
-    (k.why_it_matters ? '<details class="advisor-details"><summary>Why this matters</summary>' +
-      '<div class="advisor-body">' + escapeHtml(k.why_it_matters) + '</div></details>' : '') +
+    // What to do now leads — promoted directly under the summary.
     (actions ? '<div class="advisor-section"><div class="advisor-section-label">What to do now</div>' +
       '<ol class="advisor-steps">' + actions + '</ol></div>' : '') +
+    // Supporting detail collapses below the action list.
+    (k.why_it_matters ? '<details class="advisor-details"><summary>Why this matters</summary>' +
+      '<div class="advisor-body">' + escapeHtml(k.why_it_matters) + '</div></details>' : '') +
     (k.prevention ? '<details class="advisor-details"><summary>How to prevent this</summary>' +
       '<div class="advisor-body">' + escapeHtml(k.prevention) + '</div></details>' : '') +
     (fps ? '<details class="advisor-details"><summary>Common false positives</summary>' +
       '<ul class="advisor-fps">' + fps + '</ul></details>' : '') +
     (links ? '<div class="advisor-links">' + links + '</div>' : '') +
+  '</div>';
+}
+
+// Collapsible "Technical details" — collapsed by default. Holds the raw,
+// expert-only data: metadata (timestamp, event ID), the finding's
+// technical description + event details, and the raw event XML. A
+// non-expert never has to look at this; an expert is one click away.
+export function _drawerTechnicalBlock(f) {
+  var time = f.timestamp || _extractTime(f) || '—';
+  var eid  = (f.event_id != null && f.event_id !== '') ? f.event_id : '—';
+  var desc = (f.description || '').trim();
+  var details = (f.details || '').trim();
+  var rawXml = (f.raw_xml || '').trim();
+
+  // Don't repeat the description if it's identical to details.
+  var techText = '';
+  if (details) {
+    techText += '<div class="finding-drawer-details">' + escapeHtml(details) + '</div>';
+  }
+  if (desc && desc !== details) {
+    techText += '<div class="finding-drawer-details" style="margin-top:8px;">' + escapeHtml(desc) + '</div>';
+  }
+
+  var rawXmlHtml = rawXml
+    ? '<details class="raw-xml-toggle" style="margin-top:10px;">' +
+        '<summary class="sec-label" style="cursor:pointer;">Raw event XML</summary>' +
+        '<div class="finding-drawer-details" style="max-height:320px; margin-top:8px;">' + escapeHtml(rawXml) + '</div>' +
+      '</details>'
+    : '';
+
+  return '<div class="finding-drawer-section">' +
+    '<details class="drawer-tech-toggle">' +
+      '<summary class="sec-label" style="cursor:pointer;">Technical details</summary>' +
+      '<div class="drawer-tech-body">' +
+        '<div class="finding-drawer-grid" style="margin-bottom:10px;">' +
+          '<div><div class="k">Timestamp</div><div class="v">' + escapeHtml(String(time)) + '</div></div>' +
+          '<div><div class="k">Event ID</div><div class="v">' + escapeHtml(String(eid)) + '</div></div>' +
+        '</div>' +
+        techText +
+        rawXmlHtml +
+      '</div>' +
+    '</details>' +
+  '</div>';
+}
+
+// Compact "Framework references" line — just the MITRE mitigation pills
+// for users who want the formal mapping. The action steps live in the
+// "What to do now" list above, so this no longer repeats them. Returns
+// '' when the finding carries no mitigations.
+export function _drawerFrameworkRefs(f) {
+  if (!Array.isArray(f.mitigations) || !f.mitigations.length) return '';
+  var chips = f.mitigations.map(function (m) {
+    return '<a class="mitre-chip" href="https://attack.mitre.org/mitigations/' +
+      escapeHtml(m.id) + '/" target="_blank" rel="noopener noreferrer" title="' +
+      escapeHtml(m.name) + '">' +
+      '<span class="mitre-chip-id">' + escapeHtml(m.id) + '</span>' +
+      '<span class="mitre-chip-name">' + escapeHtml(m.name) + '</span>' +
+    '</a>';
+  }).join('');
+  return '<div class="finding-drawer-section">' +
+    '<div class="sec-label">Framework references</div>' +
+    '<div class="mitre-chips">' + chips + '</div>' +
   '</div>';
 }
 
@@ -2497,53 +2579,33 @@ export function openFindingDrawer(f) {
     mitreLink +
     _reviewBadge(f);
 
-  var time = f.timestamp || _extractTime(f) || '\u2014';
-  var eid  = (f.event_id != null && f.event_id !== '') ? f.event_id : '\u2014';
-  var desc = f.description || '';
-  var details = f.details || '';
-  var rawXml = f.raw_xml || '';
-
+  // ---------------------------------------------------------------
+  // Redesigned drawer hierarchy (understanding -> technical -> tracking):
+  //   1. Plain-language "What happened" summary + difficulty + the single
+  //      "What to do now" action list + collapsible why/prevent/FP.
+  //   2. Threat Intel (contextual IP reputation, when present).
+  //   3. Collapsible "Technical details" (raw event + metadata), collapsed.
+  //   4. "Framework references" - MITRE mitigation pills only.
+  //   5. Firewall block staging (when an IP is present).
+  //   6. A clear "Tracking" separator, then Workflow / Assigned / Notes /
+  //      Review - the bookkeeping, kept distinct from the understanding.
+  // The title + severity + MITRE tag render above in drawer-rule /
+  // drawer-sev-line, so the summary is the first thing inside the body.
+  // ---------------------------------------------------------------
   document.getElementById('drawer-body').innerHTML =
-    '<div class="finding-drawer-section">' +
-      '<div class="sec-label">Metadata</div>' +
-      '<div class="finding-drawer-grid">' +
-        '<div><div class="k">Timestamp</div><div class="v">' + escapeHtml(String(time)) + '</div></div>' +
-        '<div><div class="k">Event ID</div><div class="v">' + escapeHtml(String(eid)) + '</div></div>' +
-      '</div>' +
-    '</div>' +
-
-    (desc ? '<div class="finding-drawer-section">' +
-      '<div class="sec-label">Description</div>' +
-      '<div style="font-size:13px; color:var(--text); line-height:1.5;">' + escapeHtml(desc) + '</div>' +
-    '</div>' : '') +
-
-    (details ? '<div class="finding-drawer-section">' +
-      '<div class="sec-label">Event Details</div>' +
-      '<div class="finding-drawer-details">' + escapeHtml(details) + '</div>' +
-    '</div>' : '') +
-
-    // Threat Intel slots between Event Details and Remediation so the
-    // analyst sees IP reputation while triaging — before deciding what
-    // to do about it. Section returns '' when no public IP is present.
-    _renderIntelSection(f) +
-
-    (rawXml ? '<div class="finding-drawer-section">' +
-      '<details class="raw-xml-toggle">' +
-        '<summary class="sec-label" style="cursor:pointer;">Raw Event XML</summary>' +
-        '<div class="finding-drawer-details" style="max-height:320px; margin-top:8px;">' + escapeHtml(rawXml) + '</div>' +
-      '</details>' +
-    '</div>' : '') +
-
     '<div class="finding-drawer-section">' +
       _securityGuideBlock(f) +
     '</div>' +
 
-    '<div class="finding-drawer-section">' +
-      '<div class="sec-label">Remediation</div>' +
-      _remediationBlock(f) +
-    '</div>' +
+    _renderIntelSection(f) +
+
+    _drawerTechnicalBlock(f) +
+
+    _drawerFrameworkRefs(f) +
 
     _stageBlockSection(f) +
+
+    '<div class="drawer-tracking-divider"><span>Tracking</span></div>' +
 
     _renderWorkflowSection(f) +
 

@@ -188,6 +188,49 @@
   word-break: break-word;
 }
 
+/* Collapsible "Technical details" — collapsed by default so the drawer
+   opens on the human-readable summary. The summary row reuses .sec-label
+   styling and gets a subtle disclosure affordance. */
+.drawer-tech-toggle > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.drawer-tech-toggle > summary::-webkit-details-marker { display: none; }
+.drawer-tech-toggle > summary::before {
+  content: "▸";
+  font-size: 9px;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+.drawer-tech-toggle[open] > summary::before { transform: rotate(90deg); }
+.drawer-tech-body { margin-top: 10px; }
+
+/* "Tracking" separator — splits the understanding area (summary, actions,
+   technical) from the bookkeeping area (workflow, assignment, notes,
+   review). A hairline rule with an inset uppercase label. */
+.drawer-tracking-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 18px;
+}
+.drawer-tracking-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.drawer-tracking-divider > span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+}
+
 .stage-block-row {
   display: flex;
   align-items: center;

@@ -1279,9 +1279,18 @@ export async function renderDashboardPage() {
         ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
         : '');
 
-  var onboardingHtml = _onboardingCardHtml(_onboardingState);
+  // Brand-new account with no scans at all: lead with the first-run hero
+  // and suppress the Getting Started checklist + the inline empty banner
+  // (the hero is the single, focused call to action). The rest of the
+  // dashboard still renders below it in its empty state, but the hero is
+  // what the eye lands on. Any scan in the account flips this off forever.
+  var hasAnyScan = allScans.length > 0;
+  var onboardingHtml = hasAnyScan ? _onboardingCardHtml(_onboardingState) : '';
+  var firstRunHtml   = hasAnyScan ? '' : _firstRunHeroHtml();
+  if (!hasAnyScan) emptyBannerHtml = '';
 
   c.innerHTML =
+    firstRunHtml +
     onboardingHtml +
     dashMetaHtml +
     filterBarHtml +
@@ -1343,6 +1352,56 @@ const ONBOARDING_STEPS = [
     page:  'whitelist',
   },
 ];
+
+// First-run hero — shown only when the user has never run a scan. A
+// brand-new account opens to an empty dashboard, which reads as "broken"
+// rather than "new". This replaces that void with one clear next step:
+// run your first scan. Once any scan exists, this never shows again and
+// the normal dashboard (plus the Getting Started checklist) takes over.
+function _firstRunHeroHtml() {
+  return '<div class="card first-run-hero">' +
+    '<div class="first-run-icon" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z"/>' +
+        '<path d="M3 12h4l2 5 4-10 2 5h4"/>' +
+      '</svg>' +
+    '</div>' +
+    '<h2 class="first-run-title">Run your first scan</h2>' +
+    '<p class="first-run-sub">' +
+      'Pulse has nothing to show yet because no logs have been analyzed. ' +
+      'Scan this computer, upload a Windows <span class="mono">.evtx</span> ' +
+      'log, or try a bundled sample to see your security posture, findings, ' +
+      'and plain-language guidance.' +
+    '</p>' +
+    '<div class="first-run-steps">' +
+      '<div class="first-run-step">' +
+        '<span class="first-run-step-num">1</span>' +
+        '<span>Scan a log</span>' +
+      '</div>' +
+      '<span class="first-run-step-arrow" aria-hidden="true">&rarr;</span>' +
+      '<div class="first-run-step">' +
+        '<span class="first-run-step-num">2</span>' +
+        '<span>Pulse scores your posture A&ndash;F</span>' +
+      '</div>' +
+      '<span class="first-run-step-arrow" aria-hidden="true">&rarr;</span>' +
+      '<div class="first-run-step">' +
+        '<span class="first-run-step-num">3</span>' +
+        '<span>Review findings &amp; what to do</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="first-run-actions">' +
+      '<button class="btn btn-primary btn-with-icon" data-action="openSystemScanModal">' +
+        '<i data-lucide="scan-line"></i><span>Scan my system</span></button>' +
+      '<button class="btn btn-with-icon" data-action="openUploadModal">' +
+        '<i data-lucide="upload"></i><span>Upload a .evtx log</span></button>' +
+    '</div>' +
+    '<div class="first-run-hint">' +
+      'No log handy? Upload any file from the <span class="mono">samples/</span> ' +
+      'folder to see a fully populated dashboard.' +
+    '</div>' +
+  '</div>';
+}
 
 function _onboardingCardHtml(state) {
   if (!state || state.dismissed) return '';

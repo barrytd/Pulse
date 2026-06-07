@@ -57,3 +57,6 @@ pulse.yaml
 build/
 dist/
 _qa_check.pdf
+
+# Database backups created during resets
+pulse.db.bak-*

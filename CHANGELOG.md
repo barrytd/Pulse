@@ -5,6 +5,27 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Finding drawer redesign + first-run hero + UI polish
+
+### Finding drawer redesign (less redundancy, clearer hierarchy)
+The drawer explained the same event up to three times and had two overlapping "what to do" lists. Restructured around the non-expert reader who reads top to bottom.
+
+- **Leads with the plain-language summary.** The Security Guide's "what happened" sentence + difficulty pill now sits at the very top of the drawer, directly under the severity badge and MITRE tag — the first thing the user reads.
+- **One action list, not two.** The Security Guide's "What to do now" list is now the single source of next steps, promoted directly under the summary. The Remediation section's duplicate numbered list is gone.
+- **Remediation → compact "Framework references."** Just the MITRE mitigation pills (e.g. M1026 / M1018 / M1032) for users who want the formal mapping — no repeated steps.
+- **Raw event text deduplicated into a collapsible "Technical details" section**, collapsed by default. Holds the metadata (timestamp, event ID), the technical description/details, and the raw event XML. The old top raw-text box and the separate Description/Event Details sections are removed; experts are one click away.
+- **Clear "Tracking" separator** splits the understanding area (summary, actions, technical) from the bookkeeping area (workflow state, assignment, notes, review) at the bottom.
+- Findings with no knowledge-base entry (SIGMA imports, edge rules) fall back to leading with their own description so the drawer never opens empty.
+
+### First-run hero
+A brand-new account with no scans used to open to an empty dashboard that read as broken. New accounts now see a focused **"Run your first scan"** hero with a 1-2-3 mini guide and two clear CTAs (Scan my system / Upload a .evtx log). It disappears permanently once any scan exists. The Getting Started checklist and inline empty banner are suppressed while the hero shows, so there's a single, clear next step.
+
+### UI polish
+- Findings KPI relabeled: **"New findings" → "Untriaged"** with tightened sublabels ("all unresolved" vs "not yet reviewed") so the Open/Untriaged distinction is obvious.
+- Dashboard data-reduction funnel boxes are now equal height (the "Crit + High" label no longer wraps and pushes its box taller).
+
+---
+
 ## 2026-06-03 — Sysmon support (Phase 2: network + credential access)
 
 Completes Sysmon support. Phase 1 added process-create command-line analysis; Phase 2 adds the three remaining high-value Sysmon event types — and the parser already fetched all four IDs, so this is pure detection logic.
