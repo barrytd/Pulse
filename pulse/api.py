@@ -933,7 +933,7 @@ def _register_routes(app: FastAPI) -> None:
     # Order matters: these must be registered before any catch-all so
     # /login and /docs keep winning against `/{page}` matching.
     _SPA_PAGES = (
-        "dashboard", "monitor", "scans", "reports", "history",
+        "dashboard", "queue", "monitor", "scans", "reports", "history",
         "fleet", "firewall", "whitelist", "rules", "settings", "findings",
         "compliance", "trends", "audit",
     )
@@ -944,6 +944,14 @@ def _register_routes(app: FastAPI) -> None:
             methods=["GET"],
             include_in_schema=False,
         )
+
+    # Settings deep-links carry the active tab as a path segment
+    # (/settings/profile, /settings/account, …) so the dropdown links and a
+    # refresh land on the right tab. The client routes into the tab from the
+    # path; the server just serves the same shell.
+    @app.get("/settings/{tab}", include_in_schema=False)
+    def spa_settings_tab(tab: str, request: Request):
+        return _serve_dashboard(request)
 
     # Individual scan detail view — /scans/123 maps to the same shell;
     # the client routes into viewScan() based on the numeric segment.

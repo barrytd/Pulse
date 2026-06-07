@@ -178,7 +178,6 @@ import {
   testThreatIntelKey,
   onScheduleKindChange,
   saveScheduleSettings,
-  setActiveSettingsTab,
   switchSettingsTab,
   resetSeverityPaletteAndRender,
   createUser,
@@ -579,8 +578,7 @@ function uploadFromTopbar() {
 // upload-.evtx CLI fallback for analysts who want to triage a one-off
 // log file.
 function goToAgentEnroll() {
-  setActiveSettingsTab('agents');
-  navigate('settings');
+  navigate('settings', { tab: 'agents' });
 }
 
 // Hide the banner for the rest of the session and persist the choice.
@@ -691,7 +689,7 @@ function _boot() {
   var parsed = parsePath(path);
   // replace:true so the first history entry carries a real state object
   // and popstate from a later push returns here cleanly.
-  navigate(parsed.page, { replace: true, scanId: parsed.scanId });
+  navigate(parsed.page, { replace: true, scanId: parsed.scanId, tab: parsed.settingsTab });
 
   // Kick off the live-monitor SSE client — fire-and-forget. The topbar
   // "Live" indicator subscribes immediately so it reflects state on

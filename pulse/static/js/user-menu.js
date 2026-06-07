@@ -7,7 +7,7 @@
 import { apiGetAuthStatus, apiGetMe } from './api.js';
 import { navigate } from './navigation.js';
 import { toggleTheme, getTheme } from './theme.js';
-import { signOut, setActiveSettingsTab } from './settings.js';
+import { signOut } from './settings.js';
 import { openFeedbackModal } from './feedback.js';
 
 const GITHUB_REPO = 'https://github.com/barrytd/Pulse';
@@ -121,14 +121,12 @@ export function toggleUserMenu(arg, target, event) {
 
 export function openProfile() {
   _closeUserMenu();
-  setActiveSettingsTab('profile');
-  navigate('settings');
+  navigate('settings', { tab: 'profile' });
 }
 
 export function openAccountSettings() {
   _closeUserMenu();
-  setActiveSettingsTab('profile');
-  navigate('settings');
+  navigate('settings', { tab: 'account' });
 }
 
 export function openDocs() {

@@ -60,6 +60,7 @@ const EMAIL_PROVIDER_PRESETS = {
 // can pre-select a tab before navigate('settings') runs.
 const SETTINGS_TABS = [
   { id: 'profile',       label: 'Profile',         icon: 'user' },
+  { id: 'account',       label: 'Account',         icon: 'shield' },
   { id: 'notifications', label: 'Notifications',   icon: 'bell' },
   { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar' },
   { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
@@ -85,9 +86,32 @@ export function setActiveSettingsTab(name) {
   }
 }
 
+// The currently-resolved (validated) settings tab. Used by the router to
+// build the /settings/<tab> URL.
+export function getActiveSettingsTab() { return _activeSettingsTab; }
+
+// Pull a settings tab out of the URL path (/settings/<tab>) so a direct
+// load / refresh / back lands on the right tab. Returns '' if none.
+function _settingsTabFromPath() {
+  var parts = (window.location.pathname || '').split('/').filter(Boolean);
+  if (parts[0] === 'settings' && parts[1] &&
+      SETTINGS_TABS.some(function (t) { return t.id === parts[1]; })) {
+    return parts[1];
+  }
+  return '';
+}
+
+// In-page tab click. Reflects the choice in the URL (replaceState so the
+// back button steps out of Settings rather than cycling through every tab
+// the user browsed) and re-renders.
 export function switchSettingsTab(arg) {
   if (!arg) return;
   setActiveSettingsTab(arg);
+  try {
+    window.history.replaceState(
+      { page: 'settings', settingsTab: _activeSettingsTab },
+      '', '/settings/' + _activeSettingsTab + (window.location.search || ''));
+  } catch (e) { /* private mode — URL just won't update */ }
   renderSettingsPage();
 }
 
@@ -95,17 +119,11 @@ export async function renderSettingsPage() {
   var c = document.getElementById('content');
   c.innerHTML = '<div style="text-align:center; padding:48px; color:var(--text-muted);">Loading...</div>';
 
-  // One-shot deep-link: `localStorage.pulseSettingsActiveTab` is set by
-  // the dashboard onboarding-checklist's "Set up email alerts" / "Invite
-  // a team member" links so this page lands on the right tab instead of
-  // Profile. Read + clear so a later visit doesn't keep getting hijacked.
-  try {
-    var deepTab = localStorage.getItem('pulseSettingsActiveTab');
-    if (deepTab) {
-      setActiveSettingsTab(deepTab);
-      localStorage.removeItem('pulseSettingsActiveTab');
-    }
-  } catch (e) { /* private mode — ignore */ }
+  // The URL path is the source of truth for the active tab on a direct
+  // load / refresh / back-forward (/settings/<tab>). The router also sets
+  // the tab before navigating here, so this is belt-and-suspenders.
+  var pathTab = _settingsTabFromPath();
+  if (pathTab) setActiveSettingsTab(pathTab);
 
   // Fetch every endpoint in parallel with its own catch so one slow /
   // failing endpoint can't leave the whole page stuck on "Loading...".
@@ -375,12 +393,14 @@ export async function renderSettingsPage() {
     ? 'Work the findings assigned to you. Browse every finding in the organization read-only. Contact your manager to request a reassignment.'
     : 'Standard access. Contact your admin to change permissions.';
 
+  // Profile tab — identity only: avatar, display name, role. The sign-in
+  // controls (email / password) live on the separate Account tab.
   var profileHtml =
     avatarHtml +
     '<div class="card" style="margin-bottom:16px;">' +
-      '<div class="section-label">My Account</div>' +
+      '<div class="section-label">Profile</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
-        'The email and password you use to sign in to Pulse.' +
+        'How you appear in Pulse.' +
       '</p>' +
       '<div class="form-row"><label>Display name</label>' +
         '<div class="profile-name-row">' +
@@ -394,6 +414,16 @@ export async function renderSettingsPage() {
           '<span class="profile-role-hint">' + escapeHtml(roleExplain) + '</span>' +
         '</div>' +
       '</div>' +
+    '</div>';
+
+  // Account tab — the sign-in management section: email + password + the
+  // save / sign-out actions.
+  var accountHtml =
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">My Account</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+        'The email and password you use to sign in to Pulse.' +
+      '</p>' +
       '<div class="form-row"><label>Account email</label>' +
         '<input type="email" id="account-email" value="' + escapeHtml(auth.email || '') + '"/></div>' +
       '<div class="form-row"><label>New password</label>' +
@@ -716,6 +746,7 @@ export async function renderSettingsPage() {
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
+    account:       accountHtml,
     notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,

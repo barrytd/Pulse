@@ -79,7 +79,7 @@ function _pageHeaderHtml() {
       '<h1 class="page-title">Threat Intel</h1>' +
       '<div class="page-title-actions">' +
         '<a class="btn btn-compact btn-with-icon" ' +
-          'data-action="navigate" data-arg="settings" ' +
+          'data-action="navigate" data-arg="settings:notifications" ' +
           'title="Configure AbuseIPDB API key under Settings &rsaquo; Notifications">' +
           '<i data-lucide="settings"></i><span>Settings</span>' +
         '</a>' +
@@ -125,7 +125,7 @@ function _intelKeyBannerHtml() {
   return '<div class="ti-banner">' +
     '<i data-lucide="info"></i>' +
     '<span>Threat-intel lookups are off. ' +
-      '<a href="#" data-action="navigate" data-arg="settings">' +
+      '<a href="#" data-action="navigate" data-arg="settings:notifications">' +
         'Add an AbuseIPDB API key in Settings' +
       '</a> to enable.' +
     '</span>' +

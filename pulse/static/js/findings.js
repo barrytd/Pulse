@@ -2296,7 +2296,7 @@ async function _loadDrawerIntel(f) {
     body.innerHTML =
       '<div class="intel-empty">' +
         'Threat-intel lookups are off. Add an AbuseIPDB API key under ' +
-        '<a href="#" data-action="navigate" data-arg="settings" ' +
+        '<a href="#" data-action="navigate" data-arg="settings:notifications" ' +
         'style="color:var(--accent); text-decoration:none;">Settings &rsaquo; Notifications</a> ' +
         'to enrich source IPs.' +
       '</div>';

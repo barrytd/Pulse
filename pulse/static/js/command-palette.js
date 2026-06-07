@@ -10,7 +10,6 @@ import { toggleTheme } from './theme.js';
 import { monitorClient } from './monitor.js';
 import { openUploadModal } from './upload.js';
 import { openSystemScanModal } from './system-scan.js';
-import { setActiveSettingsTab } from './settings.js';
 
 // Cached at boot via /api/health. `null` means "not yet probed" — fall
 // back to assuming Windows so the local-scan command shows on first
@@ -54,7 +53,7 @@ const _COMMANDS = [
   { id: 'act.system_scan',   label: 'Scan my system',       group: 'Actions', keywords: 'local run now',     run: () => openSystemScanModal(),
     condition: () => _platformWindows !== false },
   { id: 'act.download_agent', label: 'Install Pulse Agent', group: 'Actions', keywords: 'download agent windows host enroll',
-    run: () => { setActiveSettingsTab('agents'); navigate('settings'); },
+    run: () => navigate('settings', { tab: 'agents' }),
     condition: () => _platformWindows === false },
   { id: 'act.toggle_theme',  label: 'Toggle dark / light',  group: 'Actions', keywords: 'theme appearance',  run: () => toggleTheme() },
 ];

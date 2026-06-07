@@ -1587,12 +1587,8 @@ export function navigateOnboarding(arg) {
   // dashboard.js and navigation.js (navigation already imports from
   // dashboard for its renderer dispatch).
   import('./navigation.js').then(function (m) {
-    if (parts[1] && page === 'settings') {
-      // Stash the tab in localStorage for the Settings renderer to
-      // pick up on its next render. setActiveSettingsTab reads it.
-      try { localStorage.setItem('pulseSettingsActiveTab', parts[1]); } catch (e) {}
-    }
-    m.navigateWithHistory(page);
+    // "settings:notifications" style targets deep-link straight to the tab.
+    m.navigate(page, { tab: parts[1] || undefined });
   });
 }
 

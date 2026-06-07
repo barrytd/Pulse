@@ -5,6 +5,14 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Settings Profile/Account split + tab routing
+
+- **Split the Profile tab in two.** **Profile** now holds identity only — profile picture / Upload Avatar, display name (with the admin "Edit on the Users tab" link), and role + description. A new **Account** tab (directly below Profile) holds the sign-in management section — account email, new/current password, Save account changes, and Sign out.
+- **Account-dropdown links now route distinctly** instead of all landing on the same page: **View Profile → Settings ▸ Profile**, **Manage Account → Settings ▸ Account**. The sidebar **Settings** item still opens on the default first tab (Profile). Each deep-links straight to the correct tab.
+- **Settings tabs are now real routes** — `/settings/profile`, `/settings/account`, `/settings/notifications`, etc. The active tab is reflected in the URL (in-page tab clicks `replaceState`; deep-links `pushState`), so refresh + back/forward behave correctly. Added the server-side `/settings/{tab}` SPA route (and a missing `/queue` route) so a direct load of a deep link serves the app shell. Threat-intel + onboarding links now deep-link to the exact tab; the old `localStorage` tab hand-off was removed.
+
+---
+
 ## 2026-06-07 — Finding drawer + theme-toggle polish
 
 - **Workflow selector** — dropped the "New" button. The selector now offers only **Acknowledged / Investigating / Resolved**; an untouched finding shows no highlighted pill (the implicit "new" state is never labeled or logged). Clicking a pill sets + saves + audits it; clicking the **active** pill again is a single-step undo that reverts to the value held right before that selection (a prior pill re-highlights; no prior → back to no pill). Reverting to the untouched state clears `workflow_status` + `workflow_updated_at` **without** writing an audit entry. The "Updated …" line tracks the most recent real change.

@@ -17,7 +17,7 @@ import { renderHistoryPage } from './history.js';
 import { renderFleetPage } from './fleet.js';
 import { renderFirewallPage } from './firewall.js';
 import { renderWhitelistPage } from './whitelist.js';
-import { renderSettingsPage } from './settings.js';
+import { renderSettingsPage, setActiveSettingsTab, getActiveSettingsTab } from './settings.js';
 import { renderReportsPage } from './reports.js';
 import { renderRulesPage } from './rules.js';
 import { renderSecurityAdvisorPage } from './advisor.js';
@@ -46,25 +46,51 @@ export function parsePath(pathname) {
   if (first === 'scans' && parts[1] && /^\d+$/.test(parts[1])) {
     return { page: 'scans', scanId: Number(parts[1]) };
   }
+  // /settings/<tab> — carry the tab so deep links + refresh land on it.
+  if (first === 'settings' && parts[1]) {
+    return { page: 'settings', settingsTab: parts[1] };
+  }
   if (validPages.indexOf(first) >= 0) return { page: first };
   return { page: 'dashboard' };
 }
 
-function _buildPath(page, scanId) {
+function _buildPath(page, scanId, settingsTab) {
   if (page === 'scans' && scanId) return '/scans/' + scanId;
+  if (page === 'settings' && settingsTab) return '/settings/' + settingsTab;
   return '/' + page;
 }
 
 // ----- navigate -----------------------------------------------------------
 export function navigate(page, opts) {
+  // The data-action dispatcher calls navigate(arg, targetEl, event), so the
+  // second argument may be a DOM node rather than an options object. Treat
+  // anything with a nodeType as "no options".
+  if (opts && opts.nodeType) opts = {};
   opts = opts || {};
+
+  // A data-arg link can encode the settings tab as "settings:account".
+  // Programmatic callers pass it as opts.tab instead.
+  var settingsTab = opts.tab;
+  if (typeof page === 'string' && page.indexOf(':') >= 0) {
+    var bits = page.split(':');
+    page = bits[0];
+    settingsTab = bits[1];
+  }
 
   // Any open detail flyout belongs to the previous page — close it
   // before we render the new page so the drawer doesn't persist (e.g.
   // a finding drawer hanging around when the user clicks Rules).
   _closeAnyOpenDrawer();
 
-  _syncUrl(page, opts.scanId, opts);
+  // Resolve the settings tab before the renderer + URL sync so both agree.
+  // A bare Settings navigation (sidebar, command palette) defaults to the
+  // first tab, Profile.
+  if (page === 'settings') {
+    setActiveSettingsTab(settingsTab || 'profile');
+    settingsTab = getActiveSettingsTab();
+  }
+
+  _syncUrl(page, opts.scanId, opts, settingsTab);
   _currentPage = page;
   _updateSidebarHighlight(page === 'scans' ? 'findings' : page);
   _updateTitle(_titleFor(page, opts.scanId));
@@ -111,14 +137,15 @@ export function navigate(page, opts) {
 // history entry". navigate() already pushes by default.
 export function navigateWithHistory(page) { navigate(page); }
 
-function _syncUrl(page, scanId, opts) {
-  var path = _buildPath(page, scanId);
+function _syncUrl(page, scanId, opts, settingsTab) {
+  var path = _buildPath(page, scanId, settingsTab);
   // Preserve the existing query string — dashboard filters write to
   // ?time=... via a separate replaceState, and we don't want to clobber
   // that when navigating between pages that share the same URL.
   var full = path + (location.search || '');
   var state = { page: page };
   if (scanId) state.scanId = scanId;
+  if (settingsTab) state.settingsTab = settingsTab;
 
   if (opts.push === false) return;
   if (opts.replace) {
@@ -173,14 +200,16 @@ function _closeAnyOpenDrawer() {
 // ----- back / forward -----------------------------------------------------
 window.addEventListener('popstate', function (event) {
   var st = event.state;
-  var page, scanId;
+  var page, scanId, settingsTab;
   if (st && st.page) {
     page = st.page;
     scanId = st.scanId || null;
+    settingsTab = st.settingsTab || null;
   } else {
     var parsed = parsePath(location.pathname);
     page = parsed.page;
     scanId = parsed.scanId || null;
+    settingsTab = parsed.settingsTab || null;
   }
-  navigate(page, { push: false, scanId: scanId });
+  navigate(page, { push: false, scanId: scanId, tab: settingsTab });
 });
