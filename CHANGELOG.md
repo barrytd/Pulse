@@ -5,6 +5,16 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-08 — Settings UI redesign (TryHackMe-style) + tab polish
+
+- **Wide, label-above form layout.** Replaced the old label-on-left two-column rows. The settings content is now a wide card (max-width 1200px, left-anchored next to the tab rail) with a reusable two-column field grid (`.settings-grid` / `.settings-field`, with `.full` to span). Each field's label sits above its input; inputs fill their column; buttons get their own row (`.settings-actions`); collapses to one column below 768px. Data-table pages (Findings, Audit, History, Scans, Fleet, Firewall, Reports) are untouched.
+- **MY ACCOUNT / SECURITY PIN** cards converted to the new grid (email full-width; password pairs side by side; actions on their own row).
+- **Profile tab tightened** — merged the "Profile Picture" and "Profile" cards into one. Avatar + Upload button lead the card; Display name + Role sit side by side in the grid.
+- **No more tab-switch flash.** Clicking a settings tab used to blank the page, refetch every endpoint, and rebuild the whole rail. Now a tab switch swaps only the content panel from a cache (`_panelCache`), keeps the rail + header mounted, and fades in over 120ms. Full render only on first load / cross-page nav / after a mutation.
+- **PIN show/hide eye** toggle on the PIN inputs, and the "Install Pulse Agent" numbered steps got proper alignment.
+
+---
+
 ## 2026-06-08 — Security PIN (step-up auth for destructive actions)
 
 Protects against a stolen session / account takeover: even with a valid login, an attacker can't do real damage without a second secret they don't have.

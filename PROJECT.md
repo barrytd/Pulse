@@ -97,7 +97,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - Login has rate limiting and lockout.
 - Each workspace's data is kept separate from every other workspace.
 - Response headers protect against clickjacking and content sniffing.
-- A security PIN (in progress) asks for a second confirmation before destructive actions like blocking an IP or removing a user, so a stolen login cannot do real damage.
+- A security PIN asks for a second confirmation before destructive actions like blocking an IP or removing a user, so a stolen login cannot do real damage. It is a separate secret from the password, opt-in per user, and locks out after repeated wrong tries.
 - The detection engine runs on the customer's own machine, so raw logs stay on their network.
 
 ## Pricing direction
@@ -106,7 +106,6 @@ Pulse is open source and free to self-host, and that will not change. The plan i
 
 ## What is next
 
-- Security PIN for sensitive actions (in progress).
 - A simple "add a host" flow with a one-line installer.
 - Tenant hardening before public sign-up (scope every admin to their own workspace, add a private platform-owner role).
 - Invite teammates by code.
