@@ -399,6 +399,25 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
                 pass
         return await call_next(request)
 
+    @app.middleware("http")
+    async def _security_headers(request, call_next):
+        """Defense-in-depth response headers on every response. Deliberately
+        omits a Content-Security-Policy for now — the SPA loads CDN scripts
+        (Lucide) and uses inline styles, so a CSP needs its own testing pass
+        before it can be enabled without breaking the UI."""
+        response = await call_next(request)
+        # Clickjacking — nothing should ever frame the app.
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        # Stop MIME-sniffing of responses (e.g. uploaded avatars served back).
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        # Don't leak full URLs (which can carry ids) to third-party origins.
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        # HSTS only in production (dev/CI run over plain HTTP).
+        if _is_production:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+
     _log_startup_summary(
         is_production=_is_production,
         yaml_found=os.path.exists(config_path),
@@ -3245,6 +3264,7 @@ def _register_routes(app: FastAPI) -> None:
                 assignee = int(raw)
             except (TypeError, ValueError):
                 raise HTTPException(400, detail="assignee_user_id must be an integer.")
+            _check_assignee_in_scope(assignee, user_id)
             # Optional triage priority + due date handed over with the
             # assignment (the assignment dialog sets these in one call).
             from pulse.database import _NOTE_UNCHANGED as _UNCH
@@ -3377,6 +3397,30 @@ def _register_routes(app: FastAPI) -> None:
                     raise HTTPException(404, detail="Finding not found.")
         return is_admin, owner
 
+    def _check_assignee_in_scope(assignee_user_id, user_id):
+        """When assigning a finding, the target user must belong to the
+        caller's organization — otherwise a manager could hand a finding to
+        someone in another tenant, who'd then see it in their queue. Admins
+        (global scope) and non-org single-user installs skip the check.
+        Raises 400 if the assignee is outside the caller's org."""
+        if assignee_user_id is None:
+            return
+        scope_kw = _read_scope_kwargs(app, user_id)
+        if not scope_kw or "organization_id" not in scope_kw:
+            return  # admin (global) or legacy single-user install
+        from pulse import db_backend
+        with db_backend.connect(app.state.db_path) as conn:
+            row = conn.execute(
+                "SELECT organization_id FROM users WHERE id = ?",
+                (int(assignee_user_id),),
+            ).fetchone()
+        org = None
+        if row is not None:
+            org = row[0] if not isinstance(row, dict) else row.get("organization_id")
+        if org is None or int(org) != int(scope_kw["organization_id"]):
+            raise HTTPException(
+                400, detail="Assignee is not a member of your organization.")
+
     @app.get("/api/finding/{finding_id}/notes")
     def finding_notes_list(finding_id: int,
                            user_id: int = Depends(require_login)):
@@ -3452,6 +3496,7 @@ def _register_routes(app: FastAPI) -> None:
                 assignee = int(raw)
             except (TypeError, ValueError):
                 raise HTTPException(400, detail="assignee_user_id must be an integer or null.")
+        _check_assignee_in_scope(assignee, user_id)
         # Capture the prior assignee BEFORE we update so the audit drawer
         # can render "Reassigned from Kwame Asante to Robert" rather than
         # just the new name. Both id + display name are stored so the
@@ -5073,6 +5118,10 @@ def _register_routes(app: FastAPI) -> None:
                 and priority not in FINDING_PRIORITIES:
             raise HTTPException(
                 400, detail="priority must be one of " + ", ".join(FINDING_PRIORITIES))
+        # Ownership/scope check — mirror /review, /workflow, /assign so a
+        # manager can only prioritize findings in their own org. 404s on a
+        # cross-scope id so existence doesn't leak.
+        _check_finding_scope(finding_id, user_id)
         from pulse.database import _NOTE_UNCHANGED as _UNCH
         ok = set_finding_priority(
             app.state.db_path, finding_id,

@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-07 — Security audit fixes (access control + headers)
+
+A hygiene + vulnerability pass (no committed secrets, no SQL/command injection, no XXE/path-traversal, XSS escaping verified sound, scrypt hashing + login lockout confirmed). Fixed the access-control gaps it surfaced:
+
+- **IDOR on `PUT /api/findings/{id}/priority` (fixed).** The priority endpoint (added with the team-queue work) skipped the ownership check every other finding endpoint does, so a manager could set priority/due-date on any finding in any org by id. Now calls `_check_finding_scope` → 404 cross-scope.
+- **Cross-org assignee leak (fixed).** `/api/finding/{id}/assign` and the batch assign validated that the assignee was *active* but not that they were in the caller's org — a manager could hand a finding to a user in another tenant, who'd then see it in their queue. Added `_check_assignee_in_scope` → 400 on an out-of-org assignee.
+- **Security headers (added).** Every response now sends `X-Frame-Options: DENY` (clickjacking), `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin`; `Strict-Transport-Security` in production. (A Content-Security-Policy is intentionally deferred — the SPA uses CDN scripts + inline styles and needs a dedicated CSP pass.)
+- 2 cross-tenant IDOR regression tests added (`test_data_isolation.py`). 1163 tests pass.
+
+*Flagged for a decision (not changed here):* tenant **admins currently have global scope** across all orgs and the `/api/users` management endpoints aren't org-scoped — fine for single-tenant, but a cross-tenant boundary break if hosted multi-tenant signup is enabled. Plus CSRF relies on `SameSite=Lax` only, and the rate limiter trusts `X-Forwarded-For`. These need a deliberate hardening pass before any multi-tenant launch.
+
+---
+
 ## 2026-06-07 — Settings Profile/Account split + tab routing
 
 - **Split the Profile tab in two.** **Profile** now holds identity only — profile picture / Upload Avatar, display name (with the admin "Edit on the Users tab" link), and role + description. A new **Account** tab (directly below Profile) holds the sign-in management section — account email, new/current password, Save account changes, and Sign out.

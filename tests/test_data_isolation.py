@@ -478,3 +478,65 @@ def test_cross_tenant_delete_is_noop(two_tenant_client):
     r = client.request("DELETE", "/api/scans", json={"ids": [sid_a]})
     assert r.status_code == 200
     assert r.json()["deleted"] == 0
+
+
+def _two_orgs_with_manager_b(tmp_path):
+    """Org A (with an analyst + a scan/finding) and Org B (with a manager).
+    Returns (client, db_path, org_a_finding_id, uid_a, mgr_b)."""
+    import sqlite3
+    from pulse.auth import hash_password
+    db_path = tmp_path / "test.db"
+    config_path = tmp_path / "pulse.yaml"
+    config_path.write_text("whitelist:\n  accounts: []\n")
+    app = create_app(db_path=str(db_path), config_path=str(config_path))
+    client = TestClient(app)
+    org_a = database.create_organization(str(db_path), name="Acme")
+    org_b = database.create_organization(str(db_path), name="Initech")
+    uid_a = database.create_user(
+        str(db_path), "an-a@acme.test", hash_password("correct-horse-battery"),
+        role="analyst", organization_id=org_a)
+    mgr_b = database.create_user(
+        str(db_path), "mgr-b@initech.test", hash_password("another-long-password"),
+        role="manager", organization_id=org_b)
+    database.save_scan(
+        str(db_path),
+        [{"rule": "RDP Logon Detected", "severity": "HIGH", "hostname": "ACME-PC"}],
+        filename="acme.evtx", user_id=uid_a)
+    with sqlite3.connect(db_path) as conn:
+        fid_a = conn.execute("SELECT id FROM findings ORDER BY id DESC LIMIT 1").fetchone()[0]
+    return client, db_path, fid_a, uid_a, mgr_b
+
+
+def test_cross_tenant_priority_is_404(tmp_path):
+    """IDOR regression: a manager in org B cannot set priority on org A's
+    finding (PUT /api/findings/{id}/priority must scope-check)."""
+    import sqlite3
+    client, db_path, fid_a, _uid_a, _mgr_b = _two_orgs_with_manager_b(tmp_path)
+    client.post("/api/auth/login", json={
+        "email": "mgr-b@initech.test", "password": "another-long-password"})
+    r = client.put(f"/api/findings/{fid_a}/priority", json={"priority": "P1"})
+    assert r.status_code == 404
+    with sqlite3.connect(db_path) as conn:
+        prio = conn.execute(
+            "SELECT priority FROM findings WHERE id=?", (fid_a,)).fetchone()[0]
+    assert prio is None   # the cross-org write was blocked, not silently applied
+
+
+def test_cross_tenant_assignee_rejected(tmp_path):
+    """A manager cannot assign one of their own findings to a user in
+    another org (assignee-scope regression for /api/finding/{id}/assign)."""
+    import sqlite3
+    client, db_path, _fid_a, uid_a, mgr_b = _two_orgs_with_manager_b(tmp_path)
+    # Give org B a finding of its own.
+    database.save_scan(
+        str(db_path),
+        [{"rule": "Audit Log Cleared", "severity": "CRITICAL", "hostname": "INIT-PC"}],
+        filename="init.evtx", user_id=mgr_b)
+    with sqlite3.connect(db_path) as conn:
+        fid_b = conn.execute(
+            "SELECT id FROM findings ORDER BY id DESC LIMIT 1").fetchone()[0]
+    client.post("/api/auth/login", json={
+        "email": "mgr-b@initech.test", "password": "another-long-password"})
+    # Assigning org B's finding to org A's user must be rejected.
+    r = client.put(f"/api/finding/{fid_b}/assign", json={"assignee_user_id": uid_a})
+    assert r.status_code == 400
