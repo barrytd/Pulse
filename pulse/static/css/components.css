@@ -284,7 +284,12 @@
 .form-column,
 .settings-tab-content {
   min-width: 0;
-  max-width: 720px;   /* left-aligns under the page heading */
+  max-width: 720px;
+  /* Center the capped column in its available area so the empty space is
+     balanced on both sides instead of pooling on one. Auto margins center
+     a block element and also center a grid item within its track (the
+     settings content sits in the 1fr column to the right of the tab rail). */
+  margin-inline: auto;
 }
 
 /* Advanced tab — collapsible SMTP block */
