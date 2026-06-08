@@ -404,20 +404,22 @@ export async function renderSettingsPage() {
     avatarHtml +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Profile</div>' +
-      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">' +
         'How you appear in Pulse.' +
       '</p>' +
-      '<div class="form-row"><label>Display name</label>' +
+      '<div class="settings-grid">' +
+      '<div class="settings-field"><label>Display name</label>' +
         '<div class="profile-name-row">' +
           '<span class="profile-name-value">' + displayNameHtml + '</span>' +
           nameHint +
         '</div>' +
       '</div>' +
-      '<div class="form-row"><label>Role</label>' +
+      '<div class="settings-field full"><label>Role</label>' +
         '<div class="profile-role-row">' +
           '<span class="profile-role-value">' + escapeHtml(roleLabel) + '</span>' +
           '<span class="profile-role-hint">' + escapeHtml(roleExplain) + '</span>' +
         '</div>' +
+      '</div>' +
       '</div>' +
     '</div>';
 
@@ -426,16 +428,18 @@ export async function renderSettingsPage() {
   var accountHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">My Account</div>' +
-      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">' +
         'The email and password you use to sign in to Pulse.' +
       '</p>' +
-      '<div class="form-row"><label>Account email</label>' +
-        '<input type="email" id="account-email" value="' + escapeHtml(auth.email || '') + '"/></div>' +
-      '<div class="form-row"><label>New password</label>' +
-        '<input type="password" id="account-new-password" placeholder="leave blank to keep current" autocomplete="new-password"/></div>' +
-      '<div class="form-row"><label>Current password</label>' +
-        '<input type="password" id="account-current-password" placeholder="required to change email or password" autocomplete="current-password"/></div>' +
-      '<div class="form-actions">' +
+      '<div class="settings-grid">' +
+        '<div class="settings-field full"><label for="account-email">Account email</label>' +
+          '<input type="email" id="account-email" value="' + escapeHtml(auth.email || '') + '"/></div>' +
+        '<div class="settings-field"><label for="account-new-password">New password</label>' +
+          '<input type="password" id="account-new-password" placeholder="leave blank to keep current" autocomplete="new-password"/></div>' +
+        '<div class="settings-field"><label for="account-current-password">Current password</label>' +
+          '<input type="password" id="account-current-password" placeholder="required to change email or password" autocomplete="current-password"/></div>' +
+      '</div>' +
+      '<div class="settings-actions">' +
         '<button class="btn btn-primary btn-with-icon" data-action="saveAccount"><i data-lucide="save"></i><span>Save account changes</span></button>' +
         '<button class="btn btn-with-icon" data-action="signOut"><i data-lucide="log-out"></i><span>Sign out</span></button>' +
       '</div>' +

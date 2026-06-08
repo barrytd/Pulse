@@ -275,21 +275,78 @@
   border-color: var(--border);
   font-weight: 500;
 }
-/* Form-content width convention.
- * Form / settings surfaces cap their content column so a short field like
- * email or PIN doesn't stretch into a giant empty bar on wide screens.
- * `.form-column` is the reusable wrapper; the settings content column adopts
- * the same cap. DO NOT put this on data-table pages (Findings, Audit,
- * History, Scans, Fleet, Firewall, Reports) — their columns need the room. */
+/* Form / settings content column (TryHackMe-style).
+ * A wide card area anchored left next to the tab rail. Fills the available
+ * space up to ~1200px with a small right margin so it's not edge-to-edge.
+ * DO NOT put this on data-table pages (Findings, Audit, History, Scans,
+ * Fleet, Firewall, Reports) — their columns need the full width. */
 .form-column,
 .settings-tab-content {
   min-width: 0;
-  max-width: 720px;
-  /* Center the capped column in its available area so the empty space is
-     balanced on both sides instead of pooling on one. Auto margins center
-     a block element and also center a grid item within its track (the
-     settings content sits in the 1fr column to the right of the tab rail). */
-  margin-inline: auto;
+  max-width: 1200px;
+  margin-right: 16px;   /* small right gap; left-anchored to the rail */
+}
+
+/* ------------------------------------------------------------------ */
+/* Reusable settings-form layout — responsive two-column field grid    */
+/* with each field's LABEL ABOVE its input. Fields default to one       */
+/* column; mark a field `.full` to span both. Below 768px collapses to  */
+/* a single column. Used by every settings card + form surface.         */
+/* ------------------------------------------------------------------ */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 20px;
+  align-items: start;
+}
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* Wide fields span the whole card: email, URLs, text areas, full selects. */
+.settings-field.full { grid-column: 1 / -1; }
+.settings-field > label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text-muted);
+}
+.settings-field input,
+.settings-field select,
+.settings-field textarea {
+  width: 100%;                 /* fills the grid column — no tiny fixed cap */
+  padding: 9px 11px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.settings-field textarea { min-height: 76px; resize: vertical; }
+.settings-field input:focus,
+.settings-field select:focus,
+.settings-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* The PIN reveal wrapper fills its field column so the eye stays at the
+   input's right edge. */
+.settings-field .pin-input-wrap { width: 100%; max-width: none; }
+
+/* A buttons row that sits on its own line under the field grid. */
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+@media (max-width: 768px) {
+  .settings-grid { grid-template-columns: 1fr; }
 }
 
 /* Advanced tab — collapsible SMTP block */
@@ -734,18 +791,22 @@ body.light .admin-banner-close {
 }
 
 /* Settings form fields */
+/* Legacy single-field row — now label-ABOVE-input to match the settings
+   redesign. Sits in a comfortable column instead of a 160px label + wide
+   input. Cards that want true two-column pairing use .settings-grid. */
 .form-row {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  max-width: 480px;
 }
 
 .form-row label {
-  font-size: 13px;
-  color: var(--text);
-  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .form-row input[type="text"],
@@ -753,12 +814,8 @@ body.light .admin-banner-close {
 .form-row input[type="number"],
 .form-row input[type="password"],
 .form-row select {
-  width: 100%;
-  /* Short fields cap at 420px so they don't run edge-to-edge inside the
-     720px form column. Longer free-text (textareas) is exempt; opt a
-     specific input wider with .field-wide or narrower with .field-short. */
-  max-width: 420px;
-  padding: 8px 10px;
+  width: 100%;            /* fills the row column */
+  padding: 9px 11px;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -767,16 +824,12 @@ body.light .admin-banner-close {
   font-size: 13px;
   box-sizing: border-box;
 }
-/* The PIN reveal wrapper must carry the same cap so the eye button (pinned
-   to its right edge) lines up with the input, not the full cell width. */
-.form-row .pin-input-wrap {
-  width: 100%;
-  max-width: 420px;
-}
+.form-row .pin-input-wrap { width: 100%; max-width: none; }
 
-/* Reusable input-width helpers for surfaces that don't use .form-row. */
+/* Reusable input-width helpers. .field-full lets a .form-row span wide
+   (e.g. a URL or textarea row); .field-short keeps one narrow. */
+.field-full  { max-width: 100% !important; }
 .field-short { max-width: 420px !important; }
-.field-wide  { max-width: 100%  !important; }
 
 .form-row input:focus, .form-row select:focus {
   outline: none;
@@ -784,10 +837,9 @@ body.light .admin-banner-close {
 }
 
 .form-row .form-hint {
-  grid-column: 2;
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: -4px;
+  margin-top: 0;
 }
 
 .form-actions {

@@ -206,18 +206,20 @@ export function pinCardHtml(status) {
       'removing a user, changing a role). Protects your account if your ' +
       'session is ever stolen. ' + stateLine +
     '</p>' +
-    '<div class="form-row"><label>' + (isSet ? 'New PIN' : 'PIN') + '</label>' +
-      '<div class="pin-input-wrap">' +
-        '<input type="password" id="pin-new" inputmode="numeric" autocomplete="off" ' +
-          'maxlength="12" placeholder="4-12 digits"/>' +
-        '<button type="button" class="pin-reveal-btn" data-action="togglePinReveal" ' +
-          'aria-label="Show PIN" title="Show / hide" tabindex="-1"><i data-lucide="eye"></i></button>' +
-      '</div></div>' +
-    '<div class="form-row"><label>Account password</label>' +
-      '<input type="password" id="pin-current-password" autocomplete="current-password" ' +
-        'placeholder="confirm it’s you"/></div>' +
+    '<div class="settings-grid">' +
+      '<div class="settings-field"><label for="pin-new">' + (isSet ? 'New PIN' : 'PIN') + '</label>' +
+        '<div class="pin-input-wrap">' +
+          '<input type="password" id="pin-new" inputmode="numeric" autocomplete="off" ' +
+            'maxlength="12" placeholder="4-12 digits"/>' +
+          '<button type="button" class="pin-reveal-btn" data-action="togglePinReveal" ' +
+            'aria-label="Show PIN" title="Show / hide" tabindex="-1"><i data-lucide="eye"></i></button>' +
+        '</div></div>' +
+      '<div class="settings-field"><label for="pin-current-password">Account password</label>' +
+        '<input type="password" id="pin-current-password" autocomplete="current-password" ' +
+          'placeholder="confirm it’s you"/></div>' +
+    '</div>' +
     '<div class="assign-status" id="pin-setup-status"></div>' +
-    '<div class="form-actions">' +
+    '<div class="settings-actions">' +
       '<button class="btn btn-primary btn-with-icon" data-action="savePin">' +
         '<i data-lucide="shield-check"></i><span>' + (isSet ? 'Change PIN' : 'Set PIN') + '</span></button>' +
       (isSet
