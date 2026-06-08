@@ -124,11 +124,6 @@ export function openProfile() {
   navigate('settings', { tab: 'profile' });
 }
 
-export function openAccountSettings() {
-  _closeUserMenu();
-  navigate('settings', { tab: 'account' });
-}
-
 export function openDocs() {
   _closeUserMenu();
   window.open(GITHUB_REPO + '#readme', '_blank', 'noopener');

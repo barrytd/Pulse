@@ -43,7 +43,7 @@ const _COMMANDS = [
   { id: 'nav.audit',      label: 'Audit log',       group: 'Go to', keywords: 'audit trail', run: () => navigate('audit') },
   { id: 'nav.compliance', label: 'Compliance',      group: 'Go to', keywords: 'nist iso 27001 csf', run: () => navigate('compliance') },
   { id: 'nav.trends',     label: 'Trends',          group: 'Go to', keywords: 'analytics chart', run: () => navigate('trends') },
-  { id: 'nav.settings',   label: 'Manage Account',  group: 'Go to', keywords: 'settings account email webhook profile', run: () => navigate('settings') },
+  { id: 'nav.settings',   label: 'Settings',        group: 'Go to', keywords: 'account email webhook profile', run: () => navigate('settings') },
 
   // Actions
   { id: 'act.start_monitor', label: 'Start monitoring',     group: 'Actions', keywords: 'watch live begin', run: () => monitorClient.start() },

@@ -247,7 +247,6 @@ import {
   mountUserMenu,
   toggleUserMenu,
   openProfile,
-  openAccountSettings,
   openDocs,
   openFeedback,
   logOutFromMenu,
@@ -529,7 +528,6 @@ const actions = {
   // user menu
   toggleUserMenu,
   openProfile,
-  openAccountSettings,
   openDocs,
   openFeedback,
   logOutFromMenu,
