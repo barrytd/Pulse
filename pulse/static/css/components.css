@@ -1264,6 +1264,22 @@ body.light .admin-banner-close {
 /* Profile tab — read-only Display name row with an "Edit on Users"
    nudge. Mirrors the .form-row grid so the value aligns with the
    email/password inputs below it. */
+/* Avatar row at the top of the merged Profile card — avatar + upload
+   button, with a hairline divider separating it from the field grid. */
+.profile-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.profile-avatar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .profile-name-row {
   display: flex;
   align-items: center;

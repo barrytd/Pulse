@@ -351,17 +351,16 @@ export async function renderSettingsPage() {
   var avatarImg = (me && me.has_avatar)
     ? '<img id="profile-avatar-img" src="/api/me/avatar' + (avatarCacheBuster ? ('?v=' + avatarCacheBuster) : '') + '" alt="Avatar" style="width:72px; height:72px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);"/>'
     : '<div id="profile-avatar-img" style="width:72px; height:72px; border-radius:50%; background:var(--bg); border:2px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:24px;">' + escapeHtml((auth.email || '?').charAt(0).toUpperCase()) + '</div>';
-  var avatarHtml =
-    '<div class="card" style="margin-bottom:16px;">' +
-      '<div class="section-label">Profile Picture</div>' +
-      '<div style="display:flex; align-items:center; gap:18px;">' +
-        avatarImg +
-        '<div style="display:flex; flex-direction:column; gap:6px;">' +
-          '<button class="btn btn-secondary btn-with-icon" data-action="uploadAvatarClick" type="button"><i data-lucide="upload"></i><span>Upload Avatar</span></button>' +
-          '<span style="color:var(--text-muted); font-size:12px;">Max size 2MB. Formats: JPG, PNG.</span>' +
-        '</div>' +
-        '<input type="file" id="profile-avatar-input" accept="image/png,image/jpeg" style="display:none;" data-action-change="onAvatarFileSelected"/>' +
+  // Avatar row — sits at the top of the merged Profile card (matches the
+  // TryHackMe "General Information" card where the avatar leads).
+  var avatarRowHtml =
+    '<div class="profile-avatar-row">' +
+      avatarImg +
+      '<div class="profile-avatar-actions">' +
+        '<button class="btn btn-secondary btn-with-icon" data-action="uploadAvatarClick" type="button"><i data-lucide="upload"></i><span>Upload Avatar</span></button>' +
+        '<span style="color:var(--text-muted); font-size:12px;">Max size 2MB. Formats: JPG, PNG.</span>' +
       '</div>' +
+      '<input type="file" id="profile-avatar-input" accept="image/png,image/jpeg" style="display:none;" data-action-change="onAvatarFileSelected"/>' +
     '</div>';
 
   // Display name is admin-editable only (Settings > Users). Show the
@@ -400,26 +399,28 @@ export async function renderSettingsPage() {
 
   // Profile tab — identity only: avatar, display name, role. The sign-in
   // controls (email / password) live on the separate Account tab.
+  // Profile tab — one card: avatar row on top, then Display name + Role
+  // side by side in the same two-column grid the Account tab uses.
   var profileHtml =
-    avatarHtml +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Profile</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">' +
         'How you appear in Pulse.' +
       '</p>' +
+      avatarRowHtml +
       '<div class="settings-grid">' +
-      '<div class="settings-field"><label>Display name</label>' +
-        '<div class="profile-name-row">' +
-          '<span class="profile-name-value">' + displayNameHtml + '</span>' +
-          nameHint +
+        '<div class="settings-field"><label>Display name</label>' +
+          '<div class="profile-name-row">' +
+            '<span class="profile-name-value">' + displayNameHtml + '</span>' +
+            nameHint +
+          '</div>' +
         '</div>' +
-      '</div>' +
-      '<div class="settings-field full"><label>Role</label>' +
-        '<div class="profile-role-row">' +
-          '<span class="profile-role-value">' + escapeHtml(roleLabel) + '</span>' +
-          '<span class="profile-role-hint">' + escapeHtml(roleExplain) + '</span>' +
+        '<div class="settings-field"><label>Role</label>' +
+          '<div class="profile-role-row">' +
+            '<span class="profile-role-value">' + escapeHtml(roleLabel) + '</span>' +
+            '<span class="profile-role-hint">' + escapeHtml(roleExplain) + '</span>' +
+          '</div>' +
         '</div>' +
-      '</div>' +
       '</div>' +
     '</div>';
 
