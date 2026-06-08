@@ -50,9 +50,11 @@ from fastapi.staticfiles import StaticFiles
 from pulse import __version__
 from pulse.auth import (
     SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS,
+    ELEVATION_COOKIE_NAME, ELEVATION_MAX_AGE_SECONDS,
     ensure_session_secret, generate_api_token, hash_password,
     issue_session_cookie, require_admin, require_login, require_manager,
-    verify_password,
+    verify_password, hash_pin, verify_pin, validate_pin_format,
+    issue_elevation_cookie, verify_elevation_cookie,
 )
 from pulse.database import (
     count_admins, count_users, create_api_token, create_user,
@@ -72,6 +74,8 @@ from pulse.database import (
     batch_set_finding_assignee, batch_set_finding_review,
     update_user_active, update_user_display_name,
     update_user_email, update_user_password,
+    set_user_pin, clear_user_pin, get_user_pin_hash, user_has_pin,
+    record_pin_failure, reset_pin_failures, get_pin_lockout_remaining,
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
     count_finding_notes, list_all_notes,
@@ -1412,6 +1416,119 @@ def _register_routes(app: FastAPI) -> None:
             },
         }
 
+    # -------------------------------------------------------------------
+    # Security PIN — step-up auth for destructive actions.
+    #   GET    /api/me/pin          — is a PIN set? is it locked?
+    #   POST   /api/me/pin          — set or change the PIN (needs password)
+    #   DELETE /api/me/pin          — remove the PIN (needs password)
+    #   POST   /api/me/pin/verify   — confirm the PIN, granting a 5-min
+    #                                 elevation cookie used by gated actions.
+    # The PIN is a SEPARATE secret from the password + session, so a stolen
+    # session can't use it. Setting/changing requires the password so a
+    # session-thief can't lock the real owner out.
+    # -------------------------------------------------------------------
+    def _require_elevation(request, user_id):
+        """Gate a sensitive action: if the user has a PIN, a fresh elevation
+        cookie (granted by /api/me/pin/verify, 5-min TTL, bound to this user)
+        is required. Users without a PIN pass (opt-in). Raises 403 with a
+        ``pin_required`` code the frontend uses to pop the PIN prompt."""
+        if not app.state.auth_required:
+            return
+        if not user_has_pin(app.state.db_path, user_id):
+            return  # opt-in: no PIN configured
+        cookie = request.cookies.get(ELEVATION_COOKIE_NAME)
+        elev_uid = (verify_elevation_cookie(app.state.session_secret, cookie)
+                    if cookie else None)
+        if elev_uid != user_id:
+            raise HTTPException(
+                403, detail={"code": "pin_required",
+                             "message": "Confirm your PIN to continue."})
+
+    @app.get("/api/me/pin")
+    def api_me_pin_status(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"pin_set": False, "locked_seconds": 0}
+        return {
+            "pin_set": user_has_pin(app.state.db_path, user_id),
+            "locked_seconds": get_pin_lockout_remaining(app.state.db_path, user_id),
+        }
+
+    @app.post("/api/me/pin")
+    async def api_me_pin_set(request: Request, user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Setting a PIN requires auth.")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        pin = str(body.get("pin") or "")
+        current_password = str(body.get("current_password") or "")
+        if not validate_pin_format(pin):
+            raise HTTPException(400, detail="PIN must be 4-12 digits.")
+        # Require the account password to set or change the PIN — blocks a
+        # session-only attacker from setting their own PIN.
+        user = get_user_by_id(app.state.db_path, user_id)
+        if not user or not verify_password(current_password, user["password_hash"]):
+            raise HTTPException(403, detail="Current password is incorrect.")
+        set_user_pin(app.state.db_path, user_id, hash_pin(pin))
+        _audit_user_action(user_id, "set_security_pin", target=str(user_id))
+        return {"status": "ok", "pin_set": True}
+
+    @app.delete("/api/me/pin")
+    async def api_me_pin_clear(request: Request, user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Removing a PIN requires auth.")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        current_password = str(body.get("current_password") or "")
+        user = get_user_by_id(app.state.db_path, user_id)
+        if not user or not verify_password(current_password, user["password_hash"]):
+            raise HTTPException(403, detail="Current password is incorrect.")
+        clear_user_pin(app.state.db_path, user_id)
+        _audit_user_action(user_id, "clear_security_pin", target=str(user_id))
+        return {"status": "ok", "pin_set": False}
+
+    @app.post("/api/me/pin/verify")
+    async def api_me_pin_verify(request: Request, response: Response,
+                                user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"status": "ok"}
+        # Lockout check first — a low-entropy PIN must not be brute-forceable.
+        locked = get_pin_lockout_remaining(app.state.db_path, user_id)
+        if locked > 0:
+            raise HTTPException(
+                423, detail={"code": "pin_locked", "locked_seconds": locked,
+                             "message": f"Too many attempts. Try again in {locked // 60 + 1} min."})
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        pin = str(body.get("pin") or "")
+        stored = get_user_pin_hash(app.state.db_path, user_id)
+        if not stored:
+            raise HTTPException(400, detail="No PIN is set on this account.")
+        if not verify_pin(pin, stored):
+            attempts_left, lock_secs = record_pin_failure(app.state.db_path, user_id)
+            if lock_secs:
+                raise HTTPException(
+                    423, detail={"code": "pin_locked", "locked_seconds": lock_secs,
+                                 "message": "Too many attempts. Account locked for 15 min."})
+            raise HTTPException(
+                401, detail={"code": "pin_wrong", "attempts_left": attempts_left,
+                             "message": f"Incorrect PIN. {attempts_left} attempt(s) left."})
+        # Correct PIN — reset failures + grant a short elevation cookie.
+        reset_pin_failures(app.state.db_path, user_id)
+        response.set_cookie(
+            ELEVATION_COOKIE_NAME,
+            issue_elevation_cookie(app.state.session_secret, user_id),
+            max_age=ELEVATION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+            secure=bool(getattr(app.state, "is_production", False)),
+        )
+        _audit_user_action(user_id, "pin_elevation_granted", target=str(user_id))
+        return {"status": "ok", "elevated_seconds": ELEVATION_MAX_AGE_SECONDS}
+
     @app.post("/api/me/onboarding/dismiss")
     def api_me_onboarding_dismiss(user_id: int = Depends(require_login)):
         if not app.state.auth_required:
@@ -2031,6 +2148,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.put("/api/users/{target_id}/role")
     async def api_update_user_role(target_id: int, request: Request,
                                    user_id: int = Depends(require_admin)):
+        _require_elevation(request, user_id)   # PIN step-up
         from pulse.database import normalize_role, VALID_ROLES
         body = await request.json()
         role = normalize_role(body.get("role"))
@@ -2084,6 +2202,7 @@ def _register_routes(app: FastAPI) -> None:
     @app.put("/api/users/{target_id}/active")
     async def api_update_user_active(target_id: int, request: Request,
                                      user_id: int = Depends(require_admin)):
+        _require_elevation(request, user_id)   # PIN step-up
         body = await request.json()
         active = bool(body.get("active"))
         target = get_user_by_id(app.state.db_path, target_id)
@@ -2100,7 +2219,9 @@ def _register_routes(app: FastAPI) -> None:
         return _public_user(get_user_by_id(app.state.db_path, target_id))
 
     @app.delete("/api/users/{target_id}")
-    def api_delete_user(target_id: int, user_id: int = Depends(require_admin)):
+    def api_delete_user(target_id: int, request: Request,
+                        user_id: int = Depends(require_admin)):
+        _require_elevation(request, user_id)   # PIN step-up
         target = get_user_by_id(app.state.db_path, target_id)
         if not target:
             raise HTTPException(404, detail="User not found.")
@@ -2730,6 +2851,7 @@ def _register_routes(app: FastAPI) -> None:
     async def block_ip_post(request: Request, user_id: int = Depends(require_login)):
         """Stage a source IP for blocking. Optional {confirm: true} pushes
         it to Windows Firewall immediately (Windows + admin required)."""
+        _require_elevation(request, user_id)   # PIN step-up
         from pulse.firewall import blocker
 
         raw_body = await request.body()
@@ -2793,7 +2915,8 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     @app.post("/api/block-list/push")
-    def block_list_push(user_id: int = Depends(require_login)):
+    def block_list_push(request: Request, user_id: int = Depends(require_login)):
+        _require_elevation(request, user_id)   # PIN step-up
         from pulse.firewall import blocker
         user = get_user_by_id(app.state.db_path, user_id) or {}
         result = blocker.push_pending(app.state.db_path, source="dashboard", user=user.get("email"))
@@ -2818,7 +2941,9 @@ def _register_routes(app: FastAPI) -> None:
     # Registered BEFORE the /{ip:path} catch-all so "batch" doesn't get
     # swallowed as an IP string.
     @app.delete("/api/block-ip/batch")
-    def block_ip_delete_batch(payload: dict = Body(...), user_id: int = Depends(require_login)):
+    def block_ip_delete_batch(request: Request, payload: dict = Body(...),
+                              user_id: int = Depends(require_login)):
+        _require_elevation(request, user_id)   # PIN step-up
         from pulse.firewall import blocker
         ips = payload.get("ips") if isinstance(payload, dict) else None
         if not isinstance(ips, list) or not ips:
@@ -2841,7 +2966,8 @@ def _register_routes(app: FastAPI) -> None:
         return {"deleted": deleted, "failed": failed}
 
     @app.delete("/api/block-ip/{ip:path}")
-    def block_ip_delete(ip: str, user_id: int = Depends(require_login)):
+    def block_ip_delete(ip: str, request: Request, user_id: int = Depends(require_login)):
+        _require_elevation(request, user_id)   # PIN step-up
         from pulse.firewall import blocker
         user = get_user_by_id(app.state.db_path, user_id) or {}
         result = blocker.unblock_ip(

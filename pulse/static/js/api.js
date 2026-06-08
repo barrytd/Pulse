@@ -3,6 +3,8 @@
 // Cached API blobs live here too.
 'use strict';
 
+import { pinGuard } from './pin.js';
+
 // ---------------------------------------------------------------
 // Shared cached API data so pages don't re-fetch every click.
 // Module-level state; invalidators live on the exported setters below.
@@ -478,18 +480,22 @@ export async function apiCreateUser(body) {
 }
 
 export async function apiUpdateUserRole(userId, role) {
-  return fetch('/api/users/' + Number(userId) + '/role', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role: role }),
+  return pinGuard(function () {
+    return fetch('/api/users/' + Number(userId) + '/role', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: role }),
+    });
   });
 }
 
 export async function apiUpdateUserActive(userId, active) {
-  return fetch('/api/users/' + Number(userId) + '/active', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ active: !!active }),
+  return pinGuard(function () {
+    return fetch('/api/users/' + Number(userId) + '/active', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !!active }),
+    });
   });
 }
 
@@ -508,7 +514,9 @@ export async function apiUpdateUserDisplayName(userId, displayName) {
 }
 
 export async function apiDeleteUser(userId) {
-  return fetch('/api/users/' + Number(userId), { method: 'DELETE' });
+  return pinGuard(function () {
+    return fetch('/api/users/' + Number(userId), { method: 'DELETE' });
+  });
 }
 
 export async function apiWhitelistBuiltin() {

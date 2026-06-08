@@ -45,6 +45,7 @@ import {
   resetSeverityColors,
 } from './severity-colors.js';
 import { refreshUserMenuAvatar, refreshUserMenuIdentity } from './user-menu.js';
+import { fetchPinStatus, pinCardHtml } from './pin.js';
 
 // Map the "Email provider" dropdown back to host+port so users never
 // have to know those exist for Gmail/Outlook/Yahoo.
@@ -167,6 +168,10 @@ export async function renderSettingsPage() {
   var me     = _val(3, { role: null });
   if (!rules || !Array.isArray(rules.rules)) rules = { rules: [] };
   var isAdmin = (me && me.role === 'admin');
+
+  // Security PIN status for the Account tab card (best-effort).
+  var _pinStatus = { pin_set: false };
+  try { _pinStatus = await fetchPinStatus(); } catch (e) { _pinStatus = { pin_set: false }; }
 
   // Admin-only users fetch — skip the round-trip for non-admins. The
   // server would 403 anyway, but avoiding it keeps the Network tab clean.
@@ -434,7 +439,10 @@ export async function renderSettingsPage() {
         '<button class="btn btn-primary btn-with-icon" data-action="saveAccount"><i data-lucide="save"></i><span>Save account changes</span></button>' +
         '<button class="btn btn-with-icon" data-action="signOut"><i data-lucide="log-out"></i><span>Sign out</span></button>' +
       '</div>' +
-    '</div>';
+    '</div>' +
+    // Security PIN card (step-up auth) — best-effort status fetch; a failure
+    // just hides the card rather than blocking the Account tab.
+    pinCardHtml(_pinStatus);
 
   // --- Notifications tab ---------------------------------------------
   var emailSmtpHtml =

@@ -7,6 +7,7 @@
 
 import { escapeHtml, showToast, toastError, relTimeHtml, sevPillHtml } from './dashboard.js';
 import { apiUnblockBatch, apiFirewallLogGet, apiFirewallLogUpload, apiFetchIntel } from './api.js';
+import { pinGuard } from './pin.js';
 
 // Tab state persists across navigation so a user who switched to
 // "Firewall Rules" and went elsewhere comes back to the same tab.
@@ -816,10 +817,12 @@ export async function submitAddBlock() {
   if (btn) { btn.disabled = true; btn.textContent = push ? 'Blocking\u2026' : 'Staging\u2026'; }
 
   try {
-    var resp = await fetch('/api/block-ip', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip: ip, comment: comment, confirm: push }),
+    var resp = await pinGuard(function () {
+      return fetch('/api/block-ip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: ip, comment: comment, confirm: push }),
+      });
     });
     var data = {};
     try { data = await resp.json(); } catch (e) {}
@@ -927,7 +930,9 @@ export async function firewallUnblock(ip) {
   if (!ip) return;
   if (!window.confirm('Unblock ' + ip + '? The Windows Firewall rule will be removed.')) return;
   try {
-    var resp = await fetch('/api/block-ip/' + encodeURIComponent(ip), { method: 'DELETE' });
+    var resp = await pinGuard(function () {
+      return fetch('/api/block-ip/' + encodeURIComponent(ip), { method: 'DELETE' });
+    });
     var data = {};
     try { data = await resp.json(); } catch (e) {}
     if (!resp.ok || data.ok === false) {

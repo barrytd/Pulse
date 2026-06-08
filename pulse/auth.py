@@ -72,11 +72,51 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Security PIN — step-up credential for sensitive actions
+# ---------------------------------------------------------------------------
+# A short numeric PIN, hashed exactly like the password (scrypt). It is a
+# SEPARATE secret from the password + session, so a stolen session can't use
+# it. Because PINs are low-entropy, every verify path MUST be rate-limited +
+# lockout-guarded by the caller — never expose verify_pin without it.
+
+PIN_MIN_LEN = 4
+PIN_MAX_LEN = 12
+
+
+def validate_pin_format(pin: str) -> bool:
+    """A PIN is 4–12 ASCII digits. (Length + digits only; entropy is handled
+    by lockout, not by allowing symbols that users won't remember.)"""
+    return bool(pin) and pin.isdigit() and PIN_MIN_LEN <= len(pin) <= PIN_MAX_LEN
+
+
+def hash_pin(pin: str) -> str:
+    """Hash a PIN with scrypt + random salt (same scheme as passwords)."""
+    if not validate_pin_format(pin):
+        raise ValueError(
+            f"PIN must be {PIN_MIN_LEN}-{PIN_MAX_LEN} digits.")
+    return hash_password(pin)   # identical scrypt construction
+
+
+def verify_pin(pin: str, stored: str) -> bool:
+    """Timing-safe verify of a PIN against its stored scrypt hash."""
+    if not pin or not stored:
+        return False
+    return verify_password(pin, stored)
+
+
+# ---------------------------------------------------------------------------
 # Session cookies
 # ---------------------------------------------------------------------------
 
 SESSION_COOKIE_NAME = "pulse_session"
 SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60   # 30 days
+
+# Elevation cookie — granted only after a correct PIN, short-lived. It rides
+# in the requester's browser, so an attacker holding only the session cookie
+# never gets one (they can't enter the PIN). Bound to user_id so it can't be
+# replayed for a different account.
+ELEVATION_COOKIE_NAME = "pulse_elev"
+ELEVATION_MAX_AGE_SECONDS = 5 * 60   # 5 minutes
 
 
 def ensure_session_secret(config: dict) -> str:
@@ -128,6 +168,20 @@ def verify_session_cookie(secret: str, cookie_value: str,
         return user_id
     except Exception:
         return None
+
+
+def issue_elevation_cookie(secret: str, user_id: int, now: Optional[int] = None) -> str:
+    """Signed short-lived elevation token (same construction as the session
+    cookie). Set after a correct PIN; expires in ELEVATION_MAX_AGE_SECONDS."""
+    return issue_session_cookie(secret, user_id, now=now)
+
+
+def verify_elevation_cookie(secret: str, cookie_value: str,
+                            now: Optional[int] = None) -> Optional[int]:
+    """Return the user_id if the elevation cookie is valid and within the
+    5-minute window, else None."""
+    return verify_session_cookie(
+        secret, cookie_value, now=now, max_age=ELEVATION_MAX_AGE_SECONDS)
 
 
 # ---------------------------------------------------------------------------

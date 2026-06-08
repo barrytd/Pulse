@@ -170,6 +170,19 @@
   transform: translateX(16px);   /* 36 − 16 knob − 2 − 2 padding = 16 */
 }
 
+/* Security PIN status pill (Settings → Account) */
+.pin-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.pin-state i { width: 13px; height: 13px; }
+.pin-state-on  { color: #3fb950; }
+.pin-state-off { color: var(--text-muted); }
+
 /* ------------------------------------------------------------------ */
 /* Settings page — left tab nav + right content                         */
 /* ------------------------------------------------------------------ */

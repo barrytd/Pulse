@@ -10,9 +10,7 @@ Flat status board organized by category, sorted by priority within each section.
 
 > Currently being built. Cap at 1–2 to keep focus.
 
-| Priority | Item | Notes |
-|---|---|---|
-| 🟠 High | **Security PIN — step-up auth for destructive actions** | Defends against session theft / account takeover of a manager or analyst. A separate scrypt-hashed PIN (distinct from password + session); setting/changing it requires the account password (so a session-thief can't set their own). Sensitive actions (block/unblock firewall IP, deactivate/delete a user, change a role) return `403 pin_required`; the UI prompts for the PIN; a correct PIN grants a **5-minute elevation bound to that browser via a signed cookie** (the attacker's session never elevates — they can't enter the PIN). Hard lockout after 5 wrong PINs. **v1 = opt-in per user** (set a PIN → it's enforced); a future "require PIN for managers/admins" org policy can make it mandatory. Backend auth helpers built; schema + endpoints + gate + frontend prompt modal remaining. |
+*Nothing in flight right now.* (Security PIN shipped 2026-06-08 — see CHANGELOG.)
 
 ---
 

@@ -280,6 +280,27 @@
   </div>
 
   <!-- ============================================================= -->
+  <!-- SECURITY PIN PROMPT (step-up confirmation)                      -->
+  <!-- Pops when a gated action returns 403 pin_required.              -->
+  <!-- ============================================================= -->
+  <div class="modal-overlay" id="pin-modal">
+    <div class="modal" style="width:380px;">
+      <h3>Confirm your PIN</h3>
+      <p>This action is protected. Enter your security PIN to continue.</p>
+      <div class="assign-field">
+        <label for="pin-input">Security PIN</label>
+        <input type="password" id="pin-input" class="assign-select" inputmode="numeric"
+               autocomplete="off" maxlength="12" placeholder="••••••" />
+      </div>
+      <div class="assign-status" id="pin-status"></div>
+      <div class="modal-actions">
+        <button class="btn btn-with-icon" data-action="cancelPinPrompt"><i data-lucide="x"></i><span>Cancel</span></button>
+        <button class="btn btn-primary btn-with-icon" id="pin-submit-btn" data-action="submitPinPrompt"><i data-lucide="shield-check"></i><span>Confirm</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
   <!-- ASSIGN FINDING(S) MODAL                                         -->
   <!-- Manager hands work to an analyst with a priority + due date in   -->
   <!-- one step. Opened from the finding drawer and the bulk bar.       -->

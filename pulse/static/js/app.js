@@ -274,6 +274,12 @@ import {
   closeAssignDialog,
   submitAssignDialog,
 } from './assign-dialog.js';
+import {
+  submitPinPrompt,
+  cancelPinPrompt,
+  savePin,
+  removePin,
+} from './pin.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -318,6 +324,10 @@ const actions = {
   // findings + scan-detail
   closeAssignDialog,
   submitAssignDialog,
+  submitPinPrompt,
+  cancelPinPrompt,
+  savePin,
+  removePin,
   viewScan,
   setFindingsSort,
   setFindingsQueryFromInput,

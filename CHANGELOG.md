@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-08 — Security PIN (step-up auth for destructive actions)
+
+Protects against a stolen session / account takeover: even with a valid login, an attacker can't do real damage without a second secret they don't have.
+
+- **A separate PIN** (4–12 digits, scrypt-hashed), distinct from the password and session. **Setting or changing it requires the account password**, so a session-only thief can't set their own PIN.
+- **Gated actions** return `403 pin_required` until confirmed: block/unblock a firewall IP, deactivate/delete a user, change a role. A correct PIN at `POST /api/me/pin/verify` grants a **5-minute elevation bound to that browser via a signed cookie** — the attacker's session never elevates because they can't enter the PIN. **Opt-in per user** (set a PIN → it's enforced; no PIN → actions proceed as before).
+- **Hard lockout** after 5 wrong PINs (15 min) — low-entropy PINs can't be brute-forced; even the correct PIN is refused while locked.
+- `pin_hash` is never read into the user object (not in the column allowlist), so it can't leak via any API.
+- Frontend: a **Security PIN card** in Settings → Account (set/change/remove, password-confirmed) and a **PIN prompt modal** that pops on a gated action and retries it after elevation (`pinGuard` wrapper).
+- 11 new tests (`test_security_pin.py`). 1174 tests pass.
+
+---
+
 ## 2026-06-07 — Security audit fixes (access control + headers)
 
 A hygiene + vulnerability pass (no committed secrets, no SQL/command injection, no XXE/path-traversal, XSS escaping verified sound, scrypt hashing + login lockout confirmed). Fixed the access-control gaps it surfaced:
