@@ -279,6 +279,7 @@ import {
   cancelPinPrompt,
   savePin,
   removePin,
+  togglePinReveal,
 } from './pin.js';
 
 // Central action registry — replaces the old window[action] lookup.
@@ -328,6 +329,7 @@ const actions = {
   cancelPinPrompt,
   savePin,
   removePin,
+  togglePinReveal,
   viewScan,
   setFindingsSort,
   setFindingsQueryFromInput,

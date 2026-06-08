@@ -170,6 +170,52 @@
   transform: translateX(16px);   /* 36 − 16 knob − 2 − 2 padding = 16 */
 }
 
+/* Agents tab — "Install Pulse Agent" numbered steps. Without explicit
+   rules the <ol> fell back to inconsistent browser defaults; pin the
+   indent so the numbers line up with the step text and the code snippet
+   sits flush under its step. */
+.agent-install-list {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.55;
+}
+.agent-install-list > li { margin-bottom: 8px; padding-left: 4px; }
+.agent-install-list > li::marker { color: var(--text-muted); font-weight: 700; }
+.agent-install-snippet {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--text);
+}
+
+/* Reveal toggle for PIN / secret inputs (eye / eye-off). */
+.pin-input-wrap { position: relative; display: block; }
+.pin-input-wrap input { width: 100%; padding-right: 38px; }
+.pin-reveal-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+.pin-reveal-btn:hover { color: var(--text); }
+.pin-reveal-btn i,
+.pin-reveal-btn svg { width: 16px; height: 16px; }
+
 /* Security PIN status pill (Settings → Account) */
 .pin-state {
   display: inline-flex;

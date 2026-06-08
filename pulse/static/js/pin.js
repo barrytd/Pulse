@@ -82,6 +82,29 @@ export function cancelPinPrompt() {
   if (resolve) resolve(false);
 }
 
+// Eye toggle: show/hide the PIN input inside the same wrapper, swapping the
+// eye / eye-off icon. `target` is the button (the data-action element).
+export function togglePinReveal(arg, target) {
+  if (!target) return;
+  var wrap = target.closest('.pin-input-wrap');
+  if (!wrap) return;
+  var input = wrap.querySelector('input');
+  if (!input) return;
+  var reveal = (input.type === 'password');
+  input.type = reveal ? 'text' : 'password';
+  target.setAttribute('aria-label', reveal ? 'Hide PIN' : 'Show PIN');
+  var icon = target.querySelector('[data-lucide], svg');
+  if (icon) {
+    var fresh = document.createElement('i');
+    fresh.setAttribute('data-lucide', reveal ? 'eye-off' : 'eye');
+    icon.replaceWith(fresh);
+    if (window.lucide && window.lucide.createIcons) {
+      try { window.lucide.createIcons(); } catch (e) {}
+    }
+  }
+  input.focus();
+}
+
 // Run a fetch-returning thunk; on a 403 pin_required, prompt + retry once.
 // `thunk` must be a function returning a Promise<Response> so we can re-run it
 // with the elevation cookie in place.
@@ -184,8 +207,12 @@ export function pinCardHtml(status) {
       'session is ever stolen. ' + stateLine +
     '</p>' +
     '<div class="form-row"><label>' + (isSet ? 'New PIN' : 'PIN') + '</label>' +
-      '<input type="password" id="pin-new" inputmode="numeric" autocomplete="off" ' +
-        'maxlength="12" placeholder="4-12 digits"/></div>' +
+      '<div class="pin-input-wrap">' +
+        '<input type="password" id="pin-new" inputmode="numeric" autocomplete="off" ' +
+          'maxlength="12" placeholder="4-12 digits"/>' +
+        '<button type="button" class="pin-reveal-btn" data-action="togglePinReveal" ' +
+          'aria-label="Show PIN" title="Show / hide" tabindex="-1"><i data-lucide="eye"></i></button>' +
+      '</div></div>' +
     '<div class="form-row"><label>Account password</label>' +
       '<input type="password" id="pin-current-password" autocomplete="current-password" ' +
         'placeholder="confirm it’s you"/></div>' +

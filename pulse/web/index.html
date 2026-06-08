@@ -289,8 +289,12 @@
       <p>This action is protected. Enter your security PIN to continue.</p>
       <div class="assign-field">
         <label for="pin-input">Security PIN</label>
-        <input type="password" id="pin-input" class="assign-select" inputmode="numeric"
-               autocomplete="off" maxlength="12" placeholder="••••••" />
+        <div class="pin-input-wrap">
+          <input type="password" id="pin-input" class="assign-select" inputmode="numeric"
+                 autocomplete="off" maxlength="12" placeholder="••••••" />
+          <button type="button" class="pin-reveal-btn" data-action="togglePinReveal"
+                  aria-label="Show PIN" title="Show / hide" tabindex="-1"><i data-lucide="eye"></i></button>
+        </div>
       </div>
       <div class="assign-status" id="pin-status"></div>
       <div class="modal-actions">
