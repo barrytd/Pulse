@@ -3582,6 +3582,13 @@ tr.pending-flash {
   color: var(--text-dim);
   font-size: 18px;
   flex-shrink: 0;
+  /* The row uses align-items: stretch so the boxes match height; without
+     this the arrow span stretches too and its glyph pins to the top. Center
+     it so every arrow sits at the same mid-height between the boxes. */
+  align-self: center;
+  display: flex;
+  align-items: center;
+  line-height: 1;
 }
 
 .repeat-offenders {
