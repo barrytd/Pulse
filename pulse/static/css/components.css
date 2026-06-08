@@ -349,6 +349,14 @@
   .settings-grid { grid-template-columns: 1fr; }
 }
 
+/* Subtle fade when the settings content panel swaps on a tab switch.
+   Opacity only (no layout shift); starts at 0.4 so it never blanks. */
+.settings-panel-enter { animation: settingsPanelFade 120ms ease; }
+@keyframes settingsPanelFade {
+  from { opacity: 0.4; }
+  to   { opacity: 1; }
+}
+
 /* Advanced tab — collapsible SMTP block */
 .settings-collapsible {
   background: var(--card-bg);

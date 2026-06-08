@@ -76,6 +76,13 @@ const SETTINGS_TABS = [
 let _activeSettingsTab = 'profile';
 let _avatarCacheBuster = '';
 
+// Built panel HTML from the most recent full render, keyed by tab id. A
+// pure tab switch swaps the visible panel from this cache instead of
+// re-rendering the whole page (which blanked + refetched + rebuilt the tab
+// rail, causing a flash). Rebuilt on every renderSettingsPage() so it stays
+// fresh after any data-mutating action.
+let _panelCache = null;
+
 // Surfaces the just-minted enrollment token across the next render.
 // Read once and cleared so a follow-up navigation doesn't accidentally
 // re-show the raw token.
@@ -113,7 +120,45 @@ export function switchSettingsTab(arg) {
       { page: 'settings', settingsTab: _activeSettingsTab },
       '', '/settings/' + _activeSettingsTab + (window.location.search || ''));
   } catch (e) { /* private mode — URL just won't update */ }
-  renderSettingsPage();
+  // Fast path: the page is already mounted and we have the panel cached, so
+  // just swap the content in place — the tab rail + header stay put and
+  // there's no blank/refetch flash. Falls back to a full render on a cache
+  // miss (first load, or a tab we haven't built yet).
+  if (!_swapSettingsPanel(_activeSettingsTab)) {
+    renderSettingsPage();
+  }
+}
+
+// Swap the visible settings panel from the cache without touching the rail,
+// header, or re-fetching. Returns false if it can't (forcing a full render).
+function _swapSettingsPanel(tab) {
+  var mount = document.getElementById('settings-tab-content');
+  if (!mount || !_panelCache || _panelCache[tab] === undefined) return false;
+
+  mount.innerHTML = _panelCache[tab];
+
+  // Reflect the active tab on the rail + the page title, in place.
+  document.querySelectorAll('.settings-tab-link').forEach(function (a) {
+    a.classList.toggle('active', a.getAttribute('data-arg') === tab);
+  });
+  var titleEl = document.getElementById('settings-page-title');
+  var meta = SETTINGS_TABS.find(function (t) { return t.id === tab; });
+  if (titleEl && meta) titleEl.textContent = meta.label;
+
+  // Re-init the icons inside the new panel + the SMTP preset sync.
+  try {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  } catch (e) {}
+  if (document.getElementById('email-provider')) onEmailProviderChange();
+
+  // Subtle 120ms fade so the swap feels smooth (opacity only — no layout
+  // shift, never blanks: starts at 0.4, not 0).
+  mount.classList.remove('settings-panel-enter');
+  void mount.offsetWidth;   // restart the animation
+  mount.classList.add('settings-panel-enter');
+  return true;
 }
 
 export async function renderSettingsPage() {
@@ -812,14 +857,18 @@ export async function renderSettingsPage() {
       '</div>'
     : '';
 
+  // Cache the built panels so a pure tab switch can swap in place (no
+  // refetch, no rail rebuild, no flash). Rebuilt on every full render.
+  _panelCache = panels;
+
   c.innerHTML =
     '<div class="page-head">' +
-      '<div class="page-head-title">' + escapeHtml(activeTab.label) + '</div>' +
+      '<div class="page-head-title" id="settings-page-title">' + escapeHtml(activeTab.label) + '</div>' +
     '</div>' +
     failureBanner +
     '<div class="settings-layout">' +
       tabNavHtml +
-      '<div class="settings-tab-content">' + (panels[_activeSettingsTab] || panels.profile) + '</div>' +
+      '<div class="settings-tab-content" id="settings-tab-content">' + (panels[_activeSettingsTab] || panels.profile) + '</div>' +
     '</div>';
 
   // Rehydrate the Lucide tab icons — these are rendered dynamically so
