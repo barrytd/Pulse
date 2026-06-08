@@ -136,7 +136,7 @@ export async function renderWhitelistPage() {
     '</div>' +
     kpiStripHtml +
 
-    '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="card form-column" style="margin-bottom:16px;">' +
       '<div class="section-label">Add Entry</div>' +
       '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
         '<select id="wl-add-type" data-action-change="setWhitelistAddType" style="padding:8px 10px; background:var(--card-bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:13px;">' +

@@ -275,7 +275,17 @@
   border-color: var(--border);
   font-weight: 500;
 }
-.settings-tab-content { min-width: 0; }
+/* Form-content width convention.
+ * Form / settings surfaces cap their content column so a short field like
+ * email or PIN doesn't stretch into a giant empty bar on wide screens.
+ * `.form-column` is the reusable wrapper; the settings content column adopts
+ * the same cap. DO NOT put this on data-table pages (Findings, Audit,
+ * History, Scans, Fleet, Firewall, Reports) — their columns need the room. */
+.form-column,
+.settings-tab-content {
+  min-width: 0;
+  max-width: 720px;   /* left-aligns under the page heading */
+}
 
 /* Advanced tab — collapsible SMTP block */
 .settings-collapsible {
@@ -739,6 +749,10 @@ body.light .admin-banner-close {
 .form-row input[type="password"],
 .form-row select {
   width: 100%;
+  /* Short fields cap at 420px so they don't run edge-to-edge inside the
+     720px form column. Longer free-text (textareas) is exempt; opt a
+     specific input wider with .field-wide or narrower with .field-short. */
+  max-width: 420px;
   padding: 8px 10px;
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -748,6 +762,16 @@ body.light .admin-banner-close {
   font-size: 13px;
   box-sizing: border-box;
 }
+/* The PIN reveal wrapper must carry the same cap so the eye button (pinned
+   to its right edge) lines up with the input, not the full cell width. */
+.form-row .pin-input-wrap {
+  width: 100%;
+  max-width: 420px;
+}
+
+/* Reusable input-width helpers for surfaces that don't use .form-row. */
+.field-short { max-width: 420px !important; }
+.field-wide  { max-width: 100%  !important; }
 
 .form-row input:focus, .form-row select:focus {
   outline: none;
