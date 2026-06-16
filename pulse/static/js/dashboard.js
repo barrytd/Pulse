@@ -124,11 +124,30 @@ export function _extractTime(f) {
   return m ? m[1] + ' ' + m[2] : '';
 }
 
-// innerHTML rewrite destroys the old <input> node, so restore focus and
-// caret to the new one if the search box was the active element.
+// Tracks whether a filter search box was focused right before a re-render.
+var _searchFocusId = null;
+
+// Call this JUST BEFORE an innerHTML rewrite destroys the search input, so we
+// can tell "the user was mid-typing" (restore focus afterward) from "fresh
+// page load / navigation" (do NOT focus — auto-focusing an empty box makes
+// the browser autofill the saved login email into it).
+export function _captureSearchFocus() {
+  var a = document.activeElement;
+  _searchFocusId = (a && a.classList &&
+    (a.classList.contains('filter-bar-search') ||
+     a.classList.contains('dash-filter-search') ||
+     a.classList.contains('fw-search-input')))
+    ? a.id : null;
+}
+
+// innerHTML rewrite destroys the old <input> node, so restore focus + caret —
+// but only when the user was actually typing in it (see _captureSearchFocus).
 export function _restoreSearchFocus(id) {
+  if (_searchFocusId !== id) return;
+  _searchFocusId = null;
   var el = document.getElementById(id);
   if (!el) return;
+  el.removeAttribute('readonly');   // they're typing; keep it editable
   el.focus();
   var len = el.value.length;
   try { el.setSelectionRange(len, len); } catch (e) {}
@@ -492,6 +511,9 @@ export function _dashFilterBarHtml(rules, sources) {
       '<label class="dash-filter-label">Search</label>' +
       '<input type="search" class="dash-filter-search" id="f-query" ' +
         'placeholder="user, IP, event ID..." value="' + escapeHtml(st.q || '') + '" ' +
+        'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+        'name="dash-search-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" ' +
+        'readonly data-nofill="1" ' +
         'data-action-keydown="dashFilterQueryKey" />' +
     '</div>' +
     '<a class="dash-filter-reset" data-action="resetDashFilters">Reset</a>' +
@@ -1097,6 +1119,34 @@ function _teamWorkloadCardHtml(analysts) {
   '</div>';
 }
 
+// Dedicated "Team" page (manager/admin) — the Team Workload oversight view,
+// moved off the Dashboard where it felt out of place. Backend already 403s
+// analysts on /api/team-workload, and the sidebar hides the nav item for
+// them (roles.js PAGE_MIN_ROLE.team = 'manager').
+export async function renderTeamPage() {
+  var c = document.getElementById('content');
+  if (!c) return;
+  c.innerHTML = '<div class="card"><div class="section-label">Team Workload</div>' +
+    '<p style="color:var(--text-muted); margin:8px 0 0;">Loading the team…</p></div>';
+
+  var analysts = null;
+  try { analysts = await _fetchTeamWorkload(); } catch (e) { analysts = null; }
+
+  if (analysts === null) {
+    c.innerHTML = '<div class="card"><div class="section-label">Team Workload</div>' +
+      '<p style="color:var(--text-muted); margin:8px 0 0;">You don’t have access to the ' +
+      'team view. This page is for managers and admins.</p></div>';
+    return;
+  }
+  if (!analysts.length) {
+    c.innerHTML = '<div class="card"><div class="section-label">Team Workload</div>' +
+      '<p style="color:var(--text-muted); margin:8px 0 0;">No analysts have assigned ' +
+      'work yet. Assign findings from the Findings page and they’ll show up here.</p></div>';
+    return;
+  }
+  c.innerHTML = _teamWorkloadCardHtml(analysts);
+}
+
 // Deep-link to an analyst's findings. Lazy-import navigation.js to avoid a
 // module cycle (navigation.js imports this module).
 export function viewAnalystQueue(userId) {
@@ -1122,15 +1172,6 @@ export async function renderDashboardPage() {
     _onboardingState = await apiGetOnboarding();
   } catch (e) {
     _onboardingState = null;
-  }
-
-  // Team Workload — manager-only oversight. Best-effort: analysts get a
-  // 403 and solo accounts get an empty list, both of which hide the card.
-  var teamWorkload = null;
-  try {
-    teamWorkload = await _fetchTeamWorkload();
-  } catch (e) {
-    teamWorkload = null;
   }
 
   var scans       = filterScansByDashState(allScans);
@@ -1378,8 +1419,8 @@ export async function renderDashboardPage() {
   var onboardingHtml = hasAnyScan ? _onboardingCardHtml(_onboardingState) : '';
   var firstRunHtml   = hasAnyScan ? '' : _firstRunHeroHtml();
   if (!hasAnyScan) emptyBannerHtml = '';
-  // Team Workload card — only when there's data to show and scans exist.
-  var teamHtml = hasAnyScan ? _teamWorkloadCardHtml(teamWorkload) : '';
+  // Team Workload moved to its own "Team" page (manager/admin) — it felt out
+  // of place mixed into the dashboard. See renderTeamPage() below.
 
   c.innerHTML =
     firstRunHtml +
@@ -1390,7 +1431,6 @@ export async function renderDashboardPage() {
     attentionHtml +
     kpiHtml +
     standupHtml +
-    teamHtml +
     chartsHtml +
     topRulesCardHtml +
     findingsHtml;

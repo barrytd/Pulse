@@ -10,6 +10,7 @@ var ROLE_RANK = { analyst: 1, manager: 2, admin: 3 };
 // every signed-in user (analyst+). Response actions + config + the audit log
 // are manager / admin only.
 var PAGE_MIN_ROLE = {
+  team:      'manager',   // team workload oversight (manager/admin)
   firewall:  'manager',   // blocking/unblocking is a response action
   whitelist: 'manager',   // detection config
   rules:     'manager',   // detection config

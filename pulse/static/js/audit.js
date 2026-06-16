@@ -16,7 +16,7 @@
 'use strict';
 
 import { fetchAudit, apiListUsers } from './api.js';
-import { escapeHtml, _restoreSearchFocus, formatRelativeTime, roleBadgeHtml } from './dashboard.js';
+import { escapeHtml, _restoreSearchFocus, _captureSearchFocus, formatRelativeTime, roleBadgeHtml } from './dashboard.js';
 import { openDrawer, closeDrawer, isDrawerOpen } from './drawer.js';
 
 // Newest-first cache of every audit row the API returned last refresh.
@@ -153,6 +153,7 @@ export async function renderAuditPage() {
 function _renderAuditShell() {
   var c = document.getElementById('content');
   if (!c) return;
+  _captureSearchFocus();   // only refocus search if the user was typing in it
   c.innerHTML =
     '<div class="findings-page">' +
       _auditPageHeaderHtml() +
@@ -167,10 +168,10 @@ function _renderAuditShell() {
     '<div class="audit-export-menu" id="audit-export-menu" hidden></div>';
   _mountAuditFilterDropdown();
   _mountAuditExportMenu();
-  // Auto-focus the search input on entry — mirrors the Findings / Scans
-  // pages so the user can start typing immediately. _restoreSearchFocus
-  // is also focus-safe across re-renders, preserving the caret position
-  // when chip toggles trigger _renderAuditShell().
+  // Restore focus + caret to the search box ONLY if the user was already
+  // typing in it before this re-render (see _captureSearchFocus). We no
+  // longer auto-focus on page entry: focusing an empty search box made the
+  // browser autofill the saved login email into it.
   _restoreSearchFocus('audit-search-box');
 }
 
@@ -361,6 +362,10 @@ function _auditFilterBarHtml() {
     '<input type="search" id="audit-search-box" class="filter-bar-search" ' +
       'placeholder="Search action, user, detail..." ' +
       'value="' + escapeHtml(_auditQuery) + '" ' +
+      // Block browser autofill of the saved login email into the search box.
+      'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+      'name="audit-search-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" ' +
+      'readonly data-nofill="1" ' +
       'data-action-input="auditSetQuery" />' +
     '<div class="filter-bar-chips">' + chips + addBtn + '</div>' +
     clearAll +

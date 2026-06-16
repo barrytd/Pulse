@@ -397,6 +397,25 @@ CREATE TABLE IF NOT EXISTS agents (
 """
 
 
+# Security Buddy ("Pip") usage meter. One row per user per UTC day, so we
+# can cap how many AI questions each person asks. The Anthropic API is
+# pay-as-you-go (billed separately from any personal subscription), so this
+# is the cost-control valve: `questions_used` counts answered questions and
+# `bonus_questions` is a per-day top-up an admin can grant. The daily limit
+# and the reset (00:00 UTC) live in the API layer — this table just keeps
+# the running count. usage_date is an ISO date string ('YYYY-MM-DD').
+_CREATE_USER_AI_USAGE = """
+CREATE TABLE IF NOT EXISTS user_ai_usage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    usage_date      TEXT    NOT NULL,
+    questions_used  INTEGER NOT NULL DEFAULT 0,
+    bonus_questions INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (user_id, usage_date)
+);
+"""
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -430,6 +449,7 @@ def init_db(db_path):
         _CREATE_ORGANIZATIONS,
         _CREATE_SIGMA_RULES,
         _CREATE_REPORTS,
+        _CREATE_USER_AI_USAGE,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;
@@ -2555,6 +2575,56 @@ def set_user_pin(db_path, user_id, pin_hash):
             "pin_locked_until = NULL WHERE id = ?",
             (pin_hash, int(user_id)),
         )
+
+
+def get_ai_usage(db_path, user_id, usage_date):
+    """Return (questions_used, bonus_questions) for a user on a given UTC day.
+
+    Returns (0, 0) when there's no row yet (the user hasn't asked Pip
+    anything today). usage_date is an ISO date string, 'YYYY-MM-DD'.
+    """
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT questions_used, bonus_questions FROM user_ai_usage "
+            "WHERE user_id = ? AND usage_date = ?",
+            (int(user_id), str(usage_date)),
+        ).fetchone()
+    if not row:
+        return (0, 0)
+    if isinstance(row, dict):
+        return (int(row.get("questions_used") or 0),
+                int(row.get("bonus_questions") or 0))
+    return (int(row[0] or 0), int(row[1] or 0))
+
+
+def increment_ai_usage(db_path, user_id, usage_date):
+    """Record one answered Pip question for a user on a given UTC day.
+
+    Upserts the per-day row and returns the new questions_used count. Only
+    called *after* Pip successfully answers, so a failed/blocked request
+    never burns a question.
+    """
+    with _connect(db_path) as conn:
+        # UPSERT — first question of the day inserts the row, the rest bump
+        # the counter. The UNIQUE(user_id, usage_date) constraint makes the
+        # ON CONFLICT target valid on both SQLite and Postgres.
+        conn.execute(
+            "INSERT INTO user_ai_usage (user_id, usage_date, questions_used) "
+            "VALUES (?, ?, 1) "
+            "ON CONFLICT (user_id, usage_date) "
+            "DO UPDATE SET questions_used = user_ai_usage.questions_used + 1",
+            (int(user_id), str(usage_date)),
+        )
+        row = conn.execute(
+            "SELECT questions_used FROM user_ai_usage "
+            "WHERE user_id = ? AND usage_date = ?",
+            (int(user_id), str(usage_date)),
+        ).fetchone()
+    if not row:
+        return 1
+    if isinstance(row, dict):
+        return int(row.get("questions_used") or 1)
+    return int(row[0] or 1)
 
 
 def clear_user_pin(db_path, user_id):

@@ -86,6 +86,7 @@ subpackage or are deliberately neutral (no domain of their own).
 | [`remediation.py`](remediation.py) | "How do I fix this?" lookups — per-rule step-by-step guidance plus MITRE ATT&CK mitigation IDs (M1026, M1027, ...). Attached to findings before they're rendered. |
 | [`rate_limit.py`](rate_limit.py) | In-process sliding-window rate limiter. `hit()` ticks + checks; `check()` checks without ticking; `record()` ticks without checking. Used for the failed-login lockout pattern and per-endpoint burst caps. |
 | [`intel.py`](intel.py) | AbuseIPDB threat-intel lookup with 24h on-disk cache. Returns confidence-of-abuse score, country, ISP, last-reported. Opt-in via `pulse.yaml` API key. |
+| [`buddy.py`](buddy.py) | "Pip", the Security Buddy. Backend proxy to the Anthropic Claude Haiku API (`ask_pip`) — the only place the `ANTHROPIC_API_KEY` is used. Read-only, prompt-injection-safe (untrusted-data fencing), never raises. Powers `GET /api/buddy/status` + `POST /api/buddy/ask` (metered per user/day via the `user_ai_usage` table). |
 | [`interactive.py`](interactive.py) | Terminal-mode browser — lets the CLI user page through findings, investigate, and add whitelist entries without leaving the terminal. |
 | [`animations.py`](animations.py) | ECG heartbeat / spinner animations shown while parsing. |
 

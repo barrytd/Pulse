@@ -470,6 +470,9 @@ function _fwFilterBarHtml() {
       '<input type="search" class="fw-search-input" ' +
         'placeholder="Filter by IP…" ' +
         'value="' + escapeHtml(_fwLog.fQuery) + '" ' +
+        'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+        'name="fw-search-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" ' +
+        'readonly data-nofill="1" ' +
         'data-action-input="fwSetSearch" />' +
     '</div>' +
   '</div>';

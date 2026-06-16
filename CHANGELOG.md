@@ -5,6 +5,40 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-16 — Demo environment seed + triage polish
+
+- **`scripts/seed_startup.py`** — one command to wipe the detection data and seed a realistic small-startup environment for live-style testing: a ~9-person team (admin / managers / analysts, all in your org, password `ChangeMe!8`), ~15 hosts (laptops + servers with believable stories — a critical domain controller, a compromised laptop, a brute-forced VPN, mostly-healthy employee machines), ~35 findings across all severities, plus assignments and workflow/review state already in progress so My Queue, Team, and the Dashboard look lived-in. Keeps your own admin login. Re-runnable.
+- **Removed redundant confirmation toasts.** Marking a finding reviewed / false-positive or changing its workflow state no longer pops a "Marked reviewed and false positive" banner in the corner — the checkbox, badge, and highlighted pill already show the new state. Error toasts are kept.
+- **Pip: follow-up chips in the user's voice.** Suggestions are now phrased as the question *you* tap to ask Pip ("Can you help with a specific alert?"), never as Pip asking you ("Do you have an alert open?").
+- **Pip: real finding details in context.** When a finding drawer is open, Pip now receives the actual event details (event ID, host, the raw detail line with task/account/command/IP) so it can analyze *that* finding directly instead of asking you to retype what's on screen.
+- **Pip: slides back on navigation.** Navigating away with a finding drawer open now tucks Pip back to the corner and clears the "Looking at &lt;finding&gt;" context, instead of leaving it stranded mid-screen.
+
+## 2026-06-16 — Security Buddy "Pip" (MVP)
+
+The headline AI feature: a floating robot chat circle in the bottom-right corner that anyone can click to ask security questions in plain language.
+
+- **Floating chat widget.** A round mascot button (bottom-right) opens a chat panel. Ask Pip what a finding means, whether something looks dangerous, or any general security question. A "questions left today" counter and a typing indicator. New self-contained `buddy.js` + `buddy.css` (themed light/dark off the shared variables); mounts independently of `app.js`.
+- **Dynamic follow-up suggestions.** After each reply, Pip offers 2–3 tappable follow-up questions tailored to what it just said — they refresh every turn instead of a fixed chip bar (starter prompts show on the greeting). The model returns them after a `[[FOLLOWUPS]]` marker that's parsed off server-side, so it never appears in the answer text.
+- **Backend-proxied, key never in the browser.** New `pulse/buddy.py` calls the Anthropic **Claude Haiku 4.5** Messages API over `httpx` (already a dependency — no new package). The API key is read **server-side** from the `ANTHROPIC_API_KEY` env var. Two routes: `GET /api/buddy/status` (available? questions left?) and `POST /api/buddy/ask`.
+- **Per-day metering.** New `user_ai_usage` table (`usage_date`, `questions_used`, `bonus_questions`) caps each user at **10 free questions per UTC day** — API billing is pay-as-you-go (separate from any personal Claude subscription), so this is the cost valve. Exhausting it returns `429` with a friendly "you're out for today, resets at midnight UTC" message. A blocked/failed answer never burns a question.
+- **Prompt-injection safe.** Event-log and finding text is untrusted, so any finding context is fenced in an `<untrusted_data>` block and the system prompt tells the model to treat everything inside as data to analyze, never instructions to follow. Pip is read-only (no tools), output is HTML-escaped before render, and the panel discloses that chats are sent to Anthropic.
+- **Finding-aware, transparently.** Opening a finding drawer slides Pip left to sit beside it (instead of overlapping) and hands Pip that finding's details (rule, severity, MITRE, plain-language meaning) so you can ask "is this dangerous?" about what you're reading. A "Looking at &lt;rule&gt;" pill in the panel makes it clear when Pip can see the finding; closing the drawer slides Pip back and clears the context.
+- **No em dashes.** Pip is told not to use em/en dashes, and any that slip through are stripped server-side (spaced dashes become commas, ranges become hyphens) so replies read human. The hardcoded greeting was de-dashed too.
+- **Thorough answers.** Tuned to give concrete, actionable guidance (not "tell me more"), with a longer answer cap so replies aren't cut off.
+- **Stays in its lane + refers out.** Pip answers only what's asked (no pivoting to findings it wasn't given), and for anything out of scope — non-security questions, credentials, account/billing, bugs, feature requests — it briefly bows out and points to the **Feedback** option in the sidebar and the **GitHub issues** page (`github.com/barrytd/Pulse/issues`). URLs in replies are clickable.
+- **Remembers your chat.** The conversation persists in the browser across refreshes (forgotten after a day), so a reload no longer wipes what Pip said or makes you re-ask and burn a question. A **New chat** button in the header starts fresh.
+- **Stale-context fix.** Finding context is now bound to the live drawer state, so a previously-viewed finding can never bleed into a later, unrelated question.
+- **Graceful when unconfigured.** With no `ANTHROPIC_API_KEY`, the widget still renders and explains that an administrator needs to add a key — no errors, no broken UI.
+
+---
+
+## 2026-06-16 — Team page + dashboard polish
+
+- **Team Workload moved to its own "Team" page.** The per-analyst oversight view (open count, severity mix, oldest-unresolved age, avg fix time) felt out of place stacked into the Dashboard, so it's now a dedicated **Team** item in the sidebar (General group), gated to managers and admins (analysts don't see it; the backend still 403s `/api/team-workload`). The Dashboard no longer fetches or renders it, so it loads a touch lighter.
+- **Browser-autofill blocked on filter/search boxes.** The saved login email was being autofilled into the search fields on Findings, Dashboard, Audit Log, and Firewall, and getting committed as a filter (the Findings list would show "0 of N"). Two causes, both fixed: (1) since Chrome ignores `autocomplete="off"` for saved emails, those inputs (and Pip's input) now render `readonly` and only become editable on real focus — the browser can't autofill a readonly field; (2) the Findings/Audit pages auto-focused the search box on load, which stripped that protection and let the email in — focus is now restored **only** when the user was actively typing (captured just before each re-render), never on a fresh page load.
+
+---
+
 ## 2026-06-08 — Finding drawer triage polish
 
 Extends the drawer redesign with the rest of the research recommendations:

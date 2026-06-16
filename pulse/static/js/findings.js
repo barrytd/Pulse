@@ -31,6 +31,7 @@ import {
   mitreMap,
   _extractTime,
   _restoreSearchFocus,
+  _captureSearchFocus,
   _gradeFor,
   _gradeRank,
   sevPillHtml,
@@ -480,6 +481,7 @@ export function applyFindingsView() {
   _findingsAutoRefreshTick();
 
   var c = document.getElementById('content');
+  _captureSearchFocus();   // remember focus before we destroy the input
   c.innerHTML =
     '<div class="findings-page">' +
       _findingsPageHeaderHtml(total, visible) +
@@ -855,6 +857,12 @@ function _findingsFilterBarHtml() {
     '<input type="search" id="findings-search-box" class="filter-bar-search" ' +
       'placeholder="Search rule, description, or MITRE..." ' +
       'value="' + escapeHtml(s.query) + '" ' +
+      // Stop the browser autofilling the saved login email into this box on
+      // every load. type=search alone isn't enough in Chrome/Edge; the
+      // autocomplete + password-manager ignore hints are what actually work.
+      'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+      'name="findings-search-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" ' +
+      'readonly data-nofill="1" ' +
       'data-action-input="setFindingsQueryFromInput" />' +
     '<div class="filter-bar-chips">' + chipsHtml + addWrap + '</div>' +
     clearAll +
@@ -1906,12 +1914,7 @@ async function _applyRowReview(f, nextReviewed, nextFp, target) {
     false_positive: f.false_positive,
   });
   applyFindingsView();
-  showToast(
-    f.reviewed && f.false_positive ? 'Marked reviewed and false positive' :
-    f.reviewed                     ? 'Marked reviewed' :
-    f.false_positive               ? 'Marked false positive' :
-                                     'Review cleared'
-  );
+  // No success toast — the row's status dot/badge already reflects it.
 }
 
 export function _expandRow(f, colspan) {
@@ -2683,6 +2686,18 @@ export function openFindingDrawer(f) {
   if (!f) return;
   _drawerFinding = f;
   _wfRevertTo = null;   // fresh single-step undo target per drawer session
+  // Slide Pip left so it sits beside the drawer (not under it), and hand it
+  // this finding so the user can ask Pip about what they're reading. The
+  // "Looking at <rule>" pill makes that visible; data is fenced as untrusted
+  // server-side (see pulse/buddy.py).
+  if (window.PulsePip) {
+    try {
+      if (window.PulsePip.setDocked) window.PulsePip.setDocked(true);
+      if (window.PulsePip.setContext) {
+        window.PulsePip.setContext(_buddyContextFor(f), f.rule || 'this finding');
+      }
+    } catch (e) {}
+  }
   if (!_firstFindingViewBeaconed) {
     _firstFindingViewBeaconed = true;
     apiMarkFirstFindingViewed();
@@ -3344,19 +3359,8 @@ async function _submitReview(nextReviewed, nextFalsePositive) {
   });
 
   invalidateFindingsCache();
-
-  // Toast reflects the final state — the pair of flags now on the finding.
-  var toast;
-  if (nextReviewed && nextFalsePositive) {
-    toast = 'Marked reviewed and false positive';
-  } else if (nextReviewed) {
-    toast = 'Marked reviewed';
-  } else if (nextFalsePositive) {
-    toast = 'Marked false positive';
-  } else {
-    toast = 'Review cleared';
-  }
-  showToast(toast);
+  // No success toast — the checkbox + "Last reviewed" line already show the
+  // new state, so a confirmation banner just obstructs the drawer.
 }
 
 // Each button toggles ONLY its own flag, preserving the other. An analyst
@@ -3414,7 +3418,6 @@ export async function setFindingWorkflow(clicked) {
   _drawerFinding.workflow_status = r.data.workflow_status || target;
   _drawerFinding.workflow_updated_at = r.data.workflow_updated_at || '';
   _repaintWorkflowPills(_drawerFinding.workflow_status, _drawerFinding.workflow_updated_at);
-  var state = _drawerFinding.workflow_status;
   // Broadcast so list rows can repaint their chip without a full refetch.
   document.dispatchEvent(new CustomEvent('pulse:workflow-changed', {
     detail: {
@@ -3423,10 +3426,7 @@ export async function setFindingWorkflow(clicked) {
       workflow_updated_at: _drawerFinding.workflow_updated_at,
     },
   }));
-  showToast(state === 'new' ? 'Workflow cleared' :
-            'Marked ' + (state === 'acknowledged' ? 'Acknowledged' :
-                         state === 'investigating' ? 'Investigating' :
-                         'Resolved'));
+  // No success toast — the highlighted workflow pill already shows the state.
 }
 
 function _repaintWorkflowPills(state, updatedAt) {
@@ -3458,6 +3458,36 @@ export function closeFindingDrawer() {
   document.getElementById('finding-drawer').classList.remove('open');
   document.body.classList.remove('flyout-push-open');
   _drawerFinding = null;
+  // Slide Pip back to the corner and drop the finding context.
+  if (window.PulsePip) {
+    try {
+      if (window.PulsePip.setDocked) window.PulsePip.setDocked(false);
+      if (window.PulsePip.setContext) window.PulsePip.setContext(null);
+    } catch (e) {}
+  }
+}
+
+// Build a short, plain-text summary of a finding for Pip. Kept compact so it
+// doesn't balloon the prompt; the server fences it as untrusted log data.
+function _buddyContextFor(f) {
+  if (!f) return null;
+  var k = f.knowledge || {};
+  var parts = [
+    'Rule: ' + (f.rule || 'Unknown'),
+    'Severity: ' + (f.severity || 'LOW'),
+  ];
+  if (f.mitre) parts.push('MITRE: ' + f.mitre);
+  if (f.event_id) parts.push('Windows Event ID: ' + f.event_id);
+  if (f.hostname) parts.push('Host: ' + f.hostname);
+  if (f.timestamp) parts.push('When: ' + f.timestamp);
+  // The raw event detail — the actual data (task name, account, command,
+  // IP, etc.). This is what lets Pip analyze THIS finding instead of asking
+  // the user to retype what's already on screen. Capped + fenced as
+  // untrusted server-side (see pulse/buddy.py).
+  if (f.details) parts.push('Event details: ' + String(f.details).slice(0, 1500));
+  if (f.description) parts.push('Summary: ' + f.description);
+  if (k.plain_language) parts.push('What it means: ' + k.plain_language);
+  return parts.join('\n');
 }
 
 // Esc closes the drawer.

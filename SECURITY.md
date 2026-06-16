@@ -59,6 +59,25 @@ Out of scope:
 
 ---
 
+## Third-party data flow — the Pip AI assistant
+
+Pulse's optional Security Buddy ("Pip") is the only feature that sends data to a third party, and only when an administrator opts in by setting an `ANTHROPIC_API_KEY`. When a user asks Pip a question, the following is sent to **Anthropic's Claude API** to generate the answer:
+
+- The user's typed question and the recent chat history in that panel.
+- If a finding is open, a short summary of it (rule name, severity, MITRE technique, hostname, and the plain-language description) — this can include event-log-derived text.
+
+Safeguards in place:
+
+- The API key is read **server-side only** (`ANTHROPIC_API_KEY` env var) and is never exposed to the browser. The browser talks only to Pulse's own `POST /api/buddy/ask`.
+- Pip is **read-only**: no tools, no function calling. It cannot scan, block, or change anything in Pulse.
+- Any finding/event text is treated as **untrusted data** — it is fenced in an `<untrusted_data>` block with a system-prompt instruction to never follow instructions embedded in log data (prompt-injection defense).
+- Model output is **HTML-escaped** before rendering.
+- The chat panel **discloses** that questions are sent to Anthropic.
+
+If you do not want any data leaving your environment, leave `ANTHROPIC_API_KEY` unset — Pip stays off and Pulse runs entirely locally.
+
+---
+
 ## Safe harbor
 
 Good-faith security research on Pulse is welcome. If you stay within the scope above and give me reasonable time to fix issues before public disclosure, I will not pursue any legal action.

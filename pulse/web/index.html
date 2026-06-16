@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/css/modals.css">
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <link rel="stylesheet" href="/static/css/findings.css">
+  <link rel="stylesheet" href="/static/css/buddy.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
@@ -149,6 +150,10 @@
         <a class="sidebar-nav" data-action="navigate" data-arg="queue">
           <i data-lucide="inbox" class="icon"></i>
           <span>My Queue</span>
+        </a>
+        <a class="sidebar-nav" data-action="navigate" data-arg="team">
+          <i data-lucide="users" class="icon"></i>
+          <span>Team</span>
         </a>
         <a class="sidebar-nav" data-action="navigate" data-arg="monitor">
           <i data-lucide="activity" class="icon"></i>
@@ -716,5 +721,8 @@
   <!-- JAVASCRIPT                                                      -->
   <!-- ============================================================= -->
   <script type="module" src="/static/js/app.js"></script>
+  <!-- Pip, the floating Security Buddy chat widget. Self-contained module -->
+  <!-- that builds its own DOM, so it loads independently of app.js.       -->
+  <script type="module" src="/static/js/buddy.js"></script>
 </body>
 </html>

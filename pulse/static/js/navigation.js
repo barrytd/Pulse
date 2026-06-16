@@ -10,7 +10,7 @@
 // to manage either — the sidebar is always visible at 200px.
 'use strict';
 
-import { renderDashboardPage } from './dashboard.js';
+import { renderDashboardPage, renderTeamPage } from './dashboard.js';
 import { renderMonitorPage } from './monitor.js';
 import { renderFindingsPage, viewScan } from './findings.js';
 import { renderHistoryPage } from './history.js';
@@ -28,7 +28,7 @@ import { renderCompliancePage } from './compliance.js';
 import { renderTrendsPage } from './trends.js';
 import { renderThreatIntelPage } from './threat-intel.js';
 
-export const validPages = ['dashboard','queue','monitor','advisor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings','intel'];
+export const validPages = ['dashboard','queue','team','monitor','advisor','scans','findings','reports','history','fleet','firewall','whitelist','rules','audit','compliance','trends','settings','intel'];
 
 // Current page — mutable module state. Exposed via getter so other
 // modules can peek (see theme.js).
@@ -126,6 +126,7 @@ export function navigate(page, opts) {
   var renderers = {
     dashboard: renderDashboardPage,
     queue:     renderMyQueuePage,
+    team:      renderTeamPage,
     monitor:   renderMonitorPage,
     advisor:   renderSecurityAdvisorPage,
     findings:  renderFindingsPage,
@@ -206,6 +207,15 @@ function _closeAnyOpenDrawer() {
   var backdrop = document.getElementById('finding-drawer-backdrop');
   if (backdrop) backdrop.classList.remove('open');
   document.body.classList.remove('flyout-push-open');
+  // The drawer shares the right edge with Pip — when it closes via navigation
+  // (not the X/Esc path, which findings.js already handles), slide Pip back
+  // to the corner and drop the stale "Looking at <finding>" context.
+  if (window.PulsePip) {
+    try {
+      if (window.PulsePip.setDocked) window.PulsePip.setDocked(false);
+      if (window.PulsePip.setContext) window.PulsePip.setContext(null);
+    } catch (e) {}
+  }
 }
 
 // ----- back / forward -----------------------------------------------------

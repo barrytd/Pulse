@@ -54,13 +54,14 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 |---|---|
 | **Detection** | 33 rules mapped to MITRE ATT&CK · 4 time-based correlation rules · 4 Sysmon-based rules (command-line analysis, LSASS access, C2 network, DNS tunneling) · NIST CSF + ISO 27001 control IDs · SIGMA rule import · custom whitelist |
 | **Security Advisor** | Every finding ships a plain-language Security Guide — what happened, why it matters, immediate actions, exploit difficulty, false-positive tips. Security Advisor sidebar page with posture summary, top concerns, attack-concept explainers, hardening checklist. |
+| **Security Buddy ("Pip")** | Optional floating AI chat (bottom-right). Ask what a finding means, whether something looks dangerous, or any security question — answered in plain language by Claude Haiku, proxied server-side (`POST /api/buddy/ask`, key never in the browser). Read-only, prompt-injection-safe, 10 free questions/user/day. Suggests context-aware follow-ups, remembers the chat across refreshes, slides beside the finding drawer to discuss the open finding, and points out-of-scope questions to GitHub/Feedback. Off until an `ANTHROPIC_API_KEY` is set. |
 | **Reports** | 9 templates (Threat Detection Summary, Executive Summary, NIST CSF, ISO 27001, Incident Investigation, Fleet Health, Board-Ready Posture, MITRE Coverage, Compliance Gap) · 4 formats each (PDF/HTML/JSON/CSV) · DB-backed persistence with 90-day retention |
 | **Dashboard** | Single-page app · live monitor (SSE) · finding drawer with notes, workflow states, assignment · Ctrl+K palette · dark mode |
 | **Alerting** | SMTP email · Slack + Discord webhooks · per-rule cooldown · live monitor email alerts |
 | **Fleet** | Per-host security score · risk tier · stale-host spotlight · severity mix · drill-into-host view · CSV export |
 | **Firewall** | `pfirewall.log` parser · port-scan detection · Pulse-managed IP block list via `netsh advfirewall` · one-click block from finding drawer |
 | **Compliance** | NIST CSF + ISO 27001 control coverage · coverage-gap report (uncovered techniques, silent rules, noisy rules) |
-| **Team & roles** | Three-role hierarchy: admin · manager · analyst. **My Queue** page (analyst's assigned, unresolved findings sorted by priority → severity → age, with in-queue / overdue / due-today / resolved-today tiles) · **assignment dialog** (pick analyst + P1–P4 priority + due date + note, from the finding drawer or the Findings bulk bar) · **Team Workload** card (per-analyst open count, severity mix, oldest-unresolved age, avg fix time, click-through to their findings). |
+| **Team & roles** | Three-role hierarchy: admin · manager · analyst. **My Queue** page (analyst's assigned, unresolved findings sorted by priority → severity → age, with in-queue / overdue / due-today / resolved-today tiles) · **assignment dialog** (pick analyst + P1–P4 priority + due date + note, from the finding drawer or the Findings bulk bar) · dedicated **Team** page (per-analyst open count, severity mix, oldest-unresolved age, avg fix time, click-through to their findings; manager/admin only). |
 | **API** | FastAPI surface with Swagger at `/docs` · Bearer-token auth · REST endpoints for scan upload, history, reports, agent transport |
 | **Agent** | Packaged `pulse-agent.exe` · two-token enrollment · 60s heartbeat + 30min scan cadence · auto-update probe · ACL self-audit |
 | **Multi-tenant** | Every row scoped to `organization_id` · self-signup mints fresh org · email verification · admin invites |
@@ -154,6 +155,16 @@ python -m pip_audit --strict                  # CVE scan against the pinned set
 ```
 
 `requirements.txt` (loose ranges) is for dev; `requirements-lock.txt` (exact pins) is for production / hosted deploys so a compromised or buggy upstream package can't silently break Pulse or introduce a vulnerable transitive dep. A test in [`tests/test_security_hardening.py`](tests/test_security_hardening.py) runs `pip-audit --strict` against the live environment on every test sweep (marked `@pytest.mark.network`, skip with `-m "not network"`).
+
+### Enabling Pip (the AI Security Buddy)
+
+Pip is **off by default**. To turn it on, set an Anthropic API key in the server's environment before starting Pulse:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."   # Windows PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+The floating chat appears once a key is present. The key is read **server-side only** ([`pulse/buddy.py`](pulse/buddy.py)) and never reaches the browser; questions are answered by **Claude Haiku 4.5** through a backend proxy (`POST /api/buddy/ask`). API usage is pay-as-you-go (separate from any personal Claude subscription) — each user is capped at **10 questions/day** to keep cost predictable. Finding/event text sent to the model is fenced as untrusted data (prompt-injection defense), Pip is read-only, and the panel discloses that chats are sent to Anthropic.
 
 ---
 

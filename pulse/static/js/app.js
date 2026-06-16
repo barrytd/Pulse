@@ -782,6 +782,18 @@ async function _boot() {
   mountNotifBell();
 }
 
+// Defeat browser autofill on filter/search boxes. Chrome ignores
+// autocomplete="off" for saved emails, but it will not autofill a readonly
+// field. Inputs render with `readonly data-nofill="1"`; we drop the readonly
+// the moment the user focuses one, so typing is unaffected and the saved
+// login email never gets pasted in on page load.
+document.addEventListener('focusin', function (e) {
+  var t = e.target;
+  if (t && t.tagName === 'INPUT' && t.hasAttribute('data-nofill') && t.hasAttribute('readonly')) {
+    t.removeAttribute('readonly');
+  }
+});
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _boot);
 } else {

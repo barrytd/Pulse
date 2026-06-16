@@ -31,7 +31,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # Upload guards. .evtx files begin with the ASCII bytes "ElfFile" followed by
@@ -46,6 +46,7 @@ from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from pulse import __version__
 from pulse.auth import (
@@ -76,6 +77,7 @@ from pulse.database import (
     update_user_email, update_user_password,
     set_user_pin, clear_user_pin, get_user_pin_hash, user_has_pin,
     record_pin_failure, reset_pin_failures, get_pin_lockout_remaining,
+    get_ai_usage, increment_ai_usage,
     update_user_role,
     insert_finding_note, list_finding_notes, delete_finding_note,
     count_finding_notes, list_all_notes,
@@ -115,6 +117,7 @@ from pulse.monitor.system_scan import is_admin as _system_scan_is_admin
 from pulse.monitor.system_scan import is_supported_platform as _system_scan_supported
 from pulse.monitor.system_scan import scan_system
 from pulse.whitelist import filter_whitelist
+from pulse import buddy
 
 
 # ---------------------------------------------------------------------------
@@ -1528,6 +1531,110 @@ def _register_routes(app: FastAPI) -> None:
         )
         _audit_user_action(user_id, "pin_elevation_granted", target=str(user_id))
         return {"status": "ok", "elevated_seconds": ELEVATION_MAX_AGE_SECONDS}
+
+    # -------------------------------------------------------------------
+    # Security Buddy "Pip" — backend-proxied AI chat.
+    #
+    #   GET  /api/buddy/status — is Pip available, and how many questions
+    #                            does the caller have left today?
+    #   POST /api/buddy/ask    — ask a question; metered per user per UTC day.
+    #
+    # The Anthropic API key lives server-side (ANTHROPIC_API_KEY env var) and
+    # never touches the browser. Questions are capped per day because API
+    # billing is pay-as-you-go — see pulse/buddy.py + database.user_ai_usage.
+    # -------------------------------------------------------------------
+    # Free questions per user per UTC day. No paid tier is live yet, so this
+    # is just the cost-control valve. An admin can top up an individual via
+    # the user_ai_usage.bonus_questions column.
+    BUDDY_DAILY_LIMIT = 10
+
+    def _buddy_today():
+        return datetime.now(timezone.utc).date().isoformat()
+
+    def _buddy_quota(user_id):
+        """Return (used, limit, remaining) for the caller today.
+
+        When auth is disabled (local single-user dev), there's no real user
+        row to meter against, so Pip is effectively unlimited.
+        """
+        if not app.state.auth_required:
+            return (0, BUDDY_DAILY_LIMIT, BUDDY_DAILY_LIMIT)
+        used, bonus = get_ai_usage(app.state.db_path, user_id, _buddy_today())
+        limit = BUDDY_DAILY_LIMIT + int(bonus or 0)
+        return (used, limit, max(0, limit - used))
+
+    @app.get("/api/buddy/status")
+    def api_buddy_status(user_id: int = Depends(require_login)):
+        used, limit, remaining = _buddy_quota(user_id)
+        return {
+            "available": buddy.is_configured(),
+            "questions_used": used,
+            "daily_limit": limit,
+            "questions_left": remaining,
+        }
+
+    @app.post("/api/buddy/ask")
+    async def api_buddy_ask(request: Request, user_id: int = Depends(require_login)):
+        if not buddy.is_configured():
+            raise HTTPException(
+                503,
+                detail={"code": "not_configured",
+                        "message": "Pip isn't set up yet. An administrator needs "
+                                   "to add an ANTHROPIC_API_KEY."},
+            )
+
+        used, limit, remaining = _buddy_quota(user_id)
+        if remaining <= 0:
+            raise HTTPException(
+                429,
+                detail={"code": "quota_exhausted",
+                        "questions_left": 0, "daily_limit": limit,
+                        "message": "Sorry, you've run out of questions for today. "
+                                   "Upgrade for more, or come back tomorrow — they "
+                                   "reset at midnight UTC."},
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+
+        question = str(body.get("question") or "").strip()
+        if not question:
+            raise HTTPException(400, detail="Ask a question first.")
+        history = body.get("history") if isinstance(body.get("history"), list) else None
+        finding_context = body.get("finding_context")
+        if finding_context is not None:
+            finding_context = str(finding_context)
+
+        # Proxy the (synchronous, network-bound) call off the event loop so a
+        # slow Anthropic response doesn't block other requests.
+        result = await run_in_threadpool(
+            buddy.ask_pip, question, history, finding_context)
+
+        if not result.get("ok"):
+            # Pip couldn't answer (network / auth / refusal) — don't burn a
+            # question. Surface a friendly message, keep the quota intact.
+            return {
+                "ok": False,
+                "answer": "",
+                "message": result.get("message") or "I couldn't answer that just now.",
+                "error": result.get("error"),
+                "questions_left": remaining,
+                "daily_limit": limit,
+            }
+
+        # Successful answer — meter it (unless auth is off / unlimited dev).
+        if app.state.auth_required:
+            used = increment_ai_usage(app.state.db_path, user_id, _buddy_today())
+            remaining = max(0, limit - used)
+        return {
+            "ok": True,
+            "answer": result["answer"],
+            "suggestions": result.get("suggestions") or [],
+            "questions_left": remaining,
+            "daily_limit": limit,
+        }
 
     @app.post("/api/me/onboarding/dismiss")
     def api_me_onboarding_dismiss(user_id: int = Depends(require_login)):
