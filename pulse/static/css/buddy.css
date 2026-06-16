@@ -10,8 +10,9 @@
   transition: right 0.24s ease;
 }
 
-/* Slid left to sit beside the open finding drawer (drawer is 460px wide). */
-#pip-root.pip-docked { right: 494px; }
+/* Slid left to sit beside an open right-side drawer. Clears the widest one
+   (the generic detail drawer is 480px; the finding drawer 460px). */
+#pip-root.pip-docked { right: 504px; }
 
 /* On narrower screens the drawer + Pip can't sit side by side; let Pip stay
    in the corner (it'll overlap the drawer, but that's the rare small case). */

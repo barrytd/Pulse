@@ -22,7 +22,7 @@ Hardening before any stranger gets a hosted login: stop one organization's admin
 - **Removed redundant confirmation toasts.** Marking a finding reviewed / false-positive or changing its workflow state no longer pops a "Marked reviewed and false positive" banner in the corner — the checkbox, badge, and highlighted pill already show the new state. Error toasts are kept.
 - **Pip: follow-up chips in the user's voice.** Suggestions are now phrased as the question *you* tap to ask Pip ("Can you help with a specific alert?"), never as Pip asking you ("Do you have an alert open?").
 - **Pip: real finding details in context.** When a finding drawer is open, Pip now receives the actual event details (event ID, host, the raw detail line with task/account/command/IP) so it can analyze *that* finding directly instead of asking you to retype what's on screen.
-- **Pip: slides back on navigation.** Navigating away with a finding drawer open now tucks Pip back to the corner and clears the "Looking at &lt;finding&gt;" context, instead of leaving it stranded mid-screen.
+- **Pip: slides for every drawer, not just findings.** A MutationObserver now drives Pip's dock state from the live DOM, so it slides left beside *any* open right-side drawer (the finding drawer and the generic detail drawer used by Fleet, and any future one) and slides back when none is open — no per-drawer wiring. Navigating away also tucks Pip back and clears the "Looking at &lt;finding&gt;" context instead of leaving it stranded mid-screen.
 
 ## 2026-06-16 — Security Buddy "Pip" (MVP)
 

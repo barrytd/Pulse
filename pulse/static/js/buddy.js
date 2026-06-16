@@ -177,19 +177,37 @@ function _renderSuggestions(list) {
 // now. The single source of truth is the live DOM, not a stale variable, so
 // context can never linger after the drawer is closed or the user navigates
 // away by any path.
-function _syncContextToDrawer() {
-  var drawerOpen = !!document.querySelector('#finding-drawer.open');
-  if (!drawerOpen) {
-    // No finding open — make sure we're not still docked-left or holding a
-    // stale "Looking at <finding>" context (e.g. after navigating away).
-    var root = document.getElementById('pip-root');
-    if (root) root.classList.remove('pip-docked');
-    if (_context || _contextLabel) {
-      _context = null;
-      _contextLabel = null;
-      _renderContextBanner();
-    }
+// Any right-side drawer in the app: the finding drawer, or the generic
+// detail drawer (drawer.js — used by Fleet, etc.). Both slide in from the
+// right and would otherwise sit under Pip.
+var _DRAWER_OPEN_SELECTOR = '#finding-drawer.open, .drawer-overlay.open';
+
+function _anyDrawerOpen() {
+  return !!document.querySelector(_DRAWER_OPEN_SELECTOR);
+}
+
+// Single source of truth for Pip's docked position: slide left whenever ANY
+// drawer is open so Pip never sits underneath one, and slide back when none
+// is. Also drops stale finding context once every drawer is closed. Driven by
+// a MutationObserver (set up in _build), so this works for every drawer in the
+// app — current and future — without wiring each one.
+function _syncDock() {
+  var root = document.getElementById('pip-root');
+  if (!root) return;
+  var open = _anyDrawerOpen();
+  root.classList.toggle('pip-docked', open);
+  if (!open && (_context || _contextLabel)) {
+    _context = null;
+    _contextLabel = null;
+    _renderContextBanner();
   }
+}
+
+var _dockSyncQueued = false;
+function _queueDockSync() {
+  if (_dockSyncQueued) return;
+  _dockSyncQueued = true;
+  requestAnimationFrame(function () { _dockSyncQueued = false; _syncDock(); });
 }
 
 // Show/hide the "Looking at: <finding>" pill so it's always clear when Pip
@@ -271,10 +289,10 @@ async function _send(question) {
   var thinking = _appendBubble('pip', '<span class="pip-typing"><i></i><i></i><i></i></span>', 'pip-thinking');
 
   var payload = { question: question, history: _history.slice(-8) };
-  // Only ever send finding context if the drawer is genuinely open right now.
+  // Only ever send finding context if a drawer is genuinely open right now.
   // This guarantees a previously-viewed finding can never bleed into a later,
   // unrelated question (the "scheduled task on Leviathan" ghost).
-  _syncContextToDrawer();
+  _syncDock();
   if (_context) payload.finding_context = _context;
 
   var data = null;
@@ -337,7 +355,7 @@ function _openPanel() {
     if (_history.length) _renderTranscript();   // restored from a refresh
     else _greeting();
   }
-  _syncContextToDrawer();   // clear any stale finding context first
+  _syncDock();              // dock + clear any stale context to match drawers
   _renderContextBanner();   // then reflect a finding that's genuinely open
   _refreshStatus();
   var input = _el('pip-input');
@@ -456,6 +474,18 @@ function _build() {
   // Bring back a saved conversation from a previous page load (rendered into
   // the hidden panel so it's ready the moment the user opens Pip).
   if (_restoreChat()) _renderTranscript();
+
+  // Keep Pip's dock state matched to any open drawer, app-wide. Watching for
+  // class/hidden changes covers the finding drawer (toggles .open) and the
+  // generic detail drawer (drawer.js, toggles .open on .drawer-overlay) — and
+  // any future drawer — without per-drawer wiring. Coalesced via rAF so the
+  // observer is cheap even during heavy re-renders.
+  try {
+    new MutationObserver(_queueDockSync).observe(document.body, {
+      attributes: true, attributeFilter: ['class', 'hidden'], subtree: true,
+    });
+  } catch (e) { /* no MutationObserver — explicit setDocked calls still work */ }
+  _syncDock();
 
   _refreshStatus();
 }
