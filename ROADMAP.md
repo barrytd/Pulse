@@ -83,7 +83,7 @@ Flat status board organized by category, sorted by priority within each section.
 
 > Tracked defects. Drop in here with a one-line repro + the file where it bites; promote into **Up Next** with priority based on severity + frequency.
 
-*No tracked bugs right now.*
+- **Fleet → "Generate Incident Report for this host" doesn't produce a report** — clicking the per-host siren button on the Fleet page appears to do nothing. Backend generation is verified working (valid PDF for populated / FP-only / empty hosts), and the frontend chain looks correct on inspection, so the failure is a silent runtime issue somewhere in the open-modal path. Bites in [`pulse/static/js/fleet.js`](pulse/static/js/fleet.js) (`fleetGenerateIncidentReport` → dynamic `import('./reports.js')` → `generateIncidentReportForHost`) and [`pulse/static/js/reports.js`](pulse/static/js/reports.js) (`openGenerateReportModal`). Added error-surfacing to the import chain (2026-06-16) so a retry should now show a toast / console error to pinpoint it — needs a live repro with the browser console open to finish diagnosing. (Logged 2026-06-16)
 
 ---
 
