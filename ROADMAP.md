@@ -18,9 +18,7 @@ Flat status board organized by category, sorted by priority within each section.
 
 > The next things to pull into **In Progress**. Top-of-list ships next.
 
-| Priority | Item | Notes |
-|---|---|---|
-| 🟡 Medium | **Drawer triage polish** | Extends the shipped drawer redesign with the rest of the research recommendations ([§1.4](.claude/research/2026-06-07-triage-drawer-ux-and-security-buddy.md)): (1) a top-level **Summary / Full toggle** (Summary = header band + What happened + What to do now + threat-intel verdict badge; default new users to Summary), (2) move the **difficulty badge into the header band** next to severity, (3) surface a one-line **threat-intel verdict badge** in the header when AbuseIPDB has a score, (4) pin the **tracking/review controls to a sticky footer** so triage actions never require scrolling past everything. |
+*Nothing queued right now — pull from the Development Backlog below (the **Add-host onboarding** under Distribution is the highest-leverage adoption item).*
 
 ---
 

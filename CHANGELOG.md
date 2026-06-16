@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-08 — Finding drawer triage polish
+
+Extends the drawer redesign with the rest of the research recommendations:
+
+- **Summary / Full toggle** at the top. **Summary** (the default for a fresh visitor, remembered per browser) leads with just the header band + "What happened" + "What to do now" + the threat-intel verdict — everything else (intel detail, technical, framework refs, firewall, assign, notes) is hidden until **Full**.
+- **Difficulty badge moved into the header band** next to the severity pill, so the "how hard is this to pull off?" signal reads at a glance (removed the duplicate pill from the security-guide card).
+- **One-line threat-intel verdict badge** in the header (e.g. "Malicious · 92") that fills in when AbuseIPDB returns a score — visible even in Summary mode where the full intel section is hidden.
+- **Workflow + review controls pinned to a sticky footer**, always reachable without scrolling past the whole drawer. The body scrolls between the header and the footer.
+
+---
+
 ## 2026-06-08 — Findings KPI strip overhaul
 
 The old Open / Untriaged / Active / Resolved tiles overlapped (an item could be all three), so they read as "broken." Replaced with four **non-overlapping** tiles that always tell a story:

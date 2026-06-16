@@ -1959,6 +1959,47 @@ export function _riskShield(f) {
   return '<span class="risk-shield risk-' + diff + '" title="' + tooltip + '" aria-label="' + tooltip + '"></span>';
 }
 
+// Difficulty pill for the drawer header band (next to the severity pill).
+// Reuses the .advisor-diff-* color language so it reads consistently with
+// the security-guide card.
+function _drawerDifficultyBadge(f) {
+  var diff = (f.knowledge && f.knowledge.difficulty || '').toLowerCase();
+  if (diff !== 'low' && diff !== 'medium' && diff !== 'high') return '';
+  var label = diff.charAt(0).toUpperCase() + diff.slice(1);
+  return '<span class="drawer-diff-badge advisor-diff-' + diff + '" ' +
+    'title="How hard is this attack to pull off?">' + label + ' difficulty</span>';
+}
+
+// ----- Drawer detail level (Summary / Full) --------------------------------
+// Summary leads non-experts with just the header band + what happened + what
+// to do + the intel verdict; Full reveals the technical depth. Persisted per
+// browser; a fresh visitor defaults to Summary.
+function _getDrawerMode() {
+  try { return localStorage.getItem('pulseDrawerMode') === 'full' ? 'full' : 'summary'; }
+  catch (e) { return 'summary'; }
+}
+
+function _applyDrawerMode(mode) {
+  mode = (mode === 'full') ? 'full' : 'summary';
+  var drawer = document.getElementById('finding-drawer');
+  if (drawer) {
+    drawer.classList.toggle('mode-full', mode === 'full');
+    drawer.classList.toggle('mode-summary', mode !== 'full');
+  }
+  var toggle = document.getElementById('drawer-mode-toggle');
+  if (toggle) {
+    toggle.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-arg') === mode);
+    });
+  }
+}
+
+export function setDrawerMode(mode) {
+  mode = (mode === 'full') ? 'full' : 'summary';
+  try { localStorage.setItem('pulseDrawerMode', mode); } catch (e) {}
+  _applyDrawerMode(mode);
+}
+
 // Render the Security Guide card — Pulse's audience often does not have
 // a SOC analyst on staff, so each finding gets a plain-language section
 // explaining what happened, why it matters, and what to do *right now*.
@@ -2003,9 +2044,6 @@ export function _securityGuideBlock(f) {
     '<div class="advisor-header">' +
       '<span class="advisor-icon" aria-hidden="true">💡</span>' +
       '<span class="advisor-title">What happened</span>' +
-      '<span class="advisor-diff-pill advisor-diff-' + diff + '" title="How hard is this attack to pull off?">' +
-        diffLabel + ' difficulty' +
-      '</span>' +
     '</div>' +
     '<div class="advisor-plain">' + escapeHtml(k.plain_language) + '</div>' +
     // What to do now leads — promoted directly under the summary.
@@ -2343,6 +2381,16 @@ async function _loadDrawerIntel(f) {
   var score   = d.score;
   var sclass  = _intelScoreClass(score);
   var slabel  = _intelScoreLabel(score);
+
+  // One-line verdict badge in the drawer header band — reads at a glance
+  // and stays visible in Summary mode (where the full section is hidden).
+  var headBadge = document.getElementById('drawer-intel-badge');
+  if (headBadge && score != null) {
+    headBadge.className = 'drawer-intel-badge ' + sclass;
+    headBadge.textContent = slabel + ' · ' + score;
+    headBadge.title = 'AbuseIPDB confidence for ' + ip;
+    headBadge.hidden = false;
+  }
   var country = d.country ? escapeHtml(d.country) : '—';
   var isp     = d.isp     ? escapeHtml(d.isp)     : '—';
   var reports = d.total_reports != null ? d.total_reports.toLocaleString() : '—';
@@ -2650,9 +2698,14 @@ export function openFindingDrawer(f) {
 
   var ruleEl = document.getElementById('drawer-rule');
   ruleEl.innerHTML = escapeHtml(rule) + _refIdPill(f);
+  // Header band: severity → difficulty → MITRE → threat-intel verdict (filled
+  // async by _loadDrawerIntel) → review badge. The difficulty + intel verdict
+  // sit here so the most decision-relevant signals are read-at-a-glance.
   document.getElementById('drawer-sev-line').innerHTML =
     '<span class="sev-pill sev-' + sev.toLowerCase() + '">' + sev + '</span>' +
+    _drawerDifficultyBadge(f) +
     mitreLink +
+    '<span class="drawer-intel-badge" id="drawer-intel-badge" hidden></span>' +
     _reviewBadge(f);
 
   // ---------------------------------------------------------------
@@ -2668,28 +2721,32 @@ export function openFindingDrawer(f) {
   // The title + severity + MITRE tag render above in drawer-rule /
   // drawer-sev-line, so the summary is the first thing inside the body.
   // ---------------------------------------------------------------
+  // Summary mode shows only the security guide (what happened + what to do);
+  // everything else is wrapped .drawer-full-only and hidden until "Full".
   document.getElementById('drawer-body').innerHTML =
     '<div class="finding-drawer-section">' +
       _securityGuideBlock(f) +
     '</div>' +
 
-    _renderIntelSection(f) +
+    '<div class="drawer-full-only">' +
+      _renderIntelSection(f) +
+      _drawerTechnicalBlock(f) +
+      _drawerFrameworkRefs(f) +
+      _stageBlockSection(f) +
+      '<div class="drawer-tracking-divider"><span>Tracking</span></div>' +
+      _renderAssignSection(f) +
+      _renderNotesSection(f) +
+    '</div>';
 
-    _drawerTechnicalBlock(f) +
+  // Workflow + review controls live in a sticky footer so the core triage
+  // actions are always reachable without scrolling, in both modes.
+  document.getElementById('drawer-footer').innerHTML =
+    '<div class="drawer-footer-inner">' +
+      _renderWorkflowSection(f) +
+      _renderReviewSection(f) +
+    '</div>';
 
-    _drawerFrameworkRefs(f) +
-
-    _stageBlockSection(f) +
-
-    '<div class="drawer-tracking-divider"><span>Tracking</span></div>' +
-
-    _renderWorkflowSection(f) +
-
-    _renderAssignSection(f) +
-
-    _renderNotesSection(f) +
-
-    _renderReviewSection(f);
+  _applyDrawerMode(_getDrawerMode());
 
   // The review buttons hydrate their persistent highlighted state directly
   // in _renderReviewSection (the is-active class), reading the finding's

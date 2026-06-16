@@ -620,7 +620,14 @@
       </div>
       <button class="finding-drawer-close" data-action="closeFindingDrawer" aria-label="Close">&times;</button>
     </div>
+    <div class="drawer-mode-bar">
+      <div class="drawer-mode-toggle" id="drawer-mode-toggle" role="tablist" aria-label="Detail level">
+        <button type="button" data-action="setDrawerMode" data-arg="summary" role="tab">Summary</button>
+        <button type="button" data-action="setDrawerMode" data-arg="full" role="tab">Full</button>
+      </div>
+    </div>
     <div class="finding-drawer-body" id="drawer-body"></div>
+    <div class="finding-drawer-footer" id="drawer-footer"></div>
   </aside>
 
   <!-- ============================================================= -->
