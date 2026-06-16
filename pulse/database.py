@@ -2793,12 +2793,20 @@ def get_user_by_id(db_path, user_id):
         return _row_to_user(row)
 
 
-def list_users(db_path):
-    """Return every user (active + deactivated), newest first. Used by the
-    admin user-management page."""
+def list_users(db_path, organization_id=None):
+    """Return users (active + deactivated), newest first. Used by the admin
+    user-management page.
+
+    Pass ``organization_id`` to scope the list to one tenant — this is what
+    keeps a hosted org admin from seeing users in other organizations. With
+    ``None`` (the default, used by single-tenant self-host and super-admins)
+    every user is returned.
+    """
+    where = "" if organization_id is None else " WHERE organization_id = ?"
+    params = () if organization_id is None else (int(organization_id),)
     with _connect(db_path) as conn:
         rows = conn.execute(
-            f"SELECT {_USER_COLS} FROM users ORDER BY id DESC"
+            f"SELECT {_USER_COLS} FROM users{where} ORDER BY id DESC", params
         ).fetchall()
     return [_row_to_user(r) for r in rows]
 
@@ -2845,14 +2853,24 @@ def delete_user(db_path, user_id):
         conn.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
 
 
-def count_admins(db_path, *, active_only=True):
+def count_admins(db_path, *, active_only=True, organization_id=None):
     """How many admin accounts exist. Used to guard against the last admin
-    being demoted or deactivated — which would lock everyone out."""
+    being demoted or deactivated — which would lock everyone out.
+
+    Pass ``organization_id`` to count admins within a single tenant, so the
+    "last admin" guard protects each hosted org independently (org A demoting
+    its only admin is blocked even though org B has admins). ``None`` counts
+    admins globally (single-tenant self-host / super-admin).
+    """
     sql = "SELECT COUNT(*) FROM users WHERE role = 'admin'"
+    params = []
     if active_only:
         sql += " AND active = 1"
+    if organization_id is not None:
+        sql += " AND organization_id = ?"
+        params.append(int(organization_id))
     with _connect(db_path) as conn:
-        row = conn.execute(sql).fetchone()
+        row = conn.execute(sql, tuple(params)).fetchone()
         return int(row[0]) if row else 0
 
 

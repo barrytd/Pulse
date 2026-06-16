@@ -109,7 +109,7 @@ Pulse is open source and free to self-host, and that will not change. The plan i
 ## What is next
 
 - A simple "add a host" flow with a one-line installer.
-- Tenant hardening before public sign-up (scope every admin to their own workspace, add a private platform-owner role).
+- Tenant hardening before public sign-up: the core is done (each workspace's admin is now scoped to their own workspace, with a private platform-owner role set by an environment variable). Still to add before opening sign-up to strangers: cross-site request protection and trusting the right network address behind a proxy.
 - Invite teammates by code.
 - More for Pip, the AI assistant: streaming replies, a paid tier with a higher daily question limit, and a curated cybersecurity knowledge file so Pip answers from vetted, documented fact instead of only its training.
 

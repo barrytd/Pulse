@@ -50,6 +50,7 @@ Security issues I am interested in:
 - Credential exposure in reports, logs, or the database
 - SMTP credential handling issues in the email module
 - Any way to trick Pulse into reporting incorrect or missing findings
+- Cross-tenant data access in hosted multi-tenant mode (`PULSE_HOSTED_SIGNUP=1`) — one organization's admin reading or managing another organization's scans, findings, or users. Org admins are scoped to their own organization; only the env-only `PULSE_SUPERADMIN_EMAILS` allowlist gets cross-tenant scope.
 
 Out of scope:
 

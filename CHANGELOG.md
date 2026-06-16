@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-16 — Multi-tenant admin isolation (data-isolation core)
+
+Hardening before any stranger gets a hosted login: stop one organization's admin from seeing or managing another organization's data.
+
+- **Hosted admins are pinned to their own org.** `_read_scope_kwargs` no longer grants every `admin` global scope. A new `_has_global_scope()` grants cross-tenant scope only to auth-disabled installs, the env-only super-admin, and **single-tenant self-host** admins (who must keep global scope so they still see CLI-uploaded scans with `organization_id = NULL`). On a hosted deploy (`PULSE_HOSTED_SIGNUP=1`), each org admin is scoped to their own `organization_id`.
+- **`/api/users` is org-scoped.** List returns only the caller's org; role/active/delete/display-name return **404** on a target in another org (404, not 403, so a cross-org id's existence doesn't leak). The "last admin" guard now counts admins **per organization**, so org A can't demote its only admin even though other orgs have admins.
+- **Platform super-admin via `PULSE_SUPERADMIN_EMAILS`.** A comma-separated, env-only allowlist of emails that keep global scope. It can't be granted through signup or any API, so no tenant can escalate into it.
+- **DB helpers** `list_users` and `count_admins` gained an `organization_id` filter.
+- **11-test multi-org suite** (`tests/test_multitenant_admin_scope.py`) proves admin-of-A can't read/list/modify/delete in org-B, the per-org last-admin guard fires, and the super-admin still sees and manages everyone. Single-tenant behavior is unchanged (existing `test_data_isolation.py` still green). 1196 tests passing.
+- *Still to do before public signup: CSRF custom-header check on mutating routes, and a trusted-proxy allowlist for the rate-limiter's `X-Forwarded-For`.*
+
 ## 2026-06-16 — Demo environment seed + triage polish
 
 - **`scripts/seed_startup.py`** — one command to wipe the detection data and seed a realistic small-startup environment for live-style testing: a ~9-person team (admin / managers / analysts, all in your org, password `ChangeMe!8`), ~15 hosts (laptops + servers with believable stories — a critical domain controller, a compromised laptop, a brute-forced VPN, mostly-healthy employee machines), ~35 findings across all severities, plus assignments and workflow/review state already in progress so My Queue, Team, and the Dashboard look lived-in. Keeps your own admin login. Re-runnable.

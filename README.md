@@ -156,6 +156,12 @@ python -m pip_audit --strict                  # CVE scan against the pinned set
 
 `requirements.txt` (loose ranges) is for dev; `requirements-lock.txt` (exact pins) is for production / hosted deploys so a compromised or buggy upstream package can't silently break Pulse or introduce a vulnerable transitive dep. A test in [`tests/test_security_hardening.py`](tests/test_security_hardening.py) runs `pip-audit --strict` against the live environment on every test sweep (marked `@pytest.mark.network`, skip with `-m "not network"`).
 
+### Hosted multi-tenant mode
+
+Set `PULSE_HOSTED_SIGNUP=1` to let each signup create its own isolated organization (tenant). In this mode an org's admin is scoped to their **own** organization — they can't see or manage another tenant's data or users. To grant yourself cross-tenant (platform-owner) access, set `PULSE_SUPERADMIN_EMAILS` to a comma-separated allowlist of emails; this is **env-only** and can't be granted through signup or the API, so no tenant can escalate into it. Single-tenant self-host (the default, no `PULSE_HOSTED_SIGNUP`) is unaffected — the lone admin sees everything, including CLI-uploaded scans.
+
+> **Before opening public signup:** CSRF protection and a trusted-proxy `X-Forwarded-For` allowlist are still on the roadmap. Until then, run hosted mode for invited/trusted users only.
+
 ### Enabling Pip (the AI Security Buddy)
 
 Pip is **off by default**. To turn it on, set an Anthropic API key in the server's environment before starting Pulse:

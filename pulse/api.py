@@ -215,6 +215,16 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
         os.environ.get("PULSE_HOSTED_SIGNUP", "").strip().lower()
         in ("1", "true", "yes", "on")
     )
+    # Platform super-admins — a private, env-only allowlist of emails that
+    # get cross-tenant (global) scope on a hosted deploy. Deliberately NOT
+    # grantable through signup or any API, so no tenant can escalate into it:
+    # the only way in is for the operator to set the env var. In single-tenant
+    # self-host this is usually empty (the lone admin already sees everything).
+    app.state.super_admin_emails = frozenset(
+        e.strip().lower()
+        for e in os.environ.get("PULSE_SUPERADMIN_EMAILS", "").split(",")
+        if e.strip()
+    )
 
     # Resolve (and if needed, generate + persist) the session signing secret
     # so every logged-in browser cookie can be verified on future requests.
@@ -628,20 +638,54 @@ def _org_scope_for(app, user_id):
     return int(org_id) if org_id else None
 
 
+def _is_super_admin(app, user):
+    """True if ``user`` is a platform super-admin (email in the env allowlist).
+
+    Super-admins get cross-tenant scope. The allowlist is env-only and never
+    settable through the API, so no tenant can escalate into it.
+    """
+    if not user:
+        return False
+    emails = getattr(app.state, "super_admin_emails", frozenset())
+    return (user.get("email") or "").strip().lower() in emails
+
+
+def _has_global_scope(app, user):
+    """True when this caller may see/manage data across every tenant.
+
+    Global scope is granted to: auth-disabled installs, super-admins, and —
+    crucially — admins on a **single-tenant self-host** (no hosted signup).
+    On a self-host the admin must keep global scope or they'd stop seeing
+    CLI-uploaded scans (organization_id NULL). Multiple organizations only
+    ever exist once hosted signup is enabled, and there each admin is pinned
+    to their own org.
+    """
+    if not getattr(app.state, "auth_required", True):
+        return True
+    if not user:
+        return False
+    if _is_super_admin(app, user):
+        return True
+    if user.get("role") == "admin" and not getattr(app.state, "hosted_signup", False):
+        return True
+    return False
+
+
 def _read_scope_kwargs(app, user_id):
     """Return scope kwargs to splat into DB read helpers.
 
     Resolution order (broadest first):
-      - admin, no-auth, or unknown caller -> ``{}`` (no filter)
+      - auth disabled / super-admin / single-tenant self-host admin -> ``{}``
       - user has an organization_id -> ``{"organization_id": N}``
       - legacy single-user install (no org assigned yet) -> ``{"user_id": N}``
+
+    The change from "any admin -> {}" to "only globally-scoped callers -> {}"
+    is the multi-tenant fix: a hosted org admin is now pinned to their own
+    organization so they can't read another tenant's data.
 
     Splat at the call site::
 
         rows = get_history(db_path, limit=20, **_read_scope_kwargs(app, uid))
-
-    Keeps every endpoint to a single line instead of repeating the
-    org-scope/user-scope branch.
     """
     if not getattr(app.state, "auth_required", True):
         return {}
@@ -650,12 +694,37 @@ def _read_scope_kwargs(app, user_id):
     user = get_user_by_id(app.state.db_path, user_id)
     if not user:
         return {"user_id": int(user_id)}
-    if user.get("role") == "admin":
+    if _has_global_scope(app, user):
         return {}
     org_id = user.get("organization_id")
     if org_id:
         return {"organization_id": int(org_id)}
     return {"user_id": int(user_id)}
+
+
+def _admin_scope_org(app, user_id):
+    """The org id a caller's user-management is confined to, or None = global.
+
+    None (global) for auth-disabled, super-admins, and single-tenant self-host
+    admins. A hosted org admin gets their own ``organization_id`` so listing,
+    role/active changes, deletion, and the "last admin" guard all stay inside
+    their tenant.
+    """
+    user = get_user_by_id(app.state.db_path, user_id) if user_id else None
+    if _has_global_scope(app, user):
+        return None
+    return user.get("organization_id") if user else None
+
+
+def _assert_user_in_admin_scope(app, caller_id, target_user):
+    """404 if ``target_user`` is outside the caller's tenant.
+
+    Mirrors the finding-scope IDOR fix: we 404 (not 403) on a cross-org id so
+    its existence doesn't leak to an admin in another organization.
+    """
+    scope_org = _admin_scope_org(app, caller_id)
+    if scope_org is not None and target_user.get("organization_id") != scope_org:
+        raise HTTPException(404, detail="User not found.")
 
 
 def _findings_scope_kwargs(app, user_id):
@@ -2211,7 +2280,10 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/api/users")
     def api_list_users(user_id: int = Depends(require_admin)):
-        return {"users": [_public_user(u) for u in list_users(app.state.db_path)]}
+        # Scope to the caller's tenant on a hosted deploy; global for a
+        # single-tenant self-host admin or a platform super-admin.
+        return {"users": [_public_user(u) for u in list_users(
+            app.state.db_path, organization_id=_admin_scope_org(app, user_id))]}
 
     @app.post("/api/users")
     async def api_create_user(request: Request, user_id: int = Depends(require_admin)):
@@ -2267,9 +2339,12 @@ def _register_routes(app: FastAPI) -> None:
         target = get_user_by_id(app.state.db_path, target_id)
         if not target:
             raise HTTPException(404, detail="User not found.")
-        # Guard: demoting the last active admin would lock everyone out.
+        _assert_user_in_admin_scope(app, user_id, target)
+        # Guard: demoting the last active admin would lock everyone out — per
+        # tenant, so org A can't demote its only admin even if org B has one.
         if target.get("role") == "admin" and role != "admin":
-            if count_admins(app.state.db_path, active_only=True) <= 1:
+            if count_admins(app.state.db_path, active_only=True,
+                            organization_id=_admin_scope_org(app, user_id)) <= 1:
                 raise HTTPException(409, detail="Cannot demote the last active admin.")
         update_user_role(app.state.db_path, target_id, role)
         _audit_user_action(user_id, "update_user_role",
@@ -2300,6 +2375,7 @@ def _register_routes(app: FastAPI) -> None:
         target = get_user_by_id(app.state.db_path, target_id)
         if not target:
             raise HTTPException(404, detail="User not found.")
+        _assert_user_in_admin_scope(app, user_id, target)
         update_user_display_name(app.state.db_path, target_id, display_name)
         _audit_user_action(user_id, "update_user_display_name",
                            target=target["email"],
@@ -2315,10 +2391,12 @@ def _register_routes(app: FastAPI) -> None:
         target = get_user_by_id(app.state.db_path, target_id)
         if not target:
             raise HTTPException(404, detail="User not found.")
+        _assert_user_in_admin_scope(app, user_id, target)
         if target_id == user_id and not active:
             raise HTTPException(409, detail="You cannot deactivate your own account.")
         if (not active and target.get("role") == "admin"
-                and count_admins(app.state.db_path, active_only=True) <= 1):
+                and count_admins(app.state.db_path, active_only=True,
+                                 organization_id=_admin_scope_org(app, user_id)) <= 1):
             raise HTTPException(409, detail="Cannot deactivate the last active admin.")
         update_user_active(app.state.db_path, target_id, active)
         _audit_user_action(user_id, "update_user_active",
@@ -2332,10 +2410,12 @@ def _register_routes(app: FastAPI) -> None:
         target = get_user_by_id(app.state.db_path, target_id)
         if not target:
             raise HTTPException(404, detail="User not found.")
+        _assert_user_in_admin_scope(app, user_id, target)
         if target_id == user_id:
             raise HTTPException(409, detail="You cannot delete your own account.")
         if (target.get("role") == "admin"
-                and count_admins(app.state.db_path, active_only=True) <= 1):
+                and count_admins(app.state.db_path, active_only=True,
+                                 organization_id=_admin_scope_org(app, user_id)) <= 1):
             raise HTTPException(409, detail="Cannot delete the last active admin.")
         delete_user(app.state.db_path, target_id)
         _audit_user_action(user_id, "delete_user", target=target["email"])
