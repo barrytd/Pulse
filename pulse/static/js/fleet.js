@@ -8,7 +8,7 @@
 import { fetchFleet } from './api.js';
 import { dashFilterState, writeDashFiltersToURL } from './dashboard.js';
 import { navigate } from './navigation.js';
-import { escapeHtml, scoreColorClass, _gradeFor, sevPillHtml, relTimeHtml } from './dashboard.js';
+import { escapeHtml, scoreColorClass, _gradeFor, sevPillHtml, relTimeHtml, showToast, toastError } from './dashboard.js';
 import { openDrawer, closeDrawer } from './drawer.js';
 
 var _fleetCache = [];
@@ -119,10 +119,25 @@ function _buildFleetTable(hosts) {
  * code lazy-loaded for users who never use this feature.
  */
 export function fleetGenerateIncidentReport(host) {
-  if (!host) return;
-  import('./reports.js').then(function (m) {
-    m.generateIncidentReportForHost(host);
-  });
+  if (!host) {
+    toastError('Could not determine which host to report on.');
+    return;
+  }
+  // Lazy-load the report module. Surface any failure (module load OR the
+  // call itself) — previously this had no error handling, so anything that
+  // threw left the button looking dead with no feedback at all.
+  import('./reports.js')
+    .then(function (m) {
+      if (!m || typeof m.generateIncidentReportForHost !== 'function') {
+        throw new Error('report module missing generateIncidentReportForHost');
+      }
+      return m.generateIncidentReportForHost(host);
+    })
+    .catch(function (err) {
+      console.error('Fleet incident report failed for host', host, err);
+      toastError('Could not open the incident report dialog: ' +
+        ((err && err.message) || 'unknown error'));
+    });
 }
 
 function _renderBody() {
