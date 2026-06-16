@@ -1432,6 +1432,13 @@ body.light .admin-banner-close {
   border-left-color: var(--accent);
   background: var(--accent-glow, rgba(88, 166, 255, 0.08));
 }
+.kpi-tile-number,
+.kpi-tile-zero {
+  min-height: 32px;            /* number + friendly-zero share a height so
+                                  tiles never jump as counts change */
+  display: flex;
+  align-items: flex-end;
+}
 .kpi-tile-number {
   font-size: 28px;
   font-weight: 600;
@@ -1439,6 +1446,20 @@ body.light .admin-banner-close {
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
+/* Friendly empty state — a short line instead of a bare 0. */
+.kpi-tile-zero {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding-bottom: 3px;
+}
+.kpi-tile.is-zero.is-good .kpi-tile-zero { color: #3fb950; }  /* zero is good */
+
+/* Tone tints the number so each tile reads at a glance. */
+.kpi-tone-crit .kpi-tile-number { color: #f85149; }
+.kpi-tone-warn .kpi-tile-number { color: #f0883e; }
+.kpi-tone-info .kpi-tile-number { color: var(--accent); }
+.kpi-tone-ok   .kpi-tile-number { color: #3fb950; }
 .kpi-tile-label {
   font-size: 12px;
   color: var(--text-muted);

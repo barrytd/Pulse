@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-08 — Findings KPI strip overhaul
+
+The old Open / Untriaged / Active / Resolved tiles overlapped (an item could be all three), so they read as "broken." Replaced with four **non-overlapping** tiles that always tell a story:
+
+- **Needs attention** — untriaged critical / high (red).
+- **In progress** — acknowledged or investigating (blue).
+- **Critical + High open** — unresolved, high severity (amber).
+- **Resolved** — closed in the last 7 days (green).
+
+Each tile is a **clickable filter** into the list (sets status + severity), acting like a radio — click the active tile again to clear. The number is tinted by tone so the strip reads at a glance, and a genuinely-zero tile shows a **friendly line instead of a bare 0** ("All clear", "None open"), green when zero is the good outcome. Counts always reflect the full dataset; the tile filters only the table below.
+
+---
+
 ## 2026-06-08 — Team role hierarchy Phase 6: sidebar role-gating + default landing
 
 The final piece of the admin > manager > analyst hierarchy.

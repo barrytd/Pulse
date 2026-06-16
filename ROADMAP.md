@@ -20,7 +20,6 @@ Flat status board organized by category, sorted by priority within each section.
 
 | Priority | Item | Notes |
 |---|---|---|
-| 🟠 High | **Findings KPI strip overhaul** | The Open / Untriaged / Active / Resolved tiles overlap (an item can be all three at once) so they collapse to identical or zero numbers and read as "broken." Replace with non-overlapping, time-bounded, severity-weighted tiles that always tell a story: **Needs attention** (untriaged + critical/high), **In progress** (assigned/active), **Critical+High open** (severity-weighted), **Resolved (last 7 days)**. Each tile is a clickable filter into the list; genuinely-zero tiles render a friendly empty state ("No critical findings — nice") instead of a bare 0. Per [research report §1.5](.claude/research/2026-06-07-triage-drawer-ux-and-security-buddy.md). Fast, high-impact UI win. |
 | 🟡 Medium | **Drawer triage polish** | Extends the shipped drawer redesign with the rest of the research recommendations ([§1.4](.claude/research/2026-06-07-triage-drawer-ux-and-security-buddy.md)): (1) a top-level **Summary / Full toggle** (Summary = header band + What happened + What to do now + threat-intel verdict badge; default new users to Summary), (2) move the **difficulty badge into the header band** next to severity, (3) surface a one-line **threat-intel verdict badge** in the header when AbuseIPDB has a score, (4) pin the **tracking/review controls to a sticky footer** so triage actions never require scrolling past everything. |
 
 ---
