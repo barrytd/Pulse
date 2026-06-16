@@ -5,6 +5,12 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-16 — Settings rail groups + Billing tab
+
+- **Settings rail grouped into labeled sections.** The flat 12-item rail is now grouped into **ACCOUNT / PREFERENCES / CONFIGURATION / TEAM / WORKSPACE** with small uppercase group labels (matching the main sidebar) and spacing between clusters. Role-gated: a group whose every item is admin-only (TEAM, WORKSPACE) disappears — label and all — for non-admins. The pages themselves and the deep-link routes are unchanged.
+- **New admin-only Billing tab** (ACCOUNT group, `/settings/billing`). Placeholder for now: a "Billing" card ("Manage your plan, payment method, and usage.") with a **Coming soon** state — no payment or plan logic yet. When Pip's daily question metering is configured, it also surfaces a read-only **AI usage** line (questions used today vs. the daily limit) from data we already have.
+- **Fleet: new `GET /api/fleet/host/{hostname}`** — returns a per-host severity breakdown + a most-severe-first findings list (tenant-scoped). Backend groundwork for the Fleet host-drawer enrichment; the Fleet table/drawer frontend redesign is still in progress (see ROADMAP).
+
 ## 2026-06-16 — Multi-tenant admin isolation (data-isolation core)
 
 Hardening before any stranger gets a hosted login: stop one organization's admin from seeing or managing another organization's data.

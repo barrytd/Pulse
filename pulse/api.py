@@ -2776,6 +2776,47 @@ def _register_routes(app: FastAPI) -> None:
             app.state.db_path, **_read_scope_kwargs(app, user_id),
         )}
 
+    @app.get("/api/fleet/host/{hostname}")
+    def fleet_host_detail(hostname: str, user_id: int = Depends(require_login)):
+        """Findings detail for a single host — powers the Fleet host drawer.
+
+        Returns a severity breakdown (counts) plus a capped, most-severe-first
+        list of this host's findings so the drawer can answer "what's wrong
+        with this machine" without leaving the page. Tenant-scoped via the same
+        scope kwargs every other read uses.
+        """
+        scope_kw = _read_scope_kwargs(app, user_id)
+        host_lc = (hostname or "").strip().lower()
+        if not host_lc:
+            raise HTTPException(400, detail="hostname is required.")
+        sev_rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        by_sev = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        findings = []
+        for s in (get_history(app.state.db_path, limit=2000, **scope_kw) or []):
+            if (s.get("hostname") or "").lower() != host_lc:
+                continue
+            for f in (get_scan_findings(app.state.db_path, s["id"], **scope_kw) or []):
+                sev = (f.get("severity") or "LOW").upper()
+                if sev in by_sev:
+                    by_sev[sev] += 1
+                findings.append({
+                    "id": f.get("id"),
+                    "rule": f.get("rule"),
+                    "severity": sev,
+                    "timestamp": f.get("timestamp"),
+                    "false_positive": bool(f.get("false_positive")),
+                    "workflow_status": f.get("workflow_status"),
+                })
+        # Most-severe-first; newest-first within a severity (stable two-pass).
+        findings.sort(key=lambda f: f.get("timestamp") or "", reverse=True)
+        findings.sort(key=lambda f: sev_rank.get(f["severity"], 9))
+        return {
+            "hostname": hostname,
+            "by_severity": by_sev,
+            "total": len(findings),
+            "findings": findings[:30],
+        }
+
     # -------------------------------------------------------------------
     # GET /api/audit — dashboard view into the audit_log table
     # -------------------------------------------------------------------

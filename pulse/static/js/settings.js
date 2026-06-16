@@ -59,19 +59,30 @@ const EMAIL_PROVIDER_PRESETS = {
 // Left-nav tab layout — each tab maps to a builder that returns the
 // right-hand content HTML. Kept module-level so `setActiveSettingsTab`
 // can pre-select a tab before navigate('settings') runs.
+// The rail is grouped into labeled sections (rendered in this order). Each
+// tab declares its `group`; the rail renders a group's uppercase label only
+// when at least one of its tabs is visible for the current role.
+const SETTINGS_GROUPS = ['ACCOUNT', 'PREFERENCES', 'CONFIGURATION', 'TEAM', 'WORKSPACE'];
+
 const SETTINGS_TABS = [
-  { id: 'profile',       label: 'Profile',         icon: 'user' },
-  { id: 'account',       label: 'Account',         icon: 'shield' },
-  { id: 'notifications', label: 'Notifications',   icon: 'bell' },
-  { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar' },
-  { id: 'appearance',    label: 'Appearance',      icon: 'palette' },
-  { id: 'tokens',        label: 'API Tokens',      icon: 'key' },
-  { id: 'agents',        label: 'Agents',          icon: 'monitor' },
-  { id: 'users',         label: 'Users',           icon: 'users', adminOnly: true },
-  { id: 'feedback',      label: 'Feedback',        icon: 'message-square', adminOnly: true },
-  { id: 'waitlist',      label: 'Waitlist',        icon: 'mail', adminOnly: true },
-  { id: 'notes',         label: 'Notes',           icon: 'sticky-note', adminOnly: true },
-  { id: 'advanced',      label: 'Advanced',        icon: 'sliders' },
+  // ACCOUNT
+  { id: 'profile',       label: 'Profile',         icon: 'user',           group: 'ACCOUNT' },
+  { id: 'account',       label: 'Account',         icon: 'shield',         group: 'ACCOUNT' },
+  { id: 'billing',       label: 'Billing',         icon: 'credit-card',    group: 'ACCOUNT', adminOnly: true },
+  // PREFERENCES
+  { id: 'notifications', label: 'Notifications',   icon: 'bell',           group: 'PREFERENCES' },
+  { id: 'appearance',    label: 'Appearance',      icon: 'palette',        group: 'PREFERENCES' },
+  // CONFIGURATION
+  { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar',       group: 'CONFIGURATION' },
+  { id: 'tokens',        label: 'API Tokens',      icon: 'key',            group: 'CONFIGURATION' },
+  { id: 'agents',        label: 'Agents',          icon: 'monitor',        group: 'CONFIGURATION' },
+  { id: 'advanced',      label: 'Advanced',        icon: 'sliders',        group: 'CONFIGURATION' },
+  // TEAM
+  { id: 'users',         label: 'Users',           icon: 'users',          group: 'TEAM', adminOnly: true },
+  { id: 'waitlist',      label: 'Waitlist',        icon: 'mail',           group: 'TEAM', adminOnly: true },
+  // WORKSPACE
+  { id: 'notes',         label: 'Notes',           icon: 'sticky-note',    group: 'WORKSPACE', adminOnly: true },
+  { id: 'feedback',      label: 'Feedback',        icon: 'message-square', group: 'WORKSPACE', adminOnly: true },
 ];
 let _activeSettingsTab = 'profile';
 let _avatarCacheBuster = '';
@@ -193,6 +204,11 @@ export async function renderSettingsPage() {
     _withTimeout(apiGetRules(),      '/api/rules'),
     _withTimeout(apiGetAuthStatus(), '/api/auth/status'),
     _withTimeout(apiGetMe(),         '/api/me'),
+    // Optional, non-core: Pip AI usage for the Billing tab. Always resolves
+    // (internal catch) so it can never break the page or the failure banner.
+    fetch('/api/buddy/status', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .catch(function () { return {}; }),
   ]);
   function _val(i, fallback) {
     var r = settled[i];
@@ -211,6 +227,7 @@ export async function renderSettingsPage() {
   var rules  = _val(1, { rules: [] });
   var auth   = _val(2, { email: '' });
   var me     = _val(3, { role: null });
+  var buddyStatus = _val(4, {});
   if (!rules || !Array.isArray(rules.rules)) rules = { rules: [] };
   var isAdmin = (me && me.role === 'admin');
 
@@ -801,10 +818,42 @@ export async function renderSettingsPage() {
   _pendingEnrollment = null; // single-render flash, see enrollAgent()
   var agentsHtml = _renderAgentsPanel(agentsList, enrollFlash);
 
+  // --- Billing (placeholder) -----------------------------------------
+  // No payment/plan logic yet — just the shell + a "coming soon" state. If
+  // Pip's daily question metering is configured, surface a read-only usage
+  // line from the data we already fetched.
+  var aiUsageHtml = '';
+  if (buddyStatus && buddyStatus.available &&
+      typeof buddyStatus.questions_used === 'number') {
+    var used = buddyStatus.questions_used;
+    var limit = buddyStatus.daily_limit;
+    var left = buddyStatus.questions_left;
+    aiUsageHtml =
+      '<div class="settings-field full" style="margin-top:18px;">' +
+        '<label>AI assistant (Pip) usage today</label>' +
+        '<div class="billing-usage">' +
+          '<strong>' + used + '</strong> of <strong>' + limit + '</strong> questions used' +
+          ' <span class="muted">(' + left + ' left · resets at midnight UTC)</span>' +
+        '</div>' +
+      '</div>';
+  }
+  var billingHtml =
+    '<div class="card">' +
+      '<div class="section-label">Billing</div>' +
+      '<p class="settings-card-desc">Manage your plan, payment method, and usage.</p>' +
+      '<div class="billing-soon">' +
+        '<div class="billing-soon-title">Coming soon</div>' +
+        '<p>Billing and plan management will be available in a future release. ' +
+        'There is nothing to set up here yet.</p>' +
+      '</div>' +
+      aiUsageHtml +
+    '</div>';
+
   // --- Compose tab panels --------------------------------------------
   var panels = {
     profile:       profileHtml,
     account:       accountHtml,
+    billing:       billingHtml,
     notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml,
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
@@ -828,14 +877,24 @@ export async function renderSettingsPage() {
       resourcesHtml,
   };
 
+  // Grouped rail: render each group's uppercase label only when it has at
+  // least one visible tab for this role, so an all-admin group (TEAM,
+  // WORKSPACE) disappears entirely — label and all — for a non-admin.
   var tabNavHtml = '<nav class="settings-tab-nav">' +
-    visibleTabs.map(function (t) {
-      var active = (t.id === _activeSettingsTab) ? ' active' : '';
-      return '<a class="settings-tab-link' + active + '" ' +
-               'data-action="switchSettingsTab" data-arg="' + t.id + '">' +
-        '<i data-lucide="' + t.icon + '"></i>' +
-        '<span>' + escapeHtml(t.label) + '</span>' +
-      '</a>';
+    SETTINGS_GROUPS.map(function (group) {
+      var groupTabs = visibleTabs.filter(function (t) { return t.group === group; });
+      if (!groupTabs.length) return '';
+      return '<div class="settings-tab-group">' +
+        '<div class="settings-tab-group-label">' + escapeHtml(group) + '</div>' +
+        groupTabs.map(function (t) {
+          var active = (t.id === _activeSettingsTab) ? ' active' : '';
+          return '<a class="settings-tab-link' + active + '" ' +
+                   'data-action="switchSettingsTab" data-arg="' + t.id + '">' +
+            '<i data-lucide="' + t.icon + '"></i>' +
+            '<span>' + escapeHtml(t.label) + '</span>' +
+          '</a>';
+        }).join('') +
+      '</div>';
     }).join('') +
   '</nav>';
 

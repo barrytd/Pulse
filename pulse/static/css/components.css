@@ -300,6 +300,54 @@
   border-color: var(--border);
   font-weight: 500;
 }
+
+/* Grouped rail: uppercase muted group labels (matching the main sidebar) with
+   the items indented below, and breathing room between groups. */
+.settings-tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-tab-group + .settings-tab-group { margin-top: 16px; }
+.settings-tab-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 12px;
+  margin-bottom: 6px;
+}
+
+/* Billing tab (placeholder) */
+.settings-card-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.billing-soon {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--bg);
+}
+.billing-soon-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.billing-soon p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+.billing-usage {
+  font-size: 13px;
+  color: var(--text);
+}
 /* Form / settings content column (TryHackMe-style).
  * A wide card area anchored left next to the tab rail. Fills the available
  * space up to ~1200px with a small right margin so it's not edge-to-edge.
