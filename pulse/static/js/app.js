@@ -14,6 +14,7 @@ import { apiGetMe } from './api.js';
 import {
   setCurrentRole,
   applyRoleToSidebar,
+  paintRoleBadge,
   defaultLanding,
   canAccessPage,
 } from './roles.js';
@@ -711,6 +712,7 @@ async function _boot() {
   } catch (e) { /* not logged in / offline */ }
   setCurrentRole(role);
   applyRoleToSidebar(role);
+  paintRoleBadge(role);
 
   // Resolve starting page from the URL pathname. Back-compat: older
   // bookmarks used "#scans" style hashes — honour them by translating

@@ -8,6 +8,7 @@ import { apiGetAuthStatus, apiGetMe } from './api.js';
 import { navigate } from './navigation.js';
 import { toggleTheme, getTheme } from './theme.js';
 import { signOut } from './settings.js';
+import { setCurrentRole, paintRoleBadge, applyRoleToSidebar } from './roles.js';
 import { openFeedbackModal } from './feedback.js';
 
 const GITHUB_REPO = 'https://github.com/barrytd/Pulse';
@@ -76,6 +77,13 @@ function _paintRole(role) {
             : r === 'analyst' ? 'Analyst'
             : 'Member';
   el.textContent = label;
+  // Backstop: keep the role model + topbar badge + sidebar gating in sync
+  // in case the boot-time /api/me lookup timed out but this one succeeded.
+  try {
+    setCurrentRole(role);
+    paintRoleBadge(role);
+    applyRoleToSidebar(role);
+  } catch (e) { /* roles module unavailable — non-fatal */ }
 }
 
 // Re-fetch /api/me and repaint the greeting + initial. Called after an

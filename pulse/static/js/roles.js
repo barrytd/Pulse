@@ -45,6 +45,19 @@ export function defaultLanding(role) {
   return normalizeRole(role) === 'analyst' ? 'queue' : 'dashboard';
 }
 
+// Paint the topbar role pill so the signed-in role is always visible.
+export function paintRoleBadge(role) {
+  var el = document.getElementById('topbar-role-badge');
+  if (!el) return;
+  role = normalizeRole(role);
+  if (!role) { el.hidden = true; el.textContent = ''; return; }
+  el.textContent = role === 'admin' ? 'Admin'
+                 : role === 'manager' ? 'Manager'
+                 : 'Analyst';
+  el.className = 'topbar-role-badge role-' + role;
+  el.hidden = false;
+}
+
 // Hide sidebar nav items the role can't use, and collapse any group whose
 // items all became hidden so no label is left orphaned.
 export function applyRoleToSidebar(role) {

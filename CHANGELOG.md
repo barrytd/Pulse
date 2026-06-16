@@ -25,7 +25,8 @@ The final piece of the admin > manager > analyst hierarchy.
 - **Per-role default landing.** An **analyst** opening the app lands on **My Queue**; managers and admins land on the **Dashboard**.
 - **Role-gated sidebar.** Analysts no longer see nav they can't use — **Firewall, Whitelist, Rules, Audit Log** are hidden (those are manager/admin response + config + audit surfaces); a **manager** sees everything except **Audit Log**; an **admin** sees all. Empty nav groups collapse so no label is left orphaned. Settings stays visible to everyone (it carries each user's own profile / password / PIN); its admin-only tabs were already filtered.
 - **Navigation guard.** Following a link to a page above your role (command palette, a stale bookmark) redirects to your default landing instead of a dead page. The role is resolved once at boot (with a 1.5s fail-open timeout) so the sidebar + landing are correct on first paint. Backend role checks are unchanged — this is the UX layer on top of them.
-- New `roles.js` (role ranks, page-access map, default landing, sidebar gating).
+- **Topbar role pill** — a small badge next to the avatar always shows the signed-in role (Admin / Manager / Analyst); Admin gets the accent so it stands out.
+- New `roles.js` (role ranks, page-access map, default landing, sidebar gating, topbar badge).
 
 ---
 
