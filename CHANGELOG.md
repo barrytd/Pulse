@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-08 — Team role hierarchy Phase 6: sidebar role-gating + default landing
+
+The final piece of the admin > manager > analyst hierarchy.
+
+- **Per-role default landing.** An **analyst** opening the app lands on **My Queue**; managers and admins land on the **Dashboard**.
+- **Role-gated sidebar.** Analysts no longer see nav they can't use — **Firewall, Whitelist, Rules, Audit Log** are hidden (those are manager/admin response + config + audit surfaces); a **manager** sees everything except **Audit Log**; an **admin** sees all. Empty nav groups collapse so no label is left orphaned. Settings stays visible to everyone (it carries each user's own profile / password / PIN); its admin-only tabs were already filtered.
+- **Navigation guard.** Following a link to a page above your role (command palette, a stale bookmark) redirects to your default landing instead of a dead page. The role is resolved once at boot (with a 1.5s fail-open timeout) so the sidebar + landing are correct on first paint. Backend role checks are unchanged — this is the UX layer on top of them.
+- New `roles.js` (role ranks, page-access map, default landing, sidebar gating).
+
+---
+
 ## 2026-06-08 — Settings UI redesign (TryHackMe-style) + tab polish
 
 - **Wide, label-above form layout.** Replaced the old label-on-left two-column rows. The settings content is now a wide card (max-width 1200px, left-anchored next to the tab rail) with a reusable two-column field grid (`.settings-grid` / `.settings-field`, with `.full` to span). Each field's label sits above its input; inputs fill their column; buttons get their own row (`.settings-actions`); collapses to one column below 768px. Data-table pages (Findings, Audit, History, Scans, Fleet, Firewall, Reports) are untouched.

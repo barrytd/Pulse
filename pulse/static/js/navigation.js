@@ -18,6 +18,7 @@ import { renderFleetPage } from './fleet.js';
 import { renderFirewallPage } from './firewall.js';
 import { renderWhitelistPage } from './whitelist.js';
 import { renderSettingsPage, setActiveSettingsTab, getActiveSettingsTab } from './settings.js';
+import { canAccessPage, defaultLanding, getCurrentRole } from './roles.js';
 import { renderReportsPage } from './reports.js';
 import { renderRulesPage } from './rules.js';
 import { renderSecurityAdvisorPage } from './advisor.js';
@@ -75,6 +76,16 @@ export function navigate(page, opts) {
     var bits = page.split(':');
     page = bits[0];
     settingsTab = bits[1];
+  }
+
+  // Role gate: if the signed-in user can't reach this page (e.g. an analyst
+  // following a link to Audit / Rules), send them to their default landing.
+  // The backend still blocks the data; this just avoids a dead page.
+  var _role = getCurrentRole();
+  if (_role && !canAccessPage(page, _role)) {
+    page = defaultLanding(_role);
+    settingsTab = undefined;
+    opts = { replace: opts.replace, push: opts.push };
   }
 
   // Any open detail flyout belongs to the previous page — close it

@@ -10,6 +10,13 @@ import {
   resetSeverityColors,
 } from './severity-colors.js';
 import { navigate, validPages, parsePath } from './navigation.js';
+import { apiGetMe } from './api.js';
+import {
+  setCurrentRole,
+  applyRoleToSidebar,
+  defaultLanding,
+  canAccessPage,
+} from './roles.js';
 import {
   openUploadModal,
   closeUploadModal,
@@ -680,13 +687,30 @@ function _installDelegator(eventName) {
 // Module scripts defer automatically, so the DOM is parsed by the time
 // this runs — but we still wait for DOMContentLoaded to be safe across
 // very old browsers and edge cases.
-function _boot() {
+async function _boot() {
   // Theme first so the UI doesn't flash.
   initTheme();
   // Severity-color overrides ride on top of the theme block, so apply
   // them immediately after initTheme() to avoid a brief flash of the
   // default palette before the user's saved colors take effect.
   applySeverityColors();
+
+  // Resolve the signed-in user's role BEFORE the first navigate so the
+  // sidebar gating + the default landing are correct on first paint (no
+  // dashboard->queue flash for analysts). Fail open if /api/me errors —
+  // the backend still enforces every restricted endpoint.
+  var role = null;
+  try {
+    // Race a 1.5s timeout so a wedged / cold-starting /api/me can't hang the
+    // whole UI — fail open (null role, full nav) if it's slow.
+    var me = await Promise.race([
+      apiGetMe(),
+      new Promise(function (res) { setTimeout(function () { res(null); }, 1500); }),
+    ]);
+    role = me && me.role;
+  } catch (e) { /* not logged in / offline */ }
+  setCurrentRole(role);
+  applyRoleToSidebar(role);
 
   // Resolve starting page from the URL pathname. Back-compat: older
   // bookmarks used "#scans" style hashes — honour them by translating
@@ -696,7 +720,12 @@ function _boot() {
     var legacy = location.hash.replace('#', '');
     if (validPages.indexOf(legacy) >= 0) path = '/' + legacy;
   }
+  var bareRoot = (path === '/' || path === '');
   var parsed = parsePath(path);
+  // Role-aware landing: an analyst opening the bare root lands on My Queue.
+  if (bareRoot) parsed.page = defaultLanding(role);
+  // Guard a deep-link to a page this role can't see → their default landing.
+  if (!canAccessPage(parsed.page, role)) parsed.page = defaultLanding(role);
   // replace:true so the first history entry carries a real state object
   // and popstate from a later push returns here cleanly.
   navigate(parsed.page, { replace: true, scanId: parsed.scanId, tab: parsed.settingsTab });
