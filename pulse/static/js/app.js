@@ -110,7 +110,8 @@ import {
   deleteSelectedHistory,
 } from './history.js';
 import { fleetOpenHost, exportFleetCsv, fleetFilterByKpi,
-         fleetGenerateIncidentReport } from './fleet.js';
+         fleetGenerateIncidentReport, fleetSetRisk, fleetSetStatus,
+         fleetSearchInput, fleetSort, fleetViewFindings } from './fleet.js';
 import {
   setFirewallTab,
   firewallPushOne,
@@ -407,6 +408,11 @@ const actions = {
   exportFleetCsv,
   fleetFilterByKpi,
   fleetGenerateIncidentReport,
+  fleetSetRisk,
+  fleetSetStatus,
+  fleetSearchInput,
+  fleetSort,
+  fleetViewFindings,
 
   // firewall
   setFirewallTab,

@@ -2694,9 +2694,9 @@
 /* ------------------------------------------------------------------ */
 .fleet-kpi-strip {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 .fleet-kpi-tile {
   display: flex;
@@ -2755,7 +2755,144 @@
   vertical-align: middle;
 }
 .status-dot.status-online  { background: var(--status-ok); box-shadow: 0 0 4px var(--status-ok); }
+.status-dot.status-stale   { background: var(--status-warn); }
 .status-dot.status-offline { background: var(--status-off); }
+
+/* ------------------------------------------------------------------ */
+/* Fleet page — constrained table, top filter bar, host drawer        */
+/* ------------------------------------------------------------------ */
+.fleet-wrap { max-width: 1500px; }
+
+/* Top filter bar (search + risk + status + export) */
+.fleet-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.fleet-search { width: 260px; flex: 0 0 auto; }
+.fleet-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.fleet-filter-field .dash-filter-select { min-width: 130px; }
+.fleet-export-btn { margin-left: auto; }
+
+/* Table: constrained, fixed columns, aligned text vs numbers */
+.fleet-table { table-layout: fixed; width: 100%; }
+.fleet-table thead th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.fleet-table thead th.sorted { color: var(--text); }
+.fleet-sort-arrow { font-size: 9px; color: var(--accent); }
+.fleet-table tbody td { height: 44px; }
+.fleet-col-host { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fleet-host-name { font-weight: 500; }
+.fleet-score-num { font-variant-numeric: tabular-nums; }
+.fleet-table .fleet-col-num,
+.fleet-table th.fleet-col-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fleet-table .fleet-col-right,
+.fleet-table th.fleet-col-right { text-align: right; }
+.fleet-table .fleet-col-actions,
+.fleet-table th.fleet-col-actions { text-align: right; white-space: nowrap; }
+
+/* Action icons — hidden at rest, revealed on row hover (cell only, so the
+   "Actions" header stays visible). */
+.fleet-table td.fleet-col-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.fleet-table tbody tr:hover td.fleet-col-actions,
+.fleet-table tbody tr:focus-within td.fleet-col-actions { opacity: 1; }
+.fleet-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.fleet-action-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--hover-bg); }
+
+.fleet-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-3);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.fleet-legend-sep { color: var(--text-light); margin: 0 4px; }
+.fleet-empty-note { padding: 32px; text-align: center; color: var(--text-muted); }
+
+/* Host drawer — severity breakdown */
+.fleet-drawer-muted { font-size: 12px; color: var(--text-dim); }
+.fleet-sevbar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-3);
+  margin-bottom: 10px;
+}
+.fleet-sevbar-seg { height: 100%; }
+.fleet-sevbar-seg.sev-critical { background: var(--severity-critical); }
+.fleet-sevbar-seg.sev-high     { background: var(--severity-high); }
+.fleet-sevbar-seg.sev-medium   { background: var(--severity-medium); }
+.fleet-sevbar-seg.sev-low      { background: var(--severity-low); }
+.fleet-sevcounts { display: flex; flex-wrap: wrap; gap: 14px; }
+.fleet-sevcount { font-size: 12px; color: var(--text-body); display: inline-flex; align-items: center; gap: 5px; }
+.fleet-sevdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.fleet-sevdot.sev-critical { background: var(--severity-critical); }
+.fleet-sevdot.sev-high     { background: var(--severity-high); }
+.fleet-sevdot.sev-medium   { background: var(--severity-medium); }
+.fleet-sevdot.sev-low      { background: var(--severity-low); }
+
+/* Host drawer — findings list */
+.fleet-finding-list { display: flex; flex-direction: column; }
+.fleet-finding-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.fleet-finding-row:hover { background: var(--hover-bg); }
+.fleet-finding-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.fleet-finding-dot.sev-critical { background: var(--severity-critical); }
+.fleet-finding-dot.sev-high     { background: var(--severity-high); }
+.fleet-finding-dot.sev-medium   { background: var(--severity-medium); }
+.fleet-finding-dot.sev-low      { background: var(--severity-low); }
+.fleet-finding-rule {
+  flex: 1; min-width: 0;
+  font-size: 13px; color: var(--text-high);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fleet-finding-time { font-size: 11px; color: var(--text-dim); flex: none; }
+.fleet-viewall {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+.fleet-viewall:hover { text-decoration: underline; }
 
 /* ------------------------------------------------------------------ */
 /* Firewall page — pending-changes banner + KPI strip                  */
