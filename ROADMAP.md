@@ -18,7 +18,9 @@ Flat status board organized by category, sorted by priority within each section.
 
 > The next things to pull into **In Progress**. Top-of-list ships next.
 
-*Nothing queued right now — pull from the Development Backlog below (the **Add-host onboarding** under Distribution is the highest-leverage adoption item).*
+- **Migrate the remaining report templates onto the shared `report_theme`** | The shared print/PDF design system ([`pulse/reports/report_theme.py`](pulse/reports/report_theme.py)) and the redesigned **Incident Investigation Report** shipped 2026-06-16. The remaining 8 templates still use their old per-template renderers: **Executive Summary, Threat Detection Summary, NIST CSF, ISO 27001, Fleet Health, Board-Ready Posture, MITRE Coverage, Compliance Gap**. Rewrite each one's `render_pdf` + `render_html` to compose the shared components (brand header/footer + "Page X of Y", section headers, severity pills, classification banner, tables, callouts, metadata grids, cards) so every report looks identical — each keeps its own content + section order. Keep JSON/CSV unchanged. The incident renderer ([`pulse/reports/incident_renderers.py`](pulse/reports/incident_renderers.py)) is the reference implementation.
+
+*Then pull from the Development Backlog below (the **Add-host onboarding** under Distribution is the highest-leverage adoption item).*
 
 ---
 

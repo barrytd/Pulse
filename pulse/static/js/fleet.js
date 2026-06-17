@@ -125,21 +125,6 @@ function _sortArrow(key) {
   return ' <span class="fleet-sort-arrow">' + (_sortDir === 'asc' ? '▲' : '▼') + '</span>';
 }
 
-// Action icons — inline SVG (Lucide is reserved for sidebar / avatar / settings).
-function _iconReport() {
-  return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>' +
-    '<polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line>' +
-    '<line x1="16" y1="17" x2="8" y2="17"></line></svg>';
-}
-function _iconEye() {
-  return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>' +
-    '<circle cx="12" cy="12" r="3"></circle></svg>';
-}
-
 function _statusDotHtml(h) {
   var st = _statusOf(h);
   var title = st === 'online' ? 'Online — scanned within 24h'
@@ -164,12 +149,7 @@ function _buildFleetTable(hosts) {
       '<td class="fleet-col-num">' + (h.scan_count || 0) + '</td>' +
       '<td class="fleet-col-num">' + (h.total_findings || 0) + '</td>' +
       '<td class="fleet-col-right">' + relTimeHtml(h.last_scan_at) + '</td>' +
-      '<td class="fleet-col-actions" data-action="stopClickPropagation">' +
-        '<button class="fleet-action-btn" title="Generate report for this host" aria-label="Generate report" ' +
-          'data-action="fleetGenerateIncidentReport" data-arg="' + hn + '">' + _iconReport() + '</button>' +
-        '<button class="fleet-action-btn" title="View findings for this host" aria-label="View findings" ' +
-          'data-action="fleetViewFindings" data-arg="' + hn + '">' + _iconEye() + '</button>' +
-      '</td></tr>';
+      '</tr>';
   }).join('');
 
   function th(key, label, cls) {
@@ -179,8 +159,8 @@ function _buildFleetTable(hosts) {
 
   return '<table class="data-table fleet-table">' +
     '<colgroup>' +
-      '<col style="width:24%"><col style="width:15%"><col style="width:14%">' +
-      '<col style="width:9%"><col style="width:10%"><col style="width:16%"><col style="width:12%">' +
+      '<col style="width:28%"><col style="width:16%"><col style="width:16%">' +
+      '<col style="width:10%"><col style="width:11%"><col style="width:19%">' +
     '</colgroup>' +
     '<thead><tr>' +
       th('host', 'Host') +
@@ -189,7 +169,6 @@ function _buildFleetTable(hosts) {
       th('scans', 'Scans', 'fleet-col-num') +
       th('findings', 'Findings', 'fleet-col-num') +
       th('lastscan', 'Last Scan', 'fleet-col-right') +
-      '<th class="fleet-col-actions">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 

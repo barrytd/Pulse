@@ -2797,35 +2797,6 @@
 .fleet-table th.fleet-col-num { text-align: right; font-variant-numeric: tabular-nums; }
 .fleet-table .fleet-col-right,
 .fleet-table th.fleet-col-right { text-align: right; }
-.fleet-table .fleet-col-actions,
-.fleet-table th.fleet-col-actions { text-align: right; white-space: nowrap; }
-
-/* Action icons — hidden at rest, revealed on row hover (cell only, so the
-   "Actions" header stays visible). */
-.fleet-table td.fleet-col-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  justify-content: flex-end;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-.fleet-table tbody tr:hover td.fleet-col-actions,
-.fleet-table tbody tr:focus-within td.fleet-col-actions { opacity: 1; }
-.fleet-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--card-bg);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-.fleet-action-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--hover-bg); }
 
 .fleet-legend {
   display: flex;
