@@ -1,13 +1,13 @@
 // fleet.js — Fleet overview page.
-// A constrained, sortable host table with a top filter bar (search + risk +
-// status) and KPI tiles that pre-filter by risk. Clicking a row opens an
-// enriched host drawer (posture + severity breakdown + findings list + real
-// actions). Styling follows .claude/skills/pulse-design.md.
+// A full-width, sortable host table with a single top filter bar (search +
+// risk + status + export). Clicking a row opens an enriched host drawer
+// (posture + severity breakdown + findings list + real actions). Styling
+// follows .claude/skills/pulse-design.md.
 'use strict';
 
 import { fetchFleet } from './api.js';
 import { navigate } from './navigation.js';
-import { escapeHtml, scoreColorClass, _gradeFor, sevPillHtml, relTimeHtml, showToast, toastError } from './dashboard.js';
+import { escapeHtml, scoreColorClass, _gradeFor, sevPillHtml, relTimeHtml, toastError } from './dashboard.js';
 import { openDrawer, closeDrawer } from './drawer.js';
 
 var _fleetCache = [];
@@ -18,10 +18,9 @@ var _sortKey = 'risk';      // risk | host | score | scans | findings | lastscan
 var _sortDir = 'asc';       // for 'risk', asc = worst-first
 
 // --- classification ------------------------------------------------------
-// One risk model drives both the KPI tiles and the Risk dropdown so they
-// never disagree. Bands by latest score: <40 critical, 40-59 high, 60-79
-// fair, 80+ secure. Hosts with no score yet are 'unknown' (counted only in
-// Total / "All risk").
+// One risk model drives the Risk dropdown. Bands by latest score: <40
+// critical, 40-59 high, 60-79 fair, 80+ secure. Hosts with no score yet are
+// 'unknown' (matched only by "All risk").
 function _riskBand(h) {
   if (h.latest_score == null) return 'unknown';
   var s = h.latest_score;
@@ -42,29 +41,6 @@ function _statusOf(h) {
 
 function _num(v) { return (v == null || isNaN(v)) ? -1 : Number(v); }
 function _ts(v) { var t = v ? Date.parse(String(v).replace(' ', 'T')) : NaN; return isNaN(t) ? 0 : t; }
-
-// --- KPI tiles -----------------------------------------------------------
-function _buildKpis(hosts) {
-  var c = { critical: 0, high: 0, fair: 0, secure: 0 };
-  hosts.forEach(function (h) { var b = _riskBand(h); if (c[b] != null) c[b] += 1; });
-  return [
-    { key: 'all',      label: 'Total Hosts', value: hosts.length, tone: 'info' },
-    { key: 'critical', label: 'Critical',    value: c.critical,   tone: 'error' },
-    { key: 'high',     label: 'High Risk',   value: c.high,       tone: 'warn' },
-    { key: 'fair',     label: 'Fair',        value: c.fair,       tone: 'warn' },
-    { key: 'secure',   label: 'Secure',      value: c.secure,     tone: 'ok' },
-  ];
-}
-
-function _kpiStripHtml(kpis) {
-  return '<div class="fleet-kpi-strip">' + kpis.map(function (k) {
-    var active = k.key === _riskFilter ? ' active' : '';
-    return '<button class="fleet-kpi-tile tone-' + k.tone + active + '" ' +
-      'data-action="fleetFilterByKpi" data-arg="' + escapeHtml(k.key) + '">' +
-      '<div class="fleet-kpi-label">' + escapeHtml(k.label) + '</div>' +
-      '<div class="fleet-kpi-value">' + k.value + '</div></button>';
-  }).join('') + '</div>';
-}
 
 // --- filter bar ----------------------------------------------------------
 function _selectOptions(opts, current) {
@@ -159,8 +135,8 @@ function _buildFleetTable(hosts) {
 
   return '<table class="data-table fleet-table">' +
     '<colgroup>' +
-      '<col style="width:28%"><col style="width:16%"><col style="width:16%">' +
-      '<col style="width:10%"><col style="width:11%"><col style="width:19%">' +
+      '<col style="width:30%"><col style="width:16%"><col style="width:16%">' +
+      '<col style="width:9%"><col style="width:9%"><col style="width:20%">' +
     '</colgroup>' +
     '<thead><tr>' +
       th('host', 'Host') +
@@ -176,14 +152,6 @@ function _buildFleetTable(hosts) {
 function _renderTable() {
   var body = document.getElementById('fleet-body');
   if (body) body.innerHTML = _buildFleetTable(_sortHosts(_applyFilters(_fleetCache)));
-}
-function _renderStrip() {
-  var w = document.getElementById('fleet-kpi-strip-wrap');
-  if (w) w.innerHTML = _kpiStripHtml(_buildKpis(_fleetCache));
-}
-function _renderFilterBar() {
-  var w = document.getElementById('fleet-filter-bar-wrap');
-  if (w) w.innerHTML = _filterBarHtml();
 }
 
 export async function renderFleetPage() {
@@ -207,7 +175,6 @@ export async function renderFleetPage() {
         '<div class="page-head-title"><strong>' + _fleetCache.length + '</strong> host' +
           (_fleetCache.length === 1 ? '' : 's') + ' tracked</div>' +
       '</div>' +
-      '<div id="fleet-kpi-strip-wrap">' + _kpiStripHtml(_buildKpis(_fleetCache)) + '</div>' +
       '<div id="fleet-filter-bar-wrap">' + _filterBarHtml() + '</div>' +
       '<div class="card fleet-table-card">' +
         '<div id="fleet-body">' + _buildFleetTable(_sortHosts(_applyFilters(_fleetCache))) + '</div>' +
@@ -223,15 +190,8 @@ export async function renderFleetPage() {
 }
 
 // --- actions -------------------------------------------------------------
-export function fleetFilterByKpi(key) {
-  _riskFilter = key || 'all';
-  _renderStrip();
-  _renderFilterBar();   // keep the Risk dropdown in sync with the tiles
-  _renderTable();
-}
 export function fleetSetRisk(arg, target) {
   _riskFilter = (target && target.value) || 'all';
-  _renderStrip();       // keep the active tile in sync with the dropdown
   _renderTable();
 }
 export function fleetSetStatus(arg, target) {

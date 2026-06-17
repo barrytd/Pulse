@@ -632,8 +632,10 @@ function _sectionItemsScan(raw) {
 }
 
 // ---------------------------------------------------------------
-// Sentinel-style page header — five stacked zones (breadcrumb,
-// title block, KPI tile row, severity bar, sticky filter bar).
+// Sentinel-style page header — four stacked zones (breadcrumb,
+// title block, severity bar, sticky filter bar). Leaner layout that
+// mirrors the Fleet page: title/breadcrumb, then the severity bar,
+// then the filters, then the table.
 // All HTML builders are intentionally framework-free strings so
 // re-rendering the page costs nothing more than an innerHTML swap.
 // ---------------------------------------------------------------
@@ -642,7 +644,6 @@ function _findingsPageHeaderHtml(total, visible) {
   return '<div class="page-header">' +
     _breadcrumbHtml(['Pulse', 'Threat Management', 'Findings']) +
     _findingsTitleBlockHtml(total, visible) +
-    _findingsKpiRowHtml() +
     _findingsSeverityBarHtml() +
     _findingsFilterBarHtml() +
   '</div>';
@@ -686,90 +687,6 @@ function _findingsTitleBlockHtml(total, visible) {
         '<i data-lucide="download"></i><span>Export CSV</span></button>' +
     '</div>' +
   '</div>';
-}
-
-// ----- KPI tiles -----------------------------------------------
-// Four NON-OVERLAPPING tiles above the severity bar, each of which always
-// tells a story (the old Open / Untriaged / Active / Resolved set overlapped
-// — an item could be all three, so they read as "broken"). Each tile is a
-// clickable filter that acts like a radio: click sets its status+severity
-// filter, click the active one again to clear. A genuinely-zero tile shows a
-// friendly line instead of a bare 0 (green when zero is the GOOD outcome).
-
-var _KPI_TILES = [
-  { key: 'attention', label: 'Needs attention', sub: 'untriaged critical / high',
-    tone: 'crit', zero: 'All clear', goodZero: true,
-    filter: { status: ['new'], severity: ['CRITICAL', 'HIGH'] } },
-  { key: 'progress', label: 'In progress', sub: 'acknowledged or investigating',
-    tone: 'info', zero: 'Nothing active', goodZero: false,
-    filter: { status: ['acknowledged', 'investigating'], severity: [] } },
-  { key: 'crithigh', label: 'Critical + High open', sub: 'unresolved, high severity',
-    tone: 'warn', zero: 'None open', goodZero: true,
-    filter: { status: ['new', 'acknowledged', 'investigating'], severity: ['CRITICAL', 'HIGH'] } },
-  { key: 'resolved7', label: 'Resolved', sub: 'last 7 days',
-    tone: 'ok', zero: 'None yet', goodZero: false,
-    filter: { status: ['resolved'], severity: [] } },
-];
-
-function _findingsKpiRowHtml() {
-  var m = _findingsKpiMetrics();
-  return '<div class="kpi-row">' +
-    _KPI_TILES.map(function (t) { return _kpiTileHtml(t, m[t.key]); }).join('') +
-  '</div>';
-}
-
-function _findingsKpiMetrics() {
-  var weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
-  var m = { attention: 0, progress: 0, crithigh: 0, resolved7: 0 };
-  (findingsState.raw || []).forEach(function (f) {
-    var st  = (f.workflow_status || 'new').toLowerCase();
-    var sev = (f.severity || 'LOW').toUpperCase();
-    var open = (st !== 'resolved');
-    var hi   = (sev === 'CRITICAL' || sev === 'HIGH');
-    if (open && st === 'new' && hi) m.attention++;
-    if (st === 'acknowledged' || st === 'investigating') m.progress++;
-    if (open && hi) m.crithigh++;
-    if (st === 'resolved') {
-      var t = _parseDbTs(f.workflow_updated_at);
-      if (t && t >= weekAgo) m.resolved7++;
-    }
-  });
-  return m;
-}
-
-// Parse a 'YYYY-MM-DD HH:MM:SS' server timestamp to epoch ms.
-function _parseDbTs(s) {
-  if (!s) return 0;
-  var t = Date.parse(String(s).replace(' ', 'T'));
-  return isNaN(t) ? 0 : t;
-}
-
-function _kpiTileHtml(tile, n) {
-  var active = _kpiTileActive(tile);
-  var isZero = (n === 0);
-  var numHtml = isZero
-    ? '<div class="kpi-tile-zero">' + escapeHtml(tile.zero) + '</div>'
-    : '<div class="kpi-tile-number">' + n.toLocaleString() + '</div>';
-  return '<button class="kpi-tile kpi-tone-' + tile.tone +
-           (active ? ' is-active' : '') +
-           (isZero ? ' is-zero' + (tile.goodZero ? ' is-good' : '') : '') +
-         '" data-action="findingsKpiClick" data-arg="' + tile.key + '">' +
-    numHtml +
-    '<div class="kpi-tile-label">' + escapeHtml(tile.label) + '</div>' +
-    '<div class="kpi-tile-sub">' + escapeHtml(tile.sub) + '</div>' +
-  '</button>';
-}
-
-// A tile is "active" when the current status + severity filters exactly
-// match its definition (precise handshake between tile and filter chips).
-function _kpiTileActive(tile) {
-  function eq(slot, vals) {
-    var inc = slot ? slot.include : null;
-    if ((inc ? inc.size : 0) !== vals.length) return false;
-    return vals.every(function (v) { return inc.has(v); });
-  }
-  return eq(findingsState.filters.status, tile.filter.status || []) &&
-         eq(findingsState.filters.severity, tile.filter.severity || []);
 }
 
 // ----- Severity bar --------------------------------------------
@@ -1124,28 +1041,6 @@ export function dismissFilterChip(dimId, _target, ev) {
   slot.include.clear();
   slot.exclude.clear();
   findingsState._addedSecondaryDims.delete(dimId);
-  applyFindingsView();
-}
-
-// ---------------------------------------------------------------
-// KPI tile click — pre-fills the Status filter to the tile's bucket.
-// ---------------------------------------------------------------
-
-export function findingsKpiClick(key) {
-  var tile = _KPI_TILES.find(function (t) { return t.key === key; });
-  if (!tile) return;
-  var statusSlot = findingsState.filters.status;
-  var sevSlot = findingsState.filters.severity;
-  // Radio behavior: clicking the already-active tile clears its filter;
-  // otherwise replace status + severity with the tile's definition.
-  var clear = _kpiTileActive(tile);
-  [statusSlot, sevSlot].forEach(function (slot) {
-    if (slot) { slot.include.clear(); slot.exclude.clear(); }
-  });
-  if (!clear) {
-    if (statusSlot) (tile.filter.status || []).forEach(function (v) { statusSlot.include.add(v); });
-    if (sevSlot) (tile.filter.severity || []).forEach(function (v) { sevSlot.include.add(v); });
-  }
   applyFindingsView();
 }
 

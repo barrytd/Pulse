@@ -5,6 +5,22 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-17 — v2.0.0
+
+First major-version release. This cycle turned Pulse from a local scanner into a multi-user, AI-assisted product, so the version jumps to **2.0.0**. (It also reconciles a version drift: `__version__` had lagged at `1.7.0` behind the `v1.8.0` tag — both are now superseded by `2.0.0`.)
+
+**Headline features that landed this cycle** (each documented in its own entry below):
+
+- **Security Buddy "Pip"** — a backend-proxied Claude Haiku 4.5 chat assistant that explains findings in plain language. Per-user daily metering, prompt-injection fencing, finding-aware context, and dock-beside-any-drawer behavior.
+- **Multi-tenant admin isolation** — hosted org admins are pinned to their own `organization_id`; env-only platform super-admin; per-org last-admin guard. Single-tenant self-host behavior unchanged.
+- **Fleet page** — full-width sortable host table, single top filter bar (search + risk + status + export), enriched host drawer with severity breakdown + per-host findings, backed by `GET /api/fleet/host/{hostname}`.
+- **Professional report system** — shared light/print theme (`report_theme.py`) with brand header, "Page X of Y" footer, severity pills, zebra tables, finding cards; the Incident Investigation Report is redesigned on it (PDF + HTML).
+
+**This release also includes UI cleanup + a security audit:**
+
+- **Leaner Findings + Fleet layouts.** The Findings page drops its four KPI tiles (Needs attention / In progress / Critical + High open / Resolved) — the page now leads with the title and breadcrumb, then the severity bar, then the filters, then the table. The Fleet page drops its KPI tile strip (it duplicated the Risk filter) and removes the width cap so its table matches the rest of the app. Both pages now share the same clean title → controls → table rhythm.
+- **API-key leak audit (Pip).** Verified the `ANTHROPIC_API_KEY` never reaches the browser: it is read **env-only** (`buddy.py`), used solely in the outbound `x-api-key` header, returned by no response, written to no log, and absent from `pulse.yaml` entirely. The config GET is a hand-built allowlist that masks every credential to a boolean (`password_set` / `url_set` / `api_key_set`); no route returns the raw config; `.env`, `pulse.yaml`, and `*.db` are gitignored and untracked. Pip's routes require login and are rate-limited per user/day.
+
 ## 2026-06-16 — Settings rail groups + Billing tab
 
 - **Settings rail grouped into labeled sections.** The flat 12-item rail is now grouped into **ACCOUNT / PREFERENCES / CONFIGURATION / TEAM / WORKSPACE** with small uppercase group labels (matching the main sidebar) and spacing between clusters. Role-gated: a group whose every item is admin-only (TEAM, WORKSPACE) disappears — label and all — for non-admins. The pages themselves and the deep-link routes are unchanged.

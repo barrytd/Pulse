@@ -59,7 +59,6 @@ import {
   filterChipDdFind,
   clearFilterChip,
   dismissFilterChip,
-  findingsKpiClick,
   toggleFindingsAutoRefresh,
   refreshFindings,
   exportFindingsCsv,
@@ -109,7 +108,7 @@ import {
   toggleHistorySelectAll,
   deleteSelectedHistory,
 } from './history.js';
-import { fleetOpenHost, exportFleetCsv, fleetFilterByKpi,
+import { fleetOpenHost, exportFleetCsv,
          fleetGenerateIncidentReport, fleetSetRisk, fleetSetStatus,
          fleetSearchInput, fleetSort, fleetViewFindings } from './fleet.js';
 import {
@@ -354,7 +353,6 @@ const actions = {
   filterChipDdFind,
   clearFilterChip,
   dismissFilterChip,
-  findingsKpiClick,
   toggleFindingsAutoRefresh,
   refreshFindings,
   exportFindingsCsv,
@@ -406,7 +404,6 @@ const actions = {
   // fleet
   fleetOpenHost,
   exportFleetCsv,
-  fleetFilterByKpi,
   fleetGenerateIncidentReport,
   fleetSetRisk,
   fleetSetStatus,
