@@ -80,7 +80,7 @@
   margin-right: 8px;
 }
 .sidebar-brand-name {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
   font-weight: 600;
   /* Tighter tracking — the prior 1.2px pushed "PULSE" too far from

@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pulse Dashboard</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Fonts: a system stack (no external webfont), so the dashboard renders
+       fully offline / air-gapped and leaks nothing to a font CDN. -->
+
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/sidebar.css">
@@ -12,8 +14,10 @@
   <link rel="stylesheet" href="/static/css/dashboard.css">
   <link rel="stylesheet" href="/static/css/findings.css">
   <link rel="stylesheet" href="/static/css/buddy.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <!-- Vendored + version-pinned (see pulse/static/vendor/README.md). Self-
+       hosted so the dashboard works air-gapped and pulls no third-party JS. -->
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/lucide.min.js"></script>
 </head>
 <body>
   <!-- ============================================================= -->

@@ -53,8 +53,9 @@
   --status-error: #ef4444;
   --status-off:   #6b7280;
 
-  /* Typography */
-  --font-body:          'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Typography — system font stack (no external webfont) so the dashboard
+     renders identically offline / air-gapped and leaks nothing to a CDN. */
+  --font-body:          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, 'Helvetica Neue', Arial, sans-serif;
   --font-mono:          'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
   --mono:               var(--font-mono); /* legacy alias used by older rules */
   --font-size-body:     13px;
