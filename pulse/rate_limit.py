@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import deque
@@ -26,20 +27,59 @@ _BUCKETS: Dict[Tuple[str, str], Tuple[int, int, Deque[float]]] = {}
 _LOCK = threading.Lock()
 
 
-def _client_ip(request: Request) -> str:
-    """Best-effort client IP extraction.
+def _trusted_proxy_hops() -> int:
+    """How many proxies sit in front of Pulse, from `PULSE_TRUSTED_PROXY_HOPS`.
 
-    Render (and most cloud load balancers) forward the real client IP in
-    `X-Forwarded-For`. We trust the first hop because the LB sits in front
-    of us; direct `request.client.host` would always be the LB.
+    0 (the default) means Pulse is reached directly, so `X-Forwarded-For`
+    is attacker-controlled and must be ignored. Set it to the number of
+    trusted reverse proxies / load balancers in front of the app — `1` for
+    a single LB like Render. Anything unparseable is treated as 0.
     """
-    xff = request.headers.get("x-forwarded-for", "").strip()
-    if xff:
-        # First entry is the original client; the rest are intermediate proxies.
-        return xff.split(",")[0].strip()
+    raw = os.environ.get("PULSE_TRUSTED_PROXY_HOPS", "").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the real client IP, resisting `X-Forwarded-For` spoofing.
+
+    `X-Forwarded-For` is set by the caller, so a client can rotate a fake
+    value every request to mint a fresh rate-limit bucket (dodging per-IP
+    caps), or set it to a victim's IP to burn that victim's budget. We only
+    trust it to the extent we actually run behind proxies.
+
+    The address chain, ordered least-to-most trustworthy, is the XFF
+    entries (left = what the client claimed) followed by the real TCP peer
+    (`request.client.host`, appended by the closest proxy). We trust the
+    last `hops` of them as our own proxies and read the client from the
+    next entry to the left. A spoofed value can only be *prepended* by the
+    client, so it stays to the left of the real entries and is skipped.
+
+    With `hops == 0` we ignore XFF entirely and use the socket peer, which
+    is the safe default for local / self-hosted / direct-exposed installs.
+    """
+    peer = ""
     if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+        peer = request.client.host
+
+    hops = _trusted_proxy_hops()
+    if hops <= 0:
+        # Not behind a trusted proxy: XFF is untrusted, use the socket peer.
+        return peer or "unknown"
+
+    xff = request.headers.get("x-forwarded-for", "")
+    chain = [p.strip() for p in xff.split(",") if p.strip()]
+    chain.append(peer or "unknown")
+
+    # Walk past `hops` trusted proxies on the right; the client is next.
+    idx = len(chain) - 1 - hops
+    if idx < 0:
+        # Fewer addresses than declared hops (XFF stripped, or misconfig).
+        # Fall back to the left-most known address rather than a proxy IP.
+        return chain[0]
+    return chain[idx]
 
 
 def hit(request: Request, name: str, *, window_sec: int, max_hits: int) -> None:

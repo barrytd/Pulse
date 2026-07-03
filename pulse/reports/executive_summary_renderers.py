@@ -23,24 +23,29 @@ import io
 import json
 from typing import Any, Dict
 
+import pulse.reports.report_theme as T
+
+REPORT_TYPE = "Executive Security Summary"
+
+# Map the posture grade to a severity key the shared theme understands, so
+# the classification banner / section accents pick up a sensible color. A/B
+# read as healthy (low/none), C as moderate, D/F as high/critical.
+_GRADE_SEV = {
+    "A": "NONE", "B": "LOW", "C": "MEDIUM", "D": "HIGH", "F": "CRITICAL",
+    "?": "NONE",
+}
+_GRADE_BANNER = {
+    "A": "Strong security posture",
+    "B": "Healthy posture",
+    "C": "Several issues need attention",
+    "D": "Multiple high-impact risks",
+    "F": "Critical risks — immediate action required",
+    "?": "No completed scans in period",
+}
+
 
 def _esc(s: Any) -> str:
     return html.escape(str(s) if s is not None else "")
-
-
-# Severity + grade palette — light theme. Same hex values as the
-# dashboard's `--severity-*` CSS custom properties so the colors stay
-# consistent across surfaces.
-SEV_COLOR = {
-    "CRITICAL": "#ef4444",
-    "HIGH":     "#f59e0b",
-    "MEDIUM":   "#3b82f6",
-    "LOW":      "#10b981",
-}
-GRADE_COLOR = {
-    "A": "#639922", "B": "#378ADD", "C": "#BA7517",
-    "D": "#E24B4A", "F": "#A32D2D", "?": "#6b7280",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -138,279 +143,110 @@ def render_html(summary: Dict[str, Any]) -> bytes:
     footer = summary.get("footer", {}) or {}
 
     grade = p.get("grade") or "?"
-    grade_color = GRADE_COLOR.get(grade, "#6b7280")
+    grade_sev = _GRADE_SEV.get(grade, "NONE")
     score = p.get("score")
-    score_str = "—" if score is None else str(int(score))
+    score_str = T.html_none() if score is None else str(int(score))
 
     trend_line = _trend_phrase(p.get("trend") or {})
 
-    # --- Top Risks block -----------------------------------------------
-    risk_blocks = ""
-    for i, r in enumerate(risks, start=1):
-        sev = (r.get("severity") or "LOW").upper()
-        sev_color = SEV_COLOR.get(sev, "#6b7280")
-        host_line = (
-            f'<div class="risk-host">Affected host: <strong>{_esc(r.get("host"))}</strong></div>'
-            if r.get("host") else ""
-        )
-        risk_blocks += f"""
-        <div class="risk-card">
-          <div class="risk-head">
-            <span class="risk-rank">#{i}</span>
-            <span class="risk-sev" style="background:{sev_color}1f;color:{sev_color};border:1px solid {sev_color}55;">
-              {_esc(sev)}
-            </span>
-          </div>
-          <div class="risk-what">{_esc(r.get("what_happened"))}</div>
-          {host_line}
-          <div class="risk-section-label">Why it matters</div>
-          <div class="risk-body">{_esc(r.get("why_it_matters"))}</div>
-          <div class="risk-section-label">Recommended action</div>
-          <div class="risk-body">{_esc(r.get("recommended_action"))}</div>
-        </div>"""
-    if not risk_blocks:
-        risk_blocks = (
-            '<div class="muted">No unresolved risks in this period.</div>'
-        )
-
-    # --- Activity tiles ------------------------------------------------
-    def tile(num, label, accent=None):
-        color = f"color:{accent};" if accent else ""
-        return (f'<div class="stat-tile"><div class="stat-num" style="{color}">{num}</div>'
-                f'<div class="stat-label">{label}</div></div>')
-
-    sev = a.get("by_severity", {}) or {}
-    activity_tiles = "".join([
-        tile(a.get("total_issues", 0),       "Total issues found"),
-        tile(a.get("open", 0),               "Still open"),
-        tile(a.get("resolved", 0),           "Resolved"),
-        tile(a.get("machines_monitored", 0), "Machines monitored"),
-        tile(a.get("machines_at_risk", 0),   "Machines at risk",
-             SEV_COLOR["HIGH"] if a.get("machines_at_risk", 0) else None),
+    # 1. Title block + metadata grid + classification banner ------------
+    body = T.html_eyebrow_title(REPORT_TYPE.upper(), h.get("title") or REPORT_TYPE)
+    body += T.html_metadata_grid([
+        ("Organization", _esc(h.get("organization"))),
+        ("Scope", _esc(h.get("scope"))),
+        ("Period", _esc(h.get("period_start")) + " – " + _esc(h.get("period_end"))
+         if h.get("period_start") else ""),
+        ("Generated", _esc(h.get("generated_at"))),
     ])
-    severity_strip = "".join([
-        tile(sev.get(s, 0), s.title(), SEV_COLOR[s])
-        for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
-    ])
+    body += T.html_classification_banner(grade_sev, _GRADE_BANNER.get(grade, ""))
 
-    # --- What Changed --------------------------------------------------
-    if c.get("had_previous_period"):
-        changed_html = f"""
-          <div class="changed-grid">
-            {tile(c.get('new_issues', 0), 'Issues this period')}
-            {tile(c.get('previous_issues', 0), 'Issues last period')}
-            {tile(_fmt_delta(c.get('issues_delta')), 'Net change in issues',
-                  '#ef4444' if (c.get('issues_delta') or 0) > 0 else '#10b981')}
-            {tile(_fmt_delta(c.get('score_delta')), 'Score change',
-                  '#10b981' if (c.get('score_delta') or 0) > 0 else
-                  '#ef4444' if (c.get('score_delta') or 0) < 0 else None)}
-            {tile(c.get('new_machines_count', 0), 'New machines added')}
-          </div>"""
+    # 2. Security Posture at a Glance — grade verdict callout -----------
+    posture_inner = (
+        '<div class="rpt-callout-verdict">' + _esc(grade) + ' — '
+        + _esc(p.get("interpretation")) + '</div>'
+        '<div style="margin-top:6px;">Overall score: <b>' + score_str
+        + '</b> out of 100</div>'
+        '<div class="rpt-chips" style="margin-top:6px;">'
+        + T.html_pill(grade_sev) + '<span style="margin-left:8px;color:'
+        + T.C_MUTED + ';">' + _esc(trend_line) + '</span></div>'
+    )
+    body += T.html_section("Security Posture at a Glance",
+                           T.html_callout(posture_inner, grade_sev), grade_sev)
+
+    # 3. What This Means — narrative callout ----------------------------
+    body += T.html_section(
+        "What This Means",
+        T.html_callout('<div class="rpt-callout-verdict">'
+                       + _esc(summary.get("what_this_means")) + '</div>'))
+
+    # 4. Top Risks ------------------------------------------------------
+    if risks:
+        risk_html = ""
+        for i, r in enumerate(risks, start=1):
+            sev = (r.get("severity") or "LOW").upper()
+            head = ('<div class="rpt-card-head">'
+                    '<span class="rpt-card-num">#' + str(i) + '</span>'
+                    + T.html_pill(sev))
+            if r.get("host"):
+                head += '<span class="rpt-badge rpt-mono">' + _esc(r.get("host")) + '</span>'
+            head += '</div>'
+            inner = (head
+                     + '<div class="rpt-card-rule">' + _esc(r.get("what_happened")) + '</div>'
+                     + '<div class="rpt-card-meta"><b>Why it matters</b></div>'
+                     + '<div class="rpt-card-desc">' + _esc(r.get("why_it_matters")) + '</div>'
+                     + '<div class="rpt-card-meta"><b>Recommended action</b></div>'
+                     + '<div class="rpt-card-desc">' + _esc(r.get("recommended_action")) + '</div>')
+            risk_html += ('<div class="rpt-card" style="border-left-color:'
+                          + T.SEV_FG[T.sev_key(sev)] + ';">' + inner + '</div>')
     else:
-        changed_html = (
-            '<div class="muted">No prior period available for comparison '
-            'yet. The next report (after another reporting interval) will '
-            'show period-over-period changes.</div>'
-        )
+        risk_html = '<div class="rpt-none">No unresolved risks in this period.</div>'
+    body += T.html_section("Top Risks", risk_html)
 
-    rec_items = "".join(
-        f'<li>{_esc(line)}</li>' for line in recs
-    ) or '<li class="muted">No recommendations generated for this period.</li>'
+    # 5. Activity Overview — tables -------------------------------------
+    sev = a.get("by_severity", {}) or {}
+    overview = T.html_table(
+        ["Total Issues", "Open", "Resolved", "Monitored", "At Risk"],
+        [[str(a.get("total_issues", 0)), str(a.get("open", 0)),
+          str(a.get("resolved", 0)), str(a.get("machines_monitored", 0)),
+          str(a.get("machines_at_risk", 0))]],
+        num_cols=[0, 1, 2, 3, 4])
+    sev_rows = [[T.html_pill(s), str(sev.get(s, 0))]
+                for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW")]
+    sev_table = T.html_table(["Severity", "Count"], sev_rows, num_cols=[1])
+    body += T.html_section("Activity Overview", overview + sev_table)
 
-    html_doc = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Executive Security Summary</title>
-<style>
-  @page {{ size: Letter; margin: 0.6in; }}
-  body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #ffffff; color: #111827;
-    margin: 0; padding: 36px 0;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }}
-  .container {{ max-width: 880px; margin: 0 auto; padding: 0 36px; }}
-  h1 {{ font-size: 26px; margin: 0 0 4px 0; }}
-  h2 {{
-    font-size: 13px; margin: 0 0 14px 0;
-    text-transform: uppercase; letter-spacing: 0.7px;
-    color: #6b7280; font-weight: 700;
-    border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;
-  }}
-  .muted {{ color: #6b7280; }}
-  .small {{ font-size: 12px; }}
-  .section {{ margin-bottom: 36px; }}
-  .org-line {{ color: #6b7280; font-size: 14px; margin-bottom: 18px; }}
-  .scope-line {{ font-size: 13px; color: #374151; }}
+    # 6. What Changed ---------------------------------------------------
+    if c.get("had_previous_period"):
+        changed = T.html_table(
+            ["This Period", "Last Period", "Net Change", "Score Change", "New Machines"],
+            [[str(c.get("new_issues", 0)), str(c.get("previous_issues", 0)),
+              _esc(_fmt_delta(c.get("issues_delta"))),
+              _esc(_fmt_delta(c.get("score_delta"))),
+              str(c.get("new_machines_count", 0))]],
+            num_cols=[0, 1, 2, 3, 4])
+    else:
+        changed = ('<div class="rpt-none">No prior period available for '
+                   'comparison yet. The next report (after another reporting '
+                   'interval) will show period-over-period changes.</div>')
+    body += T.html_section("What Changed", changed)
 
-  /* Grade hero — the single load-bearing visual on the cover. */
-  .grade-hero {{
-    display: flex;
-    align-items: center;
-    gap: 26px;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 24px 28px;
-    margin-bottom: 18px;
-  }}
-  .grade-circle {{
-    width: 110px; height: 110px;
-    border-radius: 50%;
-    background: {grade_color};
-    color: #fff;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 56px; font-weight: 700; line-height: 1;
-    flex: 0 0 auto;
-  }}
-  .grade-body {{ flex: 1; }}
-  .grade-line {{
-    font-size: 18px; font-weight: 600;
-    color: #111827; margin-bottom: 6px;
-  }}
-  .grade-score {{
-    font-size: 14px; color: #374151; margin-bottom: 10px;
-  }}
-  .grade-trend {{
-    font-size: 13px;
-    color: #6b7280;
-    padding: 4px 10px;
-    background: #fff; border: 1px solid #e5e7eb;
-    border-radius: 999px;
-    display: inline-block;
-  }}
+    # 7. Recommendations ------------------------------------------------
+    if recs:
+        recs_html = ('<ol style="margin:2px 0 6px;padding-left:20px;font-size:10px;'
+                     'line-height:1.6;">'
+                     + "".join('<li>' + _esc(line) + '</li>' for line in recs)
+                     + '</ol>')
+    else:
+        recs_html = '<div class="rpt-none">No recommendations generated for this period.</div>'
+    body += T.html_section("Recommendations", recs_html)
 
-  .narrative {{
-    font-size: 15px; line-height: 1.65;
-    color: #111827;
-    background: #fffbeb; border-left: 4px solid #f59e0b;
-    padding: 14px 18px; border-radius: 6px;
-  }}
+    # 8. Footer note ----------------------------------------------------
+    body += T.html_callout(
+        'Pulse v' + _esc(footer.get("pulse_version")) + '. '
+        + _esc(footer.get("automated_note")))
 
-  .risk-card {{
-    background: #f9fafb; border: 1px solid #e5e7eb;
-    border-radius: 8px; padding: 16px 18px;
-    margin-bottom: 12px;
-  }}
-  .risk-head {{
-    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
-  }}
-  .risk-rank {{
-    background: #1f2937; color: #fff;
-    width: 26px; height: 26px;
-    border-radius: 50%;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 700;
-  }}
-  .risk-sev {{
-    padding: 3px 10px; border-radius: 999px;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
-    line-height: 1;
-  }}
-  .risk-what {{ font-size: 15px; line-height: 1.5; font-weight: 500; margin-bottom: 8px; }}
-  .risk-host {{ font-size: 12px; color: #6b7280; margin-bottom: 10px; }}
-  .risk-section-label {{
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
-    color: #6b7280; margin-top: 10px;
-  }}
-  .risk-body {{ font-size: 13px; line-height: 1.55; color: #374151; }}
-
-  .stat-grid, .changed-grid {{
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
-  }}
-  .severity-strip {{
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-    margin-top: 12px;
-  }}
-  .stat-tile {{
-    background: #f9fafb; border: 1px solid #e5e7eb;
-    border-radius: 8px; padding: 14px 12px;
-    text-align: center;
-  }}
-  .stat-num {{ font-size: 26px; font-weight: 700; line-height: 1.1; }}
-  .stat-label {{
-    font-size: 11px; color: #6b7280;
-    text-transform: uppercase; letter-spacing: 0.4px; margin-top: 4px;
-  }}
-
-  ol.recs {{
-    padding-left: 22px; font-size: 14px; line-height: 1.65;
-  }}
-  ol.recs li {{ margin-bottom: 8px; }}
-
-  footer {{
-    margin-top: 36px;
-    padding-top: 14px;
-    border-top: 1px solid #e5e7eb;
-    font-size: 11px; color: #6b7280;
-    text-align: center;
-    line-height: 1.6;
-  }}
-  @media print {{
-    body {{ padding: 0; }}
-    .section {{ break-inside: avoid; }}
-    .grade-hero, .risk-card {{ break-inside: avoid; }}
-  }}
-</style>
-</head>
-<body>
-<div class="container">
-
-  <div class="section">
-    <h1>{_esc(h.get("title"))}</h1>
-    <div class="org-line">Prepared for <strong>{_esc(h.get("organization"))}</strong></div>
-    <div class="scope-line">{_esc(h.get("scope"))}</div>
-    <div class="scope-line muted">Generated {_esc(h.get("generated_at"))}</div>
-  </div>
-
-  <div class="section">
-    <h2>Security Posture at a Glance</h2>
-    <div class="grade-hero">
-      <div class="grade-circle">{_esc(grade)}</div>
-      <div class="grade-body">
-        <div class="grade-line">{_esc(grade)} — {_esc(p.get("interpretation"))}</div>
-        <div class="grade-score">Overall score: <strong>{_esc(score_str)}</strong> out of 100</div>
-        <div class="grade-trend">{_esc(trend_line)}</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>What This Means</h2>
-    <div class="narrative">{_esc(summary.get("what_this_means"))}</div>
-  </div>
-
-  <div class="section">
-    <h2>Top Risks</h2>
-    {risk_blocks}
-  </div>
-
-  <div class="section">
-    <h2>Activity Overview</h2>
-    <div class="stat-grid">{activity_tiles}</div>
-    <div class="severity-strip">{severity_strip}</div>
-  </div>
-
-  <div class="section">
-    <h2>What Changed</h2>
-    {changed_html}
-  </div>
-
-  <div class="section">
-    <h2>Recommendations</h2>
-    <ol class="recs">{rec_items}</ol>
-  </div>
-
-  <footer>
-    Pulse v{_esc(footer.get("pulse_version"))}<br/>
-    {_esc(footer.get("automated_note"))}
-  </footer>
-
-</div>
-</body>
-</html>"""
-    return html_doc.encode("utf-8")
+    return T.html_document(
+        REPORT_TYPE, "Pulse — " + (h.get("title") or REPORT_TYPE), body).encode("utf-8")
 
 
 def _fmt_delta(d):
@@ -432,22 +268,9 @@ def _fmt_delta(d):
 
 def render_pdf(summary: Dict[str, Any]) -> bytes:
     from io import BytesIO
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.platypus import (
-        Flowable, HRFlowable, KeepTogether, Paragraph,
-        SimpleDocTemplate, Spacer, Table, TableStyle,
-    )
-
-    from pulse.reports.pdf_report import (
-        COLOR_BORDER, COLOR_MUTED, COLOR_TEXT, COLOR_TITLE,
-        GRADE_COLORS, DEFAULT_GRADE_COLOR,
-        CONTENT_WIDTH, LEFT_MARGIN, RIGHT_MARGIN,
-        _draw_footer,
-    )
+    rl = T._rl()
+    Paragraph = rl["Paragraph"]
+    st = T.pdf_styles()
 
     h = summary["header"]
     p = summary["posture"]
@@ -458,425 +281,152 @@ def render_pdf(summary: Dict[str, Any]) -> bytes:
     footer = summary.get("footer") or {}
 
     grade = p.get("grade") or "?"
-    grade_color = GRADE_COLORS.get(grade, DEFAULT_GRADE_COLOR)
+    grade_sev = _GRADE_SEV.get(grade, "NONE")
     score = p.get("score")
     score_str = "—" if score is None else str(int(score))
-
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=LETTER,
-        leftMargin=LEFT_MARGIN, rightMargin=RIGHT_MARGIN,
-        topMargin=0.75 * inch, bottomMargin=0.85 * inch,
-        title="Pulse Executive Security Summary",
-    )
-
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "EX_Title", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=24, leading=28, textColor=COLOR_TITLE, alignment=TA_LEFT,
-        spaceAfter=2,
-    )
-    org_style = ParagraphStyle(
-        "EX_Org", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=11, leading=14, textColor=COLOR_MUTED, alignment=TA_LEFT,
-        spaceAfter=4,
-    )
-    scope_style = ParagraphStyle(
-        "EX_Scope", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10, leading=13, textColor=COLOR_TEXT, alignment=TA_LEFT,
-    )
-    section_style = ParagraphStyle(
-        "EX_Section", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=11, leading=14, textColor=COLOR_MUTED, alignment=TA_LEFT,
-        spaceAfter=8, spaceBefore=16,
-    )
-    body_style = ParagraphStyle(
-        "EX_Body", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=11, leading=16, textColor=COLOR_TEXT, alignment=TA_LEFT,
-    )
-    grade_line_style = ParagraphStyle(
-        "EX_GradeLine", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=14, leading=18, textColor=COLOR_TITLE, alignment=TA_LEFT,
-        spaceAfter=4,
-    )
-    grade_score_style = ParagraphStyle(
-        "EX_GradeScore", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=11, leading=14, textColor=COLOR_TEXT, alignment=TA_LEFT,
-        spaceAfter=6,
-    )
-    trend_style = ParagraphStyle(
-        "EX_Trend", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10, leading=13, textColor=COLOR_MUTED, alignment=TA_LEFT,
-    )
-    narrative_style = ParagraphStyle(
-        "EX_Narrative", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=12, leading=18, textColor=COLOR_TEXT, alignment=TA_LEFT,
-        leftIndent=10, rightIndent=10,
-    )
-    risk_what_style = ParagraphStyle(
-        "EX_RiskWhat", parent=body_style, fontName="Helvetica-Bold",
-        fontSize=12, leading=16, textColor=COLOR_TITLE, spaceAfter=4,
-    )
-    risk_label_style = ParagraphStyle(
-        "EX_RiskLabel", parent=body_style, fontName="Helvetica-Bold",
-        fontSize=9, leading=11, textColor=COLOR_MUTED,
-        spaceBefore=6, spaceAfter=2,
-    )
-    risk_body_style = ParagraphStyle(
-        "EX_RiskBody", parent=body_style, fontName="Helvetica",
-        fontSize=10.5, leading=15, textColor=COLOR_TEXT,
-    )
-    rec_style = ParagraphStyle(
-        "EX_Rec", parent=body_style, fontName="Helvetica",
-        fontSize=11, leading=16, textColor=COLOR_TEXT,
-        leftIndent=4, spaceAfter=4,
-    )
-
-    story = []
-
-    # -- Header ---------------------------------------------------------
-    story.append(Paragraph(h.get("title") or "Executive Security Summary",
-                            title_style))
-    story.append(Paragraph(
-        f"Prepared for <b>{html.escape(str(h.get('organization')))}</b>",
-        org_style))
-    story.append(Paragraph(html.escape(str(h.get("scope"))), scope_style))
-    story.append(Paragraph(
-        f"Generated {html.escape(str(h.get('generated_at')))}", scope_style))
-    story.append(Spacer(1, 12))
-    story.append(HRFlowable(width="100%", thickness=0.6, color=COLOR_BORDER))
-
-    # -- Posture at a Glance -------------------------------------------
-    story.append(Paragraph("SECURITY POSTURE AT A GLANCE", section_style))
-
-    # Big grade chip on the left, body on the right.
-    grade_chip = _BigGradeChip(grade, grade_color, size=86)
-
     trend_line = _trend_phrase(p.get("trend") or {})
-    grade_body = [
-        Paragraph(
-            f"{html.escape(grade)} &mdash; "
-            f"{html.escape(str(p.get('interpretation') or ''))}",
-            grade_line_style,
-        ),
-        Paragraph(
-            f"Overall score: <b>{html.escape(score_str)}</b> out of 100",
-            grade_score_style,
-        ),
-        Paragraph(html.escape(trend_line), trend_style),
+
+    story: list = []
+
+    # 1. Title block + metadata grid + classification banner ------------
+    story.append(Paragraph(REPORT_TYPE.upper(), st["eyebrow"]))
+    story.append(Paragraph(_esc(h.get("title") or REPORT_TYPE), st["title"]))
+    story.append(T.pdf_spacer(10))
+    story.append(T.pdf_metadata_grid([
+        ("Organization", _esc(h.get("organization"))),
+        ("Scope", _esc(h.get("scope"))),
+        ("Period", (_esc(h.get("period_start")) + " – " + _esc(h.get("period_end")))
+         if h.get("period_start") else ""),
+        ("Generated", _esc(h.get("generated_at"))),
+    ], st))
+    story.append(T.pdf_spacer(12))
+    story.append(T.pdf_banner(grade_sev, _GRADE_BANNER.get(grade, ""), st))
+    story.append(T.pdf_spacer(8))
+
+    # 2. Security Posture at a Glance — grade verdict callout -----------
+    story.append(T.pdf_section("Security Posture at a Glance", st, grade_sev))
+    story.append(T.pdf_spacer(4))
+    posture_flow = [
+        Paragraph("%s &mdash; %s" % (_esc(grade), _esc(p.get("interpretation"))),
+                  st["verdict"]),
+        T.pdf_spacer(4),
+        Paragraph("Overall score: <b>%s</b> out of 100" % _esc(score_str), st["body"]),
+        T.pdf_spacer(6),
+        T.pdf_pill_para(grade_sev, st),
+        T.pdf_spacer(3),
+        Paragraph('<font color="%s">%s</font>' % (T.C_MUTED, _esc(trend_line)), st["muted"]),
     ]
-    posture_table = Table(
-        [[grade_chip, grade_body]],
-        colWidths=[1.3 * inch, CONTENT_WIDTH - 1.3 * inch],
-    )
-    posture_table.setStyle(TableStyle([
-        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND",   (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
-        ("BOX",          (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 16),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-        ("TOPPADDING",   (0, 0), (-1, -1), 16),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
-    ]))
-    story.append(posture_table)
+    story.append(T.pdf_callout(posture_flow, st, grade_sev))
+    story.append(T.pdf_spacer(6))
 
-    # -- What This Means -----------------------------------------------
-    story.append(Paragraph("WHAT THIS MEANS", section_style))
-    narrative_box = Table(
-        [[Paragraph(html.escape(summary.get("what_this_means", "")),
-                     narrative_style)]],
-        colWidths=[CONTENT_WIDTH],
-    )
-    narrative_box.setStyle(TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, -1), colors.HexColor("#fffbeb")),
-        ("LINEBEFORE",   (0, 0), (0, -1), 3, colors.HexColor("#f59e0b")),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 14),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 14),
-        ("TOPPADDING",   (0, 0), (-1, -1), 12),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
-    ]))
-    story.append(narrative_box)
+    # 3. What This Means — narrative callout ----------------------------
+    story.append(T.pdf_section("What This Means", st))
+    story.append(T.pdf_spacer(4))
+    story.append(T.pdf_callout(
+        [Paragraph(_esc(summary.get("what_this_means")), st["verdict"])], st))
+    story.append(T.pdf_spacer(6))
 
-    # -- Top Risks -----------------------------------------------------
-    story.append(Paragraph("TOP RISKS", section_style))
+    # 4. Top Risks -----------------------------------------------------
+    story.append(T.pdf_section("Top Risks", st))
+    story.append(T.pdf_spacer(6))
     if risks:
-        from pulse.reports.pdf_report import PILL_BG, PILL_FG
         for i, r in enumerate(risks, start=1):
             sev = (r.get("severity") or "LOW").upper()
-            pill_bg = PILL_BG.get(sev, colors.HexColor("#f3f4f6"))
-            pill_fg = PILL_FG.get(sev, COLOR_MUTED)
-            rank_chip = _RankChip(i)
-            sev_chip_style = ParagraphStyle(
-                f"sev_{sev}_{i}", parent=body_style, alignment=TA_CENTER,
-                fontName="Helvetica-Bold", fontSize=8.5,
-                textColor=pill_fg, leading=11,
-            )
-            head_row = Table(
-                [[rank_chip, Paragraph(sev, sev_chip_style)]],
-                colWidths=[0.35 * inch, 0.6 * inch],
-            )
-            head_row.setStyle(TableStyle([
-                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-                ("BACKGROUND",    (1, 0), (1, 0), pill_bg),
-                ("ROUNDEDCORNERS", [0, 0, 0, 0]),  # corners stay rectangular
-                ("LEFTPADDING",   (1, 0), (1, 0), 6),
-                ("RIGHTPADDING",  (1, 0), (1, 0), 6),
-                ("TOPPADDING",    (1, 0), (1, 0), 4),
-                ("BOTTOMPADDING", (1, 0), (1, 0), 4),
-            ]))
-
-            blocks = [
-                head_row,
-                Spacer(1, 4),
-                Paragraph(html.escape(r.get("what_happened") or ""),
-                           risk_what_style),
-            ]
+            head = Paragraph(
+                '<font color="%s"><b>#%d</b></font>&nbsp;&nbsp;'
+                '<font color="%s"><b>%s</b></font>'
+                % (T.C_MUTED, i, T.C_TITLE, _esc(r.get("what_happened"))),
+                st["cardrule"])
+            sub_bits = [T.pdf_pill_para(sev, st)]
+            inner_rows = [[head], [sub_bits[0]]]
             if r.get("host"):
-                blocks.append(Paragraph(
-                    f'Affected host: <b>{html.escape(r["host"])}</b>',
-                    ParagraphStyle("ex_risk_host", parent=body_style,
-                                    fontSize=10, textColor=COLOR_MUTED),
-                ))
-            blocks.extend([
-                Paragraph("WHY IT MATTERS", risk_label_style),
-                Paragraph(html.escape(r.get("why_it_matters") or ""),
-                           risk_body_style),
-                Paragraph("RECOMMENDED ACTION", risk_label_style),
-                Paragraph(html.escape(r.get("recommended_action") or ""),
-                           risk_body_style),
-            ])
-            card = Table([[blocks]], colWidths=[CONTENT_WIDTH])
-            card.setStyle(TableStyle([
-                ("BACKGROUND",   (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
-                ("BOX",          (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-                ("LEFTPADDING",  (0, 0), (-1, -1), 16),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-                ("TOPPADDING",   (0, 0), (-1, -1), 14),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+                inner_rows.append([Paragraph(
+                    'Affected host: <b>%s</b>' % _esc(r.get("host")), st["muted"])])
+            inner_rows.append([T.pdf_spacer(3)])
+            inner_rows.append([Paragraph(
+                '<font color="%s"><b>WHY IT MATTERS</b></font>' % T.C_MUTED, st["th"])])
+            inner_rows.append([Paragraph(_esc(r.get("why_it_matters")), st["body"])])
+            inner_rows.append([Paragraph(
+                '<font color="%s"><b>RECOMMENDED ACTION</b></font>' % T.C_MUTED, st["th"])])
+            inner_rows.append([Paragraph(_esc(r.get("recommended_action")), st["body"])])
+
+            inner = rl["Table"](inner_rows, colWidths=[T.CONTENT_W - 16])
+            inner.setStyle(rl["TableStyle"]([
+                ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
             ]))
-            story.append(KeepTogether(card))
-            story.append(Spacer(1, 8))
-    else:
-        story.append(Paragraph("No unresolved risks in this period.",
-                                ParagraphStyle("ex_no_risks",
-                                                 parent=body_style,
-                                                 textColor=COLOR_MUTED)))
-
-    # -- Activity Overview ---------------------------------------------
-    story.append(Paragraph("ACTIVITY OVERVIEW", section_style))
-    sev_map = a.get("by_severity") or {}
-    tiles = [
-        (a.get("total_issues", 0), "Total issues",     None),
-        (a.get("open", 0),         "Still open",       None),
-        (a.get("resolved", 0),     "Resolved",         None),
-        (a.get("machines_monitored", 0), "Machines monitored", None),
-        (a.get("machines_at_risk", 0),
-         "Machines at risk",
-         colors.HexColor(SEV_COLOR["HIGH"])
-         if a.get("machines_at_risk", 0) else None),
-    ]
-    story.append(_stat_grid(tiles, cols=5,
-                             body_style=body_style))
-    story.append(Spacer(1, 10))
-    sev_tiles = [
-        (sev_map.get(s, 0), s.title(),
-         colors.HexColor(SEV_COLOR[s]))
-        for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
-    ]
-    story.append(_stat_grid(sev_tiles, cols=4, body_style=body_style))
-
-    # -- What Changed --------------------------------------------------
-    story.append(Paragraph("WHAT CHANGED", section_style))
-    if c.get("had_previous_period"):
-        changed_tiles = [
-            (c.get("new_issues", 0),      "Issues this period",  None),
-            (c.get("previous_issues", 0), "Issues last period",  None),
-            (_fmt_delta(c.get("issues_delta")),
-             "Net change in issues",
-             colors.HexColor("#ef4444") if (c.get("issues_delta") or 0) > 0
-             else colors.HexColor("#10b981")),
-            (_fmt_delta(c.get("score_delta")),
-             "Score change",
-             colors.HexColor("#10b981") if (c.get("score_delta") or 0) > 0 else
-             colors.HexColor("#ef4444") if (c.get("score_delta") or 0) < 0 else None),
-            (c.get("new_machines_count", 0), "New machines", None),
-        ]
-        story.append(_stat_grid(changed_tiles, cols=5,
-                                  body_style=body_style))
+            card = rl["Table"]([[inner]], colWidths=[T.CONTENT_W])
+            card.setStyle(rl["TableStyle"]([
+                ("BOX", (0, 0), (-1, -1), 0.6, rl["colors"].HexColor(T.C_BORDER)),
+                ("LINEBEFORE", (0, 0), (0, -1), 4, rl["colors"].HexColor(T.SEV_FG[T.sev_key(sev)])),
+                ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+            ]))
+            story.append(rl["KeepTogether"]([card]))
+            story.append(T.pdf_spacer(6))
     else:
         story.append(Paragraph(
-            "No prior period available for comparison yet. The next "
-            "report will show period-over-period changes.",
-            ParagraphStyle("ex_no_prev", parent=body_style,
-                            textColor=COLOR_MUTED),
-        ))
+            '<i><font color="%s">No unresolved risks in this period.</font></i>' % T.C_MUTED,
+            st["muted"]))
+    story.append(T.pdf_spacer(4))
 
-    # -- Recommendations -----------------------------------------------
-    story.append(Paragraph("RECOMMENDATIONS", section_style))
+    # 5. Activity Overview — tables ------------------------------------
+    story.append(T.pdf_section("Activity Overview", st))
+    story.append(T.pdf_spacer(4))
+    story.append(T.pdf_table(
+        ["Total Issues", "Open", "Resolved", "Monitored", "At Risk"],
+        [[str(a.get("total_issues", 0)), str(a.get("open", 0)),
+          str(a.get("resolved", 0)), str(a.get("machines_monitored", 0)),
+          str(a.get("machines_at_risk", 0))]],
+        [102, 102, 102, 104, 102], st))
+    story.append(T.pdf_spacer(6))
+    sev_map = a.get("by_severity") or {}
+    story.append(T.pdf_table(
+        ["Severity", "Count"],
+        [[T.pdf_pill_para(s, st), str(sev_map.get(s, 0))]
+         for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW")],
+        [256, 256], st))
+    story.append(T.pdf_spacer(6))
+
+    # 6. What Changed --------------------------------------------------
+    story.append(T.pdf_section("What Changed", st))
+    story.append(T.pdf_spacer(4))
+    if c.get("had_previous_period"):
+        story.append(T.pdf_table(
+            ["This Period", "Last Period", "Net Change", "Score Change", "New Machines"],
+            [[str(c.get("new_issues", 0)), str(c.get("previous_issues", 0)),
+              _fmt_delta(c.get("issues_delta")), _fmt_delta(c.get("score_delta")),
+              str(c.get("new_machines_count", 0))]],
+            [102, 102, 102, 104, 102], st))
+    else:
+        story.append(Paragraph(
+            '<i><font color="%s">No prior period available for comparison yet. '
+            'The next report will show period-over-period changes.</font></i>' % T.C_MUTED,
+            st["muted"]))
+    story.append(T.pdf_spacer(6))
+
+    # 7. Recommendations -----------------------------------------------
+    story.append(T.pdf_section("Recommendations", st))
+    story.append(T.pdf_spacer(4))
     if recs:
         for i, line in enumerate(recs, start=1):
-            story.append(Paragraph(
-                f"<b>{i}.</b> &nbsp;{html.escape(line)}", rec_style,
-            ))
+            story.append(Paragraph("<b>%d.</b>&nbsp;&nbsp;%s" % (i, _esc(line)), st["body"]))
+            story.append(T.pdf_spacer(3))
     else:
         story.append(Paragraph(
-            "No recommendations generated for this period.",
-            ParagraphStyle("ex_no_recs", parent=body_style,
-                            textColor=COLOR_MUTED),
-        ))
+            '<i><font color="%s">No recommendations generated for this period.</font></i>'
+            % T.C_MUTED, st["muted"]))
+    story.append(T.pdf_spacer(8))
 
-    # -- Footer note (above page footer) -------------------------------
-    story.append(Spacer(1, 18))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=COLOR_BORDER))
-    footer_style = ParagraphStyle(
-        "EX_FooterNote", parent=body_style, fontSize=9,
-        leading=12, textColor=COLOR_MUTED, alignment=TA_CENTER,
-    )
-    story.append(Spacer(1, 8))
-    story.append(Paragraph(
-        f"Pulse v{html.escape(str(footer.get('pulse_version')))}",
-        footer_style,
-    ))
-    story.append(Paragraph(
-        html.escape(str(footer.get("automated_note"))),
-        footer_style,
-    ))
+    # 8. Footer note ----------------------------------------------------
+    story.append(T.pdf_callout([Paragraph(
+        "Pulse v%s. %s" % (_esc(footer.get("pulse_version")),
+                           _esc(footer.get("automated_note"))), st["body"])], st))
 
-    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
+    buf = BytesIO()
+    doc, canvasmaker = T.new_doc(buf, "Pulse Executive Security Summary", REPORT_TYPE)
+    doc.build(story, canvasmaker=canvasmaker)
     return buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# Helper flowables / builders for the PDF
-# ---------------------------------------------------------------------------
-
-class _BigGradeChip:
-    """Large grade-colored circle with the letter centered. The cover
-    visual on the Executive Summary. We don't inherit from Flowable
-    directly; the renderer wraps the chip in a 1-cell Table so layout
-    constraints come from the table the chip sits inside."""
-
-    def __init__(self, letter, color, size=80):
-        from reportlab.platypus import Flowable
-        outer = self
-        outer.letter = (letter or "?").upper()[:1]
-        outer.color = color
-        outer.size = size
-
-        class _Impl(Flowable):
-            def __init__(self):
-                super().__init__()
-
-            def wrap(self, availWidth, availHeight):
-                return (outer.size, outer.size)
-
-            def draw(self):
-                c = self.canv
-                r = outer.size / 2.0
-                c.saveState()
-                c.setFillColor(outer.color)
-                c.circle(r, r, r, stroke=0, fill=1)
-                c.setFillColorRGB(1, 1, 1)
-                # Center the letter both axes — ReportLab's
-                # drawCentredString draws baseline at y, so subtract
-                # ~cap-height/2 to drop the optical center to cy.
-                font_size = int(outer.size * 0.5)
-                c.setFont("Helvetica-Bold", font_size)
-                c.drawCentredString(r, r - font_size * 0.32, outer.letter)
-                c.restoreState()
-
-        self._impl = _Impl()
-
-    def wrap(self, availWidth, availHeight):
-        return self._impl.wrap(availWidth, availHeight)
-
-    def drawOn(self, canv, x, y, _sW=0):
-        self._impl.canv = canv
-        return self._impl.drawOn(canv, x, y, _sW)
-
-
-class _RankChip:
-    """Small numbered rank circle for the Top Risks header row."""
-
-    def __init__(self, number, size=22):
-        from reportlab.platypus import Flowable
-        outer = self
-        outer.number = str(int(number))
-        outer.size = size
-
-        class _Impl(Flowable):
-            def wrap(self, availWidth, availHeight):
-                return (outer.size, outer.size)
-
-            def draw(self):
-                from reportlab.lib import colors as _c
-                c = self.canv
-                r = outer.size / 2.0
-                c.saveState()
-                c.setFillColor(_c.HexColor("#1f2937"))
-                c.circle(r, r, r, stroke=0, fill=1)
-                c.setFillColorRGB(1, 1, 1)
-                c.setFont("Helvetica-Bold", 10)
-                c.drawCentredString(r, r - 3.2, outer.number)
-                c.restoreState()
-
-        self._impl = _Impl()
-
-    def wrap(self, availWidth, availHeight):
-        return self._impl.wrap(availWidth, availHeight)
-
-    def drawOn(self, canv, x, y, _sW=0):
-        self._impl.canv = canv
-        return self._impl.drawOn(canv, x, y, _sW)
-
-
-def _stat_grid(tiles, *, cols, body_style):
-    """Render a row of stat tiles into a single-row Table where each
-    cell stacks number + label vertically. ``tiles`` is a list of
-    ``(num, label, color_override)`` tuples; ``color_override`` may be
-    ``None`` (use COLOR_TITLE)."""
-    from reportlab.lib import colors
-    from reportlab.lib.units import inch
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER
-    from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
-
-    from pulse.reports.pdf_report import (
-        COLOR_BORDER, COLOR_MUTED, COLOR_TITLE, CONTENT_WIDTH,
-    )
-
-    cell_w = CONTENT_WIDTH / cols
-    cells = []
-    for num, label, color_override in tiles:
-        num_color = color_override or COLOR_TITLE
-        num_style = ParagraphStyle(
-            f"tile_num_{label}", parent=body_style,
-            fontName="Helvetica-Bold", fontSize=22, leading=24,
-            textColor=num_color, alignment=TA_CENTER,
-        )
-        lbl_style = ParagraphStyle(
-            f"tile_lbl_{label}", parent=body_style,
-            fontName="Helvetica", fontSize=9, leading=12,
-            textColor=COLOR_MUTED, alignment=TA_CENTER,
-        )
-        cells.append([
-            Paragraph(str(num), num_style),
-            Spacer(1, 4),
-            Paragraph(label.upper(), lbl_style),
-        ])
-
-    tbl = Table([cells], colWidths=[cell_w] * cols)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
-        ("BOX",           (0, 0), (-1, -1), 0.4, COLOR_BORDER),
-        ("INNERGRID",     (0, 0), (-1, -1), 0.4, COLOR_BORDER),
-        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",    (0, 0), (-1, -1), 14),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
-    ]))
-    return tbl
 
 
 # ---------------------------------------------------------------------------

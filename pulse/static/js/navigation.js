@@ -94,10 +94,14 @@ export function navigate(page, opts) {
   _closeAnyOpenDrawer();
 
   // Resolve the settings tab before the renderer + URL sync so both agree.
-  // A bare Settings navigation (sidebar, command palette) defaults to the
-  // first tab, Profile.
+  // Honor an explicit tab when one is given; otherwise KEEP the current tab
+  // rather than snapping back to Profile. A bare navigate('settings') is fired
+  // when re-rendering the page in place (e.g. the Appearance theme toggle) and
+  // must not throw the user off whatever tab they're on. setActiveSettingsTab
+  // ignores empty/invalid names, and _activeSettingsTab defaults to 'profile',
+  // so a first-ever Settings visit with no tab still lands on Profile.
   if (page === 'settings') {
-    setActiveSettingsTab(settingsTab || 'profile');
+    if (settingsTab) setActiveSettingsTab(settingsTab);
     settingsTab = getActiveSettingsTab();
   }
 

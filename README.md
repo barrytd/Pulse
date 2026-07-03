@@ -4,11 +4,13 @@
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-1057%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1209%20passing-brightgreen)
 ![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
 ![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
 
-<!-- Drop a hero screenshot here: docs/screenshots/dashboard.png (max 800px wide). -->
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Pulse dashboard — security posture, needs-attention feed, KPIs, repeat offenders, and score history" width="900">
+</p>
 
 ---
 
@@ -118,22 +120,30 @@ Open `http://localhost:8443`. Postgres + Pulse start as separate containers; the
 
 **Storage** — All scan history, findings, audit log, agents, notifications, organizations, users, API tokens, IP block list, and finding notes live in one schema ([`pulse/database.py`](pulse/database.py)). Multi-tenant rows carry an `organization_id`; the API helper `_read_scope_kwargs` enforces tenant isolation on every read/write.
 
-**Tests** — 689 passing across the suite (688 offline; one runs `pip-audit --strict` and is marked `@pytest.mark.network`).
+**Tests** — 1209 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
 
 ---
 
 ## Screenshots
 
-<!-- Add screenshots to docs/screenshots/ and reference them here:
-     - dashboard.png        — score ring + KPI strip + last-scan findings
-     - findings.png         — filter bar + table + status pills
-     - monitor.png          — live SSE feed + Start/Stop banner
-     - fleet.png            — per-host card grid + score badges
-     - rules.png            — per-rule hit counts + MITRE coverage matrix
-     - audit.png            — audit log table + filter chips
--->
-
-*Screenshots coming with the next release.* Until then, point Pulse at the `samples/` directory and see the same surfaces with real detection data.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/findings.png" alt="Findings triage queue with severities, owners, and workflow state"><br>
+      <sub><b>Findings</b> — the triage queue: findings across every severity, with owners and workflow state at a glance.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/fleet-drawer.png" alt="Fleet health table with a per-host drilldown drawer"><br>
+      <sub><b>Fleet</b> — every host risk-scored worst-first, with a per-host drilldown drawer.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="docs/screenshots/findings-drawer.png" alt="Finding detail drawer with Pip, the built-in AI security buddy, explaining the alert"><br>
+      <sub><b>Every finding explains itself</b> — and <b>Pip</b>, the built-in AI security buddy, answers "is this bad?" in plain English right beside the alert.</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -160,7 +170,9 @@ python -m pip_audit --strict                  # CVE scan against the pinned set
 
 Set `PULSE_HOSTED_SIGNUP=1` to let each signup create its own isolated organization (tenant). In this mode an org's admin is scoped to their **own** organization — they can't see or manage another tenant's data or users. To grant yourself cross-tenant (platform-owner) access, set `PULSE_SUPERADMIN_EMAILS` to a comma-separated allowlist of emails; this is **env-only** and can't be granted through signup or the API, so no tenant can escalate into it. Single-tenant self-host (the default, no `PULSE_HOSTED_SIGNUP`) is unaffected — the lone admin sees everything, including CLI-uploaded scans.
 
-> **Before opening public signup:** CSRF protection and a trusted-proxy `X-Forwarded-For` allowlist are still on the roadmap. Until then, run hosted mode for invited/trusted users only.
+**Behind a reverse proxy / load balancer (Render, nginx, Cloudflare):** set `PULSE_TRUSTED_PROXY_HOPS` to the number of trusted proxies in front of Pulse — **`1`** for a single load balancer like Render. The rate limiter then reads the real client IP from `X-Forwarded-For` past that many trusted hops (where a client can't forge it). The default is **`0`**, which ignores `X-Forwarded-For` entirely and uses the direct socket peer — correct for local and directly-exposed installs. If you run behind a proxy and *don't* set this, every client collapses to the proxy's IP and shares one rate-limit bucket.
+
+> **Before opening public signup:** CSRF protection is still on the roadmap (the trusted-proxy `X-Forwarded-For` gate shipped — set `PULSE_TRUSTED_PROXY_HOPS` above). Until CSRF lands, run hosted mode for invited/trusted users only.
 
 ### Enabling Pip (the AI Security Buddy)
 

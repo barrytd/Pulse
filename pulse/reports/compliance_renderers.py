@@ -17,14 +17,35 @@ Editorial notes:
 from __future__ import annotations
 
 import csv
-import html
 import io
 import json
 from typing import Any, Dict, List
 
+import pulse.reports.report_theme as T
+
 
 def _esc(s: Any) -> str:
-    return html.escape(str(s) if s is not None else "")
+    return T.esc(s)
+
+
+def _framework_view(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve the framework-specific labels/keys once so the HTML and PDF
+    renderers stay symmetrical (NIST functions/subcategories vs ISO
+    clauses/controls)."""
+    framework = payload.get("framework") or "Compliance"
+    is_nist = framework == "NIST CSF"
+    return {
+        "framework":     framework,
+        "is_nist":       is_nist,
+        "groups":        payload.get("functions" if is_nist else "clauses", []),
+        "group_kind":    "Function" if is_nist else "Clause",
+        "item_kind":     "Subcategory" if is_nist else "Control",
+        "item_key":      "subcategory" if is_nist else "control_id",
+        "item_rows_key": "subcategory_rows" if is_nist else "control_rows",
+        "missing_key":   "missing_subcategories" if is_nist else "missing_controls",
+        "gap_item":      "subcategory" if is_nist else "control",
+        "gap_group":     "function" if is_nist else "clause",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -75,557 +96,323 @@ def render_csv(payload: Dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# HTML — light theme, audit-document look.
+# HTML — shared light-theme design system (audit-document look).
 # ---------------------------------------------------------------------------
 
 def _coverage_bar(pct: int) -> str:
-    """Inline SVG-free progress bar that survives print and PDF
-    save-as. Uses background color for the filled portion."""
+    """Inline progress bar styled with the shared palette so it survives
+    print and PDF save-as. Background color fills the covered portion."""
     pct = max(0, min(100, int(pct or 0)))
     return (
-        '<div class="coverage-bar-track">'
-        f'  <div class="coverage-bar-fill" style="width:{pct}%;"></div>'
+        '<div style="display:flex;align-items:center;gap:10px;margin:4px 0 12px;">'
+        '<div style="flex:1;height:6px;background:' + T.C_TINT
+        + ';border-radius:3px;overflow:hidden;">'
+        f'<div style="height:100%;width:{pct}%;background:{T.C_ACCENT};"></div>'
         '</div>'
-        f'<div class="coverage-bar-label">{pct}% covered</div>'
+        '<div style="font-size:9px;color:' + T.C_MUTED
+        + ';min-width:74px;text-align:right;">' + str(pct) + '% covered</div>'
+        '</div>'
     )
+
+
+def _summary_tiles_html(tiles: List) -> str:
+    cells = "".join(
+        '<div style="background:' + T.C_TINT + ';border:1px solid ' + T.C_BORDER
+        + ';border-radius:6px;padding:12px;text-align:center;">'
+        '<div style="font-size:22px;font-weight:800;color:' + T.C_TITLE
+        + ';line-height:1.1;">' + _esc(num) + _esc(suffix) + '</div>'
+        '<div style="font-size:8.5px;text-transform:uppercase;letter-spacing:0.4px;'
+        'color:' + T.C_MUTED + ';margin-top:4px;">' + _esc(label) + '</div></div>'
+        for num, label, suffix in tiles
+    )
+    return ('<div style="display:grid;grid-template-columns:repeat(4,1fr);'
+            'gap:10px;margin:4px 0 8px;">' + cells + '</div>')
 
 
 def render_html(payload: Dict[str, Any]) -> bytes:
-    framework = payload.get("framework") or "Compliance"
+    v = _framework_view(payload)
+    framework = v["framework"]
     h = payload.get("header", {})
     summary = payload.get("summary", {})
-    is_nist = framework == "NIST CSF"
-    groups = payload.get("functions" if is_nist else "clauses", [])
-    group_kind = "Function" if is_nist else "Clause"
-    item_kind  = "Subcategory" if is_nist else "Control"
-    item_key   = "subcategory" if is_nist else "control_id"
-    item_rows_key = "subcategory_rows" if is_nist else "control_rows"
-    gap_label = ("Subcategory" if is_nist else "Control") + " (no mapped rules)"
-    gap_field = "subcategory" if is_nist else "control"
+    groups = v["groups"]
+    group_kind = v["group_kind"]
+    item_kind = v["item_kind"]
+    item_key = v["item_key"]
+    item_rows_key = v["item_rows_key"]
+    gap_label = item_kind + " (no mapped rules)"
 
-    summary_tiles = "".join([
-        _tile(summary.get("overall_coverage_percent", 0),
-              "Overall coverage", suffix="%"),
-        _tile(summary.get("rules_enabled", 0),
-              f"Enabled rules of {summary.get('rules_total', 0)}"),
-        _tile(summary.get("findings_in_period", 0),
-              "Findings in period"),
-        _tile(len(payload.get("coverage_gaps", [])),
-              ("Subcategory gaps" if is_nist else "Control gaps")),
+    REPORT_TYPE = framework + " Coverage Report"
+    title = h.get("title") or framework + " Report"
+
+    # 1. Title block + metadata grid (scope / generated; period implied)
+    body = T.html_eyebrow_title(REPORT_TYPE.upper(), title)
+    body += T.html_metadata_grid([
+        ("Framework", _esc(framework)),
+        ("Organization", _esc(payload.get("organization"))),
+        ("Scope", _esc(h.get("scope"))),
+        ("Generated", _esc(h.get("generated_at"))),
     ])
 
-    group_sections = ""
+    # 2. Coverage Summary — tiles + automated-assessment callout
+    tiles = [
+        (summary.get("overall_coverage_percent", 0), "Overall coverage", "%"),
+        (summary.get("rules_enabled", 0),
+         "Enabled rules of " + str(summary.get("rules_total", 0)), ""),
+        (summary.get("findings_in_period", 0), "Findings in period", ""),
+        (len(payload.get("coverage_gaps", [])),
+         "Subcategory gaps" if v["is_nist"] else "Control gaps", ""),
+    ]
+    footer = payload.get("footer", {}) or {}
+    summary_inner = (_summary_tiles_html(tiles)
+                     + '<div style="margin-top:9px;">' + _esc(footer.get("automated_note") or "")
+                     + '</div>')
+    body += T.html_section("Coverage Summary", T.html_callout(summary_inner))
+
+    # 3. Group-by-group coverage — one section per function/clause
     for g in groups:
+        inner = '<div style="font-size:9px;color:' + T.C_MUTED + ';margin:2px 0 2px;">'
+        inner += ('<b style="color:' + T.C_TEXT + ';">' + str(g.get("rules_enabled", 0))
+                  + '</b> enabled rules &nbsp;&middot;&nbsp; '
+                  '<b style="color:' + T.C_TEXT + ';">' + str(g.get("findings_count", 0))
+                  + '</b> findings</div>')
+        inner += _coverage_bar(g.get("coverage_percent", 0))
+
         rows = g.get(item_rows_key, [])
-        if not rows:
-            inner_table = (
-                '<div class="muted">No mapped rules for this '
-                f'{group_kind.lower()}.</div>'
-            )
-        else:
-            tbody = ""
+        if rows:
+            trows = []
             for row in rows:
-                rules_html = "".join(
-                    f'<tr><td class="mono">{_esc(rule)}</td>'
-                    f'<td class="num">{row["rule_findings"].get(rule, 0)}</td></tr>'
+                rules_html = "<br>".join(
+                    _esc(rule) + ' <span style="color:' + T.C_MUTED + ';">('
+                    + str(row["rule_findings"].get(rule, 0)) + ')</span>'
                     for rule in row["rules"]
                 )
-                tbody += (
-                    '<tr class="control-row">'
-                    f'<td class="mono control-id"><strong>{_esc(row[item_key])}</strong></td>'
-                    f'<td>'
-                    f'<table class="rule-table"><tbody>{rules_html}</tbody></table>'
-                    f'</td>'
-                    f'<td class="num findings-count">{row["findings_count"]}</td>'
-                    '</tr>'
-                )
-            inner_table = (
-                f'<table class="data-table"><thead><tr>'
-                f'<th>{item_kind}</th><th>Mapped detection rules</th>'
-                f'<th>Findings</th></tr></thead><tbody>{tbody}</tbody></table>'
-            )
+                trows.append([
+                    '<span class="rpt-mono"><b>' + _esc(row[item_key]) + '</b></span>',
+                    rules_html,
+                    str(row["findings_count"]),
+                ])
+            inner += T.html_table(
+                [item_kind, "Mapped detection rules", "Findings"],
+                trows, num_cols=[2])
+        else:
+            inner += ('<div class="rpt-none">No mapped rules for this '
+                      + group_kind.lower() + '.</div>')
 
-        missing_block = ""
-        missing = g.get("missing_subcategories" if is_nist
-                        else "missing_controls", [])
+        missing = g.get(v["missing_key"], [])
         if missing:
-            missing_block = (
-                f'<div class="missing-controls"><strong>'
-                f'{group_kind} gaps:</strong> '
-                + ", ".join(f'<span class="mono">{_esc(m)}</span>'
-                             for m in missing)
-                + '</div>'
-            )
+            inner += ('<div style="margin-top:9px;font-size:9px;color:' + T.C_MUTED
+                      + ';border-top:1px dashed ' + T.C_BORDER + ';padding-top:7px;">'
+                      '<b>' + group_kind + ' gaps:</b> '
+                      + ", ".join('<span class="rpt-mono">' + _esc(m) + '</span>'
+                                  for m in missing) + '</div>')
 
-        group_label = g.get("label") if is_nist else g.get("label")
-        group_sections += f"""
-        <section class="group-section">
-          <div class="group-head">
-            <h3>{_esc(group_label)}</h3>
-            <div class="group-stats">
-              <span class="group-stat"><strong>{g.get("rules_enabled", 0)}</strong> enabled rules</span>
-              <span class="group-stat"><strong>{g.get("findings_count", 0)}</strong> findings</span>
-            </div>
-          </div>
-          <div class="coverage-bar">{_coverage_bar(g.get("coverage_percent", 0))}</div>
-          {inner_table}
-          {missing_block}
-        </section>"""
+        body += T.html_section(_esc(g.get("label")), inner)
 
+    # 4. Coverage Gaps
     gaps = payload.get("coverage_gaps", [])
     if gaps:
-        gap_rows = "".join(
-            f'<tr><td class="mono">{_esc(gap.get(gap_field))}</td>'
-            f'<td>{_esc(gap.get("function" if is_nist else "clause"))}</td></tr>'
-            for gap in gaps
-        )
-        gaps_section = (
-            f'<table class="data-table"><thead><tr>'
-            f'<th>{gap_label}</th><th>{group_kind}</th></tr></thead>'
-            f'<tbody>{gap_rows}</tbody></table>'
-        )
+        gap_rows = [[
+            '<span class="rpt-mono">' + _esc(gap.get(v["gap_item"])) + '</span>',
+            _esc(gap.get(v["gap_group"])),
+        ] for gap in gaps]
+        gaps_section = T.html_table([gap_label, group_kind], gap_rows)
     else:
-        gaps_section = (
-            '<div class="muted">No coverage gaps detected. Every expected '
-            f'{item_kind.lower()} has at least one mapped detection rule.</div>'
-        )
+        gaps_section = ('<div class="rpt-none">No coverage gaps detected. Every expected '
+                        + item_kind.lower() + ' has at least one mapped detection rule.</div>')
+    body += T.html_section("Coverage Gaps", gaps_section)
 
-    title = h.get("title") or framework + " Report"
-    footer = payload.get("footer", {}) or {}
-
-    doc = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{_esc(title)}</title>
-<style>
-  @page {{ size: Letter; margin: 0.6in; }}
-  body {{
-    font-family: "Times New Roman", Georgia, serif;
-    background: #fff; color: #1f2328;
-    margin: 0; padding: 36px 0;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }}
-  .container {{ max-width: 920px; margin: 0 auto; padding: 0 36px; }}
-  h1 {{
-    font-family: -apple-system, BlinkMacSystemFont, Helvetica, sans-serif;
-    font-size: 22px; margin: 0 0 4px 0; color: #111827;
-  }}
-  h2 {{
-    font-family: -apple-system, BlinkMacSystemFont, Helvetica, sans-serif;
-    font-size: 13px; margin: 32px 0 12px 0;
-    text-transform: uppercase; letter-spacing: 0.7px;
-    color: #6b7280; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px;
-  }}
-  h3 {{
-    font-family: -apple-system, BlinkMacSystemFont, Helvetica, sans-serif;
-    font-size: 15px; margin: 0 0 8px 0; color: #111827;
-  }}
-  .muted {{ color: #6b7280; font-size: 12px; }}
-  .mono {{ font-family: SFMono-Regular, Consolas, monospace; font-size: 12px; }}
-  .num  {{ font-variant-numeric: tabular-nums; text-align: right; }}
-
-  .scope-line {{ font-size: 13px; margin-bottom: 6px; }}
-  .scope-line strong {{ color: #111827; }}
-
-  .summary-tiles {{
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-    margin-bottom: 16px;
-  }}
-  .summary-tile {{
-    background: #f9fafb; border: 1px solid #e5e7eb;
-    border-radius: 6px; padding: 14px 12px; text-align: center;
-  }}
-  .summary-num   {{ font-size: 26px; font-weight: 700; color: #111827; line-height: 1.1; }}
-  .summary-label {{
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px;
-    color: #6b7280; margin-top: 4px;
-  }}
-
-  .group-section {{
-    margin-bottom: 28px;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    padding: 18px 20px;
-  }}
-  .group-head {{
-    display: flex; justify-content: space-between; align-items: baseline;
-    gap: 12px; margin-bottom: 6px;
-  }}
-  .group-stats {{ font-size: 12px; color: #6b7280; }}
-  .group-stat  {{ margin-left: 14px; }}
-  .group-stat strong {{ color: #111827; }}
-
-  .coverage-bar {{ display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }}
-  .coverage-bar-track {{
-    flex: 1;
-    height: 6px; background: #f3f4f6; border-radius: 3px;
-    overflow: hidden;
-  }}
-  .coverage-bar-fill {{
-    height: 100%; background: #3b82f6;
-  }}
-  .coverage-bar-label {{ font-size: 11px; color: #6b7280; min-width: 84px; text-align: right; }}
-
-  table.data-table {{
-    width: 100%; border-collapse: collapse; font-size: 12px;
-    margin-top: 4px;
-  }}
-  table.data-table th {{
-    text-align: left; font-weight: 600; color: #374151;
-    border-bottom: 2px solid #d1d5db; padding: 8px 10px;
-    background: #f9fafb;
-  }}
-  table.data-table td {{
-    padding: 8px 10px; border-bottom: 1px solid #e5e7eb;
-    vertical-align: top;
-  }}
-  .control-row td.control-id {{ width: 14%; }}
-  .control-row td:nth-child(3) {{ width: 12%; }}
-
-  table.rule-table {{ width: 100%; }}
-  table.rule-table td {{ padding: 2px 0 2px 0; border: none; }}
-  table.rule-table td.num {{ text-align: right; color: #6b7280; }}
-
-  .missing-controls {{
-    margin-top: 10px; font-size: 12px; color: #6b7280;
-    border-top: 1px dashed #e5e7eb; padding-top: 8px;
-  }}
-
-  footer {{
-    margin-top: 36px;
-    padding-top: 14px;
-    border-top: 1px solid #e5e7eb;
-    font-size: 11px; color: #6b7280;
-    text-align: center; line-height: 1.6;
-    font-family: -apple-system, BlinkMacSystemFont, Helvetica, sans-serif;
-  }}
-  @media print {{
-    body {{ padding: 0; }}
-    .group-section {{ break-inside: avoid; }}
-  }}
-</style>
-</head>
-<body>
-<div class="container">
-
-  <section>
-    <h1>{_esc(title)}</h1>
-    <div class="scope-line"><strong>Organization:</strong> {_esc(payload.get("organization"))}</div>
-    <div class="scope-line"><strong>Scope:</strong> {_esc(h.get("scope"))}</div>
-    <div class="scope-line muted">Generated {_esc(h.get("generated_at"))}</div>
-  </section>
-
-  <section>
-    <h2>Coverage Summary</h2>
-    <div class="summary-tiles">{summary_tiles}</div>
-  </section>
-
-  <section>
-    <h2>{group_kind}-by-{group_kind} Coverage</h2>
-    {group_sections}
-  </section>
-
-  <section>
-    <h2>Coverage Gaps</h2>
-    {gaps_section}
-  </section>
-
-  <footer>
-    Pulse v{_esc(footer.get("pulse_version"))}<br/>
-    {_esc(footer.get("automated_note"))}
-  </footer>
-
-</div>
-</body>
-</html>"""
-    return doc.encode("utf-8")
-
-
-def _tile(num: Any, label: str, suffix: str = "") -> str:
-    return (
-        '<div class="summary-tile">'
-        f'<div class="summary-num">{num}{suffix}</div>'
-        f'<div class="summary-label">{label}</div>'
-        '</div>'
-    )
+    return T.html_document(REPORT_TYPE, "Pulse — " + title, body).encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
 # PDF
 # ---------------------------------------------------------------------------
 
-def render_pdf(payload: Dict[str, Any]) -> bytes:
-    from io import BytesIO
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.platypus import (
-        Flowable, HRFlowable, KeepTogether, Paragraph,
-        SimpleDocTemplate, Spacer, Table, TableStyle,
-    )
-
-    from pulse.reports.pdf_report import (
-        COLOR_BORDER, COLOR_MUTED, COLOR_TEXT, COLOR_TITLE,
-        CONTENT_WIDTH, LEFT_MARGIN, RIGHT_MARGIN,
-        _draw_footer,
-    )
-
-    framework = payload.get("framework") or "Compliance"
-    is_nist = framework == "NIST CSF"
-    h = payload.get("header", {})
-    summary = payload.get("summary", {})
-    groups = payload.get("functions" if is_nist else "clauses", [])
-    group_kind = "Function" if is_nist else "Clause"
-    item_kind  = "Subcategory" if is_nist else "Control"
-    item_key   = "subcategory" if is_nist else "control_id"
-    item_rows_key = "subcategory_rows" if is_nist else "control_rows"
-    footer = payload.get("footer", {}) or {}
-
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=LETTER,
-        leftMargin=LEFT_MARGIN, rightMargin=RIGHT_MARGIN,
-        topMargin=0.75 * inch, bottomMargin=0.85 * inch,
-        title=f"Pulse {framework} Coverage Report",
-    )
-
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "CP_Title", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=20, leading=24, textColor=COLOR_TITLE, alignment=TA_LEFT,
-        spaceAfter=2,
-    )
-    scope_style = ParagraphStyle(
-        "CP_Scope", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10, leading=13, textColor=COLOR_TEXT, alignment=TA_LEFT,
-    )
-    muted_style = ParagraphStyle(
-        "CP_Muted", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=9, leading=12, textColor=COLOR_MUTED, alignment=TA_LEFT,
-    )
-    section_style = ParagraphStyle(
-        "CP_Section", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=11, leading=14, textColor=COLOR_MUTED, alignment=TA_LEFT,
-        spaceAfter=8, spaceBefore=18, letterSpacing=0.5,
-    )
-    body_style = ParagraphStyle(
-        "CP_Body", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10, leading=14, textColor=COLOR_TEXT, alignment=TA_LEFT,
-    )
-    group_head_style = ParagraphStyle(
-        "CP_GroupHead", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=13, leading=16, textColor=COLOR_TITLE, alignment=TA_LEFT,
-        spaceAfter=4,
-    )
-    rule_style = ParagraphStyle(
-        "CP_Rule", parent=body_style, fontName="Helvetica", fontSize=9.5,
-        leading=12, textColor=COLOR_TEXT,
-    )
-    mono_style = ParagraphStyle(
-        "CP_Mono", parent=body_style, fontName="Courier", fontSize=10,
-        leading=12, textColor=COLOR_TEXT,
-    )
-
-    story = []
-
-    # -- Header ---------------------------------------------------------
-    story.append(Paragraph(h.get("title") or f"{framework} Coverage Report",
-                            title_style))
-    story.append(Paragraph(
-        f"<b>Organization:</b> {html.escape(str(payload.get('organization')))}",
-        scope_style,
-    ))
-    story.append(Paragraph(
-        f"<b>Scope:</b> {html.escape(str(h.get('scope')))}",
-        scope_style,
-    ))
-    story.append(Paragraph(
-        f"Generated {html.escape(str(h.get('generated_at')))}",
-        muted_style,
-    ))
-    story.append(Spacer(1, 12))
-    story.append(HRFlowable(width="100%", thickness=0.6, color=COLOR_BORDER))
-
-    # -- Summary tiles --------------------------------------------------
-    story.append(Paragraph("COVERAGE SUMMARY", section_style))
-    tile_data = [
-        (f"{summary.get('overall_coverage_percent', 0)}%", "Overall coverage"),
-        (str(summary.get("rules_enabled", 0)),
-         f"Enabled rules / {summary.get('rules_total', 0)}"),
-        (str(summary.get("findings_in_period", 0)), "Findings in period"),
-        (str(len(payload.get("coverage_gaps", []))),
-         ("Subcategory gaps" if is_nist else "Control gaps")),
-    ]
-    cell_w = CONTENT_WIDTH / 4
-    tile_cells = []
-    for num, label in tile_data:
-        num_style = ParagraphStyle(
-            f"tile_num_{label}", parent=body_style,
-            fontName="Helvetica-Bold", fontSize=20, leading=22,
-            textColor=COLOR_TITLE, alignment=TA_CENTER,
-        )
-        lbl_style = ParagraphStyle(
-            f"tile_lbl_{label}", parent=body_style,
-            fontName="Helvetica", fontSize=8.5, leading=11,
-            textColor=COLOR_MUTED, alignment=TA_CENTER,
-        )
-        tile_cells.append([
-            Paragraph(num, num_style),
-            Spacer(1, 4),
-            Paragraph(label.upper(), lbl_style),
+def _pdf_summary_tiles(tiles: List, st) -> Any:
+    """Four equal summary tiles in a bordered, tinted row (shared palette)."""
+    rl = T._rl()
+    C = rl["colors"].HexColor
+    Paragraph = rl["Paragraph"]
+    PS = rl["ParagraphStyle"]
+    num_style = PS("cp_tile_num", fontName="Helvetica-Bold", fontSize=20,
+                   leading=22, textColor=C(T.C_TITLE), alignment=rl["TA_CENTER"])
+    lbl_style = PS("cp_tile_lbl", fontName="Helvetica", fontSize=8.5,
+                   leading=11, textColor=C(T.C_MUTED), alignment=rl["TA_CENTER"])
+    cell_w = T.CONTENT_W / 4
+    cells = []
+    for num, label, suffix in tiles:
+        cells.append([
+            Paragraph(_esc(num) + _esc(suffix), num_style),
+            rl["Spacer"](1, 4),
+            Paragraph(_esc(label).upper(), lbl_style),
         ])
-    tile_table = Table([tile_cells], colWidths=[cell_w] * 4)
-    tile_table.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#f9fafb")),
-        ("BOX",           (0, 0), (-1, -1), 0.4, COLOR_BORDER),
-        ("INNERGRID",     (0, 0), (-1, -1), 0.4, COLOR_BORDER),
+    t = rl["Table"]([cells], colWidths=[cell_w] * 4)
+    t.setStyle(rl["TableStyle"]([
+        ("BACKGROUND",    (0, 0), (-1, -1), C(T.C_TINT)),
+        ("BOX",           (0, 0), (-1, -1), 0.6, C(T.C_BORDER)),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.6, C(T.C_BORDER)),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING",    (0, 0), (-1, -1), 14),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
     ]))
-    story.append(tile_table)
+    return t
 
-    # -- Per-group sections --------------------------------------------
-    story.append(Paragraph(
-        f"{group_kind.upper()}-BY-{group_kind.upper()} COVERAGE",
-        section_style,
-    ))
 
+def _pdf_coverage_bar(pct: int, st) -> Any:
+    """Inline coverage bar (filled track + right-aligned label) as a flowable."""
+    rl = T._rl()
+    C = rl["colors"].HexColor
+    pct = max(0, min(100, int(pct or 0)))
+    track_w = T.CONTENT_W - 90
+    fill_w = max(0, round(track_w * pct / 100.0))
+    fill = rl["Table"]([[""]], colWidths=[fill_w], rowHeights=[6])
+    fill.setStyle(rl["TableStyle"]([
+        ("BACKGROUND", (0, 0), (-1, -1), C(T.C_ACCENT)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    fill.hAlign = "LEFT"
+    track = rl["Table"]([[fill]], colWidths=[track_w], rowHeights=[6])
+    track.setStyle(rl["TableStyle"]([
+        ("BACKGROUND", (0, 0), (-1, -1), C(T.C_TINT)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    lbl = rl["Paragraph"](
+        '<font color="%s">%d%% covered</font>' % (T.C_MUTED, pct),
+        rl["ParagraphStyle"]("cp_bar_lbl", fontName="Helvetica", fontSize=8,
+                             leading=10, alignment=rl["TA_RIGHT"], textColor=C(T.C_MUTED)))
+    row = rl["Table"]([[track, lbl]], colWidths=[track_w, 86])
+    row.setStyle(rl["TableStyle"]([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (0, 0), 6),
+        ("RIGHTPADDING", (1, 0), (1, 0), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return row
+
+
+def render_pdf(payload: Dict[str, Any]) -> bytes:
+    from io import BytesIO
+    rl = T._rl()
+    C = rl["colors"].HexColor
+    Paragraph = rl["Paragraph"]
+    KeepTogether = rl["KeepTogether"]
+    st = T.pdf_styles()
+
+    v = _framework_view(payload)
+    framework = v["framework"]
+    h = payload.get("header", {})
+    summary = payload.get("summary", {})
+    groups = v["groups"]
+    group_kind = v["group_kind"]
+    item_kind = v["item_kind"]
+    item_key = v["item_key"]
+    item_rows_key = v["item_rows_key"]
+    footer = payload.get("footer", {}) or {}
+
+    REPORT_TYPE = framework + " Coverage Report"
+    title = h.get("title") or REPORT_TYPE
+
+    story: list = []
+
+    # 1. Title block + metadata grid
+    story.append(Paragraph(REPORT_TYPE.upper(), st["eyebrow"]))
+    story.append(Paragraph(_esc(title), st["title"]))
+    story.append(T.pdf_spacer(10))
+    story.append(T.pdf_metadata_grid([
+        ("Framework", _esc(framework)),
+        ("Organization", _esc(payload.get("organization"))),
+        ("Scope", _esc(h.get("scope"))),
+        ("Generated", _esc(h.get("generated_at"))),
+    ], st))
+    story.append(T.pdf_spacer(12))
+
+    # 2. Coverage Summary — tiles + automated-assessment callout
+    story.append(T.pdf_section("Coverage Summary", st))
+    story.append(T.pdf_spacer(4))
+    story.append(_pdf_summary_tiles([
+        ("%d%%" % summary.get("overall_coverage_percent", 0), "Overall coverage", ""),
+        (str(summary.get("rules_enabled", 0)),
+         "Enabled rules / " + str(summary.get("rules_total", 0)), ""),
+        (str(summary.get("findings_in_period", 0)), "Findings in period", ""),
+        (str(len(payload.get("coverage_gaps", []))),
+         "Subcategory gaps" if v["is_nist"] else "Control gaps", ""),
+    ], st))
+    story.append(T.pdf_spacer(8))
+    story.append(T.pdf_callout(
+        [Paragraph(_esc(footer.get("automated_note") or ""), st["body"])], st))
+    story.append(T.pdf_spacer(6))
+
+    # 3. Group-by-group coverage — one section per function/clause
     for g in groups:
-        group_blocks = []
-        group_blocks.append(Paragraph(
-            html.escape(g.get("label") or ""), group_head_style,
-        ))
-        # Stats line: enabled rules + findings + coverage %
-        stats_text = (
-            f"<font color='{COLOR_MUTED.hexval()}' size='9'>"
-            f"<b>{g.get('rules_enabled', 0)}</b> enabled rules &nbsp;&middot;&nbsp; "
-            f"<b>{g.get('findings_count', 0)}</b> findings &nbsp;&middot;&nbsp; "
-            f"coverage <b>{g.get('coverage_percent', 0)}%</b>"
-            f"</font>"
-        )
-        group_blocks.append(Paragraph(stats_text, body_style))
-        group_blocks.append(Spacer(1, 6))
+        blocks = [T.pdf_section(g.get("label") or "", st), T.pdf_spacer(3)]
+        stats = ('<font color="%s"><b>%s</b> enabled rules &nbsp;&middot;&nbsp; '
+                 '<b>%s</b> findings</font>' % (
+                     T.C_MUTED, g.get("rules_enabled", 0), g.get("findings_count", 0)))
+        blocks.append(Paragraph(stats, st["muted"]))
+        blocks.append(T.pdf_spacer(3))
+        blocks.append(_pdf_coverage_bar(g.get("coverage_percent", 0), st))
+        blocks.append(T.pdf_spacer(5))
 
         rows = g.get(item_rows_key, [])
         if rows:
-            tbl_rows = [[item_kind, "Mapped detection rules", "Findings"]]
+            ctrl_w = 1.0 * rl["inch"]
+            count_w = 0.6 * rl["inch"]
+            rules_w = T.CONTENT_W - ctrl_w - count_w
+            trows = []
             for row in rows:
                 rules_para = Paragraph(
                     "<br/>".join(
-                        f"{html.escape(rule)} "
-                        f"<font color='{COLOR_MUTED.hexval()}'>"
-                        f"({row['rule_findings'].get(rule, 0)})</font>"
+                        "%s <font color='%s'>(%d)</font>" % (
+                            _esc(rule), T.C_MUTED, row["rule_findings"].get(rule, 0))
                         for rule in row["rules"]
-                    ),
-                    rule_style,
-                )
-                tbl_rows.append([
-                    Paragraph(f"<b>{html.escape(row[item_key])}</b>",
-                               mono_style),
-                    rules_para,
-                    str(row["findings_count"]),
-                ])
-            ctrl_w  = 1.0 * inch
-            count_w = 0.6 * inch
-            rules_w = CONTENT_WIDTH - ctrl_w - count_w
-            tbl = Table(tbl_rows, colWidths=[ctrl_w, rules_w, count_w],
-                         repeatRows=1)
-            tbl.setStyle(TableStyle([
-                ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
-                ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE",      (0, 0), (-1, -1), 9),
-                ("TEXTCOLOR",     (0, 0), (-1, 0), COLOR_MUTED),
-                ("LINEBELOW",     (0, 0), (-1, -1), 0.4, COLOR_BORDER),
-                ("VALIGN",        (0, 0), (-1, -1), "TOP"),
-                ("ALIGN",         (2, 0), (2, -1), "RIGHT"),
-                ("TOPPADDING",    (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LEFTPADDING",   (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
-            ]))
-            group_blocks.append(tbl)
+                    ), st["td"])
+                ctrl_para = Paragraph(
+                    '<font face="Courier"><b>%s</b></font>' % _esc(row[item_key]), st["td"])
+                trows.append([ctrl_para, rules_para, str(row["findings_count"])])
+            blocks.append(T.pdf_table(
+                [item_kind, "Mapped detection rules", "Findings"],
+                trows, [ctrl_w, rules_w, count_w], st))
         else:
-            group_blocks.append(Paragraph(
-                f"No mapped rules for this {group_kind.lower()}.",
-                muted_style,
-            ))
+            blocks.append(Paragraph(
+                '<i><font color="%s">No mapped rules for this %s.</font></i>'
+                % (T.C_MUTED, group_kind.lower()), st["muted"]))
 
-        missing = g.get("missing_subcategories" if is_nist
-                         else "missing_controls", [])
+        missing = g.get(v["missing_key"], [])
         if missing:
-            missing_text = (
-                f"<font color='{COLOR_MUTED.hexval()}' size='9'>"
-                f"<b>{group_kind} gaps:</b> "
-                + ", ".join(html.escape(m) for m in missing)
-                + "</font>"
-            )
-            group_blocks.append(Spacer(1, 4))
-            group_blocks.append(Paragraph(missing_text, body_style))
+            blocks.append(T.pdf_spacer(4))
+            blocks.append(Paragraph(
+                '<font color="%s"><b>%s gaps:</b> %s</font>' % (
+                    T.C_MUTED, group_kind, ", ".join(_esc(m) for m in missing)),
+                st["muted"]))
 
-        story.append(KeepTogether(group_blocks))
-        story.append(Spacer(1, 12))
+        story.append(KeepTogether(blocks))
+        story.append(T.pdf_spacer(10))
 
-    # -- Coverage gaps -------------------------------------------------
-    story.append(Paragraph("COVERAGE GAPS", section_style))
+    # 4. Coverage Gaps
+    story.append(T.pdf_section("Coverage Gaps", st))
+    story.append(T.pdf_spacer(4))
     gaps = payload.get("coverage_gaps", [])
     if gaps:
-        gap_rows = [[item_kind, group_kind]]
-        for gap in gaps:
-            gap_rows.append([
-                Paragraph(
-                    "<b>" + html.escape(gap.get(
-                        "subcategory" if is_nist else "control") or "") + "</b>",
-                    mono_style,
-                ),
-                Paragraph(html.escape(
-                    gap.get("function" if is_nist else "clause") or ""),
-                    body_style,
-                ),
-            ])
-        gap_table = Table(gap_rows,
-                            colWidths=[1.5 * inch, CONTENT_WIDTH - 1.5 * inch],
-                            repeatRows=1)
-        gap_table.setStyle(TableStyle([
-            ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
-            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 9),
-            ("TEXTCOLOR",     (0, 0), (-1, 0), COLOR_MUTED),
-            ("LINEBELOW",     (0, 0), (-1, -1), 0.4, COLOR_BORDER),
-            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING",    (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        story.append(gap_table)
+        gap_rows = [[
+            Paragraph('<font face="Courier"><b>%s</b></font>'
+                      % _esc(gap.get(v["gap_item"]) or ""), st["td"]),
+            Paragraph(_esc(gap.get(v["gap_group"]) or ""), st["td"]),
+        ] for gap in gaps]
+        story.append(T.pdf_table(
+            [item_kind + " (no mapped rules)", group_kind], gap_rows,
+            [1.5 * rl["inch"], T.CONTENT_W - 1.5 * rl["inch"]], st))
     else:
         story.append(Paragraph(
-            f"No coverage gaps detected. Every expected {item_kind.lower()} "
-            f"has at least one mapped detection rule.",
-            muted_style,
-        ))
+            '<i><font color="%s">No coverage gaps detected. Every expected %s '
+            'has at least one mapped detection rule.</font></i>'
+            % (T.C_MUTED, item_kind.lower()), st["muted"]))
 
-    # -- Footer note ---------------------------------------------------
-    story.append(Spacer(1, 18))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=COLOR_BORDER))
-    footer_style = ParagraphStyle(
-        "CP_FooterNote", parent=body_style, fontSize=9, leading=12,
-        textColor=COLOR_MUTED, alignment=TA_CENTER,
-    )
-    story.append(Spacer(1, 8))
-    story.append(Paragraph(
-        f"Pulse v{html.escape(str(footer.get('pulse_version')))}",
-        footer_style,
-    ))
-    story.append(Paragraph(
-        html.escape(str(footer.get("automated_note") or "")),
-        footer_style,
-    ))
-
-    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
+    buf = BytesIO()
+    doc, canvasmaker = T.new_doc(buf, "Pulse " + REPORT_TYPE, REPORT_TYPE)
+    doc.build(story, canvasmaker=canvasmaker)
     return buf.getvalue()
 
 

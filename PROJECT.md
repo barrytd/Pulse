@@ -119,5 +119,5 @@ See `ROADMAP.md` for the full current list. See `CHANGELOG.md` for the day-to-da
 
 - Open source on GitHub: github.com/barrytd/Pulse
 - License: MIT
-- Over 1,160 automated tests, all passing.
+- Over 1,200 automated tests, all passing.
 - Active development.

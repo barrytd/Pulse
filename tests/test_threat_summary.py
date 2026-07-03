@@ -231,19 +231,24 @@ def test_render_csv_has_header_row_and_findings(findings, scans):
     assert len(lines) == 1 + len(findings)
 
 
-def test_render_html_is_self_contained_dark_theme(findings, scans):
+def test_render_html_is_self_contained_shared_theme(findings, scans):
     data = build_summary(findings, scans, scope_label="x")
     out = render(data, "html").decode("utf-8")
-    assert out.startswith("<!doctype html>")
+    assert out.lower().startswith("<!doctype html>")
     assert "Threat Detection Summary" in out
-    # Dashboard dark-theme palette markers.
-    assert "#0d1117" in out
-    assert "#161b22" in out
-    # Section markers.
+    # Shared report_theme (light/print) markers — the design-system
+    # class names + the brand running header furniture.
+    assert "rpt-page" in out
+    assert "rpt-section-label" in out
+    assert "rpt-banner" in out         # classification banner
+    assert "CLASSIFICATION" in out
+    # Section markers — every section + its order preserved.
     assert "Attack Timeline" in out
     assert "Top Triggered Rules" in out
     assert "Findings by MITRE Tactic" in out
     assert "Repeat Offenders" in out
+    assert out.index("Findings by MITRE Tactic") < out.index("Attack Timeline") \
+        < out.index("Top Triggered Rules") < out.index("Repeat Offenders")
 
 
 def test_render_pdf_returns_pdf_magic(findings, scans):
@@ -272,34 +277,35 @@ def test_timestamp_formatter_normalizes_iso_with_sub_seconds():
     assert _format_ts("")   == "—"
 
 
-def test_severity_pill_html_has_centering_styles(findings, scans):
-    """If this regresses, MEDIUM (and friends) drift up off the badge's
-    vertical center and the colored background reads as oversized."""
+def test_severity_pill_html_uses_shared_theme_pill(findings, scans):
+    """Severity pills come from the shared report_theme now — they carry
+    the rpt-pill class and the theme's severity hues, so a CRITICAL row
+    renders the theme's critical foreground color."""
     data = build_summary(findings, scans, scope_label="x")
     out = render(data, "html").decode("utf-8")
-    # Both directives are required for the fix; either one alone
-    # leaves the pill misaligned in some browsers.
-    assert "line-height:1" in out
-    assert "vertical-align:middle" in out
+    # Theme pill class + a known severity label rendered through it.
+    assert "rpt-pill" in out
+    assert "CRITICAL" in out
+    # The theme's critical hue (SEV_FG["CRITICAL"]) must appear.
+    from pulse.reports.report_theme import SEV_FG
+    assert SEV_FG["CRITICAL"] in out
 
 
-def test_pdf_score_ring_uses_canvas_flowable(findings, scans):
-    """The original implementation used a Table cell with
-    ROUNDEDCORNERS=40 which reportlab renders as a 'fish' shape
-    instead of a circle. The fix swaps in pdf_report.ScoreRing —
-    a canvas-drawn Flowable. Importing the renderers module and
-    inspecting its globals is the cheapest way to guard against
-    the rollback: the broken Table approach didn't reference
-    ScoreRing at all."""
+def test_pdf_builds_on_shared_report_theme(findings, scans):
+    """The PDF is now built on the shared report_theme design system
+    (same components as the Incident report) rather than a bespoke
+    layout. Guard that it composes the theme's document builder + pill
+    components and still emits a valid, non-trivial PDF."""
     import pulse.reports.threat_summary_renderers as r
     # Render so render_pdf's lazy imports actually run.
     data = build_summary(findings, scans, scope_label="x")
     out = r.render_pdf(data)
     assert out[:5] == b"%PDF-"
-    # render_pdf imports ScoreRing inside the function — confirm the
-    # symbol resolves at module load time too.
-    from pulse.reports.pdf_report import ScoreRing
-    assert ScoreRing is not None
+    assert len(out) > 1000
+    # The renderers module composes the shared theme module.
+    assert r.T is not None
+    from pulse.reports.report_theme import new_doc, pdf_pill_para, pdf_banner
+    assert new_doc is not None and pdf_pill_para is not None and pdf_banner is not None
 
 
 # ---------------------------------------------------------------------------

@@ -716,14 +716,19 @@ var _incidentPreselectedIds = null;
 // Entry points from the Findings + Fleet pages.
 // -----------------------------------------------------------------
 
-/** Open the modal pre-scoped to a single host (Fleet page row action). */
+/** Open the modal pre-scoped to a single host (Fleet page row action).
+ *  RETURNS the openGenerateReportModal promise so a caller's .catch (e.g.
+ *  fleet.js's error-surfacing) actually sees async failures — without the
+ *  return, any rejection inside the async modal open is an unhandled
+ *  rejection and the button appears to do nothing. */
 export function generateIncidentReportForHost(host) {
   _incidentPreselectedIds = null;
-  openGenerateReportModal('incident_investigation', { host: host });
+  return openGenerateReportModal('incident_investigation', { host: host });
 }
 
 /** Open the modal pre-scoped to a set of finding IDs (Findings page
- *  bulk action). Accepts an array of ids OR a delimited string. */
+ *  bulk action). Accepts an array of ids OR a delimited string. Returns the
+ *  modal promise so callers can surface failures (see note above). */
 export function generateIncidentReportForFindings(ids) {
   if (typeof ids === 'string') {
     ids = ids.split(/[\s,]+/).map(function (s) { return Number(s); })
@@ -732,7 +737,7 @@ export function generateIncidentReportForFindings(ids) {
     ids = [];
   }
   _incidentPreselectedIds = ids;
-  openGenerateReportModal('incident_investigation', { finding_ids: ids });
+  return openGenerateReportModal('incident_investigation', { finding_ids: ids });
 }
 
 export async function openGenerateReportModal(templateSlug, opts) {

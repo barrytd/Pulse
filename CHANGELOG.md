@@ -5,6 +5,26 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-24 — Two UI bug fixes (Settings theme toggle, Fleet incident report)
+
+- **Settings → Appearance: the theme toggle no longer kicks you back to the Profile tab.** Changing light/dark re-renders the page with a bare `navigate('settings')`, and `navigation.js` was forcing the tab to Profile whenever no tab was passed. It now keeps the current tab (`setActiveSettingsTab` only runs when a tab is explicitly given; the module default of `profile` still covers a first-ever visit).
+- **Fleet → "Generate Incident Report for this host" no longer fails silently.** `generateIncidentReportForHost` / `generateIncidentReportForFindings` called the `async` `openGenerateReportModal` without returning its promise, so any async failure became an unhandled rejection that fleet.js's `.catch` never saw — the button appeared to do nothing. Both entry points now `return` the promise, so failures surface as a toast + console error (closing the diagnosability gap the 2026-06-16 error-surfacing couldn't reach).
+- The frontend has no JS test runner, so each fix is pinned by a source-guard regression test in [`tests/test_frontend_regressions.py`](tests/test_frontend_regressions.py) that fails if the buggy pattern returns.
+
+## 2026-06-24 — All reports unified on the shared design system
+
+- **The remaining 8 report templates now render through `report_theme`.** Executive Summary, Threat Detection Summary, NIST CSF, ISO 27001, Fleet Health, Board-Ready Posture, MITRE Coverage, and Compliance Gap each had their `render_pdf` + `render_html` rewritten to compose the shared components introduced with the Incident report on 2026-06-16: a brand header + "Page X of Y" footer on every page, section headers with accent bars, severity pills, classification banners (color = highest severity in scope), zebra tables, callout boxes, metadata grids, and a graceful "None recorded" for empty fields. Every report now looks identical and prints consistently; the old per-template dark-theme CSS and hand-rolled reportlab code is gone.
+- **JSON and CSV outputs are byte-for-byte unchanged** for all 8 — the migration is PDF + HTML only, and each report keeps its own content and section order. The data builders and payload contracts were not touched.
+- A few report tests that asserted the old per-template markup were updated to assert the shared-component output instead (section labels, severity pills, table headers, key content) — kept genuine, not gutted. Full suite green (1209 passing; the 2 unrelated pre-existing failures are the date-sensitive fleet-health ranking test and the pypdf dependency-CVE check).
+- This completes the **Up Next** roadmap item; the report system is now fully unified.
+
+## 2026-06-24 — Rate-limiter `X-Forwarded-For` spoofing fix
+
+- **The rate limiter no longer trusts `X-Forwarded-For` blindly.** `X-Forwarded-For` is a client-supplied header, but `rate_limit._client_ip` was taking its first entry as the client IP. That let anyone rotate a fake value every request to mint a fresh per-IP bucket (defeating the login / signup / upload caps), or set it to a victim's IP to burn that victim's budget (frame them into a lockout).
+- **Fix — trusted-proxy hop count.** New `PULSE_TRUSTED_PROXY_HOPS` env var (default **0**). With 0, XFF is ignored entirely and the real socket peer (`request.client.host`) is used — the safe default for local / self-hosted / directly-exposed installs. Set it to the number of trusted reverse proxies in front of Pulse (**1** for a single load balancer like Render); the client IP is then read from the right end of the forwarded chain, past the trusted hops, where a client can't forge it. A spoofed value can only be prepended on the left, so it's skipped.
+- **⚠️ Deploy note:** hosted/proxied deploys (Render) must now set `PULSE_TRUSTED_PROXY_HOPS=1`. Without it, every client collapses to the load balancer's IP and shares one bucket (over-aggressive limiting). Local and self-hosted installs need no change.
+- **Tests:** new [`tests/test_rate_limit.py`](tests/test_rate_limit.py) — unit coverage for the 0-hop (ignore XFF), 1-hop (read real client), and prepended-spoof cases, plus an integration test proving a rotating fake `X-Forwarded-For` can no longer evade a real per-IP limit.
+
 ## 2026-06-17 — v2.0.0
 
 First major-version release. This cycle turned Pulse from a local scanner into a multi-user, AI-assisted product, so the version jumps to **2.0.0**. (It also reconciles a version drift: `__version__` had lagged at `1.7.0` behind the `v1.8.0` tag — both are now superseded by `2.0.0`.)

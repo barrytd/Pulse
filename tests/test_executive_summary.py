@@ -316,14 +316,19 @@ def test_render_html_is_light_theme_self_contained(findings, scans):
     data = build_executive(findings, scans, period_days=30)
     out = render(data, "html").decode("utf-8")
     assert out.startswith("<!doctype html>")
-    # Light theme: white background, dark text.
+    # Light theme (shared report_theme palette): white background, dark text.
     assert "#ffffff" in out
-    assert "#111827" in out
-    # Section labels exactly per spec.
+    assert "#1a1a1a" in out
+    # Section labels exactly per spec (rendered by T.html_section).
     for label in ("Security Posture at a Glance", "What This Means",
                   "Top Risks", "Activity Overview", "What Changed",
                   "Recommendations"):
         assert label in out
+    # Shared-component output is present: a severity pill and a section bar.
+    assert "rpt-pill" in out
+    assert "rpt-section-label" in out
+    # Grade + interpretation surface in the posture callout.
+    assert "out of 100" in out
     # Footer mentions Pulse version + automated note.
     assert "Pulse v" in out
     assert "automated assessment" in out
