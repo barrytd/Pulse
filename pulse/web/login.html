@@ -170,7 +170,7 @@
       <span class="brand-name">Pulse</span>
     </div>
 
-    <div class="card">
+    <div class="card" id="auth-card">
       <h1 id="form-title">Sign in</h1>
       <p class="subtitle" id="form-subtitle">Welcome back. Enter your credentials to continue.</p>
 
@@ -195,6 +195,33 @@
       <div class="mode-switch" id="mode-switch" style="display:none;">
         <span id="mode-switch-text">Don&rsquo;t have an account?</span>
         <a id="mode-switch-link">Create one</a>
+      </div>
+    </div>
+
+    <!-- Email verification (OTP) screen — shown when signup returns
+         otp_required, or when an unverified user tries to log in. -->
+    <div class="card" id="otp-card" style="display:none;">
+      <h1>Verify your email</h1>
+      <p class="subtitle">Enter the 6-digit code we sent to
+        <strong id="otp-email"></strong>. It expires in 10 minutes.</p>
+
+      <form id="otp-form" autocomplete="off">
+        <div class="field">
+          <label for="otp-code">Verification code</label>
+          <input type="text" id="otp-code" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="6" pattern="[0-9]*" placeholder="123456"
+                 style="letter-spacing:8px; font-size:20px; text-align:center;"/>
+        </div>
+        <button type="submit" id="otp-submit">Verify &amp; continue</button>
+        <div id="otp-msg" class="msg"></div>
+      </form>
+
+      <div class="mode-switch">
+        <span id="otp-resend-text">Didn&rsquo;t get it?</span>
+        <a id="otp-resend-link">Resend code</a>
+      </div>
+      <div class="mode-switch">
+        <a id="otp-back-link">&larr; Back to sign in</a>
       </div>
     </div>
 
@@ -287,6 +314,17 @@
       m.textContent = text;
     }
 
+    // POST helper that always sends the CSRF header. This page is standalone
+    // (it doesn't load the app's csrf.js fetch wrapper), so it must attach the
+    // X-Pulse-Request header itself or the middleware 403s every auth POST.
+    function postJSON(url, body) {
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Pulse-Request': '1' },
+        body: JSON.stringify(body || {}),
+      });
+    }
+
     document.getElementById('auth-form').addEventListener('submit', async function (e) {
       e.preventDefault();
       var email = document.getElementById('email').value.trim();
@@ -300,24 +338,138 @@
       var url = (mode === 'signup') ? '/api/auth/signup' : '/api/auth/login';
 
       try {
-        var r = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email, password: password }),
-        });
+        var r = await postJSON(url, { email: email, password: password });
         var data = {};
         try { data = await r.json(); } catch (_) {}
-        if (!r.ok) {
-          showError(data.detail || 'Something went wrong.');
+        if (r.ok) {
+          // Signup with SMTP configured: the account is unverified and holds
+          // no session yet — go collect the emailed code.
+          if (mode === 'signup' && data.otp_required) {
+            showOtpScreen(data.email || email, false);
+            btn.disabled = false;
+            return;
+          }
+          // Otherwise a session cookie was set — into the dashboard.
+          window.location.href = '/';
+          return;
+        }
+        // Login attempt by an unverified account: route to the same
+        // verification screen instead of a dead-end error, and send a fresh
+        // code (the signup one may have expired).
+        var d = data.detail;
+        if (mode === 'login' && r.status === 403 && d && d.code === 'unverified') {
+          showOtpScreen((d && d.email) || email, true);
           btn.disabled = false;
           return;
         }
-        // Success — cookie is set, bounce to the dashboard.
-        window.location.href = '/';
+        showError(typeof d === 'string' ? d : ((d && d.message) || 'Something went wrong.'));
+        btn.disabled = false;
       } catch (err) {
         showError('Network error: ' + err.message);
         btn.disabled = false;
       }
+    });
+
+    // ----- OTP verification screen -----
+    var otpEmail = '';
+    var resendTimer = null;
+
+    function showOtpScreen(email, sendFresh) {
+      otpEmail = email || '';
+      document.getElementById('auth-card').style.display = 'none';
+      document.getElementById('otp-card').style.display = 'block';
+      document.getElementById('otp-email').textContent = otpEmail;
+      var m = document.getElementById('otp-msg');
+      m.className = 'msg'; m.textContent = '';
+      var input = document.getElementById('otp-code');
+      input.value = '';
+      input.focus();
+      if (sendFresh) {
+        // Arrived from login (code may have expired) — email a fresh one.
+        postJSON('/api/auth/resend-verification', { email: otpEmail }).catch(function () {});
+        m.className = 'msg ok';
+        m.textContent = 'We just emailed you a fresh code.';
+      }
+      startResendCooldown();   // a code is now in flight either way
+    }
+
+    function otpError(text) {
+      var m = document.getElementById('otp-msg');
+      m.className = 'msg error';
+      m.textContent = text;
+    }
+
+    // 60-second resend cooldown with a live countdown, matching the server's
+    // per-email throttle so the button and the backend never disagree.
+    function startResendCooldown() {
+      var link = document.getElementById('otp-resend-link');
+      var text = document.getElementById('otp-resend-text');
+      var remaining = 60;
+      if (resendTimer) clearInterval(resendTimer);
+      function tick() {
+        if (remaining <= 0) {
+          clearInterval(resendTimer); resendTimer = null;
+          link.style.pointerEvents = ''; link.style.opacity = '';
+          link.textContent = 'Resend code';
+          text.textContent = 'Didn’t get it?';
+          return;
+        }
+        link.style.pointerEvents = 'none'; link.style.opacity = '0.5';
+        link.textContent = 'Resend in ' + remaining + 's';
+        text.textContent = 'Didn’t get it?';
+        remaining--;
+      }
+      tick();
+      resendTimer = setInterval(tick, 1000);
+    }
+
+    document.getElementById('otp-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var code = document.getElementById('otp-code').value.trim();
+      var btn = document.getElementById('otp-submit');
+      var m = document.getElementById('otp-msg');
+      m.className = 'msg'; m.textContent = '';
+      if (!/^\d{6}$/.test(code)) { otpError('Enter the 6-digit code from your email.'); return; }
+      btn.disabled = true;
+      try {
+        var r = await postJSON('/api/auth/verify-otp', { email: otpEmail, code: code });
+        var data = {};
+        try { data = await r.json(); } catch (_) {}
+        if (r.ok) { window.location.href = '/'; return; }   // verified + logged in
+        var d = data.detail;
+        if (r.status === 423) {
+          otpError(typeof d === 'string' ? d : ((d && d.message) || 'Too many attempts. Wait 15 minutes and try again.'));
+        } else if (d && d.code === 'invalid' && typeof d.attempts_remaining === 'number') {
+          otpError('Incorrect code. ' + d.attempts_remaining + ' attempt' + (d.attempts_remaining === 1 ? '' : 's') + ' remaining.');
+        } else if (d && d.code === 'expired') {
+          otpError('That code has expired. Tap Resend to get a new one.');
+        } else if (d && d.code === 'too_many_attempts') {
+          otpError('Too many incorrect attempts. Tap Resend to get a new code.');
+        } else {
+          otpError((d && d.message) || 'That code didn’t work. Try again or resend.');
+        }
+        btn.disabled = false;
+      } catch (err) {
+        otpError('Network error: ' + err.message);
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('otp-resend-link').addEventListener('click', async function (e) {
+      e.preventDefault();
+      if (resendTimer) return;   // still cooling down
+      try { await postJSON('/api/auth/resend-verification', { email: otpEmail }); } catch (_) {}
+      var m = document.getElementById('otp-msg');
+      m.className = 'msg ok';
+      m.textContent = 'A new code is on its way.';
+      startResendCooldown();
+    });
+
+    document.getElementById('otp-back-link').addEventListener('click', function (e) {
+      e.preventDefault();
+      if (resendTimer) { clearInterval(resendTimer); resendTimer = null; }
+      document.getElementById('otp-card').style.display = 'none';
+      document.getElementById('auth-card').style.display = 'block';
     });
 
     loadMode();
