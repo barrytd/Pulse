@@ -530,6 +530,17 @@ def init_db(db_path):
         "ALTER TABLE users ADD COLUMN email_verification_token_sha256 TEXT",
         "ALTER TABLE users ADD COLUMN email_verification_expires_at   TEXT",
         "ALTER TABLE users ADD COLUMN email_verified_at               TEXT",
+        # 6-digit OTP gate (replaces the Sprint-8 link token). The code is a
+        # random 6-digit number; only its sha256 lives in
+        # email_verification_token_sha256 and its 10-minute expiry in
+        # email_verification_expires_at (reusing the columns above). These
+        # four track brute-force + resend throttling: wrong-attempt counter
+        # (invalidate at 5), last-send time (60s cooldown), and a rolling
+        # hourly resend count (max 3/hour) with its window start.
+        "ALTER TABLE users ADD COLUMN email_otp_attempts            INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN email_otp_last_sent_at        TEXT",
+        "ALTER TABLE users ADD COLUMN email_otp_resend_count        INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN email_otp_resend_window_start TEXT",
         # Security PIN — step-up credential for destructive actions. pin_hash
         # is a scrypt hash (NULL = no PIN set, opt-in). The failed-count +
         # locked-until columns enforce a hard lockout so a low-entropy PIN
@@ -2481,6 +2492,209 @@ def mark_user_email_verified(db_path, user_id, *, now=None):
         return cur.rowcount > 0
 
 
+# --- 6-digit OTP email-verification gate ---------------------------------
+# Replaces the Sprint-8 link token. A random 6-digit code is emailed; only
+# its sha256 is stored (in email_verification_token_sha256) with a 10-minute
+# expiry (email_verification_expires_at). email_verified_at NULL = the gate
+# is not yet passed. Codes are single-use; 5 wrong attempts invalidate the
+# code; resends are throttled (60s cooldown, 3/hour) via the email_otp_*
+# columns. Generation uses `secrets`, never `random`.
+
+def mint_email_otp(db_path, user_id, *, ttl_minutes=10, now=None,
+                   is_resend=False):
+    """Issue a fresh 6-digit OTP for ``user_id`` and return the raw code once.
+
+    Stores ONLY sha256(code) + a ttl_minutes expiry, resets the wrong-attempt
+    counter, and stamps the send time. Overwrites any pending code so the old
+    one dies immediately (one active code per user). ``is_resend=False`` (the
+    default, used by signup + admin invite) resets the rolling hourly resend
+    window; ``is_resend=True`` advances it (the caller must have already
+    passed the cooldown/cap gate). Raises if ``user_id`` doesn't exist.
+    """
+    import hashlib
+    import secrets
+    if user_id is None:
+        raise ValueError("user_id is required")
+    code = f"{secrets.randbelow(1_000_000):06d}"      # secrets, never random
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    base = now or datetime.now()
+    now_str = base.strftime("%Y-%m-%d %H:%M:%S")
+    expires_at = (base + timedelta(minutes=int(ttl_minutes))
+                 ).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        window_start = now_str
+        resend_count = 0
+        if is_resend:
+            row = conn.execute(
+                "SELECT email_otp_resend_window_start, email_otp_resend_count"
+                " FROM users WHERE id = ?", (int(user_id),)).fetchone()
+            if row:
+                ws = row[0] if not isinstance(row, dict) else row.get("email_otp_resend_window_start")
+                rc = row[1] if not isinstance(row, dict) else row.get("email_otp_resend_count")
+                within_hour = False
+                if ws:
+                    try:
+                        within_hour = (base - datetime.strptime(ws, "%Y-%m-%d %H:%M:%S")) < timedelta(hours=1)
+                    except (ValueError, TypeError):
+                        within_hour = False
+                if within_hour:
+                    window_start = ws
+                    resend_count = int(rc or 0) + 1
+                else:
+                    resend_count = 1     # window rolled over — start fresh
+        cur = conn.execute(
+            "UPDATE users SET"
+            "  email_verification_token_sha256 = ?,"
+            "  email_verification_expires_at   = ?,"
+            "  email_verified_at               = NULL,"   # issuing a challenge = unverified
+            "  email_otp_attempts              = 0,"
+            "  email_otp_last_sent_at          = ?,"
+            "  email_otp_resend_window_start   = ?,"
+            "  email_otp_resend_count          = ?"
+            " WHERE id = ?",
+            (code_hash, expires_at, now_str, window_start, resend_count, int(user_id)),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"user {user_id} not found")
+    return code
+
+
+def verify_email_otp(db_path, user_id, code, *, now=None, max_attempts=5):
+    """Check a submitted code against the stored hash. Returns one of:
+
+      'verified' — correct + unexpired: stamps email_verified_at and clears
+                   the code (single-use).
+      'expired'  — a code exists but its window passed.
+      'invalid'  — wrong code; the wrong-attempt counter is bumped and, on
+                   reaching ``max_attempts``, the code is invalidated so it
+                   can't be brute-forced further (the user must resend).
+      'none'     — no pending code (never issued, already consumed, or the
+                   account is already verified).
+
+    The caller maps every non-'verified' result to ONE generic message so it
+    never leaks which failure occurred or whether the email exists.
+    """
+    import hashlib
+    import hmac
+    if user_id is None or not code or not isinstance(code, str):
+        return 'none'
+    base = now or datetime.now()
+    now_str = base.strftime("%Y-%m-%d %H:%M:%S")
+    code_hash = hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT email_verification_token_sha256,"
+            "       email_verification_expires_at,"
+            "       email_verified_at, email_otp_attempts"
+            " FROM users WHERE id = ?", (int(user_id),)).fetchone()
+        if not row:
+            return 'none'
+
+        def _g(i, k):
+            return row[i] if not isinstance(row, dict) else row.get(k)
+        stored = _g(0, "email_verification_token_sha256")
+        expires_at = _g(1, "email_verification_expires_at")
+        verified_at = _g(2, "email_verified_at")
+        attempts = int(_g(3, "email_otp_attempts") or 0)
+
+        if verified_at or not stored:
+            return 'none'
+        if not expires_at or expires_at < now_str:
+            return 'expired'
+        if hmac.compare_digest(str(stored), code_hash):
+            conn.execute(
+                "UPDATE users SET"
+                "  email_verification_token_sha256 = NULL,"
+                "  email_verification_expires_at   = NULL,"
+                "  email_otp_attempts              = 0,"
+                "  email_verified_at               = ?"
+                " WHERE id = ?", (now_str, int(user_id)))
+            return 'verified'
+        attempts += 1
+        if attempts >= int(max_attempts):
+            # Invalidate the code entirely — brute-force budget spent. Returns
+            # 'locked' so the caller can tell the user to request a new code.
+            conn.execute(
+                "UPDATE users SET"
+                "  email_verification_token_sha256 = NULL,"
+                "  email_verification_expires_at   = NULL,"
+                "  email_otp_attempts              = ?"
+                " WHERE id = ?", (attempts, int(user_id)))
+            return 'locked'
+        conn.execute(
+            "UPDATE users SET email_otp_attempts = ? WHERE id = ?",
+            (attempts, int(user_id)))
+        return 'invalid'
+
+
+def get_otp_state(db_path, user_id):
+    """Read the OTP + resend-throttle state for ``user_id``.
+
+    Returns a dict {verified, has_code, expires_at, attempts, last_sent_at,
+    resend_count, resend_window_start}, or None if the user is missing. Fails
+    open (reports verified) on a pre-migration DB so nothing locks up.
+    """
+    if user_id is None:
+        return None
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT email_verified_at, email_verification_token_sha256,"
+                "       email_verification_expires_at, email_otp_attempts,"
+                "       email_otp_last_sent_at, email_otp_resend_count,"
+                "       email_otp_resend_window_start"
+                " FROM users WHERE id = ?", (int(user_id),)).fetchone()
+    except db_backend.OperationalError:
+        return {"verified": True, "has_code": False, "expires_at": None,
+                "attempts": 0, "last_sent_at": None, "resend_count": 0,
+                "resend_window_start": None}
+    if not row:
+        return None
+
+    def _g(i, k):
+        return row[i] if not isinstance(row, dict) else row.get(k)
+    return {
+        "verified": bool(_g(0, "email_verified_at")),
+        "has_code": bool(_g(1, "email_verification_token_sha256")),
+        "expires_at": _g(2, "email_verification_expires_at"),
+        "attempts": int(_g(3, "email_otp_attempts") or 0),
+        "last_sent_at": _g(4, "email_otp_last_sent_at"),
+        "resend_count": int(_g(5, "email_otp_resend_count") or 0),
+        "resend_window_start": _g(6, "email_otp_resend_window_start"),
+    }
+
+
+def otp_resend_allowed(state, *, now=None, cooldown_sec=60, max_per_hour=3):
+    """Given a ``get_otp_state()`` dict, decide whether a resend may fire.
+
+    Returns 'ok' | 'cooldown' | 'hourly_cap' | 'verified' | 'none'. The caller
+    mints a new code only on 'ok' and returns the SAME generic response either
+    way (so a rejected resend never reveals account state).
+    """
+    if state is None:
+        return 'none'
+    if state.get("verified"):
+        return 'verified'
+    base = now or datetime.now()
+    last = state.get("last_sent_at")
+    if last:
+        try:
+            if (base - datetime.strptime(last, "%Y-%m-%d %H:%M:%S")) < timedelta(seconds=int(cooldown_sec)):
+                return 'cooldown'
+        except (ValueError, TypeError):
+            pass
+    ws = state.get("resend_window_start")
+    rc = int(state.get("resend_count") or 0)
+    if ws:
+        try:
+            if ((base - datetime.strptime(ws, "%Y-%m-%d %H:%M:%S")) < timedelta(hours=1)
+                    and rc >= int(max_per_hour)):
+                return 'hourly_cap'
+        except (ValueError, TypeError):
+            pass
+    return 'ok'
+
+
 def touch_user_last_active(db_path, user_id):
     """Bump the user's last_active_at to now. Called by the auth
     middleware on every request so admins can see who's online recently
@@ -2764,10 +2978,18 @@ def create_user(db_path, email, password_hash, role="analyst", *,
             organization_id = create_organization(
                 db_path, name=f"{seed}'s organization", slug=_slugify(seed),
             )
+        # A directly-created user is verified by default (email_verified_at =
+        # created_at). The email-OTP gate is an application-layer challenge:
+        # signup + admin invite call mint_email_otp() right after, which
+        # clears email_verified_at back to NULL so the account must pass the
+        # code before it can log in. Every other create_user caller (seeder,
+        # tests, CLI) gets a ready-to-use account with no email round-trip.
         cursor = conn.execute(
-            "INSERT INTO users (email, password_hash, created_at, role, active, organization_id)"
-            " VALUES (?, ?, ?, ?, 1, ?)",
-            (email, password_hash, created_at, role, int(organization_id)),
+            "INSERT INTO users (email, password_hash, created_at, role, active,"
+            " organization_id, email_verified_at)"
+            " VALUES (?, ?, ?, ?, 1, ?, ?)",
+            (email, password_hash, created_at, role, int(organization_id),
+             created_at),
         )
         return cursor.lastrowid
 
@@ -3190,18 +3412,31 @@ def insert_feedback(db_path, user_id, kind, message, page_hint=None):
             return None
 
 
-def list_feedback(db_path, limit=200):
-    """Return feedback submissions newest-first. Admin view only."""
+def list_feedback(db_path, limit=200, organization_id=None):
+    """Return feedback submissions newest-first. Admin view only.
+
+    When ``organization_id`` is given (a hosted org admin), only feedback
+    from that org's members is returned — scoped via the submitter's org on
+    the joined users row, the same way ``/api/users`` is org-scoped. Global-
+    scope admins (single-tenant / super-admin) pass ``None`` and see all.
+    """
+    where = ""
+    params = []
+    if organization_id is not None:
+        where = " WHERE u.organization_id = ?"
+        params.append(int(organization_id))
+    params.append(int(limit))
     try:
         with _connect(db_path) as conn:
             cursor = conn.execute(
                 """SELECT f.id, f.submitted_at, f.user_id, f.kind, f.message,
                           f.page_hint, f.status, u.email
                    FROM feedback f
-                   LEFT JOIN users u ON u.id = f.user_id
-                   ORDER BY f.id DESC
+                   LEFT JOIN users u ON u.id = f.user_id"""
+                + where +
+                """ ORDER BY f.id DESC
                    LIMIT ?""",
-                (int(limit),),
+                tuple(params),
             )
             cols = [d[0] for d in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

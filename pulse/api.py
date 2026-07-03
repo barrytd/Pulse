@@ -85,6 +85,7 @@ from pulse.database import (
     count_waitlist_signups, delete_waitlist_signup,
     mint_email_verification_token, consume_email_verification_token,
     is_email_verified, mark_user_email_verified,
+    mint_email_otp, verify_email_otp, get_otp_state, otp_resend_allowed,
     save_sigma_rule, list_sigma_rules, get_sigma_rule,
     set_sigma_rule_enabled, delete_sigma_rule,
     save_report, list_reports_db, get_report_meta, get_report_bytes,
@@ -319,7 +320,8 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
         # needing to poll /api/health. Only interesting on Windows.
         if _system_scan_supported():
             kind = "administrator" if _system_scan_is_admin() else "standard user"
-            print(f"  [*] Pulse is running as a {kind}.")
+            article = "an" if kind[0] in "aeiou" else "a"
+            print(f"  [*] Pulse is running as {article} {kind}.")
 
     @app.on_event("shutdown")
     async def _stop_scheduler():
@@ -377,6 +379,26 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
         if not app.state.auth_required:
             return await call_next(request)
         path = request.url.path
+        # --- CSRF: custom-header same-origin check on state-changing routes ---
+        # A malicious cross-site page can make the browser auto-send the
+        # victim's session cookie, but it CANNOT set a custom request header
+        # (that would require a CORS preflight the attacker's origin fails).
+        # So requiring X-Pulse-Request on every cookie-authenticated mutating
+        # request defeats CSRF. Exemptions:
+        #   * agent transport routes (/api/agent/*) — a non-browser daemon;
+        #   * Bearer-token requests — the browser never auto-attaches an
+        #     Authorization header, so token-authed calls (CI, agents) can't
+        #     be forged cross-site.
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/"):
+            authz = request.headers.get("authorization", "")
+            is_bearer = authz[:7].lower() == "bearer "
+            if (not path.startswith("/api/agent/")
+                    and not is_bearer
+                    and not request.headers.get("x-pulse-request")):
+                return JSONResponse(
+                    {"detail": "Missing or invalid request header."},
+                    status_code=403,
+                )
         needs_auth = (
             path.startswith("/api/")
             and path not in _AUTH_EXEMPT_EXACT
@@ -1111,6 +1133,58 @@ def _register_routes(app: FastAPI) -> None:
         return resp
 
     # -------------------------------------------------------------------
+    # Email OTP verification gate — shared helpers.
+    #
+    # Signup, admin invite, and resend all mint a random 6-digit code
+    # (stored only as a sha256 hash, 10-minute expiry) and email it. The
+    # account stays unverified — and cannot log in or hold a session — until
+    # the code is entered. When SMTP is NOT configured (local single-user
+    # self-host with no mail server) there is no way to deliver a code, so we
+    # auto-verify instead of bricking the install; the hard gate applies to
+    # every deploy that has email set up (i.e. every hosted / public-signup
+    # deploy).
+    # -------------------------------------------------------------------
+    def _otp_email_cfg():
+        """Return (email_cfg, smtp_configured)."""
+        cfg = _read_config(app.state.config_path) or {}
+        email_cfg = (cfg.get("email") or {})
+        smtp_configured = bool(
+            (email_cfg.get("smtp_host") or "").strip()
+            and (email_cfg.get("sender") or "").strip()
+            and (email_cfg.get("password") or "").strip()
+        )
+        return email_cfg, smtp_configured
+
+    def _send_otp_code(email_cfg, recipient, code, *, invited=False):
+        """Email a 6-digit verification code. Returns True if sent."""
+        lead = ("You've been invited to Pulse."
+                if invited else "Welcome to Pulse.")
+        subject = "Your Pulse verification code"
+        text_body = (
+            f"{lead}\n\n"
+            f"Your verification code is: {code}\n\n"
+            f"Enter it to activate your account. The code expires in 10 "
+            f"minutes and can only be used once. If you didn't request this, "
+            f"you can ignore this email.\n"
+        )
+        html_body = (
+            f"<p>{lead}</p>"
+            f"<p>Your verification code is:</p>"
+            f'<p style="font-size:28px;font-weight:700;letter-spacing:6px;'
+            f'font-family:monospace;">{code}</p>'
+            f"<p style='color:#8a94a6;font-size:13px;'>Enter it to activate "
+            f"your account. The code expires in 10 minutes and can only be "
+            f"used once. If you didn't request this, ignore this email.</p>"
+        )
+        return send_transactional_email(
+            email_cfg, recipient, subject, html_body, text_body,
+        )
+
+    # A single opaque message for every OTP-verify failure so the response
+    # never reveals whether the email exists, or why the code was rejected.
+    _OTP_GENERIC_FAIL = "That code is invalid or has expired. Request a new one."
+
+    # -------------------------------------------------------------------
     # Auth endpoints (all public — these are how you get a session)
     # -------------------------------------------------------------------
     @app.get("/api/auth/status")
@@ -1201,87 +1275,37 @@ def _register_routes(app: FastAPI) -> None:
         user_id = create_user(
             app.state.db_path, email, hash_password(password), role=role,
         )
-        # Sprint 8 — email verification. Two branches:
-        #
-        # 1. SMTP is configured: mint a `pv_…` token, mail the user a
-        #    /verify?token=… link, leave email_verified_at NULL so
-        #    /api/me reports unverified. The user still gets a session
-        #    cookie so they land on the dashboard immediately, but the
-        #    UI can surface a "verify your email" banner and gate
-        #    destructive operations later.
-        #
-        # 2. SMTP not configured (single-user dev install, no env vars):
-        #    auto-verify on the spot so the existing CLI / localhost
-        #    flow keeps working without forcing the operator to wire
-        #    up SMTP. This is the right default for a self-hosted
-        #    install; hosted multi-tenant deploys always set SMTP env
-        #    vars and so always run branch (1).
-        verified_via_email_sent = False
-        try:
-            cfg = _read_config(app.state.config_path) or {}
-            email_cfg = (cfg.get("email") or {})
-            smtp_configured = bool(
-                (email_cfg.get("smtp_host") or "").strip()
-                and (email_cfg.get("sender") or "").strip()
-                and (email_cfg.get("password") or "").strip()
-            )
-            if smtp_configured:
-                raw_token = mint_email_verification_token(
-                    app.state.db_path, user_id,
-                )
-                base_url = str(request.base_url).rstrip("/")
-                verify_link = f"{base_url}/verify?token={raw_token}"
-                subject = "Verify your Pulse account"
-                # Plain-text body for spam filters + email clients that
-                # block HTML by default.
-                text_body = (
-                    f"Welcome to Pulse.\n\n"
-                    f"Click the link below to verify your email and "
-                    f"finish setting up your account:\n\n"
-                    f"{verify_link}\n\n"
-                    f"This link expires in 24 hours. If you didn't sign "
-                    f"up for Pulse, you can ignore this email.\n"
-                )
-                html_body = (
-                    f"<p>Welcome to <strong>Pulse</strong>.</p>"
-                    f"<p>Click the link below to verify your email and "
-                    f"finish setting up your account:</p>"
-                    f'<p><a href="{verify_link}" '
-                    f'style="background:#3b82f6;color:#fff;padding:10px 18px;'
-                    f'border-radius:6px;text-decoration:none;font-weight:600;">'
-                    f"Verify email</a></p>"
-                    f"<p style='color:#8a94a6;font-size:13px;'>Or paste this "
-                    f"into your browser: <code>{verify_link}</code></p>"
-                    f"<p style='color:#8a94a6;font-size:13px;'>This link "
-                    f"expires in 24 hours. If you didn't sign up for Pulse, "
-                    f"you can ignore this email.</p>"
-                )
-                verified_via_email_sent = send_transactional_email(
-                    email_cfg, email, subject, html_body, text_body,
-                )
-            if not verified_via_email_sent:
-                # Either SMTP isn't configured, or the send failed.
-                # Auto-verify so the user isn't stuck behind a "check
-                # your email" gate for an email that never arrived.
-                # Operators who care about verification will set SMTP
-                # correctly; this is the right fallback for everyone
-                # else.
-                mark_user_email_verified(app.state.db_path, user_id)
-        except Exception as exc:
-            # Verification is a feature, not a hard requirement. Don't
-            # let any failure in the mail layer 500 the signup itself
-            # — fall back to auto-verify with a logged warning.
-            print(f"  [!] Signup verification setup failed: {exc}")
+        # Mandatory 6-digit OTP gate. If SMTP is configured, mint a code,
+        # email it, and leave the account UNVERIFIED with NO session cookie —
+        # it cannot log in or do anything until the code is entered at
+        # /api/auth/verify-otp. If SMTP is not configured (local self-host
+        # with no mail server) there's nowhere to send a code, so auto-verify
+        # and issue a session as before, keeping single-user installs usable.
+        email_cfg, smtp_configured = _otp_email_cfg()
+        otp_sent = False
+        if smtp_configured:
             try:
-                mark_user_email_verified(app.state.db_path, user_id)
-            except Exception:
-                pass
+                code = mint_email_otp(app.state.db_path, user_id)
+                otp_sent = _send_otp_code(email_cfg, email, code)
+            except Exception as exc:
+                print(f"  [!] Signup OTP send failed: {exc}")
+                otp_sent = False
 
+        if smtp_configured and otp_sent:
+            # HARD GATE: unverified, no session. No cookie is set, so the
+            # account is inert until the emailed code is verified.
+            return JSONResponse({
+                "status": "otp_required", "email": email,
+                "verified": False, "otp_required": True,
+            })
+
+        # No SMTP (or the send failed): auto-verify + log in now so a
+        # self-hosted install / transient mail outage isn't bricked.
+        mark_user_email_verified(app.state.db_path, user_id)
         cookie = issue_session_cookie(app.state.session_secret, user_id)
         resp = JSONResponse({
-            "status":         "ok",
-            "email":          email,
-            "verification_sent": verified_via_email_sent,
+            "status": "ok", "email": email,
+            "verified": True, "otp_required": False,
         })
         resp.set_cookie(
             SESSION_COOKIE_NAME, cookie,
@@ -1328,6 +1352,17 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(401, detail="Invalid email or password.")
         if not user.get("active"):
             raise HTTPException(403, detail="Account is deactivated.")
+        # Mandatory email verification: an unverified account cannot log in.
+        # This is reached only AFTER a correct password, so telling the user
+        # to verify doesn't leak account existence to anyone who doesn't
+        # already have their credentials.
+        if not is_email_verified(app.state.db_path, user["id"]):
+            raise HTTPException(403, detail={
+                "code": "unverified",
+                "email": user["email"],
+                "message": ("Please verify your email first. Enter the "
+                            "code we sent you, or request a new one."),
+            })
         cookie = issue_session_cookie(app.state.session_secret, user["id"])
         resp = JSONResponse({"status": "ok", "email": user["email"]})
         resp.set_cookie(
@@ -1343,65 +1378,108 @@ def _register_routes(app: FastAPI) -> None:
         resp.delete_cookie(SESSION_COOKIE_NAME)
         return resp
 
-    @app.post("/api/auth/resend-verification")
-    async def auth_resend_verification(
-        request: Request, user_id: int = Depends(require_login),
-    ):
-        """Mint a fresh verification token and re-send the email.
+    @app.post("/api/auth/verify-otp")
+    async def auth_verify_otp(request: Request):
+        """Verify the 6-digit code emailed at signup / invite, and on success
+        log the user in so the flow continues straight to the dashboard.
 
-        Used when the original email got lost / deleted / went to spam.
-        Throttled (3/15min per IP) so an attacker can't bury the user's
-        inbox or spend our SMTP quota. Returns 200 either way to avoid
-        leaking whether the address is in fact verified — callers see
-        ``{sent: bool}`` so the UI can show "check your email" vs.
-        "your email is already verified."
+        Public — the account has no session yet; the code is the credential.
+        Rate-limited exactly like login: a per-IP burst cap (50/5min) plus a
+        failed-attempt lockout (10 failures/15min -> 423). The DB layer also
+        invalidates the code after 5 wrong tries (single-use codes). Failures
+        return a structured error state (wrong + attempts remaining, expired,
+        or spent) for the UI; unknown emails stay generic (see the note below).
         """
-        rate_limit.hit(request, "auth_resend_verify", window_sec=900, max_hits=3)
-        user = get_user_by_id(app.state.db_path, user_id)
-        if not user:
-            raise HTTPException(401, detail="Authentication required.")
-        if user.get("email_verified_at"):
-            return {"status": "ok", "sent": False, "already_verified": True}
-
-        cfg = _read_config(app.state.config_path) or {}
-        email_cfg = (cfg.get("email") or {})
-        smtp_configured = bool(
-            (email_cfg.get("smtp_host") or "").strip()
-            and (email_cfg.get("sender") or "").strip()
-            and (email_cfg.get("password") or "").strip()
+        rate_limit.hit(request, "otp_verify", window_sec=300, max_hits=50)
+        rate_limit.check(
+            request, "otp_verify_fail", window_sec=900, max_hits=10,
+            status_code=423,
+            detail=("Too many incorrect codes. This is temporarily locked. "
+                    "Wait 15 minutes and try again."),
         )
-        if not smtp_configured:
-            # No SMTP wired up — surface that so the UI can prompt the
-            # operator to set PULSE_SMTP_* instead of staring at a "we
-            # sent it!" message that never lands.
-            return {"status": "ok", "sent": False, "smtp_configured": False}
-
         try:
-            raw_token = mint_email_verification_token(
-                app.state.db_path, user_id,
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        email = str(body.get("email") or "").strip().lower()[:320]
+        code = str(body.get("code") or "").strip()
+        user = get_user_by_email(app.state.db_path, email)
+        result = (verify_email_otp(app.state.db_path, user["id"], code)
+                  if user else "none")
+        if result == "verified":
+            # Log them straight in — signup/login continues to the dashboard.
+            cookie = issue_session_cookie(app.state.session_secret, user["id"])
+            resp = JSONResponse({"status": "verified", "email": user["email"]})
+            resp.set_cookie(
+                SESSION_COOKIE_NAME, cookie,
+                max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+                secure=bool(getattr(app.state, "is_production", False)),
             )
-        except ValueError:
-            raise HTTPException(404, detail="User not found.")
-        base_url = str(request.base_url).rstrip("/")
-        verify_link = f"{base_url}/verify?token={raw_token}"
-        text_body = (
-            f"Here's a fresh Pulse verification link:\n\n{verify_link}\n\n"
-            f"This link expires in 24 hours.\n"
-        )
-        html_body = (
-            f"<p>Here's a fresh <strong>Pulse</strong> verification link:</p>"
-            f'<p><a href="{verify_link}" '
-            f'style="background:#3b82f6;color:#fff;padding:10px 18px;'
-            f'border-radius:6px;text-decoration:none;font-weight:600;">'
-            f"Verify email</a></p>"
-            f"<p style='color:#8a94a6;font-size:13px;'>This link expires in "
-            f"24 hours.</p>"
-        )
-        sent = send_transactional_email(
-            email_cfg, user["email"], "Verify your Pulse account",
-            html_body, text_body,
-        )
-        return {"status": "ok", "sent": bool(sent), "smtp_configured": True}
+            return resp
+        # Failure: count it toward the IP lockout, then return a structured
+        # error state the UI can act on (wrong code + attempts remaining,
+        # expired, or spent). An unknown email / no-pending-code stays generic
+        # (no attempts field), so a probe can at most learn that an address has
+        # a *live pending code right now* — a narrow, transient signal (and
+        # existence is already discoverable via signup's duplicate-email 409).
+        rate_limit.record(request, "otp_verify_fail", window_sec=900)
+        if result == "expired":
+            raise HTTPException(400, detail={
+                "code": "expired",
+                "message": "That code has expired. Request a new one."})
+        if result == "locked":
+            raise HTTPException(400, detail={
+                "code": "too_many_attempts",
+                "message": "Too many incorrect attempts. Request a new code."})
+        if result == "invalid" and user:
+            state = get_otp_state(app.state.db_path, user["id"]) or {}
+            remaining = max(0, 5 - int(state.get("attempts", 0)))
+            raise HTTPException(400, detail={
+                "code": "invalid", "attempts_remaining": remaining,
+                "message": (f"Incorrect code. {remaining} "
+                            f"attempt{'s' if remaining != 1 else ''} remaining.")})
+        raise HTTPException(400, detail={
+            "code": "invalid",
+            "message": "That code is invalid or has expired. Request a new one."})
+
+    @app.post("/api/auth/resend-verification")
+    async def auth_resend_verification(request: Request):
+        """Email a fresh OTP to an unverified account.
+
+        Public + email-addressed (the account has no session yet). ALWAYS
+        returns the same generic response, so it never reveals whether the
+        email exists or is already verified. Per-email throttling — a 60s
+        cooldown and max 3 resends/hour — is enforced from the DB; a coarse
+        per-IP cap stops floods.
+        """
+        rate_limit.hit(request, "otp_resend", window_sec=3600, max_hits=15)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        email = str((body or {}).get("email") or "").strip().lower()[:320]
+        generic = {"status": "ok", "message": (
+            "If that email needs verification, we've sent a new code. "
+            "It expires in 10 minutes.")}
+        user = get_user_by_email(app.state.db_path, email) if email else None
+        if not user:
+            return generic
+        email_cfg, smtp_configured = _otp_email_cfg()
+        if not smtp_configured:
+            return generic
+        state = get_otp_state(app.state.db_path, user["id"])
+        if otp_resend_allowed(state) != "ok":
+            # Already verified, inside the 60s cooldown, or over the hourly
+            # cap: silently skip. Same generic response — no observable signal.
+            return generic
+        try:
+            code = mint_email_otp(app.state.db_path, user["id"], is_resend=True)
+            _send_otp_code(email_cfg, user["email"], code)
+        except Exception as exc:
+            print(f"  [!] Resend OTP failed: {exc}")
+        return generic
 
     @app.get("/api/me")
     def api_me(user_id: int = Depends(require_login)):
@@ -2320,9 +2398,26 @@ def _register_routes(app: FastAPI) -> None:
             app.state.db_path, email, hash_password(password), role=role,
             organization_id=admin_org_id,
         )
+        # Same mandatory OTP gate as self-signup: if SMTP is configured, email
+        # the invited teammate a 6-digit code and leave them UNVERIFIED so they
+        # can't log in until they enter it. Without SMTP there's nowhere to
+        # send a code, so the admin's creation vouches for them (auto-verify).
+        email_cfg, smtp_configured = _otp_email_cfg()
+        invite_otp_sent = False
+        if smtp_configured:
+            try:
+                code = mint_email_otp(app.state.db_path, new_id)
+                invite_otp_sent = _send_otp_code(
+                    email_cfg, email, code, invited=True)
+            except Exception as exc:
+                print(f"  [!] Invite OTP send failed: {exc}")
+        if not invite_otp_sent:
+            mark_user_email_verified(app.state.db_path, new_id)
         _audit_user_action(user_id, "create_user", target=email, detail=f"role={role}")
         user = get_user_by_id(app.state.db_path, new_id)
-        return _public_user(user)
+        result = _public_user(user)
+        result["otp_required"] = bool(invite_otp_sent)
+        return result
 
     @app.put("/api/users/{target_id}/role")
     async def api_update_user_role(target_id: int, request: Request,
@@ -2467,7 +2562,12 @@ def _register_routes(app: FastAPI) -> None:
                           user_id: int = Depends(require_admin)):
         if limit < 1 or limit > 1000:
             raise HTTPException(400, detail="limit must be between 1 and 1000.")
-        return {"rows": list_feedback(app.state.db_path, limit=limit)}
+        # Org-scope like /api/users: a hosted org admin sees only their own
+        # org's feedback; a single-tenant / super-admin (global scope) sees
+        # all. _read_scope_kwargs returns {} for global scope, else
+        # {"organization_id": N}.
+        scope = _read_scope_kwargs(app, user_id)
+        return {"rows": list_feedback(app.state.db_path, limit=limit, **scope)}
 
     # -------------------------------------------------------------------
     # GET  /api/notifications      — bell-icon feed for the current user

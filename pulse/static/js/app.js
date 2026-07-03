@@ -3,6 +3,10 @@
 // Owns the event-delegation action registry and DOMContentLoaded boot.
 'use strict';
 
+// First import: installs the window.fetch wrapper that attaches the
+// X-Pulse-Request CSRF header to every mutating request, before any other
+// module can fire one.
+import './csrf.js';
 import { initTheme, toggleTheme, setThemeFromSelect } from './theme.js';
 import {
   applySeverityColors,

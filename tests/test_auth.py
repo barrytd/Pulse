@@ -240,8 +240,8 @@ def test_hosted_signup_rejects_duplicate_email(hosted_signup_client):
 @pytest.fixture
 def smtp_signup_client(tmp_path):
     """Auth-on client with SMTP wired in pulse.yaml so signup follows the
-    mail-the-verification-link branch. smtplib.SMTP is patched at the
-    top of each test so no real mail ever leaves the runner."""
+    mandatory-OTP branch. smtplib.SMTP is patched at the top of each test
+    so no real mail ever leaves the runner."""
     db_path = tmp_path / "test.db"
     config_path = tmp_path / "pulse.yaml"
     config_path.write_text(
@@ -257,87 +257,298 @@ def smtp_signup_client(tmp_path):
     return TestClient(app), str(db_path)
 
 
+def _smtp_mock():
+    """Return (patcher, inner) — `with patcher:` intercepts smtplib.SMTP and
+    `inner.sendmail` captures the sent message."""
+    from unittest.mock import patch, MagicMock
+    fake_smtp = MagicMock()
+    inner = MagicMock()
+    fake_smtp.return_value.__enter__.return_value = inner
+    return patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp), inner
+
+
+def _extract_otp(inner):
+    """Pull the 6-digit code out of the most recently sent email."""
+    import re
+    raw = inner.sendmail.call_args[0][2]
+    m = re.search(r"\b(\d{6})\b", raw)
+    assert m is not None, "verification email must contain a 6-digit code"
+    return m.group(1)
+
+
+def _signup_get_code(client, email="founder@example.com",
+                     password="correct-horse-battery"):
+    """Sign up (SMTP branch) and return the emailed 6-digit OTP."""
+    patcher, inner = _smtp_mock()
+    with patcher:
+        r = client.post("/api/auth/signup", json={"email": email, "password": password})
+    assert r.status_code == 200
+    assert r.json().get("otp_required") is True
+    return _extract_otp(inner)
+
+
 def test_signup_without_smtp_auto_verifies_user(auth_client):
-    """The plain auth_client fixture has no SMTP config — the signup
-    flow should mark the user verified on the spot so single-user CLI
-    installs don't get stuck waiting for an email that never leaves."""
+    """No SMTP config -> signup auto-verifies + logs the user in, so a
+    single-user CLI install isn't bricked waiting for a code it can't email."""
     r = auth_client.post("/api/auth/signup", json={
         "email": "me@example.com", "password": "correct-horse-battery",
     })
     assert r.status_code == 200
     body = r.json()
-    assert body["verification_sent"] is False
-    me = auth_client.get("/api/me").json()
+    assert body["verified"] is True
+    assert body["otp_required"] is False
+    me = auth_client.get("/api/me").json()  # session was issued
     assert me["email_verified"] is True
 
 
-def test_signup_with_smtp_mints_token_and_sends_email(smtp_signup_client):
-    """SMTP wired -> signup mints a pv_… token, ships the link via
-    smtplib, and leaves the user unverified until they click."""
-    from unittest.mock import patch, MagicMock
-    client, _db = smtp_signup_client
-
-    fake_smtp = MagicMock()
-    inner = MagicMock()
-    fake_smtp.return_value.__enter__.return_value = inner
-    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
+def test_signup_with_smtp_sends_otp_and_no_session(smtp_signup_client):
+    """SMTP wired -> signup emails a 6-digit code, leaves the account
+    UNVERIFIED, and issues NO session cookie (the account is inert)."""
+    client, db_path = smtp_signup_client
+    patcher, inner = _smtp_mock()
+    with patcher:
         r = client.post("/api/auth/signup", json={
-            "email": "founder@example.com",
-            "password": "correct-horse-battery",
+            "email": "founder@example.com", "password": "correct-horse-battery",
         })
-
     assert r.status_code == 200
     body = r.json()
-    assert body["verification_sent"] is True
+    assert body["otp_required"] is True
+    assert body["verified"] is False
+    assert SESSION_COOKIE_NAME not in r.cookies      # no session granted
     assert inner.sendmail.called
-
-    # Inspect the sent message — verify link present, token format right.
-    raw = inner.sendmail.call_args[0][2]
-    import re
-    m = re.search(r"/verify\?token=pv_[A-Za-z0-9_-]+", raw)
-    assert m is not None, "verification email must contain a /verify?token=pv_… link"
-
-    # User starts unverified until they click.
-    me = client.get("/api/me").json()
-    assert me["email_verified"] is False
+    code = _extract_otp(inner)
+    assert code.isdigit() and len(code) == 6
+    from pulse import database
+    uid = database.get_user_by_email(db_path, "founder@example.com")["id"]
+    assert database.is_email_verified(db_path, uid) is False
 
 
-def test_verify_endpoint_consumes_token_and_redirects(smtp_signup_client):
-    """GET /verify?token=… consumes the token, stamps email_verified_at,
-    redirects to /?verified=1, and issues a session cookie so the user
-    lands on the dashboard already signed in."""
-    from unittest.mock import patch, MagicMock
+def test_otp_correct_code_activates_and_allows_login(smtp_signup_client):
+    """Entering the correct code verifies the account; login then works."""
     client, db_path = smtp_signup_client
+    code = _signup_get_code(client)
+    # Before verification, login is blocked.
+    r = client.post("/api/auth/login", json={
+        "email": "founder@example.com", "password": "correct-horse-battery"})
+    assert r.status_code == 403
+    # Verify the code.
+    r = client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": code})
+    assert r.status_code == 200 and r.json()["status"] == "verified"
+    # Now login succeeds.
+    r = client.post("/api/auth/login", json={
+        "email": "founder@example.com", "password": "correct-horse-battery"})
+    assert r.status_code == 200
 
-    fake_smtp = MagicMock()
-    inner = MagicMock()
-    fake_smtp.return_value.__enter__.return_value = inner
-    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
-        client.post("/api/auth/signup", json={
-            "email": "founder@example.com",
-            "password": "correct-horse-battery",
-        })
-    body = inner.sendmail.call_args[0][2]
-    import re
-    link = re.search(r"/verify\?token=pv_[A-Za-z0-9_-]+", body).group(0)
 
-    # Log out so the verify flow has to re-issue a session.
-    client.post("/api/auth/logout")
-    r = client.get(link, follow_redirects=False)
-    assert r.status_code == 302
-    assert r.headers["location"] == "/?verified=1"
-    # /verify issued a fresh session cookie too.
-    assert SESSION_COOKIE_NAME in r.cookies
+def test_otp_single_use(smtp_signup_client):
+    """A code works exactly once — replaying it after success fails."""
+    client, _db = smtp_signup_client
+    code = _signup_get_code(client)
+    assert client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": code}).status_code == 200
+    r2 = client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": code})
+    assert r2.status_code == 400
 
-    # And now /api/me reports verified.
+
+def test_otp_wrong_code_counts_down_then_invalidates(smtp_signup_client):
+    """Each wrong code bumps the attempt counter; the 5th invalidates the
+    code so even the correct one no longer works (user must resend)."""
+    from pulse import database
+    client, db_path = smtp_signup_client
+    code = _signup_get_code(client)
+    uid = database.get_user_by_email(db_path, "founder@example.com")["id"]
+    wrong = "000000" if code != "000000" else "111111"
+    for i in range(4):
+        r = client.post("/api/auth/verify-otp", json={
+            "email": "founder@example.com", "code": wrong})
+        assert r.status_code == 400
+        assert database.get_otp_state(db_path, uid)["attempts"] == i + 1
+    # 5th wrong attempt invalidates the code entirely.
+    r = client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": wrong})
+    assert r.status_code == 400
+    assert database.get_otp_state(db_path, uid)["has_code"] is False
+    # The (previously) correct code is now dead too.
+    r = client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": code})
+    assert r.status_code == 400
+    assert database.is_email_verified(db_path, uid) is False
+
+
+def test_otp_expired_code_fails(tmp_path):
+    """A code past its 10-minute window is rejected (DB layer, time-mocked)."""
+    from datetime import datetime, timedelta
+    from pulse import database
+    db_path = str(tmp_path / "otp.db")
+    database.init_db(db_path)
+    uid = database.create_user(db_path, "a@b.com", "h")
+    t0 = datetime(2026, 1, 1, 12, 0, 0)
+    code = database.mint_email_otp(db_path, uid, now=t0)
+    assert database.verify_email_otp(db_path, uid, code,
+                                     now=t0 + timedelta(minutes=11)) == "expired"
+    # Still valid a minute before expiry.
+    assert database.verify_email_otp(db_path, uid, code,
+                                     now=t0 + timedelta(minutes=9)) == "verified"
+
+
+def test_unverified_account_cannot_login(smtp_signup_client):
+    """An unverified account cannot authenticate even with the right
+    password — login returns 403 with an 'unverified' marker."""
+    client, _db = smtp_signup_client
+    _signup_get_code(client)   # account exists, unverified, no session
+    r = client.post("/api/auth/login", json={
+        "email": "founder@example.com", "password": "correct-horse-battery"})
+    assert r.status_code == 403
+    detail = r.json()["detail"]
+    assert isinstance(detail, dict) and detail.get("code") == "unverified"
+
+
+def test_otp_verify_error_states_and_bounded_leak(smtp_signup_client):
+    """A wrong code for a real (pending) account exposes attempts_remaining so
+    the UI can guide the user; an UNKNOWN email stays generic (no attempts
+    field). Both are 400 — a probe can at most learn that an address has a
+    live pending code right now, not that an account exists (which signup's
+    409 already reveals)."""
+    client, _db = smtp_signup_client
+    _signup_get_code(client)
+    real = client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": "999999"})
+    ghost = client.post("/api/auth/verify-otp", json={
+        "email": "nobody@example.com", "code": "999999"})
+    assert real.status_code == ghost.status_code == 400
+    real_detail = real.json()["detail"]
+    ghost_detail = ghost.json()["detail"]
+    # Real pending account: structured error with attempts remaining.
+    assert real_detail["code"] == "invalid"
+    assert real_detail["attempts_remaining"] == 4
+    # Unknown email: generic, NO attempts field.
+    assert ghost_detail["code"] == "invalid"
+    assert "attempts_remaining" not in ghost_detail
+
+
+def test_full_otp_flow_signup_verify_logged_in(smtp_signup_client):
+    """End-to-end (SMTP on), the exact sequence the login page drives:
+    signup -> otp_required + NO session -> read the emailed code -> verify-otp
+    -> 200 + session cookie -> the user is verified and logged in. The SMTP
+    mock captures the real MIME message the same way a local debug SMTP sink
+    (aiosmtpd) would, without touching the network."""
+    client, db_path = smtp_signup_client
+    patcher, inner = _smtp_mock()
+    with patcher:
+        r = client.post("/api/auth/signup", json={
+            "email": "founder@example.com", "password": "correct-horse-battery"})
+    assert r.json()["otp_required"] is True
+    assert SESSION_COOKIE_NAME not in r.cookies          # no session yet
+    code = _extract_otp(inner)                            # captured from the email
+    # /api/me is unreachable while unverified (no session).
+    assert client.get("/api/me").status_code == 401
+    # Verify -> logged in (verify-otp itself issues the session).
+    v = client.post("/api/auth/verify-otp", json={
+        "email": "founder@example.com", "code": code})
+    assert v.status_code == 200 and v.json()["status"] == "verified"
+    assert SESSION_COOKIE_NAME in v.cookies
     me = client.get("/api/me").json()
-    assert me["email_verified"] is True
+    assert me["email"] == "founder@example.com" and me["email_verified"] is True
+
+
+def test_smtp_off_bypasses_the_otp_screen(auth_client):
+    """With SMTP off (fresh self-host), signup must auto-verify + issue a
+    session, so the frontend never routes to the OTP screen (otp_required
+    false). This is the 'fresh visitor isn't bricked' guarantee."""
+    r = auth_client.post("/api/auth/signup", json={
+        "email": "solo@example.com", "password": "correct-horse-battery"})
+    body = r.json()
+    assert body["otp_required"] is False and body["verified"] is True
+    assert auth_client.get("/api/me").json()["email_verified"] is True
+
+
+def test_login_unverified_routes_to_otp_with_email(smtp_signup_client):
+    """An unverified account logging in gets 403 with a structured
+    {code: unverified, email} the login page uses to open the OTP screen."""
+    client, _db = smtp_signup_client
+    _signup_get_code(client)   # account exists, unverified, no session
+    r = client.post("/api/auth/login", json={
+        "email": "founder@example.com", "password": "correct-horse-battery"})
+    assert r.status_code == 403
+    d = r.json()["detail"]
+    assert d["code"] == "unverified" and d["email"] == "founder@example.com"
+
+
+def test_otp_verify_rate_limited_like_login(smtp_signup_client):
+    """Repeated wrong codes eventually hit the per-IP lockout (423), same
+    as the login failed-attempt lockout (10 failures / 15 min)."""
+    client, _db = smtp_signup_client
+    _signup_get_code(client)
+    codes = 0
+    saw_lock = False
+    for _ in range(15):
+        r = client.post("/api/auth/verify-otp", json={
+            "email": "founder@example.com", "code": "123123"})
+        codes += 1
+        if r.status_code == 423:
+            saw_lock = True
+            break
+    assert saw_lock, "verify-otp must lock out (423) after repeated failures"
+
+
+def test_resend_cooldown_and_hourly_cap(tmp_path):
+    """DB gate: 60s cooldown between resends and max 3 resends/hour."""
+    from datetime import datetime, timedelta
+    from pulse import database
+    db_path = str(tmp_path / "otp.db")
+    database.init_db(db_path)
+    uid = database.create_user(db_path, "c@d.com", "h")
+    t = datetime(2026, 1, 1, 12, 0, 0)
+    database.mint_email_otp(db_path, uid, now=t)        # initial send
+    st = database.get_otp_state(db_path, uid)
+    assert database.otp_resend_allowed(st, now=t + timedelta(seconds=30)) == "cooldown"
+    assert database.otp_resend_allowed(st, now=t + timedelta(seconds=61)) == "ok"
+    tt = t
+    for _ in range(3):
+        tt += timedelta(seconds=61)
+        assert database.otp_resend_allowed(database.get_otp_state(db_path, uid), now=tt) == "ok"
+        database.mint_email_otp(db_path, uid, now=tt, is_resend=True)
+    tt += timedelta(seconds=61)
+    assert database.otp_resend_allowed(database.get_otp_state(db_path, uid), now=tt) == "hourly_cap"
+
+
+def test_resend_endpoint_cooldown_blocks_second_send(smtp_signup_client):
+    """Endpoint: a second resend within the 60s cooldown returns the same
+    generic response but does NOT send a second email."""
+    client, _db = smtp_signup_client
+    _signup_get_code(client)   # this counts as the initial send (last_sent_at now)
+    patcher, inner = _smtp_mock()
+    with patcher:
+        r = client.post("/api/auth/resend-verification",
+                        json={"email": "founder@example.com"})
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert not inner.sendmail.called, "resend inside the 60s cooldown must not send"
+
+
+def test_resend_endpoint_generic_for_unknown_and_verified(auth_client, smtp_signup_client):
+    """Resend is always generic — an unknown email and an off-SMTP install
+    both return {status: ok} with nothing revealed."""
+    # Unknown email (SMTP client): generic ok, no leak, no send.
+    client, _db = smtp_signup_client
+    patcher, inner = _smtp_mock()
+    with patcher:
+        r = client.post("/api/auth/resend-verification",
+                        json={"email": "does-not-exist@example.com"})
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert not inner.sendmail.called
+    # No SMTP configured (auth_client): still generic ok.
+    auth_client.post("/api/auth/signup", json={
+        "email": "me@example.com", "password": "correct-horse-battery"})
+    r = auth_client.post("/api/auth/resend-verification",
+                         json={"email": "me@example.com"})
+    assert r.status_code == 200 and r.json()["status"] == "ok"
 
 
 def test_verify_endpoint_rejects_bad_token(smtp_signup_client):
-    """Unknown / garbage tokens redirect to /login?verified=0 so the UI
-    can render a single "link invalid or expired" message — no leak of
-    whether the token shape was right vs. whether the row existed."""
+    """Legacy link endpoint still rejects unknown/missing tokens with a
+    single opaque /login?verified=0 redirect (kept for old emails)."""
     client, _db = smtp_signup_client
     r = client.get("/verify?token=pv_not_a_real_token", follow_redirects=False)
     assert r.status_code == 302
@@ -345,97 +556,6 @@ def test_verify_endpoint_rejects_bad_token(smtp_signup_client):
     r = client.get("/verify", follow_redirects=False)  # missing token entirely
     assert r.status_code == 302
     assert "verified=0" in r.headers["location"]
-
-
-def test_verify_endpoint_rejects_replay(smtp_signup_client):
-    """Consuming a token should clear it so the same link can't be
-    re-used. The second click 302s to /login?verified=0."""
-    from unittest.mock import patch, MagicMock
-    client, _db = smtp_signup_client
-
-    fake_smtp = MagicMock()
-    inner = MagicMock()
-    fake_smtp.return_value.__enter__.return_value = inner
-    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
-        client.post("/api/auth/signup", json={
-            "email": "founder@example.com",
-            "password": "correct-horse-battery",
-        })
-    body = inner.sendmail.call_args[0][2]
-    import re
-    link = re.search(r"/verify\?token=pv_[A-Za-z0-9_-]+", body).group(0)
-
-    r1 = client.get(link, follow_redirects=False)
-    assert r1.status_code == 302
-    assert "verified=1" in r1.headers["location"]
-
-    r2 = client.get(link, follow_redirects=False)
-    assert r2.status_code == 302
-    assert "verified=0" in r2.headers["location"]
-
-
-def test_resend_verification_succeeds_when_smtp_configured(smtp_signup_client):
-    """Logged-in unverified user can hit /api/auth/resend-verification
-    to mint a fresh token + send a new email."""
-    from unittest.mock import patch, MagicMock
-    client, _db = smtp_signup_client
-
-    fake_smtp = MagicMock()
-    inner = MagicMock()
-    fake_smtp.return_value.__enter__.return_value = inner
-    with patch("pulse.alerts.emailer.smtplib.SMTP", fake_smtp):
-        client.post("/api/auth/signup", json={
-            "email": "founder@example.com",
-            "password": "correct-horse-battery",
-        })
-        # First email was the signup verification — clear the call list
-        # so we only see the resend.
-        inner.sendmail.reset_mock()
-        r = client.post("/api/auth/resend-verification")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["sent"] is True
-    assert body["smtp_configured"] is True
-    assert inner.sendmail.called
-
-
-def test_resend_verification_reports_smtp_off(auth_client):
-    """When SMTP isn't configured, the resend endpoint returns 200 with
-    sent=False + smtp_configured=False so the UI can show a "ask your
-    admin to configure SMTP" message instead of "check your email"."""
-    auth_client.post("/api/auth/signup", json={
-        "email": "me@example.com", "password": "correct-horse-battery",
-    })
-    # The signup auto-verified them, so we re-flip to unverified to
-    # exercise the resend path. (Otherwise the endpoint short-circuits
-    # with already_verified=True, which is a different code path.)
-    from pulse import database
-    import sqlite3
-    # auth_client owns the DB path via app.state — easiest is to find
-    # it via the app
-    app = auth_client.app
-    db_path = app.state.db_path
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE users SET email_verified_at = NULL")
-    r = auth_client.post("/api/auth/resend-verification")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["sent"] is False
-    assert body["smtp_configured"] is False
-
-
-def test_resend_verification_short_circuits_when_already_verified(auth_client):
-    """A user who's already verified shouldn't be able to spam more
-    verification emails. The endpoint returns sent=False +
-    already_verified=True without minting a token."""
-    auth_client.post("/api/auth/signup", json={
-        "email": "me@example.com", "password": "correct-horse-battery",
-    })
-    r = auth_client.post("/api/auth/resend-verification")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["sent"] is False
-    assert body.get("already_verified") is True
 
 
 def test_db_verification_token_round_trip(tmp_path):
