@@ -233,6 +233,11 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
         if e.strip()
     )
 
+    # Whether pulse.yaml existed BEFORE this boot — the secret-persist below
+    # may create it on a fresh install, and the startup banner distinguishes
+    # "created" (this boot made it) from "found" (it was already there).
+    _yaml_preexisted = os.path.exists(config_path)
+
     # Resolve (and if needed, generate + persist) the session signing secret
     # so every logged-in browser cookie can be verified on future requests.
     # In production the secret MUST come from the PULSE_SECRET env var — we
@@ -482,6 +487,7 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     _log_startup_summary(
         is_production=_is_production,
         yaml_found=os.path.exists(config_path),
+        yaml_created=(not _yaml_preexisted and os.path.exists(config_path)),
         db_ok=_db_ok,
         db_path=db_path,
         config_path=config_path,
@@ -513,7 +519,8 @@ def _redact_db_target(target):
     return target
 
 
-def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_path):
+def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_path,
+                         yaml_created=False):
     """One-shot startup banner — appears once in Render's log stream so
     the operator can tell at a glance which env Pulse thinks it's in,
     whether pulse.yaml loaded, and which optional channels are wired."""
@@ -537,7 +544,9 @@ def _log_startup_summary(*, is_production, yaml_found, db_ok, db_path, config_pa
         return "ok" if flag else "off"
 
     env_label = "production" if is_production else "development"
-    yaml_label = "found" if yaml_found else "missing (env-var fallback)"
+    yaml_label = ("created (first boot)" if yaml_created
+                  else "found" if yaml_found
+                  else "missing (env-var fallback)")
     db_label = "ok" if db_ok else "FAILED"
 
     print("  [*] Pulse startup:")
