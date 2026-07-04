@@ -60,3 +60,6 @@ _qa_check.pdf
 
 # Database backups created during resets
 pulse.db.bak-*
+
+# Personal content drafts (LinkedIn posts etc.) — not part of the public repo.
+docs/LINKEDIN_CONTENT.md
