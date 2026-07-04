@@ -312,6 +312,19 @@ CREATE TABLE IF NOT EXISTS organizations (
 );
 """
 
+# Authenticator-app 2FA recovery codes. Eight single-use codes are generated
+# when a user enables TOTP and shown once; only the sha256 of each is stored,
+# so a DB leak can't recover them. `used_at` NULL = still available.
+_CREATE_MFA_RECOVERY_CODES = """
+CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_sha256 TEXT    NOT NULL,
+    used_at     TEXT,
+    created_at  TEXT    NOT NULL
+);
+"""
+
 
 _CREATE_NOTIFICATIONS = """
 CREATE TABLE IF NOT EXISTS notifications (
@@ -447,6 +460,7 @@ def init_db(db_path):
         _CREATE_AGENTS,
         _CREATE_NOTIFICATIONS,
         _CREATE_ORGANIZATIONS,
+        _CREATE_MFA_RECOVERY_CODES,
         _CREATE_SIGMA_RULES,
         _CREATE_REPORTS,
         _CREATE_USER_AI_USAGE,
@@ -541,6 +555,20 @@ def init_db(db_path):
         "ALTER TABLE users ADD COLUMN email_otp_last_sent_at        TEXT",
         "ALTER TABLE users ADD COLUMN email_otp_resend_count        INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN email_otp_resend_window_start TEXT",
+        # Authenticator-app 2FA (TOTP, RFC 6238). totp_secret is the base32
+        # shared secret (must be reversible to verify codes, so it's stored as-
+        # is — encrypting it at rest is tracked under 'Encrypted config secrets'
+        # on the roadmap). totp_enabled flips to 1 only after the user confirms
+        # a valid code. Recovery codes live in mfa_recovery_codes (hashes only).
+        "ALTER TABLE users ADD COLUMN totp_secret  TEXT",
+        "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+        # Replay protection: the last 30-second TOTP step consumed at login,
+        # so a code can't be reused within its own validity window.
+        "ALTER TABLE users ADD COLUMN totp_last_step INTEGER",
+        # Org policy: when 1, every member of the org must have 2FA enabled;
+        # the middleware blocks non-compliant members from everything except
+        # the 2FA setup screen.
+        "ALTER TABLE organizations ADD COLUMN require_2fa INTEGER NOT NULL DEFAULT 0",
         # Security PIN — step-up credential for destructive actions. pin_hash
         # is a scrypt hash (NULL = no PIN set, opt-in). The failed-count +
         # locked-until columns enforce a hard lockout so a low-entropy PIN
@@ -2693,6 +2721,160 @@ def otp_resend_allowed(state, *, now=None, cooldown_sec=60, max_per_hour=3):
         except (ValueError, TypeError):
             pass
     return 'ok'
+
+
+# --- Authenticator-app 2FA (TOTP, RFC 6238) ------------------------------
+# The base32 secret lives in users.totp_secret (reversible — needed to verify
+# codes). totp_enabled flips to 1 only after the user confirms a code. Recovery
+# codes are stored as sha256 hashes in mfa_recovery_codes, single-use.
+
+def set_totp_secret(db_path, user_id, secret):
+    """Store a PENDING (unconfirmed) TOTP secret. Stays disabled until the
+    user proves they can generate a valid code (see enable_totp)."""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?",
+            (secret, int(user_id)))
+
+
+def enable_totp(db_path, user_id):
+    """Activate 2FA once a confirming code has validated. No-op with no secret."""
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE users SET totp_enabled = 1"
+            " WHERE id = ? AND totp_secret IS NOT NULL", (int(user_id),))
+        return cur.rowcount > 0
+
+
+def disable_totp(db_path, user_id):
+    """Turn 2FA off: clear the secret, flip enabled to 0, drop recovery codes."""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?",
+            (int(user_id),))
+        conn.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ?",
+                     (int(user_id),))
+
+
+def get_totp_secret(db_path, user_id):
+    """Return the stored secret (pending or active) for verification, or None."""
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT totp_secret FROM users WHERE id = ?",
+                           (int(user_id),)).fetchone()
+    if not row:
+        return None
+    return row[0] if not isinstance(row, dict) else row.get("totp_secret")
+
+
+def is_totp_enabled(db_path, user_id):
+    """True if the user has confirmed + active 2FA. Fails safe (False) on a
+    pre-migration DB so nobody is locked out of a feature they never set up."""
+    if user_id is None:
+        return False
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute("SELECT totp_enabled FROM users WHERE id = ?",
+                               (int(user_id),)).fetchone()
+    except db_backend.OperationalError:
+        return False
+    if not row:
+        return False
+    val = row[0] if not isinstance(row, dict) else row.get("totp_enabled")
+    return bool(val)
+
+
+def totp_step_is_fresh(db_path, user_id, step):
+    """Replay guard: return True and record ``step`` if it's newer than the
+    last TOTP step this user consumed at login; return False (a replay) if the
+    same or an older step is presented again."""
+    step = int(step)
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT totp_last_step FROM users WHERE id = ?",
+                           (int(user_id),)).fetchone()
+        last = None
+        if row:
+            last = row[0] if not isinstance(row, dict) else row.get("totp_last_step")
+        if last is not None and step <= int(last):
+            return False
+        conn.execute("UPDATE users SET totp_last_step = ? WHERE id = ?",
+                     (step, int(user_id)))
+    return True
+
+
+def hash_recovery_code(code):
+    """Normalize (strip spaces/dashes, lowercase) + sha256 a recovery code, so
+    display formatting never affects matching."""
+    import hashlib
+    norm = (code or "").strip().replace(" ", "").replace("-", "").lower()
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def store_recovery_codes(db_path, user_id, codes):
+    """Replace user_id's recovery codes. ``codes`` are the RAW plaintext codes
+    (shown to the user once); only their hashes are persisted."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ?",
+                     (int(user_id),))
+        for c in codes:
+            conn.execute(
+                "INSERT INTO mfa_recovery_codes (user_id, code_sha256, created_at)"
+                " VALUES (?, ?, ?)", (int(user_id), hash_recovery_code(c), ts))
+
+
+def consume_recovery_code(db_path, user_id, code):
+    """Spend a single-use recovery code. Returns True if a matching UNUSED code
+    existed (now marked used), else False."""
+    if not code:
+        return False
+    h = hash_recovery_code(code)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id FROM mfa_recovery_codes"
+            " WHERE user_id = ? AND code_sha256 = ? AND used_at IS NULL"
+            " LIMIT 1", (int(user_id), h)).fetchone()
+        if not row:
+            return False
+        rid = row[0] if not isinstance(row, dict) else row.get("id")
+        conn.execute("UPDATE mfa_recovery_codes SET used_at = ? WHERE id = ?",
+                     (ts, int(rid)))
+    return True
+
+
+def count_recovery_codes(db_path, user_id):
+    """Number of UNUSED recovery codes remaining for the user."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM mfa_recovery_codes"
+            " WHERE user_id = ? AND used_at IS NULL", (int(user_id),)).fetchone()
+    if not row:
+        return 0
+    val = row[0] if not isinstance(row, dict) else list(row.values())[0]
+    return int(val or 0)
+
+
+def set_org_require_2fa(db_path, org_id, enabled):
+    with _connect(db_path) as conn:
+        conn.execute("UPDATE organizations SET require_2fa = ? WHERE id = ?",
+                     (1 if enabled else 0, int(org_id)))
+
+
+def org_requires_2fa(db_path, org_id):
+    """True if the org mandates 2FA for all members. Fails safe (False)."""
+    if org_id is None:
+        return False
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT require_2fa FROM organizations WHERE id = ?",
+                (int(org_id),)).fetchone()
+    except db_backend.OperationalError:
+        return False
+    if not row:
+        return False
+    val = row[0] if not isinstance(row, dict) else row.get("require_2fa")
+    return bool(val)
 
 
 def touch_user_last_active(db_path, user_id):

@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-1225%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1232%20passing-brightgreen)
 ![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
 ![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
 
@@ -69,7 +69,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 | **API** | FastAPI surface with Swagger at `/docs` · Bearer-token auth · REST endpoints for scan upload, history, reports, agent transport |
 | **Agent** | Packaged `pulse-agent.exe` · two-token enrollment · 60s heartbeat + 30min scan cadence · auto-update probe · ACL self-audit |
 | **Self-hosted & air-gap friendly** | No third-party CDNs, web fonts, or telemetry — Chart.js and Lucide are **version-pinned and vendored** (`static/vendor/`), fonts use a system stack, so the dashboard renders **fully offline / air-gapped** and leaks nothing to external hosts. |
-| **Auth & hardening** | Mandatory **6-digit email OTP** on signup (verification screen with resend + attempt limits; auto-verifies on no-SMTP self-host so a fresh install isn't bricked) · **CSRF** protection on mutating routes · per-IP login/OTP rate-limits + lockouts · optional step-up **security PIN** · multi-tenant org isolation |
+| **Auth & hardening** | Mandatory **6-digit email OTP** on signup (verification screen with resend + attempt limits; auto-verifies on no-SMTP self-host so a fresh install isn't bricked) · **authenticator-app 2FA** (TOTP, RFC 6238 — QR enrollment, single-use recovery codes, ±1 drift window, replay-protected, optional org-wide "require 2FA" policy, admin org-scoped reset) · **CSRF** protection on mutating routes · per-IP login/OTP/2FA rate-limits + lockouts · optional step-up **security PIN** · multi-tenant org isolation |
 | **Multi-tenant** | Every row scoped to `organization_id` · self-signup mints fresh org · email verification · admin invites |
 
 ---
@@ -124,7 +124,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 
 **Storage** — All scan history, findings, audit log, agents, notifications, organizations, users, API tokens, IP block list, and finding notes live in one schema ([`pulse/database.py`](pulse/database.py)). Multi-tenant rows carry an `organization_id`; the API helper `_read_scope_kwargs` enforces tenant isolation on every read/write.
 
-**Tests** — 1225 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
+**Tests** — 1232 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
 
 ---
 

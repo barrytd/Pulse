@@ -13,6 +13,8 @@ import {
   apiUpdateUserActive,
   apiUpdateUserDisplayName,
   apiDeleteUser,
+  apiResetUser2fa,
+  apiSetOrgRequire2fa,
   apiChangeEmail,
   apiChangePassword,
   apiLogout,
@@ -46,6 +48,7 @@ import {
 } from './severity-colors.js';
 import { refreshUserMenuAvatar, refreshUserMenuIdentity } from './user-menu.js';
 import { fetchPinStatus, pinCardHtml } from './pin.js';
+import { fetch2faStatus, twofaCardHtml } from './twofa.js';
 
 // Map the "Email provider" dropdown back to host+port so users never
 // have to know those exist for Gmail/Outlook/Yahoo.
@@ -234,15 +237,23 @@ export async function renderSettingsPage() {
   // Security PIN status for the Account tab card (best-effort).
   var _pinStatus = { pin_set: false };
   try { _pinStatus = await fetchPinStatus(); } catch (e) { _pinStatus = { pin_set: false }; }
+  // 2FA (TOTP) status for the Account tab card (best-effort).
+  var _2faStatus = { enabled: false, recovery_codes_remaining: 0 };
+  try { _2faStatus = await fetch2faStatus(); } catch (e) { _2faStatus = { enabled: false }; }
 
   // Admin-only users fetch — skip the round-trip for non-admins. The
   // server would 403 anyway, but avoiding it keeps the Network tab clean.
   var usersList = [];
+  var orgRequire2fa = false;
   if (isAdmin) {
     try {
       var lu = await apiListUsers();
       usersList = lu.users || [];
     } catch (e) { usersList = []; }
+    try {
+      var or2 = await fetch('/api/org/require-2fa');
+      if (or2.ok) orgRequire2fa = !!(await or2.json()).require_2fa;
+    } catch (e) { orgRequire2fa = false; }
   }
 
   // API tokens for the current user — always fetched (every signed-in
@@ -509,7 +520,9 @@ export async function renderSettingsPage() {
     '</div>' +
     // Security PIN card (step-up auth) — best-effort status fetch; a failure
     // just hides the card rather than blocking the Account tab.
-    pinCardHtml(_pinStatus);
+    pinCardHtml(_pinStatus) +
+    // Authenticator-app 2FA card.
+    twofaCardHtml(_2faStatus);
 
   // --- Notifications tab ---------------------------------------------
   var emailSmtpHtml =
@@ -805,7 +818,7 @@ export async function renderSettingsPage() {
     '</div>';
 
   // --- Users tab (admins only) --------------------------------------
-  var usersHtml = isAdmin ? _renderUsersPanel(me, usersList) : '';
+  var usersHtml = isAdmin ? _renderUsersPanel(me, usersList, orgRequire2fa) : '';
   var feedbackHtml = isAdmin ? _renderFeedbackPanel(feedbackRows) : '';
   var notesHtml = isAdmin ? _renderNotesAdminPanel(notesRows) : '';
   var waitlistHtml = isAdmin ? _renderWaitlistPanel(waitlistRows) : '';
@@ -948,7 +961,7 @@ export async function renderSettingsPage() {
 // Users tab (admin-only)
 // ------------------------------------------------------------------------
 
-function _renderUsersPanel(me, users) {
+function _renderUsersPanel(me, users, orgRequire2fa) {
   var rowsHtml = (users || []).map(function (u) {
     var isSelf = (u.id === me.id);
 
@@ -1007,6 +1020,13 @@ function _renderUsersPanel(me, users) {
         '<i data-lucide="' + (u.active ? 'user-minus' : 'user-check') + '"></i>' +
         '<span>' + (u.active ? 'Disable account' : 'Enable account') + '</span>' +
       '</a>' +
+      // Reset 2FA — only shown for a user who has it enabled (locked-out
+      // recovery path for an admin). Backend is org-scoped + PIN-gated.
+      (u.two_factor ?
+        '<a class="pulse-dropdown-item" data-action="reset2faConfirm" data-arg="' +
+            u.id + '|' + encodeURIComponent(u.email) + '">' +
+          '<i data-lucide="shield-off"></i><span>Reset 2FA</span>' +
+        '</a>' : '') +
       '<div class="pulse-dropdown-divider"></div>' +
       '<a class="pulse-dropdown-item pulse-dropdown-item-danger" ' +
          'data-action="deleteUserConfirm" data-arg="' +
@@ -1061,6 +1081,19 @@ function _renderUsersPanel(me, users) {
     : '<p style="color:var(--text-muted); font-size:13px;">No other users yet.</p>';
 
   return (
+    '<div class="card" style="margin-bottom:16px;">' +
+      '<div class="section-label">Two-factor policy</div>' +
+      '<p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">' +
+        'Require every member of your organization to set up authenticator-app 2FA. ' +
+        'Members without it are locked to the 2FA setup screen until they enrol.' +
+      '</p>' +
+      '<label style="display:flex; align-items:center; gap:10px; cursor:pointer;">' +
+        '<input type="checkbox" id="org-require-2fa"' + (orgRequire2fa ? ' checked' : '') +
+          ' data-action-change="toggleRequire2fa"/>' +
+        '<span>Require 2FA for all members</span>' +
+      '</label>' +
+      '<div class="assign-status" id="org-require-2fa-status"></div>' +
+    '</div>' +
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Invite a User</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
@@ -1897,6 +1930,63 @@ export async function deleteUserConfirm(arg) {
     renderSettingsPage();
   } catch (e) {
     toastError('Network error: ' + e.message);
+  }
+}
+
+// Admin: force-disable a locked-out user's 2FA (org-scoped + PIN-gated on the
+// server; the pinGuard in apiResetUser2fa pops the PIN prompt when needed).
+export async function reset2faConfirm(arg) {
+  var parts = String(arg || '').split('|');
+  var id = Number(parts[0]);
+  var email = decodeURIComponent(parts[1] || '');
+  if (!id) return;
+  if (!window.confirm('Reset two-factor authentication for ' + email + '?\n\n' +
+      'This turns off their 2FA and deletes their recovery codes, so they can sign in ' +
+      'with just their password. Use this only when they are locked out.')) return;
+  try {
+    var r = await apiResetUser2fa(id);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError((err && err.detail) || 'Could not reset 2FA.');
+      return;
+    }
+    showToast('2FA reset for ' + email);
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+// Admin: toggle the org "require 2FA for all members" policy. Enabling it
+// pops a confirm dialog explaining non-compliant members get locked to setup.
+export async function toggleRequire2fa(arg, target) {
+  var enable = !!(target && target.checked);
+  function setMsg(m, err) {
+    var el = document.getElementById('org-require-2fa-status');
+    if (el) { el.textContent = m || ''; el.className = 'assign-status' + (err ? ' assign-status-err' : ''); }
+  }
+  if (enable && !window.confirm(
+      'Require 2FA for all members?\n\n' +
+      'Members who do not have two-factor authentication enabled will be locked out of ' +
+      'everything except the 2FA setup screen until they set it up (including you, if you ' +
+      'have not enabled it yet).')) {
+    if (target) target.checked = false;   // revert the toggle
+    return;
+  }
+  setMsg('Saving…');
+  try {
+    var r = await apiSetOrgRequire2fa(enable);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      var det = err && err.detail;
+      setMsg((det && det.message) || (typeof det === 'string' ? det : 'Could not update the policy.'), true);
+      if (target) target.checked = !enable;
+      return;
+    }
+    setMsg(enable ? 'Two-factor is now required for all members.' : 'Requirement removed.');
+  } catch (e) {
+    setMsg('Network error.', true);
+    if (target) target.checked = !enable;
   }
 }
 

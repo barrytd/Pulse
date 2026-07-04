@@ -519,6 +519,24 @@ export async function apiDeleteUser(userId) {
   });
 }
 
+// Admin-only: force-disable a user's 2FA (org-scoped, PIN-gated server-side).
+export async function apiResetUser2fa(userId) {
+  return pinGuard(function () {
+    return fetch('/api/users/' + Number(userId) + '/2fa/reset', { method: 'POST' });
+  });
+}
+
+// Admin-only: set the org "require 2FA for all members" policy (PIN-gated).
+export async function apiSetOrgRequire2fa(enabled) {
+  return pinGuard(function () {
+    return fetch('/api/org/require-2fa', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !!enabled }),
+    });
+  });
+}
+
 export async function apiWhitelistBuiltin() {
   try {
     var resp = await fetch('/api/whitelist/builtin');

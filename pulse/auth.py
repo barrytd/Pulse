@@ -20,6 +20,8 @@ import secrets
 import time
 from typing import Optional
 
+import pyotp
+
 from fastapi import HTTPException, Request
 
 
@@ -182,6 +184,70 @@ def verify_elevation_cookie(secret: str, cookie_value: str,
     5-minute window, else None."""
     return verify_session_cookie(
         secret, cookie_value, now=now, max_age=ELEVATION_MAX_AGE_SECONDS)
+
+
+# Two-factor challenge cookie — issued after a correct password when the
+# account has 2FA on, and consumed by the /api/auth/2fa/verify step. It is NOT
+# a session (it grants no access on its own); it only proves "this browser
+# passed the password for user N" so the second factor can be checked. Short
+# TTL so an abandoned half-login can't be resumed later.
+MFA_COOKIE_NAME = "pulse_2fa"
+MFA_MAX_AGE_SECONDS = 10 * 60   # 10 minutes
+
+
+def issue_mfa_cookie(secret: str, user_id: int, now: Optional[int] = None) -> str:
+    """Signed short-lived 2FA-pending token (same construction as the session
+    cookie). Set after a correct password when the user has 2FA enabled."""
+    return issue_session_cookie(secret, user_id, now=now)
+
+
+def verify_mfa_cookie(secret: str, cookie_value: str,
+                      now: Optional[int] = None) -> Optional[int]:
+    """Return the user_id if the 2FA-pending cookie is valid + within the
+    10-minute window, else None."""
+    return verify_session_cookie(
+        secret, cookie_value, now=now, max_age=MFA_MAX_AGE_SECONDS)
+
+
+def verify_totp(secret: str, code: str, valid_window: int = 1) -> bool:
+    """Verify a 6-digit TOTP (RFC 6238) against ``secret``.
+
+    ``valid_window=1`` accepts the code for the previous, current, and next
+    30-second step (±1), tolerating modest clock drift between the server and
+    the authenticator app. Never raises on malformed input.
+    """
+    if not secret or not code:
+        return False
+    code = code.strip().replace(" ", "")
+    if not code.isdigit():
+        return False
+    try:
+        return bool(pyotp.TOTP(secret).verify(code, valid_window=int(valid_window)))
+    except Exception:
+        return False
+
+
+def totp_matched_step(secret: str, code: str, valid_window: int = 1,
+                      now: Optional[int] = None) -> Optional[int]:
+    """Like verify_totp, but return the 30-second STEP index the code matched
+    (for replay protection), or None if it doesn't match. Checks the ±window
+    steps around ``now``.
+    """
+    if not secret or not code:
+        return None
+    code = code.strip().replace(" ", "")
+    if not code.isdigit():
+        return None
+    try:
+        totp = pyotp.TOTP(secret)
+        now = now if now is not None else int(time.time())
+        for offset in range(-int(valid_window), int(valid_window) + 1):
+            t = now + offset * 30
+            if hmac.compare_digest(totp.at(t), code):
+                return t // 30
+    except Exception:
+        return None
+    return None
 
 
 # ---------------------------------------------------------------------------

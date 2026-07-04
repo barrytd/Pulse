@@ -200,6 +200,8 @@ import {
   saveUserDisplayNameOnEnter,
   toggleUserRowMenu,
   deleteUserConfirm,
+  reset2faConfirm,
+  toggleRequire2fa,
   uploadAvatarClick,
   onAvatarFileSelected,
   createToken,
@@ -294,6 +296,13 @@ import {
   removePin,
   togglePinReveal,
 } from './pin.js';
+import {
+  start2faSetup,
+  confirm2faSetup,
+  cancel2faSetup,
+  ack2faRecovery,
+  disable2fa,
+} from './twofa.js';
 
 // Central action registry — replaces the old window[action] lookup.
 // Every data-action / data-action-<event> string in the HTML or
@@ -343,6 +352,11 @@ const actions = {
   savePin,
   removePin,
   togglePinReveal,
+  start2faSetup,
+  confirm2faSetup,
+  cancel2faSetup,
+  ack2faRecovery,
+  disable2fa,
   viewScan,
   setFindingsSort,
   setFindingsQueryFromInput,
@@ -498,6 +512,8 @@ const actions = {
   saveUserDisplayNameOnEnter,
   toggleUserRowMenu,
   deleteUserConfirm,
+  reset2faConfirm,
+  toggleRequire2fa,
   uploadAvatarClick,
   onAvatarFileSelected,
   createToken,

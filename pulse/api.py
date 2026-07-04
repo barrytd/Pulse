@@ -56,6 +56,8 @@ from pulse.auth import (
     issue_session_cookie, require_admin, require_login, require_manager,
     verify_password, hash_pin, verify_pin, validate_pin_format,
     issue_elevation_cookie, verify_elevation_cookie,
+    MFA_COOKIE_NAME, MFA_MAX_AGE_SECONDS,
+    issue_mfa_cookie, verify_mfa_cookie, verify_totp, totp_matched_step,
 )
 from pulse.database import (
     count_admins, count_users, create_api_token, create_user,
@@ -86,6 +88,10 @@ from pulse.database import (
     mint_email_verification_token, consume_email_verification_token,
     is_email_verified, mark_user_email_verified,
     mint_email_otp, verify_email_otp, get_otp_state, otp_resend_allowed,
+    set_totp_secret, enable_totp, disable_totp, get_totp_secret,
+    is_totp_enabled, store_recovery_codes, consume_recovery_code,
+    count_recovery_codes, set_org_require_2fa, org_requires_2fa,
+    totp_step_is_fresh,
     save_sigma_rule, list_sigma_rules, get_sigma_rule,
     set_sigma_rule_enabled, delete_sigma_rule,
     save_report, list_reports_db, get_report_meta, get_report_bytes,
@@ -373,6 +379,10 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     # otherwise. The plural `/api/agents/` management routes stay behind
     # the normal user-session check.
     _AUTH_EXEMPT_PREFIX  = ("/api/auth/", "/api/agent/")
+    # When an org mandates 2FA, a non-compliant member may still reach these
+    # (plus anything under /api/2fa/) so they can enrol, see their profile,
+    # and log out — everything else is blocked until they enable 2FA.
+    _MFA_SETUP_ALLOWED   = {"/api/me", "/api/auth/logout", "/api/auth/status"}
 
     @app.middleware("http")
     async def _auth_middleware(request, call_next):
@@ -428,6 +438,18 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             user = get_user_by_id(app.state.db_path, user_id)
             if not user or not user.get("active"):
                 return JSONResponse({"detail": "Authentication required."}, status_code=401)
+            # Org 2FA policy: if the organization mandates 2FA and this member
+            # hasn't enabled it, block everything EXCEPT the 2FA setup surface
+            # (+ their own profile / logout / auth status) until they comply.
+            if (org_requires_2fa(app.state.db_path, user.get("organization_id"))
+                    and not is_totp_enabled(app.state.db_path, user_id)
+                    and not path.startswith("/api/2fa/")
+                    and path not in _MFA_SETUP_ALLOWED):
+                return JSONResponse(
+                    {"detail": {"code": "2fa_setup_required",
+                                "message": ("Your organization requires two-factor "
+                                            "authentication. Set it up to continue.")}},
+                    status_code=403)
             # Last-active beacon — bump the column so the Users admin
             # tab can show "active 3m ago" timestamps. Best-effort; a
             # DB hiccup here must never break the request.
@@ -1363,6 +1385,18 @@ def _register_routes(app: FastAPI) -> None:
                 "message": ("Please verify your email first. Enter the "
                             "code we sent you, or request a new one."),
             })
+        # Second factor. If the account has 2FA enabled, the correct password
+        # is NOT enough — issue a short-lived pending-2FA cookie (not a
+        # session) and ask for the authenticator code at /api/auth/2fa/verify.
+        if is_totp_enabled(app.state.db_path, user["id"]):
+            mfa_cookie = issue_mfa_cookie(app.state.session_secret, user["id"])
+            resp = JSONResponse({"status": "mfa_required"})
+            resp.set_cookie(
+                MFA_COOKIE_NAME, mfa_cookie,
+                max_age=MFA_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+                secure=bool(getattr(app.state, "is_production", False)),
+            )
+            return resp
         cookie = issue_session_cookie(app.state.session_secret, user["id"])
         resp = JSONResponse({"status": "ok", "email": user["email"]})
         resp.set_cookie(
@@ -1376,6 +1410,62 @@ def _register_routes(app: FastAPI) -> None:
     def auth_logout():
         resp = JSONResponse({"status": "ok"})
         resp.delete_cookie(SESSION_COOKIE_NAME)
+        resp.delete_cookie(MFA_COOKIE_NAME)
+        return resp
+
+    @app.post("/api/auth/2fa/verify")
+    async def auth_2fa_verify(request: Request):
+        """Second login step: verify the authenticator code (or a recovery
+        code) for a user who already passed the password.
+
+        The pending-2FA cookie (set by /api/auth/login) identifies the user —
+        the code is the second credential. Accepts a 6-digit TOTP (±1 step for
+        clock drift) OR a single-use recovery code; recovery codes are spent on
+        use. Rate-limited exactly like login (per-IP burst + failed-attempt
+        lockout). Every failure returns ONE generic message — it never reveals
+        whether the code was wrong, whether it was the TOTP vs. recovery factor,
+        or that 2FA is even the failing step.
+        """
+        rate_limit.hit(request, "mfa_verify", window_sec=300, max_hits=50)
+        rate_limit.check(
+            request, "mfa_verify_fail", window_sec=900, max_hits=10,
+            status_code=423,
+            detail=("Too many incorrect codes. This is temporarily locked. "
+                    "Wait 15 minutes and try again."),
+        )
+        cookie = request.cookies.get(MFA_COOKIE_NAME)
+        user_id = (verify_mfa_cookie(app.state.session_secret, cookie)
+                   if cookie else None)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        code = str((body or {}).get("code") or "").strip()
+
+        ok = False
+        if user_id is not None and code and is_totp_enabled(app.state.db_path, user_id):
+            secret = get_totp_secret(app.state.db_path, user_id)
+            # Try the time-based code first, then fall back to a recovery code.
+            step = totp_matched_step(secret, code, valid_window=1)
+            if step is not None:
+                # Valid TOTP — accept only if this 30s step hasn't been used
+                # already (rejects a replayed code inside its own window).
+                ok = totp_step_is_fresh(app.state.db_path, user_id, step)
+            elif consume_recovery_code(app.state.db_path, user_id, code):
+                ok = True
+        if not ok:
+            rate_limit.record(request, "mfa_verify_fail", window_sec=900)
+            raise HTTPException(400, detail="That code is incorrect. Try again.")
+
+        # Passed — promote the pending login to a real session.
+        session = issue_session_cookie(app.state.session_secret, user_id)
+        resp = JSONResponse({"status": "ok"})
+        resp.set_cookie(
+            SESSION_COOKIE_NAME, session,
+            max_age=SESSION_MAX_AGE_SECONDS, httponly=True, samesite="lax",
+            secure=bool(getattr(app.state, "is_production", False)),
+        )
+        resp.delete_cookie(MFA_COOKIE_NAME)
         return resp
 
     @app.post("/api/auth/verify-otp")
@@ -1678,6 +1768,99 @@ def _register_routes(app: FastAPI) -> None:
         )
         _audit_user_action(user_id, "pin_elevation_granted", target=str(user_id))
         return {"status": "ok", "elevated_seconds": ELEVATION_MAX_AGE_SECONDS}
+
+    # -------------------------------------------------------------------
+    # Authenticator-app 2FA (TOTP) — enrollment + management (Settings).
+    # -------------------------------------------------------------------
+    def _totp_qr_data_uri(otpauth_uri):
+        """Render an otpauth:// URI as a PNG data URI — server-side, no CDN."""
+        import io
+        import base64 as _b64
+        import qrcode
+        img = qrcode.make(otpauth_uri)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode("ascii")
+
+    def _gen_recovery_codes(n=8):
+        """n formatted single-use recovery codes (xxxxx-xxxxx). Matching is
+        format-insensitive (see database.hash_recovery_code)."""
+        import secrets as _secrets
+        out = []
+        for _ in range(n):
+            raw = _secrets.token_hex(5)   # 10 hex chars
+            out.append(f"{raw[:5]}-{raw[5:]}")
+        return out
+
+    @app.get("/api/2fa/status")
+    def api_2fa_status(user_id: int = Depends(require_login)):
+        if not app.state.auth_required:
+            return {"enabled": False, "recovery_codes_remaining": 0}
+        return {
+            "enabled": is_totp_enabled(app.state.db_path, user_id),
+            "recovery_codes_remaining": count_recovery_codes(app.state.db_path, user_id),
+        }
+
+    @app.post("/api/2fa/setup")
+    def api_2fa_setup(user_id: int = Depends(require_login)):
+        """Generate a fresh (unconfirmed) TOTP secret and return the QR +
+        manual key. 2FA is NOT active until /api/2fa/confirm succeeds."""
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Two-factor auth requires login.")
+        if is_totp_enabled(app.state.db_path, user_id):
+            raise HTTPException(409, detail="Two-factor authentication is already enabled.")
+        import pyotp
+        user = get_user_by_id(app.state.db_path, user_id) or {}
+        secret = pyotp.random_base32()
+        set_totp_secret(app.state.db_path, user_id, secret)
+        uri = pyotp.TOTP(secret).provisioning_uri(
+            name=user.get("email") or f"user{user_id}", issuer_name="Pulse")
+        return {"secret": secret, "otpauth_uri": uri, "qr": _totp_qr_data_uri(uri)}
+
+    @app.post("/api/2fa/confirm")
+    async def api_2fa_confirm(request: Request, user_id: int = Depends(require_login)):
+        """Confirm setup with a valid code, activate 2FA, and return 8 single-
+        use recovery codes ONCE (only their sha256 hashes are stored)."""
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Two-factor auth requires login.")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        code = str((body or {}).get("code") or "").strip()
+        secret = get_totp_secret(app.state.db_path, user_id)
+        if not secret:
+            raise HTTPException(400, detail="Start 2FA setup first.")
+        if not verify_totp(secret, code, valid_window=1):
+            raise HTTPException(400, detail={
+                "code": "invalid",
+                "message": "That code didn't match. Check your authenticator and try again."})
+        enable_totp(app.state.db_path, user_id)
+        codes = _gen_recovery_codes(8)
+        store_recovery_codes(app.state.db_path, user_id, codes)
+        _audit_user_action(user_id, "enable_2fa", target=str(user_id))
+        return {"status": "enabled", "recovery_codes": codes}
+
+    @app.post("/api/2fa/disable")
+    async def api_2fa_disable(request: Request, user_id: int = Depends(require_login)):
+        """Self-disable 2FA. Requires a valid CURRENT code (TOTP or a recovery
+        code), so a hijacked session alone can't switch the protection off."""
+        if not app.state.auth_required:
+            raise HTTPException(400, detail="Two-factor auth requires login.")
+        if not is_totp_enabled(app.state.db_path, user_id):
+            return {"status": "disabled"}
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body.")
+        code = str((body or {}).get("code") or "").strip()
+        secret = get_totp_secret(app.state.db_path, user_id)
+        if not (verify_totp(secret, code, valid_window=1)
+                or consume_recovery_code(app.state.db_path, user_id, code)):
+            raise HTTPException(400, detail="That code is incorrect.")
+        disable_totp(app.state.db_path, user_id)
+        _audit_user_action(user_id, "disable_2fa", target=str(user_id))
+        return {"status": "disabled"}
 
     # -------------------------------------------------------------------
     # Security Buddy "Pip" — backend-proxied AI chat.
@@ -2343,6 +2526,7 @@ def _register_routes(app: FastAPI) -> None:
             "created_at":     u.get("created_at"),
             "display_name":   u.get("display_name"),
             "last_active_at": u.get("last_active_at"),
+            "two_factor":     is_totp_enabled(app.state.db_path, u["id"]),
         }
 
     def _audit_user_action(acting_user_id, action, *, target=None, detail=None):
@@ -2497,6 +2681,46 @@ def _register_routes(app: FastAPI) -> None:
         _audit_user_action(user_id, "update_user_active",
                            target=target["email"], detail=f"active={int(active)}")
         return _public_user(get_user_by_id(app.state.db_path, target_id))
+
+    @app.post("/api/users/{target_id}/2fa/reset")
+    def api_admin_reset_2fa(target_id: int, request: Request,
+                            user_id: int = Depends(require_admin)):
+        """Force-disable 2FA for a locked-out member of the admin's OWN org
+        (e.g. they lost their phone and their recovery codes). Org-scoped
+        (404 on a cross-org id, like every other /api/users op), PIN-gated if
+        the admin has a security PIN, and audit-logged."""
+        _require_elevation(request, user_id)   # PIN step-up
+        target = get_user_by_id(app.state.db_path, target_id)
+        if not target:
+            raise HTTPException(404, detail="User not found.")
+        _assert_user_in_admin_scope(app, user_id, target)   # 404 if cross-org
+        disable_totp(app.state.db_path, target_id)
+        _audit_user_action(user_id, "admin_reset_2fa", target=target["email"])
+        return {"status": "reset", "email": target["email"]}
+
+    @app.get("/api/org/require-2fa")
+    def api_get_org_require_2fa(user_id: int = Depends(require_admin)):
+        admin = get_user_by_id(app.state.db_path, user_id) or {}
+        return {"require_2fa": org_requires_2fa(
+            app.state.db_path, admin.get("organization_id"))}
+
+    @app.put("/api/org/require-2fa")
+    async def api_set_org_require_2fa(request: Request,
+                                      user_id: int = Depends(require_admin)):
+        """Org policy: require every member to have 2FA. Non-compliant members
+        are then blocked from everything except the 2FA setup screen. PIN-
+        gated + audit-logged; scoped to the admin's own organization."""
+        _require_elevation(request, user_id)   # PIN step-up
+        body = await request.json()
+        enabled = bool(body.get("enabled"))
+        admin = get_user_by_id(app.state.db_path, user_id) or {}
+        org_id = admin.get("organization_id")
+        if org_id is None:
+            raise HTTPException(400, detail="No organization on this account.")
+        set_org_require_2fa(app.state.db_path, org_id, enabled)
+        _audit_user_action(user_id, "set_org_require_2fa",
+                           target=f"org={org_id}", detail=f"enabled={int(enabled)}")
+        return {"require_2fa": enabled}
 
     @app.delete("/api/users/{target_id}")
     def api_delete_user(target_id: int, request: Request,

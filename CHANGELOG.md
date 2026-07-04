@@ -5,6 +5,17 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-06-28 — Authenticator-app 2FA (TOTP)
+
+Added RFC 6238 time-based two-factor authentication on top of passwords, using the `pyotp` library. Opt-in per user, or mandatory per organization.
+
+- **Enrollment (Settings → Profile).** "Enable two-factor authentication" generates a TOTP secret, shows a **QR code** (rendered server-side from the `otpauth://` URI with `qrcode` — no CDN) plus the **manual key**. The user must enter a valid code to **confirm before it activates**, then gets **8 single-use recovery codes shown once** (only their sha256 hashes are stored).
+- **Login second step.** After a correct password, an account with 2FA returns `mfa_required` and **no session** — a short-lived pending-2FA cookie carries the half-login to `POST /api/auth/2fa/verify`, which accepts a **6-digit code or a recovery code**. A **±1 time-step (30s) drift window** tolerates clock skew; a used TOTP step can't be **replayed**; recovery codes are single-use. The step is **rate-limited exactly like login** (per-IP burst + 423 lockout), and every failure is one generic message that **never reveals whether 2FA is the failing factor**.
+- **Admin force-disable.** `POST /api/users/{id}/2fa/reset` lets an admin clear 2FA for a locked-out member of **their own org only** (404 on a cross-org id, like every `/api/users` op), **PIN-gated** (if the admin has a security PIN) and **audit-logged**.
+- **Org policy "require 2FA for all members."** When on, the auth middleware **blocks non-compliant members from everything except the 2FA setup screen** (`/api/2fa/*`, their profile, logout) until they enrol.
+- **Deps:** `pyotp` + `qrcode` (added to `requirements.txt` + `requirements-lock.txt`; `qrcode` renders the QR via Pillow, already present). **Storage note:** the TOTP secret must be reversible to verify codes, so it's stored as-is — encrypting it at rest is tracked under "Encrypted config secrets" on the roadmap.
+- **Tests:** new [`tests/test_2fa.py`](tests/test_2fa.py) — setup requires a valid confirm code, login rejects wrong + replayed codes, recovery codes are single-use, the drift window works, the admin reset is org-scoped + audited, and the require-2FA org policy blocks access until enrolled. Full suite 1232 passing.
+
 ## 2026-06-27 — Fresh-visitor fixes: OTP screen, air-gap vendoring, onboarding
 
 A dogfooding pass through the first-run path (fresh venv, no `pulse.yaml`/`pulse.db`) surfaced several issues; this fixes them.

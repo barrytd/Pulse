@@ -14,6 +14,11 @@ python-multipart>=0.0.28
 # httpx: used at runtime by pulse/buddy.py (the "Pip" assistant proxies the
 # Anthropic API over httpx) and by FastAPI's TestClient in the test suite.
 httpx>=0.25.0
+# pyotp: RFC 6238 TOTP for authenticator-app two-factor auth (pure Python).
+pyotp>=2.9.0
+# qrcode: renders the 2FA enrollment QR (otpauth:// URI) as a PNG server-side
+# using Pillow (already present via reportlab) — so no CDN / external QR call.
+qrcode>=7.4
 # reportlab: Pure-Python PDF generator used for dashboard PDF export
 reportlab>=4.0.0
 # psycopg (v3): PostgreSQL driver. Optional — only imported when DATABASE_URL

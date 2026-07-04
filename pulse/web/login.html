@@ -225,6 +225,28 @@
       </div>
     </div>
 
+    <!-- Two-factor (TOTP) screen — shown when login returns mfa_required. -->
+    <div class="card" id="twofa-card" style="display:none;">
+      <h1>Two-factor authentication</h1>
+      <p class="subtitle">Enter the 6-digit code from your authenticator app.
+        Lost your device? Enter one of your recovery codes instead.</p>
+
+      <form id="twofa-form" autocomplete="off">
+        <div class="field">
+          <label for="twofa-code">Authenticator or recovery code</label>
+          <input type="text" id="twofa-code" inputmode="text" autocomplete="one-time-code"
+                 maxlength="24" placeholder="123456"
+                 style="letter-spacing:4px; font-size:18px; text-align:center;"/>
+        </div>
+        <button type="submit" id="twofa-submit">Verify &amp; sign in</button>
+        <div id="twofa-msg" class="msg"></div>
+      </form>
+
+      <div class="mode-switch">
+        <a id="twofa-back-link">&larr; Back to sign in</a>
+      </div>
+    </div>
+
     <div class="footnote">Pulse &middot; Windows event log analyzer</div>
   </div>
 
@@ -349,6 +371,13 @@
             btn.disabled = false;
             return;
           }
+          // Correct password but the account has 2FA — ask for the second
+          // factor before granting a session.
+          if (data.status === 'mfa_required') {
+            showTwofaScreen();
+            btn.disabled = false;
+            return;
+          }
           // Otherwise a session cookie was set — into the dashboard.
           window.location.href = '/';
           return;
@@ -469,6 +498,47 @@
       e.preventDefault();
       if (resendTimer) { clearInterval(resendTimer); resendTimer = null; }
       document.getElementById('otp-card').style.display = 'none';
+      document.getElementById('auth-card').style.display = 'block';
+    });
+
+    // ----- Two-factor (TOTP) screen -----
+    function showTwofaScreen() {
+      document.getElementById('auth-card').style.display = 'none';
+      document.getElementById('twofa-card').style.display = 'block';
+      var m = document.getElementById('twofa-msg');
+      m.className = 'msg'; m.textContent = '';
+      var input = document.getElementById('twofa-code');
+      input.value = '';
+      input.focus();
+    }
+
+    document.getElementById('twofa-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var code = document.getElementById('twofa-code').value.trim();
+      var btn = document.getElementById('twofa-submit');
+      var m = document.getElementById('twofa-msg');
+      m.className = 'msg'; m.textContent = '';
+      if (!code) { m.className = 'msg error'; m.textContent = 'Enter your code.'; return; }
+      btn.disabled = true;
+      try {
+        var r = await postJSON('/api/auth/2fa/verify', { code: code });
+        if (r.ok) { window.location.href = '/'; return; }   // second factor OK
+        var data = {}; try { data = await r.json(); } catch (_) {}
+        var d = data.detail;
+        m.className = 'msg error';
+        m.textContent = (r.status === 423)
+          ? (typeof d === 'string' ? d : ((d && d.message) || 'Too many attempts. Wait 15 minutes.'))
+          : (typeof d === 'string' ? d : ((d && d.message) || 'That code is incorrect. Try again.'));
+        btn.disabled = false;
+      } catch (err) {
+        m.className = 'msg error'; m.textContent = 'Network error: ' + err.message;
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('twofa-back-link').addEventListener('click', function (e) {
+      e.preventDefault();
+      document.getElementById('twofa-card').style.display = 'none';
       document.getElementById('auth-card').style.display = 'block';
     });
 
