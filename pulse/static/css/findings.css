@@ -1883,6 +1883,21 @@
   color: var(--text-muted);
 }
 
+/* One block per enrichment connector (AbuseIPDB, VirusTotal), stacked. */
+.intel-provider + .intel-provider {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.intel-provider-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
 /* ==================================================================
  * Findings page — Sentinel-style header (breadcrumb / title / KPIs /
  * severity bar / sticky filter bar) + push-flyout layout. Reusable

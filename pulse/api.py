@@ -5026,16 +5026,12 @@ def _register_routes(app: FastAPI) -> None:
                 "flavor":   webhook.get("flavor") or "",
                 "url_set":  bool((webhook.get("url") or "").strip()),
             },
-            # Threat-intel (AbuseIPDB). The API key is a credential, so
-            # only `api_key_set` crosses the wire — never the raw value.
-            # `enabled` defaults to True when a key is set; users can
-            # explicitly toggle off without removing the key.
-            "threat_intel": {
-                "enabled":         intel.get("enabled") is not False
-                                    and bool((intel.get("abuseipdb_api_key") or "").strip()),
-                "api_key_set":     bool((intel.get("abuseipdb_api_key") or "").strip()),
-                "cache_ttl_hours": int(intel.get("cache_ttl_hours", 24) or 24),
-            },
+            # Threat-intel (AbuseIPDB + VirusTotal). API keys are
+            # credentials, so only the `*_key_set` flags cross the wire,
+            # never the raw values. `enabled` defaults to True when any
+            # key is set; users can explicitly toggle off without
+            # removing the keys.
+            "threat_intel": _threat_intel_view(intel),
             "scheduled_scan": _scheduled_scan_view(config),
         }
 
@@ -5309,7 +5305,7 @@ def _register_routes(app: FastAPI) -> None:
         return {"status": "sent"}
 
     # -------------------------------------------------------------------
-    # PUT /api/config/threat_intel — save AbuseIPDB key + toggles
+    # PUT /api/config/threat_intel — save AbuseIPDB/VirusTotal keys + toggles
     # -------------------------------------------------------------------
     @app.put("/api/config/threat_intel")
     async def update_threat_intel(request: Request,
@@ -5317,7 +5313,8 @@ def _register_routes(app: FastAPI) -> None:
         """Update the threat-intel section of pulse.yaml.
 
         API-key handling mirrors email.password / webhook.url: an omitted
-        or empty `abuseipdb_api_key` preserves the stored value, so the
+        or empty `abuseipdb_api_key` / `virustotal_api_key` preserves the
+        stored value, so the
         UI can resave the enabled toggle without forcing the user to
         repaste their key every time. Sending the literal string "null"
         clears the key.
@@ -5338,26 +5335,29 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(400, detail="cache_ttl_hours must be between 1 and 720.")
             intel["cache_ttl_hours"] = ttl
 
-        if "abuseipdb_api_key" in body:
-            raw = body.get("abuseipdb_api_key")
+        for field in ("abuseipdb_api_key", "virustotal_api_key"):
+            if field not in body:
+                continue
+            raw = body.get(field)
             if raw is None or raw == "" or raw == "null":
-                # Explicit clear: caller sent "null" or empty as a sentinel.
+                # Explicit clear: caller sent "null" as a sentinel.
                 if raw == "null":
-                    intel["abuseipdb_api_key"] = None
+                    intel[field] = None
                 # Empty string just means "leave alone" (UI placeholder).
             else:
                 key = str(raw).strip()
                 if key:
-                    intel["abuseipdb_api_key"] = key
+                    intel[field] = key
 
         config["threat_intel"] = intel
         _write_config(app.state.config_path, config)
 
+        view = _threat_intel_view(intel)
         return {
-            "status":      "ok",
-            "api_key_set": bool((intel.get("abuseipdb_api_key") or "").strip()),
-            "enabled":     intel.get("enabled") is not False
-                           and bool((intel.get("abuseipdb_api_key") or "").strip()),
+            "status":                 "ok",
+            "api_key_set":            view["api_key_set"],
+            "virustotal_api_key_set": view["virustotal_api_key_set"],
+            "enabled":                view["enabled"],
         }
 
     # -------------------------------------------------------------------
@@ -5407,17 +5407,90 @@ def _register_routes(app: FastAPI) -> None:
         return {k: v for k, v in result.items() if not k.startswith("_")}
 
     # -------------------------------------------------------------------
-    # POST /api/intel/test — verify the configured API key works
+    # GET /api/intel/{ip}/verdicts — every enrichment connector's take
+    # -------------------------------------------------------------------
+    @app.get("/api/intel/{ip}/verdicts")
+    def get_intel_verdicts(ip: str, user_id: int = Depends(require_login)):
+        """One verdict per enrichment connector that can look up an IP
+        (AbuseIPDB, VirusTotal, ...). Powers the finding drawer panel
+        next to the block button.
+
+        Each entry has a `status`:
+          ok        `result` holds the normalized lookup
+          no_key    connector has no API key and nothing cached
+          no_intel  key set, but the lookup failed or hit the quota
+          disabled  threat-intel lookups are switched off in Settings
+        A connector failing never fails the request.
+        """
+        from pulse import connectors
+
+        if not connectors.base.is_public_ip(ip):
+            raise HTTPException(404, detail="IP is private, loopback, or invalid.")
+
+        config = _read_config(app.state.config_path) or {}
+        disabled = (config.get("threat_intel") or {}).get("enabled") is False
+
+        verdicts = []
+        for c in connectors.all_connectors(kind="enrichment"):
+            if "lookup_ip" not in c.actions():
+                continue
+            entry = {"connector": c.key, "name": c.name}
+            cfg = connectors.config_for(c, config, db_path=app.state.db_path)
+            if disabled:
+                entry["status"] = "disabled"
+            else:
+                result = connectors.run_action(c.key, "lookup_ip", {"ip": ip}, cfg)
+                if result is not None:
+                    entry["status"] = "ok"
+                    entry["result"] = {k: v for k, v in result.items()
+                                       if not k.startswith("_")}
+                elif not c.health_check(cfg):
+                    entry["status"] = "no_key"
+                else:
+                    entry["status"] = "no_intel"
+            verdicts.append(entry)
+        return {"ip": ip, "verdicts": verdicts}
+
+    # -------------------------------------------------------------------
+    # POST /api/intel/test — verify a configured API key works
     # -------------------------------------------------------------------
     @app.post("/api/intel/test")
-    def test_threat_intel(user_id: int = Depends(require_admin)):
-        """Confirm the saved AbuseIPDB key works by looking up a known
-        public IP (Cloudflare 1.1.1.1 — always responds, score is low).
-        Bypasses the cache so the result reflects live API health.
+    def test_threat_intel(connector: str = "abuseipdb",
+                          user_id: int = Depends(require_admin)):
+        """Confirm a saved key works by looking up a known public IP
+        (Cloudflare 1.1.1.1: always responds, score is low). Bypasses
+        the cache so the result reflects live API health.
+        `?connector=virustotal` tests the VirusTotal key instead.
         """
         from pulse import intel as intel_mod
 
         config = _read_config(app.state.config_path) or {}
+
+        if connector == "virustotal":
+            from pulse.connectors import virustotal as vt
+            api_key = intel_mod.get_virustotal_key_from_config(config)
+            if not api_key:
+                raise HTTPException(400, detail="No VirusTotal API key configured.")
+            # Live call, but it still counts against the free-tier budget.
+            if not vt.QUOTA.try_acquire():
+                raise HTTPException(
+                    429,
+                    detail="VirusTotal free-tier limit reached (4/min, 500/day). "
+                           "Wait a minute and try again.",
+                )
+            result = vt.fetch("lookup_ip", "1.1.1.1", api_key)
+            if result is None:
+                raise HTTPException(
+                    502,
+                    detail="Lookup failed. Check the key and try again "
+                           "(VirusTotal may also be rate-limiting).",
+                )
+            return {"status": "ok", "malicious": result.get("malicious"),
+                    "engines": result.get("engines")}
+
+        if connector != "abuseipdb":
+            raise HTTPException(400, detail="Unknown connector.")
+
         api_key = intel_mod.get_api_key_from_config(config)
         if not api_key:
             raise HTTPException(400, detail="No AbuseIPDB API key configured.")
@@ -6509,6 +6582,21 @@ def _write_config(config_path, config):
 def _get_rule_names():
     """Return a sorted list of all detection rule names."""
     return get_rule_names()
+
+
+def _threat_intel_view(intel):
+    """Build the threat_intel slice of GET /api/config from the raw
+    pulse.yaml block. Key presence only; raw keys never leave here."""
+    intel = intel or {}
+    abuse_set = bool((intel.get("abuseipdb_api_key") or "").strip())
+    vt_set = bool((intel.get("virustotal_api_key") or "").strip())
+    return {
+        "enabled":                intel.get("enabled") is not False
+                                  and (abuse_set or vt_set),
+        "api_key_set":            abuse_set,
+        "virustotal_api_key_set": vt_set,
+        "cache_ttl_hours":        int(intel.get("cache_ttl_hours", 24) or 24),
+    }
 
 
 def _scheduled_scan_view(config):

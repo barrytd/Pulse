@@ -74,7 +74,14 @@ scheduled_scan:
 # public source IP against AbuseIPDB and caches the result for
 # `cache_ttl_hours`. Free tier of AbuseIPDB allows 1000 lookups/day.
 # Get a key at https://www.abuseipdb.com/account/api.
+#
+# `virustotal_api_key` adds VirusTotal engine verdicts next to AbuseIPDB's
+# in the finding drawer. Bring your own key: Pulse never ships one. The
+# free public key allows 4 lookups/min and 500/day and is for
+# non-commercial use only; Pulse caches every lookup and stays under
+# those limits. Env vars ABUSEIPDB_API_KEY / VIRUSTOTAL_API_KEY work too.
 threat_intel:
   enabled: false
   abuseipdb_api_key: null
+  virustotal_api_key: null
   cache_ttl_hours: 24

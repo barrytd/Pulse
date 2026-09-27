@@ -62,7 +62,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 ### Response and hardening
 - Block an attacking IP from a finding, managed through the Windows firewall.
 - A custom whitelist to suppress known-good activity.
-- Threat intel lookups against AbuseIPDB.
+- Threat intel lookups against AbuseIPDB and VirusTotal. Both verdicts show in the finding panel right above the block button, so an analyst can check an IP's reputation without opening another site. VirusTotal uses the customer's own API key; Pulse never ships one.
 - Alerts by email, Slack, and Discord.
 
 ### Team and access
@@ -90,6 +90,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - Database: SQLite for single-machine use, PostgreSQL for hosted and multi-user use.
 - Sign-in: session cookies, scrypt password hashing, and API tokens for automation.
 - Agent: a separate Python program that ships as a Windows executable.
+- Integrations: a connector layer in `pulse/connectors/`. Each outside service (AbuseIPDB, VirusTotal) is one file with the same small interface, and it registers itself, so adding a new one needs no changes to the core. This is the base for automated response playbooks.
 - Hosting: runs on one server (for example Render) or self-hosted on your own machine.
 
 ## Security
@@ -100,6 +101,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - Response headers protect against clickjacking and content sniffing.
 - A security PIN asks for a second confirmation before destructive actions like blocking an IP or removing a user, so a stolen login cannot do real damage. It is a separate secret from the password, opt-in per user, and locks out after repeated wrong tries.
 - The detection engine runs on the customer's own machine, so raw logs stay on their network.
+- Threat intel lookups never send private IP addresses or internal domain names to outside services. API keys stay on the server, every lookup is cached, and each provider's free-tier limit is respected so a noisy host cannot burn the quota. A failed lookup shows "no intel" instead of breaking the page.
 - The Pip AI assistant is off unless an administrator adds an Anthropic API key, the key stays on the server (never in the browser), and the chat panel discloses that questions are sent to Anthropic to be answered. Pip is read-only and cannot take any action in Pulse.
 
 ## Pricing direction
@@ -108,6 +110,7 @@ Pulse is open source and free to self-host, and that will not change. The plan i
 
 ## What is next
 
+- Automated response playbooks (SOAR): when a finding fires, Pulse looks the attacker up, decides, and responds (block, alert, open a ticket), with a human approval step before anything is blocked. The connector layer is built; the playbook engine is next. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
 - A simple "add a host" flow with a one-line installer.
 - Tenant hardening before public sign-up: the core is done (each workspace's admin is now scoped to their own workspace, with a private platform-owner role set by an environment variable). Still to add before opening sign-up to strangers: cross-site request protection and trusting the right network address behind a proxy.
 - Invite teammates by code.

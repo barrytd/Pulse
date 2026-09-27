@@ -674,40 +674,59 @@ export async function renderSettingsPage() {
       '</div>' +
     '</div>';
 
-  // ----- Threat-intel (AbuseIPDB) ------------------------------------
-  // Once a key is saved, the dashboard can enrich findings + firewall
-  // rows with abuse confidence scores. Same secret-handling rules as
-  // the webhook URL: the raw key never leaves the server, the input
-  // shows a "leave blank to keep current" placeholder when one is set.
+  // ----- Threat-intel (AbuseIPDB + VirusTotal) -----------------------
+  // Once a key is saved, the finding drawer shows that provider's verdict
+  // next to the block button. Same secret-handling rules as the webhook
+  // URL: raw keys never leave the server, and each input shows a "leave
+  // blank to keep current" placeholder when a key is set. VirusTotal is
+  // bring-your-own-key only; Pulse never ships one.
   var tiKeyStatus = ti.api_key_set
     ? '<span class="password-status set">\u2713 AbuseIPDB key saved</span>'
     : '<span class="password-status">No AbuseIPDB key saved yet</span>';
+  var tiVtKeyStatus = ti.virustotal_api_key_set
+    ? '<span class="password-status set">\u2713 VirusTotal key saved</span>'
+    : '<span class="password-status">No VirusTotal key saved yet</span>';
   var threatIntelHtml =
     '<div class="card" style="margin-bottom:16px;">' +
       '<div class="section-label">Threat Intelligence</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">' +
-        'Enrich source IPs with AbuseIPDB reputation data \u2014 every finding ' +
-        'or blocked IP gets a 0\u2013100 confidence-of-abuse score, country, ISP, ' +
-        'and recent-report count. Lookups are cached for 24 hours so a ' +
+        'Enrich source IPs with reputation data from AbuseIPDB (a 0\u2013100 ' +
+        'confidence-of-abuse score, country, ISP, recent reports) and VirusTotal ' +
+        '(how many antivirus engines flag the address). Both verdicts show in the ' +
+        'finding drawer next to the block button. Lookups are cached so a ' +
         'noisy host doesn\u2019t burn quota. ' +
         '<a href="https://www.abuseipdb.com/account/api" target="_blank" data-default="allow" ' +
-          'style="color:var(--accent); text-decoration:none;">Get a free API key \u2192</a>' +
+          'style="color:var(--accent); text-decoration:none;">Get a free AbuseIPDB key \u2192</a>' +
       '</p>' +
       '<div class="form-row"><label>Enable lookups</label>' +
         '<label class="form-checkbox"><input type="checkbox" id="ti-enabled"' +
-          (ti.enabled ? ' checked' : '') + '/> Look up source IPs against AbuseIPDB</label></div>' +
-      '<div class="form-row"><label>API key</label>' +
+          (ti.enabled ? ' checked' : '') + '/> Look up source IPs against every provider with a key</label></div>' +
+      '<div class="form-row"><label>AbuseIPDB key</label>' +
         '<input type="password" id="ti-api-key" placeholder="' +
           (ti.api_key_set ? 'leave blank to keep current' : 'paste AbuseIPDB API key') +
           '" autocomplete="new-password"/></div>' +
+      '<div class="form-row"><span></span><span>' + tiKeyStatus + '</span></div>' +
+      '<div class="form-row"><label>VirusTotal key</label>' +
+        '<input type="password" id="ti-vt-api-key" placeholder="' +
+          (ti.virustotal_api_key_set ? 'leave blank to keep current' : 'paste your VirusTotal API key') +
+          '" autocomplete="new-password"/></div>' +
+      '<div class="form-row"><span></span><span>' + tiVtKeyStatus + '</span></div>' +
+      '<p style="color:var(--text-muted); font-size:12px; margin:0 0 14px;">' +
+        'VirusTotal uses your own key. The free public key allows 4 lookups a minute ' +
+        'and 500 a day, and VirusTotal\u2019s terms limit it to non-commercial use. ' +
+        'Pulse stays under those limits and shows \u201cno intel\u201d instead of waiting. ' +
+        '<a href="https://www.virustotal.com/gui/my-apikey" target="_blank" data-default="allow" ' +
+          'style="color:var(--accent); text-decoration:none;">Find your VirusTotal key \u2192</a>' +
+      '</p>' +
       '<div class="form-row"><label>Cache TTL (hours)</label>' +
         '<input type="number" id="ti-cache-ttl" min="1" max="720" value="' +
           (ti.cache_ttl_hours || 24) + '"/></div>' +
-      '<div class="form-row"><span></span><span>' + tiKeyStatus + '</span></div>' +
       '<div class="form-actions">' +
         '<button class="btn btn-primary btn-with-icon" data-action="saveThreatIntelSettings"><i data-lucide="save"></i><span>Save threat-intel settings</span></button>' +
-        '<button class="btn btn-with-icon" data-action="testThreatIntelKey"' +
-          (ti.api_key_set ? '' : ' disabled') + '><i data-lucide="zap"></i><span>Test key</span></button>' +
+        '<button class="btn btn-with-icon" data-action="testThreatIntelKey" data-arg="abuseipdb"' +
+          (ti.api_key_set ? '' : ' disabled') + '><i data-lucide="zap"></i><span>Test AbuseIPDB key</span></button>' +
+        '<button class="btn" data-action="testThreatIntelKey" data-arg="virustotal"' +
+          (ti.virustotal_api_key_set ? '' : ' disabled') + '>Test VirusTotal key</button>' +
       '</div>' +
     '</div>';
 
@@ -2160,15 +2179,17 @@ export async function sendTestWebhook() {
   }
 }
 
-// Threat-intel (AbuseIPDB) settings — same secret-handling rules as the
-// webhook URL: an empty input means "leave alone", so saving the toggle
-// without retyping the key works.
+// Threat-intel (AbuseIPDB + VirusTotal) settings — same secret-handling
+// rules as the webhook URL: an empty input means "leave alone", so saving
+// the toggle without retyping either key works.
 export async function saveThreatIntelSettings() {
   var keyInput = document.getElementById('ti-api-key');
+  var vtKeyInput = document.getElementById('ti-vt-api-key');
   var ttlInput = document.getElementById('ti-cache-ttl');
   var body = {
     enabled:         document.getElementById('ti-enabled').checked,
     abuseipdb_api_key: (keyInput && keyInput.value) || '',
+    virustotal_api_key: (vtKeyInput && vtKeyInput.value) || '',
     cache_ttl_hours: parseInt((ttlInput && ttlInput.value) || '24', 10) || 24,
   };
   try {
@@ -2184,19 +2205,28 @@ export async function saveThreatIntelSettings() {
     }
     showToast('Threat-intel settings saved');
     if (keyInput) keyInput.value = '';
+    if (vtKeyInput) vtKeyInput.value = '';
     renderSettingsPage();
   } catch (e) {
     toastError('Network error: ' + e.message);
   }
 }
 
-export async function testThreatIntelKey() {
-  showToast('Testing AbuseIPDB key...');
+// `connector` comes from the button's data-arg: 'abuseipdb' or 'virustotal'.
+export async function testThreatIntelKey(connector) {
+  var isVt = connector === 'virustotal';
+  showToast('Testing ' + (isVt ? 'VirusTotal' : 'AbuseIPDB') + ' key...');
   try {
-    var r = await fetch('/api/intel/test', { method: 'POST' });
+    var r = await fetch('/api/intel/test?connector=' + (isVt ? 'virustotal' : 'abuseipdb'),
+                        { method: 'POST' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok) {
       toastError(data.detail || 'Lookup failed.');
+      return;
+    }
+    if (isVt) {
+      showToast('VirusTotal key works (1.1.1.1: ' + (data.malicious == null ? 'n/a' : data.malicious) +
+                '/' + (data.engines == null ? 'n/a' : data.engines) + ' engines flagged)');
       return;
     }
     showToast('AbuseIPDB key works (1.1.1.1 score: ' + (data.score == null ? 'n/a' : data.score) + ')');

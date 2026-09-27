@@ -219,6 +219,20 @@ export async function apiFetchIntel(ip) {
   }
 }
 
+// Every enrichment connector's verdict for one IP (AbuseIPDB, VirusTotal).
+// Returns { ok, status, data } where data is { ip, verdicts: [{ connector,
+// name, status: 'ok'|'no_key'|'no_intel'|'disabled', result? }] }.
+export async function apiFetchIntelVerdicts(ip) {
+  try {
+    var resp = await fetch('/api/intel/' + encodeURIComponent(ip) + '/verdicts');
+    var data = null;
+    try { data = await resp.json(); } catch (e) { /* non-JSON 5xx */ }
+    return { ok: resp.ok, status: resp.status, data: data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, error: e };
+  }
+}
+
 // Per-framework compliance coverage summary. Returns { nist_csf, iso_27001, rules }.
 export async function apiGetCompliance() {
   var resp = await fetch('/api/compliance');

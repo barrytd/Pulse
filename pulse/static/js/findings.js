@@ -16,7 +16,7 @@ import {
   apiListFindingNotes,
   apiCreateFindingNote,
   apiDeleteFindingNote,
-  apiFetchIntel,
+  apiFetchIntelVerdicts,
   apiMarkFirstFindingViewed,
   invalidateScansCache,
   invalidateFindingsCache,
@@ -2206,9 +2206,9 @@ function _extractSourceIp(text) {
 }
 
 // ---------------------------------------------------------------------
-// Threat-intel section (AbuseIPDB) — rendered into the finding drawer
-// just before the "Block Source IP" block so the analyst sees reputation
-// data before deciding to block.
+// Threat-intel section: one verdict per enrichment connector (AbuseIPDB,
+// VirusTotal), rendered directly above the "Block Source IP" block so the
+// analyst sees reputation data right where they decide to block.
 //
 // Returns '' (skipped section) for any finding whose details + description
 // don't yield a public IPv4 address. Private / reserved IPs intentionally
@@ -2222,26 +2222,110 @@ function _renderIntelSection(f) {
   return '<div class="finding-drawer-section" id="drawer-intel-wrap" data-intel-ip="' + escapeHtml(ip) + '">' +
     '<div class="sec-label">Threat Intelligence</div>' +
     '<div id="drawer-intel-body" class="intel-loading" style="font-size:12px; color:var(--text-muted);">' +
-      'Looking up ' + escapeHtml(ip) + ' on AbuseIPDB…' +
+      'Looking up ' + escapeHtml(ip) + '…' +
     '</div>' +
   '</div>';
 }
 
-function _intelScoreClass(score) {
-  // Buckets follow AbuseIPDB convention: 75+ is "high confidence abuse",
-  // 25–74 is "some reports", below that is "clean / unknown". The buckets
-  // also drive the badge color so the drawer reads at a glance.
-  if (score == null) return 'intel-score-na';
-  if (score >= 75)  return 'intel-score-high';
-  if (score >= 25)  return 'intel-score-med';
-  return 'intel-score-low';
+// Connectors return a verdict of malicious / suspicious / clean / unknown.
+// The classes drive the score-block and header-badge colors.
+var _VERDICT_CLASS = {
+  malicious:  'intel-score-high',
+  suspicious: 'intel-score-med',
+  clean:      'intel-score-low',
+  unknown:    'intel-score-na',
+};
+var _VERDICT_LABEL = {
+  malicious:  'Malicious',
+  suspicious: 'Suspicious',
+  clean:      'Clean',
+  unknown:    'No data',
+};
+var _VERDICT_RANK = { malicious: 3, suspicious: 2, clean: 1, unknown: 0 };
+
+var _SETTINGS_LINK =
+  '<a href="#" data-action="navigate" data-arg="settings:notifications" ' +
+  'style="color:var(--accent); text-decoration:none;">Settings &rsaquo; Notifications</a>';
+
+function _intelRow(k, v, extra) {
+  return '<div class="intel-meta-row"><span class="k">' + k + '</span>' +
+    '<span class="v">' + v + '</span>' + (extra || '') + '</div>';
 }
 
-function _intelScoreLabel(score) {
-  if (score == null) return 'No data';
-  if (score >= 75) return 'Malicious';
-  if (score >= 25) return 'Suspicious';
-  return 'Clean';
+function _intelTs(v) {
+  return v ? escapeHtml(String(v).replace('T', ' ').slice(0, 19)) : null;
+}
+
+function _intelProviderHtml(name, verdict, scoreText, rows, footer) {
+  var sclass = _VERDICT_CLASS[verdict] || 'intel-score-na';
+  return '<div class="intel-provider">' +
+    '<div class="intel-provider-name">' + escapeHtml(name) + '</div>' +
+    '<div class="intel-header">' +
+      '<div class="intel-score-block ' + sclass + '">' +
+        '<div class="intel-score">' + scoreText + '</div>' +
+        '<div class="intel-score-label">' + escapeHtml(_VERDICT_LABEL[verdict] || 'No data') + '</div>' +
+      '</div>' +
+      '<div class="intel-meta">' + rows + '</div>' +
+    '</div>' +
+    '<div class="intel-footer">' + footer + '</div>' +
+  '</div>';
+}
+
+function _intelSourceLink(href, text) {
+  return 'Source: <a href="' + href + '" target="_blank" rel="noopener" data-default="allow" ' +
+    'style="color:var(--accent); text-decoration:none;">' + text + ' &rsaquo;</a>';
+}
+
+function _intelAbuseHtml(ip, d) {
+  var cached = d.cached
+    ? '<span class="intel-cache-flag" title="Served from local cache">cached</span>'
+    : '';
+  var rows =
+    _intelRow('IP', '<span class="intel-mono">' + escapeHtml(ip) + '</span>', cached) +
+    _intelRow('Country', d.country ? escapeHtml(d.country) : '—') +
+    _intelRow('ISP', d.isp ? escapeHtml(d.isp) : '—') +
+    _intelRow('Reports (90d)', d.total_reports != null ? d.total_reports.toLocaleString() : '—') +
+    _intelRow('Last reported', _intelTs(d.last_reported) || 'Never reported');
+  return _intelProviderHtml('AbuseIPDB', d.verdict,
+    d.score == null ? '—' : d.score, rows,
+    _intelSourceLink('https://www.abuseipdb.com/check/' + encodeURIComponent(ip), 'AbuseIPDB report'));
+}
+
+function _intelVirusTotalHtml(ip, d) {
+  var cached = d.cached
+    ? '<span class="intel-cache-flag" title="Served from local cache">cached</span>'
+    : '';
+  var flagged = d.found
+    ? d.malicious + ' / ' + d.engines +
+      (d.suspicious ? ' <span style="color:var(--text-muted);">(+' + d.suspicious + ' suspicious)</span>' : '')
+    : 'Never seen by VirusTotal';
+  var rows =
+    _intelRow('IP', '<span class="intel-mono">' + escapeHtml(ip) + '</span>', cached) +
+    _intelRow('Engines flagged', flagged) +
+    _intelRow('Reputation', d.reputation != null ? String(d.reputation) : '—') +
+    _intelRow('AS owner', d.as_owner ? escapeHtml(d.as_owner) : '—') +
+    _intelRow('Last analysis', _intelTs(d.last_analysis) || '—');
+  return _intelProviderHtml('VirusTotal', d.verdict,
+    d.found ? d.malicious : '—', rows,
+    _intelSourceLink('https://www.virustotal.com/gui/ip-address/' + encodeURIComponent(ip), 'VirusTotal report'));
+}
+
+// Message for a connector that didn't return data. Keyed by the backend
+// status so "no key" (fixable in Settings) reads differently from a
+// transient failure.
+function _intelStatusHtml(v) {
+  var name = escapeHtml(v.name || v.connector);
+  var msg;
+  if (v.status === 'no_key') {
+    msg = v.connector === 'virustotal'
+      ? 'Not set up. Add your own VirusTotal API key under ' + _SETTINGS_LINK + ' to see engine verdicts here.'
+      : 'Not set up. Add an AbuseIPDB API key under ' + _SETTINGS_LINK + ' to enrich source IPs.';
+    return '<div class="intel-provider"><div class="intel-provider-name">' + name + '</div>' +
+      '<div class="intel-empty">' + msg + '</div></div>';
+  }
+  msg = 'No intel right now. The lookup failed or the free-tier limit is used up. Try again later.';
+  return '<div class="intel-provider"><div class="intel-provider-name">' + name + '</div>' +
+    '<div class="intel-error">' + msg + '</div></div>';
 }
 
 async function _loadDrawerIntel(f) {
@@ -2251,74 +2335,53 @@ async function _loadDrawerIntel(f) {
   var ip = wrap.getAttribute('data-intel-ip');
   if (!ip || !body) return;
 
-  var resp = await apiFetchIntel(ip);
+  var resp = await apiFetchIntelVerdicts(ip);
   // Drawer may have been closed/replaced during the fetch — bail if the
   // section we were going to write into is gone.
   if (!document.body.contains(body)) return;
+  body.classList.remove('intel-loading');
 
-  if (resp.status === 400) {
-    // No API key configured. Tell the user how to enable it instead of
-    // hiding the section silently — the value is in discoverability.
-    body.classList.remove('intel-loading');
-    body.innerHTML =
-      '<div class="intel-empty">' +
-        'Threat-intel lookups are off. Add an AbuseIPDB API key under ' +
-        '<a href="#" data-action="navigate" data-arg="settings:notifications" ' +
-        'style="color:var(--accent); text-decoration:none;">Settings &rsaquo; Notifications</a> ' +
-        'to enrich source IPs.' +
-      '</div>';
+  if (!resp.ok || !resp.data || !Array.isArray(resp.data.verdicts)) {
+    body.innerHTML = '<div class="intel-error">Could not load threat intel. Try again later.</div>';
     return;
   }
-  if (!resp.ok || !resp.data) {
-    body.classList.remove('intel-loading');
-    body.innerHTML = '<div class="intel-error">Could not reach AbuseIPDB. Try again later.</div>';
+  var verdicts = resp.data.verdicts;
+  if (verdicts.length && verdicts.every(function (v) { return v.status === 'disabled'; })) {
+    body.innerHTML = '<div class="intel-empty">Threat-intel lookups are turned off under ' +
+      _SETTINGS_LINK + '.</div>';
     return;
   }
 
-  var d = resp.data;
-  var score   = d.score;
-  var sclass  = _intelScoreClass(score);
-  var slabel  = _intelScoreLabel(score);
+  var html = '';
+  var worst = null;
+  var summary = [];
+  verdicts.forEach(function (v) {
+    if (v.status !== 'ok' || !v.result) {
+      html += _intelStatusHtml(v);
+      return;
+    }
+    var d = v.result;
+    if (v.connector === 'virustotal') {
+      html += _intelVirusTotalHtml(ip, d);
+      if (d.found) summary.push('VirusTotal: ' + d.malicious + '/' + d.engines + ' engines');
+    } else {
+      html += _intelAbuseHtml(ip, d);
+      if (d.score != null) summary.push((v.name || v.connector) + ': ' + d.score + '/100');
+    }
+    if (!worst || (_VERDICT_RANK[d.verdict] || 0) > (_VERDICT_RANK[worst] || 0)) worst = d.verdict;
+  });
+  body.innerHTML = html;
 
-  // One-line verdict badge in the drawer header band — reads at a glance
-  // and stays visible in Summary mode (where the full section is hidden).
+  // One-line verdict badge in the drawer header band. Shows the worst
+  // verdict across connectors, reads at a glance, and stays visible in
+  // Summary mode (where the full section is hidden).
   var headBadge = document.getElementById('drawer-intel-badge');
-  if (headBadge && score != null) {
-    headBadge.className = 'drawer-intel-badge ' + sclass;
-    headBadge.textContent = slabel + ' · ' + score;
-    headBadge.title = 'AbuseIPDB confidence for ' + ip;
+  if (headBadge && worst && worst !== 'unknown') {
+    headBadge.className = 'drawer-intel-badge ' + _VERDICT_CLASS[worst];
+    headBadge.textContent = _VERDICT_LABEL[worst];
+    headBadge.title = summary.join(' · ') + ' (' + ip + ')';
     headBadge.hidden = false;
   }
-  var country = d.country ? escapeHtml(d.country) : '—';
-  var isp     = d.isp     ? escapeHtml(d.isp)     : '—';
-  var reports = d.total_reports != null ? d.total_reports.toLocaleString() : '—';
-  var lastReported = d.last_reported
-    ? escapeHtml(String(d.last_reported).replace('T', ' ').slice(0, 19))
-    : 'Never reported';
-  var cached = d.cached
-    ? '<span class="intel-cache-flag" title="Served from local cache">cached</span>'
-    : '';
-
-  body.classList.remove('intel-loading');
-  body.innerHTML =
-    '<div class="intel-header">' +
-      '<div class="intel-score-block ' + sclass + '">' +
-        '<div class="intel-score">' + (score == null ? '—' : score) + '</div>' +
-        '<div class="intel-score-label">' + escapeHtml(slabel) + '</div>' +
-      '</div>' +
-      '<div class="intel-meta">' +
-        '<div class="intel-meta-row"><span class="k">IP</span><span class="v intel-mono">' + escapeHtml(ip) + '</span>' + cached + '</div>' +
-        '<div class="intel-meta-row"><span class="k">Country</span><span class="v">' + country + '</span></div>' +
-        '<div class="intel-meta-row"><span class="k">ISP</span><span class="v">' + isp + '</span></div>' +
-        '<div class="intel-meta-row"><span class="k">Reports (90d)</span><span class="v">' + reports + '</span></div>' +
-        '<div class="intel-meta-row"><span class="k">Last reported</span><span class="v">' + lastReported + '</span></div>' +
-      '</div>' +
-    '</div>' +
-    '<div class="intel-footer">' +
-      'Source: <a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" ' +
-        'target="_blank" rel="noopener" data-default="allow" ' +
-        'style="color:var(--accent); text-decoration:none;">AbuseIPDB report &rsaquo;</a>' +
-    '</div>';
 }
 
 function _stageBlockSection(f) {
@@ -2622,10 +2685,11 @@ export function openFindingDrawer(f) {
   // Redesigned drawer hierarchy (understanding -> technical -> tracking):
   //   1. Plain-language "What happened" summary + difficulty + the single
   //      "What to do now" action list + collapsible why/prevent/FP.
-  //   2. Threat Intel (contextual IP reputation, when present).
-  //   3. Collapsible "Technical details" (raw event + metadata), collapsed.
-  //   4. "Framework references" - MITRE mitigation pills only.
-  //   5. Firewall block staging (when an IP is present).
+  //   2. Collapsible "Technical details" (raw event + metadata), collapsed.
+  //   3. "Framework references" - MITRE mitigation pills only.
+  //   4. Threat Intel (AbuseIPDB + VirusTotal verdicts, when a public IP
+  //      is present), directly above...
+  //   5. Firewall block staging, so the verdicts sit next to Block.
   //   6. A clear "Tracking" separator, then Workflow / Assigned / Notes /
   //      Review - the bookkeeping, kept distinct from the understanding.
   // The title + severity + MITRE tag render above in drawer-rule /
@@ -2639,9 +2703,9 @@ export function openFindingDrawer(f) {
     '</div>' +
 
     '<div class="drawer-full-only">' +
-      _renderIntelSection(f) +
       _drawerTechnicalBlock(f) +
       _drawerFrameworkRefs(f) +
+      _renderIntelSection(f) +
       _stageBlockSection(f) +
       '<div class="drawer-tracking-divider"><span>Tracking</span></div>' +
       _renderAssignSection(f) +
