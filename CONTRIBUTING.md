@@ -188,7 +188,15 @@ class MyConnector(Connector):
 
     def summarize(self, action, result):
         ...                          # one plain-language line for the panel
+
+    # Optional, for the playbook builder (sensible defaults exist for
+    # lookup_ip / lookup_domain / lookup_hash):
+    result_fields = {"score": "Abuse score"}   # offered as {{ <step>.score }}
+    def action_inputs(self, action): ...       # [{name, label, required, multiline}]
+    def action_label(self, action): ...        # "Look up an IP address"
 ```
+
+The playbook builder reads `action_inputs`, `action_label` and `result_fields` from `GET /api/playbooks/builder`, so a new connector appears in the builder automatically. Recipe validation rejects a step that leaves a required input empty. Every `result_fields` key must be a key your results really contain; [`tests/test_playbook_builder.py`](tests/test_playbook_builder.py) checks that.
 
 The rules every connector follows (reviewers check these):
 

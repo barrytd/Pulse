@@ -30,6 +30,11 @@ class FirewallBlockConnector(Connector):
     def health_check(self, config):
         return True
 
+    def action_inputs(self, action):
+        return [{"name": "ip", "label": "IP address to block", "required": True, "multiline": False},
+                {"name": "comment", "label": "Comment (shown on the Firewall page)",
+                 "required": False, "multiline": False}]
+
     def run(self, action, inputs, config):
         if action != "block_ip":
             return None

@@ -77,11 +77,40 @@ class Connector:
         there is nothing to report. May raise; `run_action` catches."""
         raise NotImplementedError
 
+    # --- Playbook-builder metadata ------------------------------------
+    # Result fields later playbook steps may reference as
+    # {{ <save_as>.<field> }}, e.g. {"score": "Abuse score (0-100)"}.
+    result_fields = {}
+
+    def action_label(self, action):
+        """Plain-language name for an action, shown in the builder."""
+        return ACTION_LABELS.get(action, action.replace("_", " ").capitalize())
+
+    def action_inputs(self, action):
+        """The inputs `run(action, ...)` reads: [{name, label, required,
+        multiline}]. The builder renders one field per entry, and recipe
+        validation rejects a step that leaves a required one empty."""
+        return [dict(i) for i in DEFAULT_INPUTS.get(action, [])]
+
     def summarize(self, action, result):
         """One plain-language line describing `result`, shown in the
         finding drawer's Investigate panel. None to show nothing."""
         return None
 
+
+ACTION_LABELS = {
+    "lookup_ip":     "Look up an IP address",
+    "lookup_domain": "Look up a domain",
+    "lookup_hash":   "Look up a file hash",
+    "block_ip":      "Block an IP address",
+    "post_message":  "Post a message",
+}
+
+DEFAULT_INPUTS = {
+    "lookup_ip":     [{"name": "ip", "label": "IP address", "required": True, "multiline": False}],
+    "lookup_domain": [{"name": "domain", "label": "Domain", "required": True, "multiline": False}],
+    "lookup_hash":   [{"name": "hash", "label": "File hash", "required": True, "multiline": False}],
+}
 
 _REGISTRY = {}
 

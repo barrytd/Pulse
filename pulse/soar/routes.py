@@ -112,6 +112,14 @@ def register(app, *, require_elevation, check_finding_scope, read_config):
                                "summary": t["summary"], "recipe": t["recipe"]}
                               for t in templates.TEMPLATES]}
 
+    @app.get("/api/playbooks/builder")
+    def builder_schema(user_id: int = Depends(require_manager)):
+        """Vocabulary for the click-together builder (condition kinds,
+        connectors + their inputs, placeholders). Registered before
+        /api/playbooks/{id} so "builder" isn't read as an id."""
+        from . import builder
+        return builder.schema()
+
     @app.post("/api/playbooks/validate")
     async def validate_playbook(request: Request, user_id: int = Depends(require_admin)):
         rate_limit.hit(request, "playbook_validate", window_sec=60, max_hits=60)

@@ -142,6 +142,7 @@ def _finish(entry, cached):
 @register
 class AbuseIPDBConnector(Connector):
     key = "abuseipdb"
+    result_fields = {"score": "Abuse score (0-100)", "country": "Country code", "total_reports": "Reports in 90 days", "verdict": "Verdict"}
     name = "AbuseIPDB"
     kind = "enrichment"
     config_fields = ["api_key"]

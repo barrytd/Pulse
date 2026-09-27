@@ -301,6 +301,7 @@ def _finish(entry, cached):
 @register
 class WhoisConnector(Connector):
     key = "whois"
+    result_fields = {"age_days": "Domain age (days)", "registrar": "Registrar", "verdict": "Verdict"}
     name = "Whois"
     kind = "enrichment"
     config_fields = []

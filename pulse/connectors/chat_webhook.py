@@ -48,6 +48,9 @@ class ChatWebhookConnector(Connector):
     def config_from_pulse(self, pulse_config):
         return {"targets": _targets(pulse_config)}
 
+    def action_inputs(self, action):
+        return [{"name": "text", "label": "Message", "required": True, "multiline": True}]
+
     def run(self, action, inputs, config):
         if action != "post_message":
             return None

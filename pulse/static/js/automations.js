@@ -18,6 +18,7 @@
 import { escapeHtml, showToast, toastError, relTimeHtml } from './dashboard.js';
 import { apiGetMe } from './api.js';
 import { pinGuard } from './pin.js';
+import { builderHtml } from './playbook-builder.js';
 
 var _isAdmin = false;
 var _openRunId = null;
@@ -203,10 +204,14 @@ function _render() {
       '<div class="page-title-block">' +
         '<h1 class="page-title">Automations' +
           '<span class="page-title-count">' + _data.playbooks.length + '</span></h1>' +
+        (_isAdmin
+          ? '<div class="page-title-actions"><button class="btn btn-primary" data-action="builderOpen">New playbook</button></div>'
+          : '') +
       '</div>' +
       '<p class="muted soar-intro">Playbooks react to new findings on their own: they look ' +
         'attackers up right away, and propose responses like blocking an IP. ' +
         'A response never runs until someone approves it here or in the finding.</p>' +
+      (_isAdmin ? builderHtml() : '') +
       _awaitingHtml() +
       _playbooksHtml() +
       _runsHtml() +
@@ -273,6 +278,7 @@ function _playbooksHtml() {
           '<span class="rule-toggle-track"><span class="rule-toggle-thumb"></span></span>' +
           '<span class="rule-toggle-label">' + (p.enabled ? 'On' : 'Off') + '</span>' +
         '</button> ' +
+        '<button class="btn btn-ghost btn-sm" data-action="editPlaybook" data-arg="' + p.id + '">Edit</button> ' +
         '<button class="btn btn-ghost btn-sm" data-action="deletePlaybook" data-arg="' + p.id + '">Delete</button>';
     } else {
       status = '<span class="muted">' + (p.enabled ? 'On' : 'Off') + '</span>';
@@ -332,7 +338,8 @@ function _addHtml() {
   }).join('');
   var example = JSON.stringify((_data.templates[0] || {}).recipe || {}, null, 2);
   return '<div class="card soar-card">' +
-    '<div class="section-label">Add a playbook</div>' +
+    '<div class="section-label">Start from an example or JSON</div>' +
+    '<p class="muted" style="margin:0 0 8px 0;">Or use <b>New playbook</b> at the top to build one by clicking, no JSON needed.</p>' +
     '<div class="soar-subhead">Built-in examples</div>' +
     '<div class="soar-templates">' + tpl + '</div>' +
     '<div class="soar-subhead">Or paste one (JSON)</div>' +
@@ -385,6 +392,8 @@ async function _refresh() {
 }
 
 document.addEventListener('pulse:playbook-run-updated', _refresh);
+// The builder saved a playbook.
+document.addEventListener('pulse:playbooks-changed', _refresh);
 
 export function toggleRunDetail(runId) {
   runId = Number(runId);

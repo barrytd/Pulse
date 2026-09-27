@@ -228,6 +228,12 @@ def _flatten(steps, guard_stack, depth, out, guards, defined, errors, path="step
                                       "(use finding.* or a save_as from an earlier step).")
             except expr.ExprError as e:
                 errors.append(f"{where}.with.{k}: {e}")
+        if action in conn.actions():
+            for spec in conn.action_inputs(action):
+                v = inputs.get(spec["name"])
+                if spec.get("required") and (v is None or (isinstance(v, str) and not v.strip())):
+                    errors.append(f"{where}: '{spec['label']}' is required for "
+                                  f"{conn.name}: {conn.action_label(action)}.")
         requires = s.get("requires_approval")
         if requires is not None and not isinstance(requires, bool):
             errors.append(f"{where}.requires_approval must be true or false.")
@@ -254,7 +260,7 @@ def _flatten(steps, guard_stack, depth, out, guards, defined, errors, path="step
             "with": inputs,
             "save_as": save_as,
             "requires_approval": bool(requires),
-            "label": (label or f"{conn.name}: {action}")[:120],
+            "label": (label or f"{conn.name}: {conn.action_label(action)}")[:120],
             "guards": list(guard_stack),
         })
         if save_as:

@@ -5,6 +5,27 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Click-together playbook builder (SOAR phase 3, part 2)
+
+- **Build a playbook without JSON.** Admins get a **New playbook** button on the Automations page:
+  - **Trigger:** "When a new finding is created".
+  - **Conditions:** rows from a fixed safe set: severity is at least / is one of; source IP is public, private, or present; rule is / isn't one of (all 35 rules); host name contains. Match all or any.
+  - **Steps:** ordered. Pick a connector and action, then fill its inputs. An **Insert a value** picker offers finding fields (source IP, host name, rule, severity, reference, MITRE, time) and earlier steps' results, e.g. `{{ abuseipdb.score }}`. Steps can be reordered.
+  - **Check / Save** show clear errors, and the rows at fault are highlighted. A "Show the JSON this saves" panel shows the recipe.
+  - **Edit** reopens an existing playbook in the builder, unless it uses an `if` block, which stays JSON-only for now.
+- **Same recipe, same engine.** The builder saves exactly the JSON the engine already runs (no engine change) and goes through the same server validation as pasted JSON. Response steps show a fixed "Response · needs approval" badge, and approval is enforced on save. The JSON paste box and built-in examples remain.
+- **The server owns the vocabulary:** `GET /api/playbooks/builder` (manager+) returns the condition kinds, the triggers, each connector's actions with their inputs (`Connector.action_inputs`), the result fields later steps may reference (`Connector.result_fields`), and the finding placeholders. New connectors show up in the builder automatically. The vocabulary lives in `pulse/soar/builder.py`.
+- **Stricter validation for everyone:** a step that leaves a required input empty (e.g. a block with no IP, a post with no message) is now rejected at save instead of failing at run time. Default step labels are plain language ("AbuseIPDB: Look up an IP address").
+- Tests: new [`tests/test_playbook_builder.py`](tests/test_playbook_builder.py) checks that:
+  - every condition kind is valid and filters as labeled
+  - rule options are rules the engine really emits
+  - every placeholder the builder offers resolves, including every connector's result fields
+  - builder-shaped recipes round-trip (create and edit)
+  - approval-less response steps and missing required inputs are refused
+  - every `data-action` in the builder and the Automations page is registered in `app.js`
+
+  Checked in headless Chrome in light and dark: built, checked, saved and re-edited a playbook, with no horizontal overflow at 420px.
+
 ## 2026-09-27 — Bundled GeoIP database (DB-IP Country Lite)
 
 - **GeoIP works with no setup.** Pulse now ships DB-IP's free "IP to Country Lite" database as [`pulse/data/dbip-country-lite.mmdb`](pulse/data/README.md) (8 MB, September 2026 release, CC BY 4.0). The GeoIP connector uses it when nothing more specific is configured, so every install gets offline country-level lookups; it's in the Docker image too.

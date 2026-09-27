@@ -75,6 +75,7 @@ def _finish(entry):
 @register
 class DNSConnector(Connector):
     key = "dns"
+    result_fields = {"found": "Resolves (true/false)", "verdict": "Verdict"}
     name = "DNS"
     kind = "enrichment"
     config_fields = []

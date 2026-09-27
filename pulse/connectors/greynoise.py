@@ -137,6 +137,7 @@ def _read(db_path, ip):
 @register
 class GreyNoiseConnector(Connector):
     key = "greynoise"
+    result_fields = {"classification": "Classification", "name": "Organization", "verdict": "Verdict"}
     name = "GreyNoise"
     kind = "enrichment"
     config_fields = ["api_key"]

@@ -418,7 +418,8 @@ class TestEngine:
         pid = _playbook(db, _contain_template())
         run_id = engine.handle_scan(db, _scan(db, [_finding()]), KEYS)[0]
         # Someone edits the playbook while the block is waiting.
-        edited = _rec(name="edited", steps=[{"connector": "abuseipdb", "action": "lookup_ip"}])
+        edited = _rec(name="edited", steps=[{"connector": "abuseipdb", "action": "lookup_ip",
+                                              "with": {"ip": "{{ finding.source_ip }}"}}])
         store.update_playbook(db, 0, pid, recipe.normalize(edited)[0])
         engine.approve(db, 0, run_id, "boss@x.com", KEYS)
         assert _isolate["stage"][0]["ip"] == PUBLIC_IP

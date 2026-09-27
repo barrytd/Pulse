@@ -155,6 +155,7 @@ def _read(db_path, indicator):
 @register
 class OTXConnector(Connector):
     key = "otx"
+    result_fields = {"pulse_count": "Threat reports naming it", "verdict": "Verdict"}
     name = "AlienVault OTX"
     kind = "enrichment"
     config_fields = ["api_key"]

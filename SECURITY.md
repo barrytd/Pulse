@@ -68,7 +68,7 @@ Out of scope:
 
 Playbooks ([`pulse/soar/`](pulse/soar/)) react to new findings automatically, but they can't act on their own:
 
-- **Lookups run by themselves; responses never do.** Every response step (a firewall block, a Slack/Discord post) pauses the run until a person approves it. A playbook that sets `requires_approval: false` on a response step is rejected when it's imported. There is no fully automatic mode.
+- **Lookups run by themselves; responses never do.** Every response step (a firewall block, a Slack/Discord post) pauses the run until a person approves it. A playbook that sets `requires_approval: false` on a response step is rejected when it's saved, whether it was built with the click-together builder, pasted as JSON, or sent to the API directly (all three go through the same server-side validation). There is no fully automatic mode.
 - **Who can approve:** managers and admins only, and only for their own organization's runs. Approving requires the user's **security PIN** step-up when they have one set (the same gate as the dashboard's Block button). Denying stops the rest of the run.
 - **What runs is what was shown.** The step runs exactly the inputs the approver saw. Each approval is single-use (a conditional database update), so two people approving at once can't run it twice. Runs snapshot their playbook, so editing a playbook can't change a step that's already waiting.
 - **No code execution.** Conditions and `{{ placeholders }}` are parsed with Python's `ast` and walked against a whitelist (and / or / not, comparisons, dotted names, literals). Calls, subscripts, arithmetic and dunder access are rejected at import. Nothing is ever passed to `eval`.

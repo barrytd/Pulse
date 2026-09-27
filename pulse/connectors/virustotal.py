@@ -253,6 +253,7 @@ def _read(db_path, indicator):
 @register
 class VirusTotalConnector(Connector):
     key = "virustotal"
+    result_fields = {"malicious": "Engines flagging it", "engines": "Engines that answered", "verdict": "Verdict"}
     name = "VirusTotal"
     kind = "enrichment"
     config_fields = ["api_key"]

@@ -136,6 +136,7 @@ def lookup_ip(ip, db_path_file):
 @register
 class GeoIPConnector(Connector):
     key = "geoip"
+    result_fields = {"country": "Country", "country_code": "Country code", "city": "City"}
     name = "GeoIP"
     kind = "enrichment"
     config_fields = ["db_file"]
