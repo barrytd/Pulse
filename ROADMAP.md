@@ -100,6 +100,7 @@ Flat status board organized by category, sorted by priority within each section.
 > Tracked defects. Drop in here with a one-line repro + the file where it bites; promote into **Up Next** with priority based on severity + frequency.
 
 - **Two detection rules aren't registered** — `DCSync Attempt` (CRITICAL, 4662) and `Suspicious Child Process` (HIGH, 4688) fire from [`pulse/core/detections.py`](pulse/core/detections.py) but have no entry in `RULE_META` ([`pulse/core/rules_config.py`](pulse/core/rules_config.py)), so they can't be switched off on the Rules page, have no NIST/ISO mapping, and fall back to the generic plain-language guide. Fix: add both to `RULE_META` and `KNOWLEDGE`.
+- **Settings scrolls sideways on narrow screens** — at 420px wide, every card on a Settings tab is squeezed to about 128px and the page scrolls horizontally. Repro: open Settings → Notifications in a 420px-wide window. This was already there before 2026-09-27 and wasn't caused by the playbook-responses card. Likely cause: `.settings-layout` in [`pulse/static/css/components.css`](pulse/static/css/components.css) keeps its `200px 1fr` grid with no narrow-screen breakpoint, so the tab nav takes a fixed column. The header buttons also run past the edge. Fix: stack the tab nav above the content under a max-width breakpoint.
 
 (Two 2026-06-16 defects — the Settings theme-toggle tab reset and the Fleet incident-report button — were fixed 2026-06-24; see Shipped + CHANGELOG.)
 
