@@ -4,14 +4,20 @@
 # up in a local MaxMind-format (.mmdb) database file. No network call,
 # ever, so it works offline and air-gapped.
 #
-# Pulse does not ship the database. MaxMind's GeoLite2 license forbids
-# giving the file to third parties without their written consent and
-# requires replacing it within 30 days of each update, so it can't be
-# committed to a public repo. Any .mmdb in the GeoIP2 layout works:
-#   * MaxMind GeoLite2 City / Country (free account, or `geoipupdate`)
-#   * DB-IP "IP to City Lite" / "IP to Country Lite" (CC BY 4.0)
-# Point threat_intel.geoip_db_path (Settings) or PULSE_GEOIP_DB at it, or
-# drop it in <pulse>/data/ under one of DEFAULT_NAMES.
+# Works out of the box: Pulse bundles DB-IP "IP to Country Lite"
+# (pulse/data/dbip-country-lite.mmdb, CC BY 4.0), so every install gets
+# country-level lookups offline with no setup. DB-IP's license requires
+# the attribution "IP Geolocation by DB-IP" (https://db-ip.com) wherever
+# results are shown; results from any DB-IP database carry it in
+# `attribution`, and the Investigate panel renders it.
+#
+# For city-level detail, bring your own .mmdb in the GeoIP2 layout and it
+# takes priority over the bundled file:
+#   * DB-IP "IP to City Lite" (127 MB, too big to bundle in the repo)
+#   * MaxMind GeoLite2 City / Country (free account; its license forbids
+#     redistribution, so Pulse can never ship it)
+# Set threat_intel.geoip_db_path (Settings) or PULSE_GEOIP_DB, or drop the
+# file in the top-level data/ folder under one of DEFAULT_NAMES.
 #
 # Needs the `maxminddb` reader (requirements.txt). Missing reader or file
 # -> the connector reports "not set up"; a bad file -> "no intel".
@@ -28,9 +34,12 @@ ENV_PATH = "PULSE_GEOIP_DB"
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_NAMES = ("GeoLite2-City.mmdb", "GeoLite2-Country.mmdb",
                  "dbip-city-lite.mmdb", "dbip-country-lite.mmdb")
+# Shipped with Pulse; used when nothing more specific is configured.
+BUNDLED = Path(__file__).resolve().parent.parent / "data" / "dbip-country-lite.mmdb"
+DBIP_ATTRIBUTION = {"text": "IP Geolocation by DB-IP", "url": "https://db-ip.com"}
 
 _reader_lock = threading.Lock()
-_reader = {"key": None, "reader": None}
+_reader = {"key": None, "reader": None, "dbip": False}
 
 
 def resolve_path(pulse_config):
@@ -42,7 +51,14 @@ def resolve_path(pulse_config):
         p = DATA_DIR / name
         if p.is_file():
             return str(p)
-    return None
+    return str(BUNDLED) if BUNDLED.is_file() else None
+
+
+def is_bundled(path):
+    try:
+        return path is not None and Path(path).resolve() == BUNDLED.resolve()
+    except OSError:
+        return False
 
 
 def reader_available():
@@ -66,6 +82,11 @@ def _open(path):
                     pass
             _reader["reader"] = maxminddb.open_database(path)
             _reader["key"] = key
+            try:
+                db_type = str(_reader["reader"].metadata().database_type or "")
+            except Exception:
+                db_type = ""
+            _reader["dbip"] = db_type.upper().startswith("DBIP")
         return _reader["reader"]
 
 
@@ -83,9 +104,12 @@ def lookup_ip(ip, db_path_file):
         rec = _open(db_path_file).get(ip.strip())
     except Exception:
         return None
+    # DB-IP's CC BY 4.0 license: attribution travels with every result.
+    attribution = dict(DBIP_ATTRIBUTION) if _reader["dbip"] else None
     if not rec:
         return {"ip": ip.strip(), "source": "geoip", "found": False,
-                "fetched_at": now_iso(), "verdict": "unknown", "cached": False}
+                "fetched_at": now_iso(), "verdict": "unknown", "cached": False,
+                "attribution": attribution}
     country = rec.get("country") or rec.get("registered_country") or {}
     subdivisions = rec.get("subdivisions") or [{}]
     location = rec.get("location") or {}
@@ -105,6 +129,7 @@ def lookup_ip(ip, db_path_file):
         # Location is context, not a judgement of the IP.
         "verdict": "info",
         "cached": False,
+        "attribution": attribution,
     }
 
 

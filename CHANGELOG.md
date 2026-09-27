@@ -5,6 +5,14 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Bundled GeoIP database (DB-IP Country Lite)
+
+- **GeoIP works with no setup.** Pulse now ships DB-IP's free "IP to Country Lite" database as [`pulse/data/dbip-country-lite.mmdb`](pulse/data/README.md) (8 MB, September 2026 release, CC BY 4.0). The GeoIP connector uses it when nothing more specific is configured, so every install gets offline country-level lookups; it's in the Docker image too.
+- **Bring-your-own still wins.** A path in Settings, `PULSE_GEOIP_DB`, or a database dropped in the top-level `data/` folder takes priority, for city-level detail (DB-IP City Lite, MaxMind GeoLite2 City).
+- **Attribution, as DB-IP's license requires:** results from any DB-IP database carry `attribution`, and the Investigate panel shows "IP Geolocation by DB-IP" (linking https://db-ip.com) under each GeoIP result. Settings shows when the bundled database is in use.
+- **Why country, not city:** City Lite is 127 MB uncompressed, over GitHub's 100 MB file limit, and a monthly refresh would add about 60 MB to the repo history each time. MaxMind GeoLite2 can't be bundled at all (its EULA forbids redistribution). Refresh steps are in `pulse/data/README.md`.
+- Tests: bundled fallback, user-file priority, attribution on DB-IP results (and not on others), and a real lookup against the bundled file (skipped where `maxminddb` isn't installed).
+
 ## 2026-09-27 — Docs refresh + repo hygiene
 
 - **Line endings:** added `.gitattributes` (`* text=auto`) so line endings no longer depend on each machine's `core.autocrlf`. The repo was already LF-only, so renormalizing changed no content. Shell scripts and the Dockerfile are pinned to LF (a CRLF `entrypoint.sh` from a Windows checkout breaks the image); sample `.evtx` logs and images are marked binary.

@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-1746%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1751%20passing-brightgreen)
 ![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
 ![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
 
@@ -61,7 +61,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 |---|---|
 | **Detection** | 35 rules mapped to MITRE ATT&CK · 4 time-based correlation rules · 4 Sysmon-based rules (command-line analysis, LSASS access, C2 network, DNS tunneling) · NIST CSF + ISO 27001 control IDs · SIGMA rule import · custom whitelist |
 | **Security score** | 0–100, graded A–F. Each unique finding removes a *share of the remaining* score (Critical keeps 72%, High 85%, Medium 93%, Low 97%), so the number keeps meaning something on a bad day: 8 criticals and 40 criticals score differently. Open findings count fully, resolved ones 20%, false positives not at all; a finding fades after a week open, measured from when Pulse recorded it. The dashboard, CLI and every report use the same scorer and the same A–F bands. |
-| **Threat intel & Investigate** | Drop-in connector layer ([`pulse/connectors/`](pulse/connectors/)). The finding drawer shows AbuseIPDB and VirusTotal verdicts next to the Block button, and an **Investigate** button runs every lookup that fits the finding's indicators at once: IPs → AbuseIPDB, VirusTotal, GreyNoise, AlienVault OTX, GeoIP; domains → Whois (RDAP), DNS, VirusTotal, OTX; file hashes → VirusTotal, OTX. One provider failing never hides the others. Bring-your-own API keys; GeoIP reads a local database file (works offline); private IPs and internal hostnames are never sent out. Every lookup is cached and held to the provider's free-tier limits. |
+| **Threat intel & Investigate** | Drop-in connector layer ([`pulse/connectors/`](pulse/connectors/)). The finding drawer shows AbuseIPDB and VirusTotal verdicts next to the Block button, and an **Investigate** button runs every lookup that fits the finding's indicators at once: IPs → AbuseIPDB, VirusTotal, GreyNoise, AlienVault OTX, GeoIP; domains → Whois (RDAP), DNS, VirusTotal, OTX; file hashes → VirusTotal, OTX. One provider failing never hides the others. Bring-your-own API keys; GeoIP works out of the box from a bundled offline database (country level, [IP Geolocation by DB-IP](https://db-ip.com)); private IPs and internal hostnames are never sent out. Every lookup is cached and held to the provider's free-tier limits. |
 | **Automations (playbooks)** | Stored JSON playbooks react to every new finding: a trigger, conditions (severity, rule, public source IP, …) and ordered steps with placeholders like `{{ finding.source_ip }}`. Lookups run on their own; **response steps (block an IP, post to Slack/Discord) always wait for a manager or admin to approve them**, with the security PIN when one is set, and run exactly the values shown. There's no fully automatic mode. **Automations** page with approvals, playbooks, runs and a step-by-step log; three built-in examples; JSON paste import; per-organization connector switches; everything audit-logged. |
 | **Security Advisor** | Every finding ships a plain-language Security Guide — what happened, why it matters, immediate actions, exploit difficulty, false-positive tips. Security Advisor sidebar page with posture summary, top concerns, attack-concept explainers, hardening checklist. |
 | **Security Buddy ("Pip")** | Optional floating AI chat (bottom-right). Ask what a finding means, whether something looks dangerous, or any security question — answered in plain language by Claude Haiku, proxied server-side (`POST /api/buddy/ask`, key never in the browser). Read-only, prompt-injection-safe, 10 free questions/user/day. Suggests context-aware follow-ups, remembers the chat across refreshes, slides beside the finding drawer to discuss the open finding, and points out-of-scope questions to GitHub/Feedback. Off until an `ANTHROPIC_API_KEY` is set. |
@@ -134,7 +134,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 
 **Storage** — All scan history, findings, audit log, agents, notifications, organizations, users, API tokens, IP block list, finding notes, playbooks, playbook runs and per-org connector switches live in one schema ([`pulse/database.py`](pulse/database.py)). Multi-tenant rows carry an `organization_id`; the API helper `_read_scope_kwargs` enforces tenant isolation on every read/write.
 
-**Tests** — 1746 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
+**Tests** — 1751 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
 
 ---
 
@@ -194,7 +194,7 @@ Set `PULSE_HOSTED_SIGNUP=1` to let each signup create its own isolated organizat
 
 Every outside lookup is bring-your-own and off until you set it up under **Settings › Notifications** (or with environment variables on a hosted deploy): `ABUSEIPDB_API_KEY`, `VIRUSTOTAL_API_KEY`, `GREYNOISE_API_KEY`, `OTX_API_KEY`. Keys stay on the server; the browser only ever sees whether one is set. VirusTotal's free public key is for non-commercial use only.
 
-GeoIP needs a MaxMind-format `.mmdb` file. Pulse can't ship one, because MaxMind's GeoLite2 license forbids redistribution. Download GeoLite2 City (free MaxMind account) or DB-IP "IP to City Lite", then set its path in Settings, set `PULSE_GEOIP_DB`, or drop it in Pulse's `data/` folder. Whois and DNS need no key.
+GeoIP needs no setup: Pulse bundles DB-IP's free **IP to Country Lite** database ([`pulse/data/`](pulse/data/README.md), CC BY 4.0, [IP Geolocation by DB-IP](https://db-ip.com)), so country-level lookups work offline on every install. For city-level detail, download DB-IP "IP to City Lite" or MaxMind GeoLite2 City (free account) and set its path in Settings, set `PULSE_GEOIP_DB`, or drop it in the top-level `data/` folder; your file takes priority. (City Lite is too large to bundle, and MaxMind's license forbids redistribution.) Whois and DNS need no key.
 
 ### Enabling Pip (the AI Security Buddy)
 

@@ -93,7 +93,7 @@ Each outside lookup is **bring-your-own-key** and sends nothing until its key is
 | AlienVault OTX | otx.alienvault.com | a public IP, a public domain, or a file hash |
 | Whois | IANA, then the domain's registry / registrar (RDAP or port 43) | a public domain name |
 | DNS | the Pulse host's own resolver | a public domain name |
-| GeoIP | **nothing:** reads a local `.mmdb` file | — |
+| GeoIP | **nothing:** reads a local `.mmdb` file (the bundled DB-IP country database, or one you supply) | — |
 
 Safeguards:
 

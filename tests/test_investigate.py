@@ -273,6 +273,7 @@ class TestGeoIP:
     def test_not_set_up_without_file_or_reader(self, tmp_path, monkeypatch):
         c = connectors.get("geoip")
         monkeypatch.setattr(geoip, "DATA_DIR", tmp_path / "nothing-here")
+        monkeypatch.setattr(geoip, "BUNDLED", tmp_path / "no-bundle.mmdb")
         assert c.health_check(connectors.config_for(c, {})) is False
         monkeypatch.setattr(geoip, "reader_available", lambda: False)
         f = tmp_path / "x.mmdb"
@@ -295,6 +296,57 @@ class TestGeoIP:
         assert geoip.resolve_path({"threat_intel": {"geoip_db_path": str(cfgf)}}) == str(cfgf)
         # An explicit path that doesn't exist is "not found", not a fallback.
         assert geoip.resolve_path({"threat_intel": {"geoip_db_path": str(tmp_path / "gone.mmdb")}}) is None
+
+    def test_bundled_database_is_the_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(geoip, "DATA_DIR", tmp_path / "empty")
+        path = geoip.resolve_path({})
+        assert path == str(geoip.BUNDLED) and geoip.is_bundled(path)
+        assert geoip.BUNDLED.is_file()          # actually shipped in the repo
+
+    def test_users_own_database_beats_the_bundled_one(self, tmp_path, monkeypatch):
+        data = tmp_path / "data"
+        data.mkdir()
+        (data / "dbip-city-lite.mmdb").write_bytes(b"x")
+        monkeypatch.setattr(geoip, "DATA_DIR", data)
+        assert not geoip.is_bundled(geoip.resolve_path({}))
+        own = tmp_path / "mine.mmdb"
+        own.write_bytes(b"x")
+        assert geoip.resolve_path({"threat_intel": {"geoip_db_path": str(own)}}) == str(own)
+
+    def test_dbip_results_carry_the_required_attribution(self, db, tmp_path, monkeypatch):
+        f = tmp_path / "dbip-country-lite.mmdb"
+        f.write_bytes(b"fake")
+
+        class _DbipReader(_FakeReader):
+            def metadata(self):
+                import types
+                return types.SimpleNamespace(database_type="DBIP-Country-Lite")
+        reader = _DbipReader({PUBLIC_IP: {"country": {"iso_code": "GB",
+                                                      "names": {"en": "United Kingdom"}}}})
+        import sys
+        import types
+        monkeypatch.setattr(geoip, "reader_available", lambda: True)
+        monkeypatch.setitem(sys.modules, "maxminddb",
+                            types.SimpleNamespace(open_database=lambda p: reader))
+        geoip._reader.update(key=None, reader=None, dbip=False)
+        cfg = {"threat_intel": {"geoip_db_path": str(f)}}
+        found = _run("geoip", "lookup_ip", {"ip": PUBLIC_IP}, db, cfg)
+        missing = _run("geoip", "lookup_ip", {"ip": "8.8.8.8"}, db, cfg)
+        for out in (found, missing):
+            assert out["attribution"] == {"text": "IP Geolocation by DB-IP",
+                                          "url": "https://db-ip.com"}
+        assert connectors.get("geoip").summarize("lookup_ip", found) == "United Kingdom"
+
+    def test_non_dbip_database_has_no_attribution(self, db, mmdb):
+        cfg = {"threat_intel": {"geoip_db_path": mmdb[0]}}
+        assert _run("geoip", "lookup_ip", {"ip": PUBLIC_IP}, db, cfg)["attribution"] is None
+
+    def test_real_lookup_in_the_bundled_database(self, db):
+        pytest.importorskip("maxminddb")
+        geoip._reader.update(key=None, reader=None, dbip=False)
+        out = _run("geoip", "lookup_ip", {"ip": "8.8.8.8"}, db)
+        assert out["found"] and out["country_code"] == "US"
+        assert out["attribution"]["text"] == "IP Geolocation by DB-IP"
 
     def test_bad_database_is_no_intel(self, db, tmp_path, monkeypatch):
         f = tmp_path / "broken.mmdb"

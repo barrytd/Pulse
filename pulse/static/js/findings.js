@@ -2431,8 +2431,14 @@ function _invRowHtml(v) {
     var verdict = v.verdict || 'unknown';
     pill = '<span class="soar-pill soar-' + (_VERDICT_TONE[verdict] || 'muted') + '">' +
       escapeHtml(_VERDICT_TEXT[verdict] || verdict) + '</span>';
+    var attr = v.result && v.result.attribution;
     line = escapeHtml(v.summary || '') +
-      (v.result && v.result.cached ? ' <span class="intel-cache-flag" title="Served from local cache">cached</span>' : '');
+      (v.result && v.result.cached ? ' <span class="intel-cache-flag" title="Served from local cache">cached</span>' : '') +
+      // Data-license attribution (e.g. DB-IP's CC BY 4.0 for GeoIP).
+      (attr && attr.text && /^https:\/\//.test(attr.url || '')
+        ? '<div class="inv-attribution"><a href="' + escapeHtml(attr.url) + '" target="_blank" rel="noopener" ' +
+          'data-default="allow" class="link">' + escapeHtml(attr.text) + '</a></div>'
+        : '');
   } else {
     pill = '<span class="soar-pill soar-muted">' +
       escapeHtml(v.status === 'not_set_up' ? 'Not set up' : v.status === 'disabled' ? 'Off' : 'No intel') + '</span>';

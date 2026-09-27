@@ -6664,6 +6664,7 @@ def _threat_intel_view(intel):
         "geoip": {
             "path":   (intel.get("geoip_db_path") or "").strip() or None,
             "found":  geo_path,
+            "bundled": geoip.is_bundled(geo_path),
             "reader": geoip.reader_available(),
         },
         "cache_ttl_hours":        int(intel.get("cache_ttl_hours", 24) or 24),

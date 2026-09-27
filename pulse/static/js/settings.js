@@ -734,9 +734,10 @@ export async function renderSettingsPage() {
       '<div class="form-row"><span></span><span>' + _geoipStatus(ti.geoip || {}) + '</span></div>' +
       '<p style="color:var(--text-muted); font-size:12px; margin:0 0 14px;">' +
         'GeoIP looks IPs up in a local database file, with no network call, so it works offline. ' +
-        'Pulse can\u2019t ship one (MaxMind\u2019s license doesn\u2019t allow redistributing it). Download ' +
-        'MaxMind GeoLite2 City with a free account, or DB-IP \u201cIP to City Lite\u201d, then enter ' +
-        'the .mmdb file\u2019s path here or put it in Pulse\u2019s data folder.' +
+        'Pulse ships DB-IP\u2019s free country-level database, so this works with no setup. ' +
+        'For city-level detail, download DB-IP \u201cIP to City Lite\u201d or MaxMind GeoLite2 City ' +
+        '(free account) and enter the .mmdb file\u2019s path here; it takes priority. Leave blank to ' +
+        'use the bundled one. <a href="https://db-ip.com" target="_blank" data-default="allow" class="link">IP Geolocation by DB-IP</a>' +
       '</p>' +
       '<div class="form-row"><label>Cache TTL (hours)</label>' +
         '<input type="number" id="ti-cache-ttl" min="1" max="720" value="' +
@@ -2216,6 +2217,7 @@ function _tiKeyRow(label, id, isSet, provider) {
 
 function _geoipStatus(g) {
   if (!g.reader) return '<span class="password-status">GeoIP reader not installed (pip install -r requirements.txt)</span>';
+  if (g.found && g.bundled) return '<span class="password-status set">✓ Using the bundled DB-IP country database</span>';
   if (g.found) return '<span class="password-status set">✓ Using ' + escapeHtml(g.found) + '</span>';
   if (g.path) return '<span class="password-status">File not found: ' + escapeHtml(g.path) + '</span>';
   return '<span class="password-status">No GeoIP database yet</span>';
