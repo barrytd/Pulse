@@ -36,14 +36,14 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 ## What it does today
 
 ### Detection
-- 33 detection rules mapped to MITRE ATT&CK.
+- 35 detection rules mapped to MITRE ATT&CK.
 - Sysmon support (process creation, LSASS access, network connections, DNS queries).
 - Multi-event correlation that links separate events into one attack chain.
 - Import of community SIGMA rules.
 - A built-in list of over 100 known-good services to cut false positives.
 
 ### Dashboard and triage
-- A single-page web app with a security score, charts, and a view that shows raw events narrowing down to critical findings.
+- A single-page web app. The dashboard leads with the security grade and one plain-language line about what's wrong, next to the unreviewed critical and high findings, then four key numbers, the score history, and findings by severity. A brand-new account sees a "Run your first scan" prompt instead of empty zeros.
 - The security score (0 to 100, graded A to F) uses diminishing returns: each unique finding removes a share of the health that is left, so the score gets close to 0 without hitting it, and a host with 40 critical findings scores lower than one with 8. Open findings count fully, resolved ones count a little, and false positives don't count. A finding fades after it has been open for a week, measured from when Pulse recorded it, so an old log uploaded today is scored at full strength. The dashboard, the command line, and every report use the same scorer, so one host gets one score everywhere.
 - A finding panel that leads with a plain summary, the actions to take, and the framework references, with the raw event data tucked into a section you can expand.
 - My Queue: each analyst's assigned, unresolved findings, sorted by priority.
@@ -126,5 +126,5 @@ See `ROADMAP.md` for the full current list. See `CHANGELOG.md` for the day-to-da
 
 - Open source on GitHub: github.com/barrytd/Pulse
 - License: MIT
-- Over 1,600 automated tests, all passing.
+- Over 1,700 automated tests, all passing.
 - Active development.

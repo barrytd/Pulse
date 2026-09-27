@@ -5,6 +5,18 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Docs refresh + repo hygiene
+
+- **Line endings:** added `.gitattributes` (`* text=auto`) so line endings no longer depend on each machine's `core.autocrlf`. The repo was already LF-only, so renormalizing changed no content. Shell scripts and the Dockerfile are pinned to LF (a CRLF `entrypoint.sh` from a Windows checkout breaks the image); sample `.evtx` logs and images are marked binary.
+- **README, PROJECT, SECURITY, CONTRIBUTING, ROADMAP and `samples/README.md`** brought in line with the code:
+  - README: Python **3.10+** (not 3.8+), **35** detection rules (two MITRE IDs corrected), 1,746 tests, a new dashboard screenshot, the scoring model, threat intel + Investigate, and Automations with its approval model.
+  - SECURITY.md: the playbook approval model, and every third-party data flow. It no longer claims Pip is the only one.
+  - CONTRIBUTING.md: "adding a connector"; the rule tutorial now matches how `run_all_detections()` works and includes the knowledge-base step.
+  - Sample logs now grade **D**, not F, under the share-of-remaining score.
+  - CHANGELOG backfilled for the dashboard redesign, report grade bands and dependency refresh.
+- Found during the audit, now tracked in ROADMAP → Bugs: **`DCSync Attempt` and `Suspicious Child Process` fire but aren't registered in `RULE_META`**, so they can't be switched off on the Rules page and have no NIST/ISO mapping or plain-language guide.
+- Added `CLAUDE.md` with the project's documentation policy (docs change in the same commit as the code). Removed a leftover scratch folder and ignored it.
+
 ## 2026-09-27 — Investigate panel + enrichment connectors (SOAR phase 3, part 1)
 
 - **Investigate panel in the finding drawer.** One click runs every enrichment connector that fits each indicator in the finding, in parallel, and shows all the verdicts together, grouped by indicator:
@@ -81,6 +93,29 @@ Phase 2 of [the SOAR design](docs/2026-09-26-soar-playbooks-and-integrations.md)
   - the API: PIN step-up, analyst forbidden, cross-org 404s, audit entries, and an upload triggering a run
 
   Nothing in the tests touches the network or the real firewall.
+
+## 2026-09-26 — Reports grade with the dashboard's A–F bands
+
+- The PDF, executive-summary (and board-ready), threat-summary and fleet-health reports each carried their own A90 / B75 / C60 / D40 scale, while the dashboard grades with `GRADE_BANDS` in [`pulse/reports/reporter.py`](pulse/reports/reporter.py) (A90 / B75 / C50 / D25). The same score could read D on screen and F in a board report (e.g. 30). Every report now grades through `reporter.grade_for_score`; fleet-health risk tiers derive from the letter.
+- **Report letters change**, now matching the dashboard: a 30 is a D (was F in reports), a 55 is a C (was D).
+- [`tests/test_grade_bands.py`](tests/test_grade_bands.py) fails if any report module defines its own score→letter thresholds again, and checks every report grades 0–100 like the dashboard.
+
+## 2026-09-26 — Dependency refresh
+
+- `requirements-lock.txt` regenerated from a clean venv (same 45 packages) to clear new advisories: anyio (CVE-2026-63374, -64847, -63349), pypdf (PYSEC-2026-3655/3656/3910–3913), setuptools (PYSEC-2026-3447). Notable refreshes: starlette 1.7.0, uvicorn 0.54.0, fastapi 0.141.1, websockets 17.1. pip-audit is clean and the full suite passes on the exact pins. **The pinned set needs Python 3.10+.**
+- `test_fleet_health_tiers_and_ranking` no longer depends on the date (its fixed June scan dates had aged past the stale window).
+
+## 2026-09-26 — Dashboard redesign
+
+Implements [the dashboard redesign](docs/2026-09-26-dashboard-redesign.md).
+
+- **One hero:** the security grade in a gauge, the number, a plain-language verdict from the knowledge base, and a day-over-day trend chip, next to a **Needs attention** list of unreviewed critical/high findings (last 7 days) that opens the finding drawer.
+- **A 4-stat strip:** open findings, critical unreviewed, scans today, mean time to detect.
+- **One row:** score history (a Chart.js area line with the B-grade threshold) and findings by severity with repeat offenders. The old four-box data-reduction funnel is now one line.
+- Only the zone containers are cards (soft shadow, large radius, no outline). The old grid of bordered boxes is gone.
+- **Empty states say what to do:** a brand-new account sees "Run your first scan" with the scan and upload actions instead of gray zeros.
+- Still offline and air-gapped: no CDNs or web fonts, existing design tokens plus `--brand`, the vendored Chart.js. Fixes a horizontal overflow at phone width.
+- **The frontend grades with the backend's bands:** `dashboard.js` used A90/B80/C70/D60; it now reads the same `GRADE_BANDS` table as `reporter.py`, pinned by [`tests/test_grade_bands.py`](tests/test_grade_bands.py).
 
 ## 2026-09-26 — Security score: keep-factor model, one scorer everywhere
 

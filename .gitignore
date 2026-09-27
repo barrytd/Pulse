@@ -63,3 +63,6 @@ pulse.db.bak-*
 
 # Personal content drafts (LinkedIn posts etc.) — not part of the public repo.
 docs/LINKEDIN_CONTENT.md
+
+# Local scratch output from AI tooling (duplicates of files kept in docs/).
+Claude outputs/

@@ -20,6 +20,8 @@ Flat status board organized by category, sorted by priority within each section.
 
 - **Add-host onboarding (agent enrollment)** | The highest-leverage adoption gap now that the public-signup security gates have all shipped (CSRF + XFF + org-scoping, plus the mandatory email OTP; see Shipped). Turn Settings → Agents into a real flow: download button + copy-paste command with the enrollment token pre-filled + a one-line PowerShell installer that registers the agent as a Windows service and enrolls it. See the **Add a host** row in the Development Backlog.
 
+- **SOAR playbooks & integrations** | Turn Pulse from detect-and-report into detect-and-act: a connector layer (VirusTotal, GreyNoise, OTX alongside AbuseIPDB), a playbook engine (trigger → conditions → actions), and enrichment/response run inside the finding drawer so analysts never leave Pulse. Full design in [docs/2026-09-26-soar-playbooks-and-integrations.md](docs/2026-09-26-soar-playbooks-and-integrations.md). **Phases 1 and 2 and Phase 3 part 1 are shipped** (connector layer, playbook engine + Automations page, Investigate panel + five enrichment connectors; see Shipped). **Next:** the rest of Phase 3 (click-together builder, ClickUp/Jira tickets, generic outbound webhook) in the Automation & integrations backlog tier.
+
 *Public-signup security gate is complete — see the Development Backlog row.*
 
 ---
@@ -67,6 +69,18 @@ Flat status board organized by category, sorted by priority within each section.
 | **CONTRIBUTING.md** | Dev environment setup, running tests, adding a detection rule (step-by-step with example), adding a dashboard page, code style, PR review process. |
 | **Sample data bundle** | `samples/` directory with 3–4 synthetic `.evtx` files containing known threats (brute force, credential dumping, lateral movement, persistence), sample `pfirewall.log`, README explaining what each demonstrates. |
 
+### 🟠 High / 🟡 Medium — Automation & integrations (SOAR)
+
+> Turn Pulse into a SIEM **+ SOAR** platform: react to findings automatically, and add outside services as drop-in connectors. Full design + API facts + phased plan: [docs/2026-09-26-soar-playbooks-and-integrations.md](docs/2026-09-26-soar-playbooks-and-integrations.md). Build in the three phases below, top-down.
+
+| Item | Notes |
+|---|---|
+| ✅ **Phase 1 — Connector layer + VirusTotal — shipped 2026-09-26** | New `pulse/connectors/` with a base-class + self-registering pattern (mirrors how rules register). Port AbuseIPDB (`intel.py`) onto it as the first connector, then add **VirusTotal** (header `x-apikey`; endpoints `/ip_addresses/{ip}`, `/files/{hash}`, `/domains/{domain}`, `/urls/{id}`; free tier 4/min, 500/day; **public key is non-commercial → make it bring-your-own-key**). Show both verdicts **inside the finding drawer** next to the block button. No engine yet. Small, ships a wanted feature, proves the plugin model. **Start here.** |
+| ✅ **Phase 2 — Playbook engine (no builder UI) — shipped 2026-09-26** | New `pulse/soar/engine.py` + 3 tables (`connectors_config`, `playbooks`, `playbook_runs`, all org-scoped). Playbook = stored JSON recipe: `trigger` (`finding_created`) → `conditions` → ordered `steps` (connector + action + placeholders like `{{ finding.source_ip }}`). Engine matches conditions, runs steps, logs every step to a run record. **Response actions default to approval-required (wire to the security PIN); enrichment auto-runs.** Create playbooks via API / JSON-paste (like SIGMA import). New **Automations** page listing playbooks + runs; show triggered runs in the finding drawer. Ship 2–3 built-in example playbooks. |
+| **Phase 3 — Investigate panel, visual builder + connector catalog** | **Part 1 ✅ shipped 2026-09-27:** the Investigate panel, plus GreyNoise, AlienVault OTX, GeoIP, Whois (RDAP + port 43) and DNS connectors, and the Slack/Discord + firewall response connectors (shipped with Phase 2). GeoIP reads a local `.mmdb` the user supplies: the GeoLite2 EULA forbids bundling it (see Decisions Needed). **Still to build:** the click-together builder, ClickUp/Jira ticketing, a generic outbound webhook, Shodan, and optional MISP / OpenCTI. Original scope: **Investigate panel** in the finding drawer: one click runs every enrichment connector that fits the finding's indicators (IP → AbuseIPDB + VirusTotal + GreyNoise + Shodan + GeoIP; domain → Whois + DNS; hash → VirusTotal), so the browser-bookmark tools become buttons inside Pulse. Click-together playbook builder (pick trigger, add condition rows, drag action steps) so a non-coder builds one without touching JSON. Fold in the bookmark-bar catalog: **GreyNoise, AlienVault OTX, Shodan, Whois/DNS, MaxMind GeoIP** (bundled GeoLite2 DB, offline), plus **ClickUp/Jira ticketing** and a **generic outbound webhook**. **MISP / OpenCTI** as optional, off-by-default, bring-your-own-instance intel-feed connectors (enrich from your feed; optionally push a finding's IOCs out to share). Generalize Slack/Discord (`webhook.py`) and firewall block (`blocker.py`) into response connectors. See the connector catalog in the design doc. |
+| **Phase 4 — Unified Toolkit hub (post-Phase 3)** | A new left-sidebar page ("Toolkit" / "Workbench") that is one front door to everything: run any connector lookup on a pasted IP / domain / hash with no finding open (standalone Investigate), quick access to the MITRE / NIST / ISO frameworks and the Security Advisor knowledge base already in Pulse, the threat-intel connectors (incl. optional MISP / OpenCTI), and a small analyze-and-decode utility (base64 / hex, CyberChef-style). Mostly assembles pieces built in Phases 1–3; the only new work is the page + sidebar item (same pattern as Findings / Fleet) plus the decode tool. Idea (Robert, 2026-09-26): fold the scattered tools and browser bookmarks into one place so nobody leaves the app. Ship a first version after Phase 3. |
+| ✅ **Safety rails (build into Phase 2, not after) — shipped with Phase 2** | Response steps PIN-gated by default; every run org-scoped + audit-logged; a connector failure (bad key / timeout / rate limit) logs and continues, never crashes the run; cache lookups keyed on (indicator, provider) like `intel_cache` already does, and respect each provider's per-minute cap so a finding burst doesn't blow the daily quota. |
+
 ### 🟢 Low — Polish & nice-to-haves
 
 | Item | Notes |
@@ -85,7 +99,9 @@ Flat status board organized by category, sorted by priority within each section.
 
 > Tracked defects. Drop in here with a one-line repro + the file where it bites; promote into **Up Next** with priority based on severity + frequency.
 
-*No open bugs.* (Two 2026-06-16 defects — the Settings theme-toggle tab reset and the Fleet incident-report button — were fixed 2026-06-24; see Shipped + CHANGELOG.)
+- **Two detection rules aren't registered** — `DCSync Attempt` (CRITICAL, 4662) and `Suspicious Child Process` (HIGH, 4688) fire from [`pulse/core/detections.py`](pulse/core/detections.py) but have no entry in `RULE_META` ([`pulse/core/rules_config.py`](pulse/core/rules_config.py)), so they can't be switched off on the Rules page, have no NIST/ISO mapping, and fall back to the generic plain-language guide. Fix: add both to `RULE_META` and `KNOWLEDGE`.
+
+(Two 2026-06-16 defects — the Settings theme-toggle tab reset and the Fleet incident-report button — were fixed 2026-06-24; see Shipped + CHANGELOG.)
 
 ---
 
@@ -97,11 +113,23 @@ Flat status board organized by category, sorted by priority within each section.
 - **Scale + concurrency ceiling** — *"Can Pulse handle heavy load / many people working at once?"* **Honest read:** for its actual job — host-based Windows event-log detection for a **small team** — yes. FastAPI is async (handles many concurrent users), the data is org-scoped, and the roles/queue model is built for several analysts triaging at once. Agents scan every ~30 min and ship only *findings* (not raw logs), so even dozens–low-hundreds of hosts is light traffic. **The real ceiling is the database:** SQLite (the default) has a single-writer lock that bottlenecks under heavy concurrent writes. **Recommendation:** make **Postgres the default for any hosted / multi-user deployment** (already supported via `db_backend` — this is config, not a rewrite); load-test "N analysts + M agents" and document the supported envelope; only add a job-queue for agent ingestion when host counts actually grow into the thousands. Don't over-engineer ahead of demand.
 - **Web / application *traffic* monitoring — a different lane?** — *"Could someone use Pulse to manage the traffic of a website/app?"* **Honest read: not today, and it's a different product category.** Pulse analyzes **host event logs** (periodic, batch) for *threats* — it is not a real-time, high-throughput **traffic** monitor (that's WAF / reverse-proxy / APM / streaming-SIEM territory: thousands of events/sec, a streaming ingest pipeline, a time-series store). Bolting that onto the current architecture would be a major build, not a feature. **Recommendation:** **stay in lane** — be the best "Windows threat detection for people without a SOC," not a worse Datadog/Cloudflare. If web/app-log *security* detection is wanted later, the right shape is a **generic log-shipper + detections for non-Windows sources** (web access logs, syslog, app logs) feeding the *same* findings model — a deliberate post-PMF expansion, gated on real demand. Validate that customers ask for it before building.
 - **Agent-to-server protocol** — REST (shipped, fast) vs. gRPC (more efficient at fleet scale). Default: stay on REST until fleet size justifies the migration.
+- **GeoIP database: bring-your-own or bundle DB-IP Lite?** — MaxMind's GeoLite2 EULA forbids redistributing the database without written consent and requires deleting old copies within 30 days of an update, so Pulse can't ship it. Today the GeoIP connector reads a `.mmdb` the user downloads (GeoLite2 or DB-IP Lite). Alternative: bundle **DB-IP "IP to City Lite"** (same format, CC BY 4.0, redistributable with attribution) so GeoIP works offline out of the box, at the cost of a large binary in the repo and a monthly refresh.
 - **Code-signing certificate** — needed before SmartScreen-friendly public distribution of `pulse-agent.exe`. Cheapest path: Sectigo / DigiCert OV (~$200/year). EV needed for instant SmartScreen reputation.
 
 ---
 
 ## ✅ Shipped
+
+<details>
+<summary><strong>September 2026 — SOAR, scoring, dashboard — click to expand</strong></summary>
+
+- **Investigate panel + five enrichment connectors (SOAR phase 3, part 1)** — one click in the finding drawer runs every connector that fits the finding's IPs, domains and file hashes, in parallel, with one result per provider. New drop-in connectors: GreyNoise and AlienVault OTX (bring-your-own keys), GeoIP (local `.mmdb`, offline), Whois (RDAP then port 43) and DNS. Private IPs and internal names are never sent. [`tests/test_investigate.py`](tests/test_investigate.py). (2026-09-27)
+- **Playbook engine + Automations page (SOAR phase 2)** — stored JSON playbooks react to new findings: lookups run on their own, every response step (firewall block, Slack/Discord post) waits for a manager/admin approval with the security PIN. No full-auto mode. Org-scoped, audit-logged, three built-in examples. [`tests/test_soar.py`](tests/test_soar.py). (2026-09-26)
+- **Connector layer + VirusTotal (SOAR phase 1)** — `pulse/connectors/` with self-registering connectors; AbuseIPDB moved onto it; VirusTotal added (bring-your-own key, 4/min + 500/day quota); both verdicts in the finding drawer next to Block. [`tests/test_connectors.py`](tests/test_connectors.py). (2026-09-26)
+- **Share-of-remaining security score** — each unique finding removes a share of the remaining health (Critical 0.72 … Low 0.97), so 8 and 40 criticals score differently; open findings count fully, resolved 20%, false positives not at all; recency fades from when Pulse recorded the finding. One scorer for the dashboard, CLI and every report, and every report grades with the dashboard's A–F bands. [`tests/test_scoring.py`](tests/test_scoring.py), [`tests/test_grade_bands.py`](tests/test_grade_bands.py). (2026-09-26)
+- **Dashboard redesign** — one hero (score + "needs attention"), a 4-stat strip, score history + findings by severity; soft cards instead of bordered boxes; a "Run your first scan" empty state. (2026-09-26)
+
+</details>
 
 <details>
 <summary><strong>Post-v1.8.0 work (June 2026) — click to expand</strong></summary>
