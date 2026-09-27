@@ -156,6 +156,18 @@ class AbuseIPDBConnector(Connector):
             "ttl_hours": ttl_hours_from_config(pulse_config),
         }
 
+    def summarize(self, action, result):
+        if not result:
+            return None
+        score = result.get("score")
+        if score is None:
+            return "No abuse data."
+        reports = result.get("total_reports")
+        return (f"Abuse confidence {score}/100"
+                + (f", {reports} report{'s' if reports != 1 else ''} in 90 days" if reports is not None else "")
+                + (f" · {result['country']}" if result.get("country") else "")
+                + (f" · {result['isp']}" if result.get("isp") else ""))
+
     def run(self, action, inputs, config):
         if action != "lookup_ip":
             return None

@@ -21,6 +21,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -76,6 +77,11 @@ class Connector:
         there is nothing to report. May raise; `run_action` catches."""
         raise NotImplementedError
 
+    def summarize(self, action, result):
+        """One plain-language line describing `result`, shown in the
+        finding drawer's Investigate panel. None to show nothing."""
+        return None
+
 
 _REGISTRY = {}
 
@@ -114,6 +120,46 @@ def is_public_ip(ip):
     if addr.is_multicast or addr.is_reserved or addr.is_unspecified:
         return False
     return True
+
+
+_HASH_RE = re.compile(r"^(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})$")
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
+)
+# Internal-only suffixes. Sending these off-host would leak the
+# network's naming, and outside services would have nothing on them.
+INTERNAL_SUFFIXES = (
+    ".local", ".localdomain", ".lan", ".home", ".internal", ".intranet",
+    ".corp", ".private", ".localhost", ".arpa", ".test", ".invalid",
+    ".example",
+)
+
+
+def normalize_hash(value):
+    """Lowercased MD5/SHA-1/SHA-256 hex, or None."""
+    if not value or not isinstance(value, str):
+        return None
+    v = value.strip().lower()
+    return v if _HASH_RE.match(v) else None
+
+
+def normalize_domain(value):
+    """Lowercased public-looking domain name, or None. Rejects IPs,
+    single labels, and internal suffixes like .local / .corp, so no
+    connector ever sends the network's internal naming off-host."""
+    if not value or not isinstance(value, str):
+        return None
+    v = value.strip().lower().rstrip(".")
+    try:
+        ipaddress.ip_address(v)
+        return None
+    except ValueError:
+        pass
+    if not _DOMAIN_RE.match(v):
+        return None
+    if any(v.endswith(s) for s in INTERNAL_SUFFIXES):
+        return None
+    return v
 
 
 def env_value(name):

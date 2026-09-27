@@ -64,6 +64,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - Block an attacking IP from a finding, managed through the Windows firewall.
 - A custom whitelist to suppress known-good activity.
 - Threat intel lookups against AbuseIPDB and VirusTotal. Both verdicts show in the finding panel right above the block button, so an analyst can check an IP's reputation without opening another site. VirusTotal uses the customer's own API key; Pulse never ships one.
+- An Investigate button in the finding panel: one click looks up every IP address, domain and file hash in the finding across all the threat-intel sources at once (AbuseIPDB, VirusTotal, GreyNoise, AlienVault OTX, GeoIP location, Whois registration age, and DNS) and shows every verdict together. GreyNoise and OTX use the customer's own free keys. GeoIP reads a local database file the customer downloads, so it works offline.
 - Alerts by email, Slack, and Discord.
 - Automations (playbooks): saved recipes that react to new findings on their own. A playbook can look the attacker up on AbuseIPDB and VirusTotal the moment a finding fires, then propose a response such as blocking the IP or alerting the team. Lookups run by themselves; every response waits for a manager or admin to approve it on the Automations page or in the finding. Three ready-made examples can be added with one click, and admins can paste their own as JSON.
 
@@ -113,7 +114,7 @@ Pulse is open source and free to self-host, and that will not change. The plan i
 
 ## What is next
 
-- Automations, phase 3: a click-together playbook builder so nobody has to write JSON, plus more connectors (GreyNoise, AlienVault OTX, ClickUp/Jira tickets, a generic outbound webhook). The connector layer and the playbook engine are built. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
+- Automations, phase 3 (the rest): a click-together playbook builder so nobody has to write JSON, plus ClickUp/Jira tickets and a generic outbound webhook. The connector layer, the playbook engine, the Investigate panel and the GreyNoise, OTX, GeoIP, Whois and DNS connectors are built. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
 - A simple "add a host" flow with a one-line installer.
 - Tenant hardening before public sign-up: the core is done (each workspace's admin is now scoped to their own workspace, with a private platform-owner role set by an environment variable). Still to add before opening sign-up to strangers: cross-site request protection and trusting the right network address behind a proxy.
 - Invite teammates by code.

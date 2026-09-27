@@ -1962,3 +1962,27 @@ body.flyout-push-open .findings-page { padding-right: 460px; }
  * ================================================================== */
 body.flyout-push-open .finding-drawer-backdrop { display: none; }
 body.flyout-push-open .finding-drawer { box-shadow: none; }
+
+/* Investigate panel (finding drawer): verdicts from every enrichment
+   connector, grouped by indicator. Pills reuse the .soar-pill tones. */
+.inv-intro { font-size: 12px; margin: 0 0 8px; }
+.inv-group { padding: 10px 0; }
+.inv-group + .inv-group { border-top: 1px solid var(--border); }
+.inv-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; min-width: 0; }
+.inv-kind {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.inv-value { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.inv-row { padding: 5px 0 5px 10px; border-left: 2px solid var(--border); margin-left: 2px; }
+.inv-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.inv-source { font-size: 13px; font-weight: 500; color: var(--text); }
+.inv-row-line { font-size: 12px; color: var(--text-body); margin-top: 2px; overflow-wrap: anywhere; }
+.inv-skipped { padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
+.inv-skipped .inv-kind { margin-bottom: 4px; }
+.inv-again { margin-top: 10px; }
+.inv-quiet { font-size: 12px; margin: 4px 0 0 12px; }

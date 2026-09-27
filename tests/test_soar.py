@@ -624,7 +624,8 @@ class TestPlaybookApi:
         assert rows["firewall"]["kind"] == "response"
         assert rows["virustotal"]["configured"] is False
         assert c.put("/api/connectors/virustotal", json={"enabled": False}).status_code == 200
-        assert c.get("/api/connectors").json()["connectors"][2]["enabled"] is False
+        after = {r["key"]: r for r in c.get("/api/connectors").json()["connectors"]}
+        assert after["virustotal"]["enabled"] is False
         assert c.put("/api/connectors/nope", json={"enabled": False}).status_code == 404
         assert "connector_disable" in _audit_actions(db_path)
 

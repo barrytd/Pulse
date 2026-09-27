@@ -8,7 +8,7 @@
 # 2026-07-03 pins: anyio (CVE-2026-63374, -64847, -63349; fixed 4.14.2),
 # pypdf (PYSEC-2026-3655/3656/3910-3913; fixed 6.16.1) and setuptools
 # (PYSEC-2026-3447; fixed 83.0.0). Same 45 packages, nothing added or
-# dropped.
+# dropped. Later the same day: + maxminddb 3.2.0 (GeoIP connector; no deps).
 #
 # Use this for production / hosted deploys where reproducible builds
 # matter: a fresh `pip install -r requirements-lock.txt` six months from
@@ -52,6 +52,7 @@ httptools==0.8.0
 httpx==0.28.1
 idna==3.20
 iniconfig==2.3.0
+maxminddb==3.2.0
 packaging==26.3
 pefile==2024.8.26
 pillow==12.3.0

@@ -2394,6 +2394,123 @@ async function _loadDrawerIntel(f) {
 }
 
 // ---------------------------------------------------------------------
+// Investigate: one click runs every enrichment connector that fits the
+// finding's indicators (IPs -> AbuseIPDB / VirusTotal / GreyNoise / OTX /
+// GeoIP, domains -> Whois / DNS / VirusTotal / OTX, file hashes ->
+// VirusTotal / OTX). The server extracts the indicators, so it decides
+// what may leave the machine; private IPs and internal names are listed
+// as skipped. Each provider's result is its own row, so one failing
+// never hides the others.
+// ---------------------------------------------------------------------
+
+var _VERDICT_TONE = { malicious: 'error', suspicious: 'warn', clean: 'ok', info: 'info', unknown: 'muted' };
+var _VERDICT_TEXT = { malicious: 'Malicious', suspicious: 'Suspicious', clean: 'Clean', info: 'Info', unknown: 'No data' };
+var _STATUS_TEXT = {
+  not_set_up: 'Not set up. Add it under Settings › Notifications.',
+  no_intel:   'No intel right now (lookup failed, over its limit, or offline).',
+  disabled:   'Switched off.',
+};
+var _KIND_TEXT = { ip: 'IP address', domain: 'Domain', hash: 'File hash' };
+
+function _renderInvestigateSection(f) {
+  if (!f || f.id == null) return '';
+  return '<div class="finding-drawer-section" id="drawer-investigate-wrap">' +
+    '<div class="sec-label">Investigate</div>' +
+    '<div id="drawer-investigate-body">' +
+      '<p class="muted inv-intro">Look up every IP address, domain and file hash in this ' +
+        'finding across all your threat-intel sources at once.</p>' +
+      '<button class="btn btn-sm btn-primary" data-action="investigateFinding" data-arg="' +
+        escapeHtml(String(f.id)) + '">Investigate</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function _invRowHtml(v) {
+  var pill, line;
+  if (v.status === 'ok') {
+    var verdict = v.verdict || 'unknown';
+    pill = '<span class="soar-pill soar-' + (_VERDICT_TONE[verdict] || 'muted') + '">' +
+      escapeHtml(_VERDICT_TEXT[verdict] || verdict) + '</span>';
+    line = escapeHtml(v.summary || '') +
+      (v.result && v.result.cached ? ' <span class="intel-cache-flag" title="Served from local cache">cached</span>' : '');
+  } else {
+    pill = '<span class="soar-pill soar-muted">' +
+      escapeHtml(v.status === 'not_set_up' ? 'Not set up' : v.status === 'disabled' ? 'Off' : 'No intel') + '</span>';
+    line = '<span class="muted">' + escapeHtml(v.message || _STATUS_TEXT[v.status] || '') + '</span>';
+  }
+  return '<div class="inv-row">' +
+    '<div class="inv-row-head"><span class="inv-source">' + escapeHtml(v.name) + '</span>' + pill + '</div>' +
+    '<div class="inv-row-line">' + line + '</div>' +
+  '</div>';
+}
+
+// Sources that answered (or tried and failed) get a row each; sources
+// that aren't set up or are switched off collapse into one short line,
+// so a fresh install doesn't bury the real results under repeats.
+function _invGroupRowsHtml(verdicts) {
+  if (!verdicts.length) return '<div class="muted inv-row-line">No connector can look this up.</div>';
+  var rows = verdicts.filter(function (v) { return v.status === 'ok' || v.status === 'no_intel'; });
+  var notSetUp = verdicts.filter(function (v) { return v.status === 'not_set_up'; })
+    .map(function (v) { return escapeHtml(v.name); });
+  var off = verdicts.filter(function (v) { return v.status === 'disabled'; })
+    .map(function (v) { return escapeHtml(v.name); });
+  var html = rows.map(_invRowHtml).join('');
+  if (notSetUp.length) {
+    html += '<div class="inv-quiet muted">Not set up: ' + notSetUp.join(', ') +
+      '. <a href="#" data-action="navigate" data-arg="settings:notifications" class="link">Add keys</a></div>';
+  }
+  if (off.length) html += '<div class="inv-quiet muted">Switched off: ' + off.join(', ') + '</div>';
+  return html;
+}
+
+function _investigateHtml(data, findingId) {
+  var groups = data.indicators || [];
+  var html = '';
+  if (!groups.length) {
+    html += '<p class="muted inv-intro">No public IP addresses, domains or file hashes in this finding.</p>';
+  }
+  groups.forEach(function (g) {
+    var shown = g.type === 'hash' && g.value.length > 20
+      ? g.value.slice(0, 12) + '…' + g.value.slice(-8) : g.value;
+    html += '<div class="inv-group">' +
+      '<div class="inv-group-head"><span class="inv-kind">' + escapeHtml(_KIND_TEXT[g.type] || g.type) + '</span> ' +
+        '<span class="mono inv-value" title="' + escapeHtml(g.value) + '">' + escapeHtml(shown) + '</span></div>' +
+      _invGroupRowsHtml(g.verdicts) +
+    '</div>';
+  });
+  if ((data.skipped || []).length) {
+    html += '<div class="inv-skipped"><div class="inv-kind">Not sent anywhere</div>' +
+      data.skipped.map(function (s) {
+        return '<div class="muted"><span class="mono">' + escapeHtml(s.value) + '</span> — ' + escapeHtml(s.reason) + '</div>';
+      }).join('') + '</div>';
+  }
+  html += '<button class="btn btn-sm inv-again" data-action="investigateFinding" data-arg="' +
+    escapeHtml(String(findingId)) + '">Run again</button>';
+  return html;
+}
+
+export async function investigateFinding(findingId) {
+  var body = document.getElementById('drawer-investigate-body');
+  if (!body) return;
+  body.innerHTML = '<p class="muted inv-intro">Checking every source… this can take a few seconds.</p>';
+  var data = null, status = 0;
+  try {
+    var resp = await fetch('/api/findings/' + encodeURIComponent(findingId) + '/investigate', { method: 'POST' });
+    status = resp.status;
+    data = await resp.json().catch(function () { return null; });
+  } catch (e) { data = null; }
+  if (!document.body.contains(body)) return;
+  if (!data || status !== 200) {
+    var msg = status === 429 ? 'Too many investigations in a row. Wait a minute and try again.'
+                             : 'Could not run the investigation. Try again.';
+    body.innerHTML = '<p class="intel-error">' + msg + '</p>' +
+      '<button class="btn btn-sm" data-action="investigateFinding" data-arg="' + escapeHtml(String(findingId)) + '">Try again</button>';
+    return;
+  }
+  body.innerHTML = _investigateHtml(data, findingId);
+}
+
+// ---------------------------------------------------------------------
 // Automations: playbook runs this finding triggered (SOAR phase 2).
 // The section stays hidden unless there's at least one run. A run that
 // is waiting for approval shows Approve / Deny right here, for managers
@@ -2760,6 +2877,7 @@ export function openFindingDrawer(f) {
       _drawerTechnicalBlock(f) +
       _drawerFrameworkRefs(f) +
       _renderIntelSection(f) +
+      _renderInvestigateSection(f) +
       _stageBlockSection(f) +
       _renderAutomationsSection(f) +
       '<div class="drawer-tracking-divider"><span>Tracking</span></div>' +

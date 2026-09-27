@@ -33,7 +33,8 @@ from datetime import datetime, timezone
 from .base import (
     DEFAULT_CACHE_TTL_HOURS, HTTP_TIMEOUT_SECONDS, USER_AGENT, Connector,
     QuotaGuard, coerce_int, config_str, env_value, is_public_ip, is_stale,
-    now_iso, read_cache, register, ttl_hours_from_config, write_cache,
+    normalize_domain, normalize_hash, now_iso, read_cache, register,
+    ttl_hours_from_config, write_cache,
 )
 
 SOURCE = "virustotal"
@@ -47,18 +48,6 @@ QUOTA = QuotaGuard(per_minute=4, per_day=500)
 # One or two hits is common noise from a single aggressive engine.
 MALICIOUS_THRESHOLD = 3
 
-_HASH_RE = re.compile(r"^(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})$")
-_DOMAIN_RE = re.compile(
-    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
-)
-# Internal-only suffixes. Sending these off-host would leak the
-# network's naming, and VirusTotal would have nothing on them anyway.
-_INTERNAL_SUFFIXES = (
-    ".local", ".localdomain", ".lan", ".home", ".internal", ".intranet",
-    ".corp", ".private", ".localhost", ".arpa", ".test", ".invalid",
-    ".example",
-)
-
 _KINDS = {
     # action:        (type,     URL path segment)
     "lookup_ip":     ("ip",     "ip_addresses"),
@@ -70,32 +59,6 @@ _KINDS = {
 # ---------------------------------------------------------------------------
 # Input normalization
 # ---------------------------------------------------------------------------
-
-def normalize_hash(value):
-    """Lowercased MD5/SHA-1/SHA-256 hex, or None."""
-    if not value or not isinstance(value, str):
-        return None
-    v = value.strip().lower()
-    return v if _HASH_RE.match(v) else None
-
-
-def normalize_domain(value):
-    """Lowercased public-looking domain name, or None. Rejects IPs,
-    single labels, and internal suffixes like .local / .corp."""
-    if not value or not isinstance(value, str):
-        return None
-    v = value.strip().lower().rstrip(".")
-    try:
-        ipaddress.ip_address(v)
-        return None
-    except ValueError:
-        pass
-    if not _DOMAIN_RE.match(v):
-        return None
-    if any(v.endswith(s) for s in _INTERNAL_SUFFIXES):
-        return None
-    return v
-
 
 def _normalize(kind, value):
     if kind == "ip":
@@ -303,6 +266,17 @@ class VirusTotalConnector(Connector):
                          or env_value(ENV_KEY),
             "ttl_hours": ttl_hours_from_config(pulse_config),
         }
+
+    def summarize(self, action, result):
+        if not result:
+            return None
+        if not result.get("found"):
+            return "VirusTotal has never seen it."
+        line = f"{result.get('malicious', 0)} of {result.get('engines', 0)} engines flag it"
+        if result.get("suspicious"):
+            line += f" (+{result['suspicious']} suspicious)"
+        extra = result.get("name") or result.get("as_owner") or result.get("registrar")
+        return line + (f" · {extra}" if extra else "")
 
     def run(self, action, inputs, config):
         value = {

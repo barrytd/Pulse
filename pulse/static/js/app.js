@@ -103,6 +103,7 @@ import {
   closeForceBlockModal,
   forceBlockInputCheck,
   confirmForceBlock,
+  investigateFinding,
 } from './findings.js';
 import {
   highlightHistoryScan,
@@ -562,6 +563,7 @@ const actions = {
   previewSigmaRule,
   uploadSigmaRule,
   toggleSigmaRule,
+  investigateFinding,
   approvePlaybookRun,
   denyPlaybookRun,
   toggleRunDetail,

@@ -5,6 +5,37 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Investigate panel + enrichment connectors (SOAR phase 3, part 1)
+
+- **Investigate panel in the finding drawer.** One click runs every enrichment connector that fits each indicator in the finding, in parallel, and shows all the verdicts together, grouped by indicator:
+  - IP address: AbuseIPDB, VirusTotal, GreyNoise, OTX, GeoIP.
+  - Domain: Whois, DNS, VirusTotal, OTX.
+  - File hash: VirusTotal, OTX.
+
+  "Fits" is read from each connector's `actions()`, so a new connector joins the panel with no other change.
+  - `POST /api/findings/{id}/investigate` returns one entry per provider (`ok` / `not_set_up` / `no_intel` / `disabled`), under a 20-second deadline. One provider failing or timing out never hides the others, the same pattern as `/api/intel/{ip}/verdicts`.
+  - The endpoint is finding-scoped, CSRF-protected and rate-limited. It honors the per-org connector switches and the global threat-intel toggle, and writes the indicators it sent to the audit log.
+- **Indicators are extracted on the server** (`pulse/investigate.py`) from the stored finding, so the server decides what leaves the machine.
+  - Private or reserved IPs and internal names (`.local`, `.corp`, …) are listed as "Not sent anywhere".
+  - File names (`lsass.exe`) and code namespaces (`Microsoft.Windows.Client.OOBE`, `System.IO`) aren't mistaken for domains.
+  - For hashes, only the strongest kind is kept (Sysmon logs MD5, SHA-1 and SHA-256 of the same file).
+- **New connectors,** each a drop-in file in `pulse/connectors/` that registers itself, fails safe to "no intel", caches its answers, and never sends private IPs or internal names:
+  - **GreyNoise** (`greynoise.py`): Community API. It tells you whether an IP is internet-wide scanning noise, a known business service (RIOT), or unseen and possibly targeted. Bring your own free key; nothing is called without it. Held to the free tier (about 100 lookups a day).
+  - **AlienVault OTX** (`otx.py`): IP, domain and file hash. It counts the community threat reports ("pulses") naming the indicator: 5+ is malicious, 1–4 suspicious. Bring your own free key. OTX publishes no limit, so a conservative quota applies.
+  - **GeoIP** (`geoip.py`): country / city / network from a local `.mmdb` file via `maxminddb`. There is no network call, so it works air-gapped. **The database isn't bundled:** MaxMind's GeoLite2 license forbids redistribution without written consent and requires deleting old copies within 30 days of an update. Point Settings (or `PULSE_GEOIP_DB`) at a GeoLite2 or DB-IP Lite file, or drop it in `data/`.
+  - **Whois** (`whois_lookup.py`): registrar, dates, and domain age; a domain under 30 days old is suspicious. It uses RDAP first, via IANA's bootstrap file (ICANN dropped the port-43 requirement in 2025, and `.uk` already answers only RDAP), then classic Whois on port 43. Standard library only.
+  - **DNS** (`dns_lookup.py`): what a domain resolves to right now, via the host's resolver, with a hard timeout. A public-looking name that resolves to a private address is flagged as suspicious.
+- **Connectors write their own summary line** through a new `Connector.summarize()` hook, and AbuseIPDB and VirusTotal gained one. The domain and hash validators moved to `connectors/base.py`, so every connector applies the same internal-name guard.
+- **Settings:** GreyNoise and OTX key fields (keys never leave the server) with Test buttons, and a GeoIP database path with a live found / not-found status. `PUT /api/config/threat_intel` accepts `greynoise_api_key`, `otx_api_key` and `geoip_db_path` (must be a `.mmdb` path).
+- **New dependency:** `maxminddb` 3.2.0 (MaxMind's reader, Apache-2.0, no dependencies). It's added to `requirements.txt` and `requirements-lock.txt`, and pip-audit is clean.
+- **Tests:** new [`tests/test_investigate.py`](tests/test_investigate.py). The file blocks network access by default and covers:
+  - each connector's request shape, verdicts, caching, quota, failure handling, and refusal of private or internal indicators
+  - GeoIP path precedence and the not-set-up states
+  - RDAP-first with port-43 fallback
+  - indicator extraction
+  - the runner: every fitting connector runs, one failure is isolated, a slow provider times out alone, and the switches are honored
+  - the endpoint: audit, rate limit, auth, Settings, and key test
+
 ## 2026-09-26 — Playbook engine (SOAR phase 2)
 
 Phase 2 of [the SOAR design](docs/2026-09-26-soar-playbooks-and-integrations.md): playbooks that react to new findings. Lookups run on their own; every response action waits for a person. The visual builder and new connectors are phase 3.

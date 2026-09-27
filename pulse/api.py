@@ -5360,7 +5360,18 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(400, detail="cache_ttl_hours must be between 1 and 720.")
             intel["cache_ttl_hours"] = ttl
 
-        for field in ("abuseipdb_api_key", "virustotal_api_key"):
+        if "geoip_db_path" in body:
+            raw = body.get("geoip_db_path")
+            if raw in (None, "", "null"):
+                intel["geoip_db_path"] = None
+            else:
+                path = str(raw).strip()
+                if len(path) > 500 or not path.lower().endswith(".mmdb"):
+                    raise HTTPException(400, detail="The GeoIP database must be a .mmdb file path.")
+                intel["geoip_db_path"] = path
+
+        for field in ("abuseipdb_api_key", "virustotal_api_key",
+                      "greynoise_api_key", "otx_api_key"):
             if field not in body:
                 continue
             raw = body.get(field)
@@ -5377,13 +5388,7 @@ def _register_routes(app: FastAPI) -> None:
         config["threat_intel"] = intel
         _write_config(app.state.config_path, config)
 
-        view = _threat_intel_view(intel)
-        return {
-            "status":                 "ok",
-            "api_key_set":            view["api_key_set"],
-            "virustotal_api_key_set": view["virustotal_api_key_set"],
-            "enabled":                view["enabled"],
-        }
+        return dict(_threat_intel_view(intel), status="ok")
 
     # -------------------------------------------------------------------
     # GET /api/intel/recent — every cached intel lookup, newest-first.
@@ -5512,6 +5517,22 @@ def _register_routes(app: FastAPI) -> None:
                 )
             return {"status": "ok", "malicious": result.get("malicious"),
                     "engines": result.get("engines")}
+
+        if connector in ("greynoise", "otx"):
+            from pulse.connectors import greynoise as gn, otx as otx_mod
+            mod, field, label = ((gn, "greynoise_api_key", "GreyNoise") if connector == "greynoise"
+                                 else (otx_mod, "otx_api_key", "OTX"))
+            api_key = ((config.get("threat_intel") or {}).get(field) or "").strip()
+            if not api_key:
+                raise HTTPException(400, detail=f"No {label} API key configured.")
+            if not mod.QUOTA.try_acquire():
+                raise HTTPException(429, detail=f"{label} lookup limit reached. Try again later.")
+            result = (gn.fetch("8.8.8.8", api_key) if connector == "greynoise"
+                      else otx_mod.fetch("ip", "8.8.8.8", api_key))
+            if result is None:
+                raise HTTPException(502, detail="Lookup failed. Check the key and try again "
+                                                f"({label} may also be rate-limiting).")
+            return {"status": "ok", "found": result.get("found")}
 
         if connector != "abuseipdb":
             raise HTTPException(400, detail="Unknown connector.")
@@ -6316,6 +6337,11 @@ def _register_routes(app: FastAPI) -> None:
                           check_finding_scope=_check_finding_scope,
                           read_config=_read_config)
 
+    # Investigate panel: one click, every enrichment connector that fits.
+    from pulse import investigate as _investigate
+    _investigate.register_routes(app, check_finding_scope=_check_finding_scope,
+                                 read_config=_read_config)
+
     # -------------------------------------------------------------------
     # Live monitor endpoints
     # -------------------------------------------------------------------
@@ -6622,13 +6648,24 @@ def _threat_intel_view(intel):
     """Build the threat_intel slice of GET /api/config from the raw
     pulse.yaml block. Key presence only; raw keys never leave here."""
     intel = intel or {}
-    abuse_set = bool((intel.get("abuseipdb_api_key") or "").strip())
-    vt_set = bool((intel.get("virustotal_api_key") or "").strip())
+    has = lambda k: bool((intel.get(k) or "").strip())  # noqa: E731
+    abuse_set, vt_set = has("abuseipdb_api_key"), has("virustotal_api_key")
+    gn_set, otx_set = has("greynoise_api_key"), has("otx_api_key")
+    from pulse.connectors import geoip
+    geo_path = geoip.resolve_path({"threat_intel": intel})
     return {
         "enabled":                intel.get("enabled") is not False
-                                  and (abuse_set or vt_set),
+                                  and (abuse_set or vt_set or gn_set or otx_set),
         "api_key_set":            abuse_set,
         "virustotal_api_key_set": vt_set,
+        "greynoise_api_key_set":  gn_set,
+        "otx_api_key_set":        otx_set,
+        # GeoIP reads a local database file; its path isn't a secret.
+        "geoip": {
+            "path":   (intel.get("geoip_db_path") or "").strip() or None,
+            "found":  geo_path,
+            "reader": geoip.reader_available(),
+        },
         "cache_ttl_hours":        int(intel.get("cache_ttl_hours", 24) or 24),
     }
 

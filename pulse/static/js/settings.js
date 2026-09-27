@@ -718,6 +718,26 @@ export async function renderSettingsPage() {
         '<a href="https://www.virustotal.com/gui/my-apikey" target="_blank" data-default="allow" ' +
           'style="color:var(--accent); text-decoration:none;">Find your VirusTotal key \u2192</a>' +
       '</p>' +
+      _tiKeyRow('GreyNoise key', 'ti-gn-api-key', ti.greynoise_api_key_set, 'GreyNoise') +
+      _tiKeyRow('OTX key', 'ti-otx-api-key', ti.otx_api_key_set, 'AlienVault OTX') +
+      '<p style="color:var(--text-muted); font-size:12px; margin:0 0 14px;">' +
+        'Optional, free, bring your own. GreyNoise tells you whether an IP is internet-wide ' +
+        'scanning noise or aimed at you (free use is limited, about 100 lookups a day). ' +
+        'AlienVault OTX counts community threat reports naming an IP, domain or file hash. ' +
+        'Nothing is sent to either until you add its key. ' +
+        '<a href="https://viz.greynoise.io/account/api-key" target="_blank" data-default="allow" class="link">GreyNoise key \u2192</a> ' +
+        '<a href="https://otx.alienvault.com/api" target="_blank" data-default="allow" class="link">OTX key \u2192</a>' +
+      '</p>' +
+      '<div class="form-row"><label>GeoIP database</label>' +
+        '<input type="text" id="ti-geoip-path" placeholder="path to a .mmdb file" value="' +
+          escapeHtml((ti.geoip && ti.geoip.path) || '') + '"/></div>' +
+      '<div class="form-row"><span></span><span>' + _geoipStatus(ti.geoip || {}) + '</span></div>' +
+      '<p style="color:var(--text-muted); font-size:12px; margin:0 0 14px;">' +
+        'GeoIP looks IPs up in a local database file, with no network call, so it works offline. ' +
+        'Pulse can\u2019t ship one (MaxMind\u2019s license doesn\u2019t allow redistributing it). Download ' +
+        'MaxMind GeoLite2 City with a free account, or DB-IP \u201cIP to City Lite\u201d, then enter ' +
+        'the .mmdb file\u2019s path here or put it in Pulse\u2019s data folder.' +
+      '</p>' +
       '<div class="form-row"><label>Cache TTL (hours)</label>' +
         '<input type="number" id="ti-cache-ttl" min="1" max="720" value="' +
           (ti.cache_ttl_hours || 24) + '"/></div>' +
@@ -727,6 +747,10 @@ export async function renderSettingsPage() {
           (ti.api_key_set ? '' : ' disabled') + '><i data-lucide="zap"></i><span>Test AbuseIPDB key</span></button>' +
         '<button class="btn" data-action="testThreatIntelKey" data-arg="virustotal"' +
           (ti.virustotal_api_key_set ? '' : ' disabled') + '>Test VirusTotal key</button>' +
+        '<button class="btn" data-action="testThreatIntelKey" data-arg="greynoise"' +
+          (ti.greynoise_api_key_set ? '' : ' disabled') + '>Test GreyNoise key</button>' +
+        '<button class="btn" data-action="testThreatIntelKey" data-arg="otx"' +
+          (ti.otx_api_key_set ? '' : ' disabled') + '>Test OTX key</button>' +
       '</div>' +
     '</div>';
 
@@ -2179,6 +2203,24 @@ export async function sendTestWebhook() {
   }
 }
 
+function _tiKeyRow(label, id, isSet, provider) {
+  return '<div class="form-row"><label>' + label + '</label>' +
+      '<input type="password" id="' + id + '" placeholder="' +
+        (isSet ? 'leave blank to keep current' : 'paste your ' + provider + ' API key') +
+        '" autocomplete="new-password"/></div>' +
+    '<div class="form-row"><span></span><span>' +
+      (isSet ? '<span class="password-status set">✓ ' + provider + ' key saved</span>'
+             : '<span class="password-status">No ' + provider + ' key saved yet</span>') +
+    '</span></div>';
+}
+
+function _geoipStatus(g) {
+  if (!g.reader) return '<span class="password-status">GeoIP reader not installed (pip install -r requirements.txt)</span>';
+  if (g.found) return '<span class="password-status set">✓ Using ' + escapeHtml(g.found) + '</span>';
+  if (g.path) return '<span class="password-status">File not found: ' + escapeHtml(g.path) + '</span>';
+  return '<span class="password-status">No GeoIP database yet</span>';
+}
+
 // Threat-intel (AbuseIPDB + VirusTotal) settings — same secret-handling
 // rules as the webhook URL: an empty input means "leave alone", so saving
 // the toggle without retyping either key works.
@@ -2190,6 +2232,9 @@ export async function saveThreatIntelSettings() {
     enabled:         document.getElementById('ti-enabled').checked,
     abuseipdb_api_key: (keyInput && keyInput.value) || '',
     virustotal_api_key: (vtKeyInput && vtKeyInput.value) || '',
+    greynoise_api_key: (document.getElementById('ti-gn-api-key') || {}).value || '',
+    otx_api_key: (document.getElementById('ti-otx-api-key') || {}).value || '',
+    geoip_db_path: ((document.getElementById('ti-geoip-path') || {}).value || '').trim() || 'null',
     cache_ttl_hours: parseInt((ttlInput && ttlInput.value) || '24', 10) || 24,
   };
   try {
@@ -2206,6 +2251,9 @@ export async function saveThreatIntelSettings() {
     showToast('Threat-intel settings saved');
     if (keyInput) keyInput.value = '';
     if (vtKeyInput) vtKeyInput.value = '';
+    ['ti-gn-api-key', 'ti-otx-api-key'].forEach(function (id) {
+      var el = document.getElementById(id); if (el) el.value = '';
+    });
     renderSettingsPage();
   } catch (e) {
     toastError('Network error: ' + e.message);
@@ -2214,14 +2262,19 @@ export async function saveThreatIntelSettings() {
 
 // `connector` comes from the button's data-arg: 'abuseipdb' or 'virustotal'.
 export async function testThreatIntelKey(connector) {
+  var labels = { abuseipdb: 'AbuseIPDB', virustotal: 'VirusTotal', greynoise: 'GreyNoise', otx: 'OTX' };
+  connector = labels[connector] ? connector : 'abuseipdb';
   var isVt = connector === 'virustotal';
-  showToast('Testing ' + (isVt ? 'VirusTotal' : 'AbuseIPDB') + ' key...');
+  showToast('Testing ' + labels[connector] + ' key...');
   try {
-    var r = await fetch('/api/intel/test?connector=' + (isVt ? 'virustotal' : 'abuseipdb'),
-                        { method: 'POST' });
+    var r = await fetch('/api/intel/test?connector=' + connector, { method: 'POST' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok) {
       toastError(data.detail || 'Lookup failed.');
+      return;
+    }
+    if (connector === 'greynoise' || connector === 'otx') {
+      showToast(labels[connector] + ' key works.');
       return;
     }
     if (isVt) {

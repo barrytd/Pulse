@@ -26,3 +26,8 @@ reportlab>=4.0.0
 # it's in requirements.txt so hosted deploys (Render, Railway, Fly) get the
 # driver automatically when they spin up a Postgres addon.
 psycopg[binary]>=3.1
+# maxminddb: MaxMind's reader for .mmdb GeoIP databases (Apache-2.0, no deps).
+# Used by the GeoIP connector to look IPs up in a LOCAL file, so GeoIP works
+# offline / air-gapped. The database itself isn't shipped (see
+# pulse/connectors/geoip.py for why and where to put one).
+maxminddb>=3.0,<4
