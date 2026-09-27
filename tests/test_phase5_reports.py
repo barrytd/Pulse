@@ -4,6 +4,7 @@
 # Posture, MITRE ATT&CK Coverage, Compliance Gap Analysis.
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,18 +24,24 @@ from pulse.reports.phase5_renderers import (
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+def _ago(**delta):
+    """Local timestamp relative to now, in the DB's scanned_at format.
+    Fixed dates here expired once they fell outside the stale window."""
+    return (datetime.now() - timedelta(**delta)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 @pytest.fixture
 def fleet_rows():
     return [
         {"hostname": "DC01", "latest_score": 35, "latest_grade": "F",
          "worst_severity": "CRITICAL", "scan_count": 5,
-         "total_findings": 12, "last_scan_at": "2026-06-02 12:00:00"},
+         "total_findings": 12, "last_scan_at": _ago(hours=1)},
         {"hostname": "WS-FIN", "latest_score": 82, "latest_grade": "B",
          "worst_severity": "LOW", "scan_count": 3,
-         "total_findings": 1, "last_scan_at": "2026-06-02 11:00:00"},
+         "total_findings": 1, "last_scan_at": _ago(hours=2)},
         {"hostname": "OLD-PC", "latest_score": 60, "latest_grade": "C",
          "worst_severity": "MEDIUM", "scan_count": 1,
-         "total_findings": 2, "last_scan_at": "2026-05-15 09:00:00"},
+         "total_findings": 2, "last_scan_at": _ago(days=30)},
     ]
 
 

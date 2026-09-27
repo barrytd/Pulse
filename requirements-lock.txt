@@ -1,12 +1,14 @@
 # Pulse — pinned dependency lock file
 # -------------------------------------
-# Regenerated via `pip freeze` on 2026-07-03 against Python 3.14 on Windows
-# x64, from a clean venv (requirements.txt + test/build tooling). Every pin
-# below was validated by the full test suite (1232 passing) before it
-# replaced the previous lock. All versions are at or above the CVE floors
-# the prior lock pinned by hand (pytest >= 9.0.3 / CVE-2025-71176,
-# python-multipart >= 0.0.28 / CVE-2026-42561), so no manual patching was
-# needed this round — the fresh resolution already clears them.
+# Regenerated via `pip freeze` on 2026-09-26 against Python 3.14 on Windows
+# x64, from a clean venv (requirements.txt + test/build tooling: pytest,
+# pyinstaller, pypdf). Every pin below was validated by the full test suite
+# (1461 passing, including the pip-audit CVE check) before it replaced the
+# previous lock. This refresh clears the advisories raised against the
+# 2026-07-03 pins: anyio (CVE-2026-63374, -64847, -63349; fixed 4.14.2),
+# pypdf (PYSEC-2026-3655/3656/3910-3913; fixed 6.16.1) and setuptools
+# (PYSEC-2026-3447; fixed 83.0.0). Same 45 packages, nothing added or
+# dropped.
 #
 # Use this for production / hosted deploys where reproducible builds
 # matter: a fresh `pip install -r requirements-lock.txt` six months from
@@ -35,47 +37,47 @@
 # pyinstaller too — slightly larger image, zero security cost.
 
 altgraph==0.17.5
-annotated-doc==0.0.4
-annotated-types==0.7.0
-anyio==4.14.1
-certifi==2026.6.17
-charset-normalizer==3.4.7
-click==8.4.2
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+charset-normalizer==3.5.1
+click==8.5.0
 colorama==0.4.6
-fastapi==0.139.0
+fastapi==0.141.1
 h11==0.16.0
 hexdump==3.3
 httpcore==1.0.9
 httptools==0.8.0
 httpx==0.28.1
-idna==3.18
+idna==3.20
 iniconfig==2.3.0
-packaging==26.2
+packaging==26.3
 pefile==2024.8.26
 pillow==12.3.0
 pluggy==1.6.0
-psycopg==3.3.4
-psycopg-binary==3.3.4
-pydantic==2.13.4
-pydantic_core==2.46.4
-Pygments==2.20.0
-pyinstaller==6.21.0
-pyinstaller-hooks-contrib==2026.6
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
 PyOTP==2.10.0
-pypdf==6.14.2
+pypdf==6.19.0
 pytest==9.1.1
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 python-evtx==0.8.1
 python-multipart==0.0.32
 pywin32-ctypes==0.2.3
 PyYAML==6.0.3
 qrcode==8.2
-reportlab==5.0.0
-setuptools==82.0.1
-starlette==1.3.1
-typing-inspection==0.4.2
+reportlab==5.0.1
+setuptools==84.0.0
+starlette==1.7.0
+typing-inspection==0.4.4
 typing_extensions==4.16.0
-tzdata==2026.2
-uvicorn==0.49.0
-watchfiles==1.2.0
-websockets==16.0
+tzdata==2026.4
+uvicorn==0.54.0
+watchfiles==1.3.0
+websockets==17.1
