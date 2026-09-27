@@ -1,0 +1,21 @@
+# Line endings are decided here, in the repo, not by each machine's git
+# config. Text files are stored with LF; each checkout gets its platform's
+# native endings. This stops CRLF/LF-only "modified" noise across clients.
+* text=auto
+
+# Must stay LF in every checkout: run inside Linux containers.
+*.sh text eol=lf
+Dockerfile text eol=lf
+
+# Binary: never touch line endings or try to diff as text.
+*.evtx binary
+*.mmdb binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.db   binary
