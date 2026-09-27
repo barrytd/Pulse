@@ -153,12 +153,18 @@ export function _restoreSearchFocus(id) {
   try { el.setSelectionRange(len, len); } catch (e) {}
 }
 
+// Letter-grade bands: [minimum score, grade], highest first; below the
+// last band is F. Must match GRADE_BANDS in pulse/reports/reporter.py
+// (the backend grades every stored score with it); tests/test_grade_bands.py
+// fails if the two drift apart. Where the backend already returns a
+// `grade`, render that instead of recomputing.
+export const GRADE_BANDS = [[90, 'A'], [75, 'B'], [50, 'C'], [25, 'D']];
+
 export function _gradeFor(score) {
   if (score == null) return '';
-  if (score >= 90) return 'A';
-  if (score >= 80) return 'B';
-  if (score >= 70) return 'C';
-  if (score >= 60) return 'D';
+  for (var i = 0; i < GRADE_BANDS.length; i++) {
+    if (score >= GRADE_BANDS[i][0]) return GRADE_BANDS[i][1];
+  }
   return 'F';
 }
 
@@ -272,49 +278,11 @@ export function downloadReport(scanId, target, e) {
 // ---------------------------------------------------------------
 // Shared HTML builders
 // ---------------------------------------------------------------
-export function sevBadge(level, count) {
-  var colors = { CRITICAL: '#f85149', HIGH: '#f0883e', MEDIUM: '#d29922', LOW: '#3fb950' };
-  var c = colors[level] || '#8b949e';
-  var bg = count > 0 ? c + '22' : 'transparent';
-  var textColor = count > 0 ? c : 'var(--text-muted)';
-  return '<div style="text-align:center;">' +
-    '<div style="background:' + bg + '; border:1px solid ' + (count > 0 ? c : 'var(--border)') + '; border-radius:6px; padding:6px 12px; min-width:50px;">' +
-      '<div style="font-size:18px; font-weight:700; color:' + textColor + ';">' + count + '</div>' +
-      '<div style="font-size:10px; text-transform:uppercase; letter-spacing:0.3px; color:' + textColor + '; opacity:0.8;">' + level + '</div>' +
-    '</div>' +
-  '</div>';
-}
-
 export function statCard(label, value, sub, colorClass) {
   return '<div class="stat-card">' +
     '<div class="label">' + label + '</div>' +
     '<div class="value ' + (colorClass || '') + '">' + value + '</div>' +
     '<div class="sub">' + (sub || '') + '</div></div>';
-}
-
-export function buildDailyScoreTable(dailyScores) {
-  if (!dailyScores || dailyScores.length === 0) {
-    return '<div style="text-align:center; padding:24px; color:var(--text-muted);">No daily scores yet.</div>';
-  }
-  return '<table class="history-table"><thead><tr>' +
-    '<th>Date</th><th>Grade</th><th>Score</th><th>Rules</th><th>Trend</th>' +
-    '</tr></thead><tbody>' +
-    dailyScores.map(function (d, i) {
-      var trend = '<span class="trend-flat">=</span>';
-      if (i < dailyScores.length - 1) {
-        var diff = d.score - dailyScores[i + 1].score;
-        if (diff > 0) trend = '<span class="trend-up">\u2191 +' + diff + '</span>';
-        else if (diff < 0) trend = '<span class="trend-down">\u2193 ' + diff + '</span>';
-      }
-      return '<tr>' +
-        '<td>' + d.date + '</td>' +
-        '<td><span class="grade-badge" style="background:' + d.colour + '; width:28px; height:28px; font-size:14px;">' + d.grade + '</span></td>' +
-        '<td style="font-weight:600; color:' + d.colour + ';">' + d.score + '</td>' +
-        '<td>' + d.unique_rules + ' rule' + (d.unique_rules !== 1 ? 's' : '') + '</td>' +
-        '<td>' + trend + '</td>' +
-      '</tr>';
-    }).join('') +
-    '</tbody></table>';
 }
 
 // ---------------------------------------------------------------
@@ -649,73 +617,164 @@ export function _accentForScore(score) {
 }
 
 
-// Shared by the Dashboard's Last Scan Findings card. Populated right
-// before we render so the drawer can look up a finding by index.
-let _dashRecentFindings = [];
+// ---------------------------------------------------------------
+// Dashboard building blocks (2026-09 redesign)
+// ---------------------------------------------------------------
+// Four zones, one hero: (1) score + "needs attention" list, (2) a
+// 4-stat strip, (3) score history + findings by severity, with the
+// data-reduction funnel folded into one line. Only those zone
+// containers are cards; everything inside them is borderless.
+// See docs/2026-09-26-dashboard-redesign.md.
 
-// Compact "last 5 findings" list with colored severity left-borders.
-export function _dashFindingsHtml(findings) {
-  _dashRecentFindings = findings;
-  return '<div class="dash-findings">' +
-    findings.map(function (f, i) {
-      var sev = (f.severity || 'LOW').toUpperCase();
-      var rule = f.rule || 'Unknown';
-      var details = f.details || f.description || '';
-      var time = f.timestamp || _extractTime(f) || '';
-      var rowCls = 'dash-finding-row sev-' + sev.toLowerCase() +
-                   (isTouched(f) ? ' row-reviewed' : '');
-      var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
-      return '<div class="' + rowCls + '"' + fidAttr + ' ' +
-             'data-action="openFindingDrawerByIdx" data-arg="' + i + '" style="cursor:pointer;">' +
-        '<div>' +
-          '<div class="time">' + (time ? relTimeHtml(time) : '<span class="rel-time">—</span>') + '</div>' +
-        '</div>' +
-        '<div>' +
-          '<div class="rule">' + escapeHtml(rule) + '</div>' +
-          '<div class="desc">' + escapeHtml(details) + '</div>' +
-        '</div>' +
-        '<div class="sev ' + sev.toLowerCase() + '">' + sev + '</div>' +
-        '<div class="finding-status-col" data-status-slot="dot">' + _statusDotHtml(f) + '</div>' +
-      '</div>';
-    }).join('') +
+// Grade -> color token. Grades come from the backend (today.grade).
+var _GRADE_TONE = {
+  A: 'var(--status-ok)',
+  B: 'var(--severity-low)',
+  C: 'var(--severity-medium)',
+  D: 'var(--severity-high)',
+  F: 'var(--severity-critical)',
+};
+var _GRADE_LEAD = {
+  A: 'Looking healthy.',
+  B: 'Mostly healthy.',
+  C: 'Needs attention.',
+  D: 'At risk.',
+  F: 'Critical risk.',
+};
+var _SEV_KEY = { CRITICAL: 'critical', HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
+
+// The knowledge base's plain-language sentence, unless it's the generic
+// fallback (rules without an entry), whose boilerplate refers to a
+// details section the dashboard doesn't show.
+function _plainLanguage(f) {
+  var k = (f && f.knowledge) || {};
+  return k.generic ? '' : (k.plain_language || '').trim();
+}
+
+function _sevKey(f) {
+  return _SEV_KEY[(f && f.severity || '').toUpperCase()] || 'low';
+}
+
+// Local YYYY-MM-DD. Scan timestamps are stored in local time.
+function _localDay(d) {
+  var dt = d || new Date();
+  var m = dt.getMonth() + 1, day = dt.getDate();
+  return dt.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+}
+
+function _shortDate(ymd) {
+  var d = new Date(ymd + 'T00:00:00');
+  if (isNaN(d)) return ymd;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function _compactNum(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e4) return Math.round(n / 1e3) + 'K';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(n);
+}
+
+// --- Hero, left: the score --------------------------------------
+
+function _scoreGaugeSvg(score, tone) {
+  var r = 76, c = 2 * Math.PI * r;
+  var fill = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+  return '<svg class="dash-gauge-svg" viewBox="0 0 176 176" aria-hidden="true">' +
+    '<circle cx="88" cy="88" r="' + r + '" class="dash-gauge-track"/>' +
+    (fill > 0
+      ? '<circle cx="88" cy="88" r="' + r + '" class="dash-gauge-fill" ' +
+          'style="stroke:' + tone + '" stroke-dasharray="' + c.toFixed(1) + '" ' +
+          'stroke-dashoffset="' + (c * (1 - fill)).toFixed(1) + '" transform="rotate(-90 88 88)"/>'
+      : '') +
+  '</svg>';
+}
+
+// One plain-language line saying what is wrong. Prefers the knowledge
+// base's plain-language sentence for the most urgent open finding.
+function _verdictHtml(grade, top, uniqueRules) {
+  var lead = '<b>' + escapeHtml(_GRADE_LEAD[grade] || '') + '</b> ';
+  if (top) {
+    var what = _plainLanguage(top) ||
+               ((top.rule || 'A finding') + ' was detected.');
+    var host = top.hostname || top._scan_host || '';
+    return lead + escapeHtml(what) +
+      (host ? ' <span class="dash-verdict-host">' + escapeHtml(host) + '</span>' : '');
+  }
+  if (!uniqueRules) return lead + 'No detection rules fired in this window.';
+  return lead + uniqueRules + ' rule' + (uniqueRules === 1 ? '' : 's') +
+    ' fired in this window. Nothing critical or high is waiting for review.';
+}
+
+function _scoreTrendChip(today, prev) {
+  if (!today || !prev) return '';
+  var diff = today.score - prev.score;
+  var yesterday = _localDay(new Date(Date.now() - 86400000));
+  var since = prev.date === yesterday ? 'yesterday' : _shortDate(prev.date);
+  if (diff === 0) {
+    return '<span class="dash-chip flat">No change since ' + escapeHtml(since) + '</span>';
+  }
+  var down = diff < 0;
+  return '<span class="dash-chip ' + (down ? 'bad' : 'good') + '">' +
+    (down ? '▼ down ' : '▲ up ') + Math.abs(diff) + ' pt' +
+    (Math.abs(diff) === 1 ? '' : 's') + ' since ' + escapeHtml(since) + '</span>';
+}
+
+function _heroScoreHtml(opts) {
+  var today = opts.today;
+  if (!today) {
+    // Scans exist, just none in this window. Say what to do, not "0".
+    var actions = opts.filtersOn
+      ? '<button class="btn btn-primary" data-action="resetDashFilters">Reset filters</button>'
+      : '<button class="btn btn-primary" data-action="openSystemScanModal">Scan my system</button>' +
+        '<button class="btn" data-action="openUploadModal">Upload a log</button>';
+    return '<div class="dash-card dash-score today-security-score">' +
+      '<div class="dash-eyebrow">Security posture</div>' +
+      '<div class="dash-gauge">' + _scoreGaugeSvg(null, '') +
+        '<div class="dash-gauge-label"><span class="dash-gauge-empty">No scans</span></div>' +
+      '</div>' +
+      '<div class="dash-verdict">' +
+        (opts.filtersOn ? 'No scans match these filters.' : 'No scans in this window yet.') +
+        ' Run a scan to score it.' +
+      '</div>' +
+      '<div class="dash-score-actions">' + actions + '</div>' +
+    '</div>';
+  }
+  var grade = today.grade || _gradeFor(today.score);
+  var tone = _GRADE_TONE[grade] || 'var(--text-dim)';
+  return '<div class="dash-card dash-score today-security-score">' +
+    '<div class="dash-eyebrow">Security posture · ' + escapeHtml(opts.windowLabel) + '</div>' +
+    '<div class="dash-gauge">' + _scoreGaugeSvg(today.score, tone) +
+      '<div class="dash-gauge-label">' +
+        '<span class="dash-grade-letter" style="color:' + tone + '">' + escapeHtml(grade) + '</span>' +
+        '<span class="dash-grade-num mono">' + today.score + ' / 100</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="dash-verdict">' + _verdictHtml(grade, opts.top, today.unique_rules) + '</div>' +
+    _scoreTrendChip(today, opts.prev) +
   '</div>';
 }
 
-export function openFindingDrawerByIdx(idx, target) {
-  var f = _dashRecentFindings[idx];
-  if (!f) return;
-  _selectDashFindingRow(target);
-  openFindingDrawer(f);
-}
+// --- Hero, right: needs attention --------------------------------
+// Unreviewed CRITICAL/HIGH findings from the last 7 days across every
+// scan, independent of the filter bar so outstanding items stay visible.
+// When that list is empty, the newest findings of the latest scan show
+// instead so the panel never reads as blank.
 
-function _selectDashFindingRow(target) {
-  document.querySelectorAll('.dash-finding-row.selected').forEach(function (r) {
-    if (r !== target) r.classList.remove('selected');
-  });
-  if (target) target.classList.add('selected');
-}
+var _attentionFindings = []; // unreviewed crit/high, last 7 days
+var _openFindings = [];      // every unreviewed finding, last 7 days
+var _latestFindings = [];    // fallback list (latest scan, newest first)
+var _heroList = [];          // what the hero list currently shows
 
-// ---------------------------------------------------------------
-// Needs Attention widget — unreviewed CRITICAL/HIGH in the last 7 days
-// across every scan. Always uses a fixed 7-day window regardless of
-// the dashboard filter bar so outstanding items stay visible while an
-// analyst drills into narrower slices with the filters.
-// ---------------------------------------------------------------
-
-var _attentionFindings = []; // full list, shared with the drawer opener
-var _lastFilteredScanCount = 0; // drives whether the green "clear" bar renders
-
-async function _fetchAttentionFindings(allScans) {
+async function _fetchRecentFindings(allScans, findingsFor) {
   var cutoff = Date.now() - 7 * 86400000;
   var recent = (allScans || []).filter(function (s) {
     if (!s.total_findings) return false;
-    var t = Date.parse(s.scanned_at || '');
+    var t = Date.parse(String(s.scanned_at || '').replace(' ', 'T'));
     return !isNaN(t) && t >= cutoff;
   });
-  if (recent.length === 0) return [];
-
   var batches = await Promise.all(recent.map(function (s) {
-    return fetchFindings(s.id).then(function (fs) {
+    return findingsFor(s.id).then(function (fs) {
       return fs.map(function (f) {
         return Object.assign({}, f, {
           _scan_id:     s.id,
@@ -724,23 +783,20 @@ async function _fetchAttentionFindings(allScans) {
           _scan_host:   s.hostname || s.filename || '',
         });
       });
-    }).catch(function () { return []; });
+    });
   }));
-
   var all = [];
   batches.forEach(function (b) { all = all.concat(b); });
+  return all.filter(function (f) { return !isTouched(f); });
+}
 
-  // Unreviewed CRITICAL/HIGH only. "Touched" (reviewed or marked FP)
-  // findings drop out of the attention list entirely.
-  all = all.filter(function (f) {
+function _attentionFrom(open) {
+  var list = open.filter(function (f) {
     var sv = (f.severity || '').toUpperCase();
-    if (sv !== 'CRITICAL' && sv !== 'HIGH') return false;
-    return !isTouched(f);
+    return sv === 'CRITICAL' || sv === 'HIGH';
   });
-
-  // Most recent first, CRITICAL before HIGH as a stable tie-breaker so
-  // the top of the list is always the most urgent thing.
-  all.sort(function (a, b) {
+  // CRITICAL before HIGH, then newest first.
+  list.sort(function (a, b) {
     var sa = (a.severity || '').toUpperCase() === 'CRITICAL' ? 0 : 1;
     var sb = (b.severity || '').toUpperCase() === 'CRITICAL' ? 0 : 1;
     if (sa !== sb) return sa - sb;
@@ -748,85 +804,98 @@ async function _fetchAttentionFindings(allScans) {
     var bt = b.timestamp || _extractTime(b) || b._scan_date || '';
     return at < bt ? 1 : at > bt ? -1 : 0;
   });
-
-  return all;
+  return list;
 }
 
-export function _needsAttentionHtml(findings, scansInWindow) {
-  var total = findings.length;
-  var hasScans = (scansInWindow == null)
-    ? _lastFilteredScanCount > 0
-    : scansInWindow > 0;
-
-  if (total === 0) {
-    // Positive confirmation only makes sense when the system has actually
-    // scanned something in the selected window. Otherwise the widget hides.
-    if (!hasScans) return '';
-    return '<div class="needs-attention clear na-empty">' +
-      '<span>No critical or high findings need attention</span>' +
-    '</div>';
-  }
-
-  var hasCritical = findings.some(function (f) {
-    return (f.severity || '').toUpperCase() === 'CRITICAL';
-  });
-  var accentCls = hasCritical ? 'accent-critical' : 'accent-high';
-
-  var visible = findings.slice(0, 3);
-  var rowsHtml = visible.map(function (f, i) {
-    var sev  = (f.severity || 'HIGH').toUpperCase();
-    var rule = f.rule || 'Unknown';
-    var host = f._scan_host || '-';
-    var time = f.timestamp || _extractTime(f) || (f._scan_date || '-');
-    var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
-    return '<div class="na-row"' + fidAttr + ' ' +
-           'data-action="openAttentionFinding" data-arg="' + i + '" style="cursor:pointer;">' +
-      '<span class="na-rule">' + escapeHtml(rule) + '</span>' +
-      sevPillHtml(sev) +
-      '<span class="na-host">' + escapeHtml(host) + '</span>' +
-      '<span class="na-time">' + relTimeHtml(time) + '</span>' +
-    '</div>';
-  }).join('');
-
-  var moreLink = total > 3
-    ? '<a class="na-more" data-action="openUnreviewedCriticalHigh" style="cursor:pointer;">' +
-        'and ' + (total - 3) + ' more unreviewed finding' + (total - 3 === 1 ? '' : 's') + ' \u2192' +
-      '</a>'
-    : '';
-
-  return '<div class="needs-attention ' + accentCls + '">' +
-    '<div class="na-header">' +
-      '<span class="na-title">Needs Attention</span>' +
-      '<span class="na-sub">Unreviewed critical / high \u2014 last 7 days</span>' +
+function _heroRowHtml(f, i) {
+  var sk = _sevKey(f);
+  var host = f.hostname || f._scan_host || '';
+  var time = f.timestamp || _extractTime(f) || f._scan_date || '';
+  var sub = (_plainLanguage(f) || f.description || f.details || '').trim();
+  var fidAttr = (f.id != null) ? ' data-finding-id="' + escapeHtml(String(f.id)) + '"' : '';
+  return '<div class="dash-att-row"' + fidAttr + ' data-action="openAttentionFinding" ' +
+         'data-arg="' + i + '" role="button" tabindex="0">' +
+    '<span class="dash-stripe sev-' + sk + '"></span>' +
+    '<div class="dash-att-main">' +
+      '<div class="dash-att-title">' + escapeHtml(f.rule || 'Unknown') + '</div>' +
+      '<div class="dash-att-meta">' +
+        (host ? '<span class="mono">' + escapeHtml(host) + '</span>' : '') +
+        (time ? relTimeHtml(time) : '') +
+        (sub ? '<span class="dash-att-sub">' + escapeHtml(sub) + '</span>' : '') +
+      '</div>' +
     '</div>' +
-    '<div class="na-rows">' + rowsHtml + '</div>' +
-    moreLink +
+    '<span class="dash-sev sev-' + sk + '">' + escapeHtml((f.severity || 'LOW').toUpperCase()) + '</span>' +
   '</div>';
 }
 
+export function _needsAttentionHtml() {
+  var att = _attentionFindings;
+  var head, rows, more = '';
+  if (att.length) {
+    _heroList = att.slice(0, 5);
+    var crit = att.filter(function (f) { return _sevKey(f) === 'critical'; }).length;
+    var high = att.length - crit;
+    var parts = [];
+    if (crit) parts.push(crit + ' critical');
+    if (high) parts.push(high + ' high');
+    head = parts.join(', ') + ', unreviewed';
+    if (att.length > 5) {
+      more = '<a class="dash-link dash-att-more" data-action="openUnreviewedCriticalHigh">' +
+        '+ ' + (att.length - 5) + ' more →</a>';
+    }
+  } else {
+    _heroList = _latestFindings.slice(0, 3);
+    head = 'Nothing critical or high to review';
+  }
+  rows = _heroList.map(_heroRowHtml).join('');
+  var sub = att.length
+    ? 'Most urgent first · last 7 days'
+    : (_heroList.length ? 'Newest findings from the latest scan' : 'No findings in the last 7 days');
+  return '<div class="dash-att-head">' +
+      '<div>' +
+        '<div class="dash-eyebrow">Needs attention</div>' +
+        '<h3 class="dash-att-heading">' + escapeHtml(head) + '</h3>' +
+        '<div class="dash-sublabel">' + sub + '</div>' +
+      '</div>' +
+      '<a class="dash-link" data-action="' + (att.length ? 'openUnreviewedCriticalHigh' : 'navigate') +
+        '" data-arg="findings">All findings →</a>' +
+    '</div>' +
+    (rows
+      ? '<div class="dash-att-list">' + rows + '</div>'
+      : '<div class="dash-att-clear">' +
+          '<span class="dash-att-clear-dot"></span>' +
+          'All clear. Nothing new has been detected in the last week.' +
+        '</div>') +
+    more;
+}
+
 export function openAttentionFinding(idx) {
-  var f = _attentionFindings[Number(idx)];
+  var f = _heroList[Number(idx)];
   if (f) openFindingDrawer(f);
 }
 
-// In-place widget refresh. Called after a review toggle so the list
-// stays accurate without rebuilding the whole dashboard. Mutates the
-// cached finding's flags then re-renders just our container.
+// Kept for the app.js action table; the dashboard's finding rows all
+// go through the hero list now.
+export function openFindingDrawerByIdx(idx) {
+  openAttentionFinding(idx);
+}
+
+// In-place refresh after a review toggle so the list and the two
+// finding stats stay accurate without rebuilding the whole dashboard.
 function _refreshNeedsAttentionFromCache() {
+  _openFindings = _openFindings.filter(function (f) { return !isTouched(f); });
+  _attentionFindings = _attentionFrom(_openFindings);
   var mount = document.getElementById('dash-needs-attention');
-  if (!mount) return;
-  var live = _attentionFindings.filter(function (f) {
-    return !isTouched(f);
-  });
-  _attentionFindings = live;
-  mount.innerHTML = _needsAttentionHtml(live);
+  if (mount) mount.innerHTML = _needsAttentionHtml();
+  var stats = document.getElementById('dash-stats');
+  if (stats) stats.outerHTML = _statStripHtml(_lastStatCtx);
 }
 
 function _onReviewToggled(ev) {
   if (!ev || !ev.detail) return;
   var id = ev.detail.id;
   var changed = false;
-  _attentionFindings.forEach(function (f) {
+  _openFindings.forEach(function (f) {
     if (f.id != null && String(f.id) === String(id)) {
       f.reviewed = !!ev.detail.reviewed;
       f.false_positive = !!ev.detail.false_positive;
@@ -837,53 +906,163 @@ function _onReviewToggled(ev) {
 }
 document.addEventListener('pulse:review-toggled', _onReviewToggled);
 
-// ---------------------------------------------------------------
-// Standup polish — data-reduction funnel + top-hosts repeat offenders
-// ---------------------------------------------------------------
-// Shows how raw telemetry narrows down into triage-worthy alerts.
-// Events come from scans.total_events; findings / crit+high / crit are
-// aggregated across the filter window. Non-numeric / missing fields
-// degrade to zero so a brand-new install still renders the row.
-export function _dashFunnelHtml(scans, findings) {
+// --- Stat strip ---------------------------------------------------
+
+var _lastStatCtx = null;
+
+function _statHtml(label, valueHtml, sub, subTone, attrs) {
+  return '<div class="dash-stat"' + (attrs || '') + '>' +
+    '<div class="dash-stat-k">' + label + '</div>' +
+    '<div class="dash-stat-v mono">' + valueHtml + '</div>' +
+    '<div class="dash-stat-d ' + (subTone || 'flat') + '">' + sub + '</div>' +
+  '</div>';
+}
+
+function _statStripHtml(ctx) {
+  _lastStatCtx = ctx;
+  var today = _localDay();
+  var open = _openFindings.length;
+  var newToday = _openFindings.filter(function (f) {
+    return String(f._scan_date || '').slice(0, 10) === today;
+  }).length;
+  var crit = _attentionFindings.filter(function (f) { return _sevKey(f) === 'critical'; }).length;
+  var scansToday = ctx.allScans.filter(function (s) {
+    return String(s.scanned_at || '').slice(0, 10) === today;
+  });
+  var mttd = _computeMTTDSeconds(_openFindings);
+  var mttdHtml = '—';
+  if (mttd != null) {
+    var m = /^([\d.]+)(\D+)$/.exec(_formatDuration(mttd));
+    var units = { s: ' sec', m: ' min', h: ' hr', d: ' days' };
+    mttdHtml = m ? m[1] + '<small>' + (units[m[2]] || m[2]) + '</small>' : _formatDuration(mttd);
+  }
+  var clickable = function (kind) {
+    return ' data-action="clickStatCard" data-arg="' + kind + '" data-stat-kind="' + kind +
+           '" role="button" tabindex="0"';
+  };
+  return '<div class="dash-card dash-stats" id="dash-stats">' +
+    _statHtml('Open findings', String(open),
+      newToday ? '▲ ' + newToday + ' new today' : (open ? 'none new today' : 'nothing open'),
+      newToday ? 'bad' : 'flat', clickable('findings')) +
+    _statHtml('Critical, unreviewed',
+      '<span' + (crit ? ' class="dash-stat-crit"' : '') + '>' + crit + '</span>',
+      crit ? 'needs action now' : 'none waiting', crit ? 'bad' : 'good',
+      ' data-action="openUnreviewedCriticalHigh" role="button" tabindex="0"') +
+    _statHtml('Scans today', String(scansToday.length),
+      scansToday.length ? 'last one ' + escapeHtml(formatRelativeTime(scansToday[0].scanned_at)) : 'none yet today',
+      'flat', clickable('scans')) +
+    _statHtml('Mean time to detect', mttdHtml,
+      mttd == null ? 'needs timestamped findings' : 'event to detection, 7 days', 'flat') +
+  '</div>';
+}
+
+// --- Row 3: score history + severity -----------------------------
+
+function _historyPanelHtml(dailyScores, filtersOn) {
+  var bLine = GRADE_BANDS[1][0];
+  var body;
+  if (!dailyScores.length) {
+    body = '<div class="dash-panel-empty">' +
+      (filtersOn
+        ? 'No scores in this window. <a class="dash-link" data-action="resetDashFilters">Reset filters</a>'
+        : 'Your score history starts with the first scan in this window.') +
+    '</div>';
+  } else {
+    body = '<div class="dash-chart-wrap"><canvas id="score-line-chart"></canvas></div>';
+  }
+  var sub = dailyScores.length === 1
+    ? 'One day so far · the line fills in as you scan on more days'
+    : 'Daily posture · dashed line is the B grade (' + bLine + ')';
+  return '<div class="dash-card dash-panel">' +
+    '<div class="dash-panel-head">' +
+      '<div><h3>Score history</h3><div class="dash-sublabel">' + sub + '</div></div>' +
+      '<a class="dash-link" data-action="navigate" data-arg="history">Full history →</a>' +
+    '</div>' +
+    body +
+  '</div>';
+}
+
+function _severityPanelHtml(windowFindings, scans) {
+  var counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  windowFindings.forEach(function (f) { counts[_sevKey(f)]++; });
+  var total = windowFindings.length;
   var events = 0;
   scans.forEach(function (s) { events += (s.total_events || 0); });
-  var findingsTotal = findings.length;
-  var critHigh = 0, critOnly = 0;
-  findings.forEach(function (f) {
-    var sv = (f.severity || '').toUpperCase();
-    if (sv === 'CRITICAL' || sv === 'HIGH') critHigh++;
-    if (sv === 'CRITICAL') critOnly++;
-  });
-  function fmt(n) {
-    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
-    return String(n);
+
+  var names = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+  var order = ['critical', 'high', 'medium', 'low'];
+  var body;
+  if (!total) {
+    // The sublabel already says whether anything was scanned; only add a
+    // line when scans ran and came back clean.
+    body = scans.length ? '<div class="dash-panel-empty">No findings in this window.</div>' : '';
+  } else {
+    body =
+      '<div class="dash-sevbar" role="img" aria-label="' +
+        order.map(function (k) { return counts[k] + ' ' + names[k]; }).join(', ') + '">' +
+        order.filter(function (k) { return counts[k]; }).map(function (k) {
+          return '<span class="sev-' + k + '" style="flex:' + counts[k] + '" ' +
+                 'title="' + names[k] + ' · ' + counts[k] + '"></span>';
+        }).join('') +
+      '</div>' +
+      '<div class="dash-sevkey">' +
+        order.map(function (k) {
+          return '<div class="dash-sevkey-row">' +
+            '<span class="dash-sevkey-dot sev-' + k + '"></span>' +
+            '<span class="dash-sevkey-lab">' + names[k] + '</span>' +
+            '<span class="dash-sevkey-num mono">' + counts[k] + '</span>' +
+          '</div>';
+        }).join('') +
+      '</div>';
   }
-  var stages = [
-    { label: 'Events',      value: events,         tone: 'neutral' },
-    { label: 'Findings',    value: findingsTotal,  tone: 'info' },
-    { label: 'Crit + High', value: critHigh,       tone: 'warn' },
-    { label: 'Critical',    value: critOnly,       tone: 'error' },
-  ];
-  return '<div class="dash-funnel">' +
-    stages.map(function (s, i) {
-      var arrow = (i < stages.length - 1)
-        ? '<span class="funnel-arrow" aria-hidden="true">&rarr;</span>'
-        : '';
-      return '<div class="funnel-stage tone-' + s.tone + '">' +
-               '<div class="funnel-value">' + fmt(s.value) + '</div>' +
-               '<div class="funnel-label">' + escapeHtml(s.label) + '</div>' +
-             '</div>' + arrow;
-    }).join('') +
+  // The old four-box data-reduction funnel, as one line.
+  var funnel = total
+    ? '<span class="mono">' + _compactNum(events) + '</span> events → ' +
+      '<span class="mono">' + _compactNum(total) + '</span> findings → ' +
+      '<span class="mono dash-stat-crit">' + counts.critical + '</span> critical'
+    : (scans.length ? _compactNum(events) + ' events scanned in this window' : 'Nothing scanned in this window');
+  return '<div class="dash-card dash-panel">' +
+    '<h3>Findings by severity</h3>' +
+    '<div class="dash-sublabel">' + funnel + '</div>' +
+    body +
+    '<div class="dash-eyebrow dash-offenders-label">Repeat offenders</div>' +
+    _offendersHtml(scans) +
   '</div>';
+}
+
+// Top hosts by finding count in the filtered window.
+function _offendersHtml(scans) {
+  var agg = {};
+  scans.forEach(function (s) {
+    var host = s.hostname || s.filename || 'unknown';
+    if (!agg[host]) agg[host] = { count: 0, last: '' };
+    agg[host].count += (s.total_findings || 0);
+    var ts = s.scanned_at || '';
+    if (ts > agg[host].last) agg[host].last = ts;
+  });
+  var rows = Object.keys(agg).map(function (h) {
+    return { host: h, count: agg[h].count, last: agg[h].last };
+  }).filter(function (r) { return r.count > 0; })
+    .sort(function (a, b) { return b.count - a.count; })
+    .slice(0, 3);
+  if (!rows.length) {
+    return '<div class="dash-panel-empty dash-panel-empty-sm">No host activity in this window.</div>';
+  }
+  return '<div class="dash-offenders">' + rows.map(function (r, i) {
+    return '<div class="dash-off-row">' +
+      '<span class="dash-off-host mono">' + escapeHtml(r.host) + '</span>' +
+      '<span class="dash-off-last">' + relTimeHtml(r.last) + '</span>' +
+      '<span class="dash-off-ct' + (i === 0 ? ' top' : '') + '">' +
+        r.count + ' finding' + (r.count === 1 ? '' : 's') + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
 }
 
 // Mean time to detect — average delta between each finding's event
 // timestamp and when the scan that surfaced it actually ran. Lower is
-// better. Operates on a list of findings that know their parent scan's
-// scanned_at date (either inline `.scanned_at` or a hoisted `._scan_date`
-// the attention fetch attaches). Returns seconds, or null when we have
-// nothing to compute from.
+// better. Operates on findings that know their parent scan's scanned_at
+// (inline `.scanned_at` or the hoisted `._scan_date`). Returns seconds,
+// or null when there's nothing to compute from.
 export function _computeMTTDSeconds(findings) {
   if (!Array.isArray(findings) || !findings.length) return null;
   var total = 0, n = 0;
@@ -909,41 +1088,10 @@ export function _formatDuration(seconds) {
   return (seconds / 86400).toFixed(1).replace(/\.0$/, '') + 'd';
 }
 
-// Top 5 hosts by finding count in the filtered scan window. Last-seen
-// uses the most recent scanned_at for that host so stale hosts surface.
-export function _dashTopHostsHtml(scans) {
-  var agg = {};
-  scans.forEach(function (s) {
-    var host = s.hostname || s.filename || 'unknown';
-    if (!agg[host]) agg[host] = { count: 0, last: '' };
-    agg[host].count += (s.total_findings || 0);
-    var ts = s.scanned_at || '';
-    if (ts > agg[host].last) agg[host].last = ts;
-  });
-  var rows = Object.keys(agg).map(function (h) {
-    return { host: h, count: agg[h].count, last: agg[h].last };
-  }).filter(function (r) { return r.count > 0; })
-    .sort(function (a, b) { return b.count - a.count; })
-    .slice(0, 5);
-  if (rows.length === 0) {
-    return '<div class="dash-empty-note" style="font-size:12px; margin:4px 0 0 0;">No host activity in this window.</div>';
-  }
-  var max = rows[0].count || 1;
-  return '<div class="repeat-offenders">' +
-    rows.map(function (r) {
-      var pct = Math.round((r.count / max) * 100);
-      return '<div class="offender-row">' +
-               '<div class="offender-host mono">' + escapeHtml(r.host) + '</div>' +
-               '<div class="offender-bar-wrap"><div class="offender-bar" style="width:' + pct + '%"></div></div>' +
-               '<div class="offender-count">' + r.count + '</div>' +
-               '<div class="offender-last">' + relTimeHtml(r.last) + '</div>' +
-             '</div>';
-    }).join('') +
-  '</div>';
-}
-
 // ---------------------------------------------------------------
-// Score-over-time chart (shared by dashboard + history)
+// Score-over-time chart: one area line, faint grid, B-grade line.
+// Canvas can't read CSS variables, so colors are resolved from the
+// current theme's tokens at render time.
 // ---------------------------------------------------------------
 let _scoreChartInstance = null;
 
@@ -952,53 +1100,38 @@ export function _initScoreLineChart(dailyScores) {
   var canvas = document.getElementById('score-line-chart');
   if (!canvas) return;
 
-  // Reverse so oldest -> newest (Chart.js plots left to right).
+  // Oldest -> newest (Chart.js plots left to right).
   var series = dailyScores.slice().reverse();
-  var labels = series.map(function (d) { return d.date; });
+  var labels = series.map(function (d) { return _shortDate(d.date); });
   var scores = series.map(function (d) { return d.score; });
 
   var styles = getComputedStyle(document.documentElement);
-  var accent     = styles.getPropertyValue('--accent').trim() || '#58a6ff';
-  var textMuted  = styles.getPropertyValue('--text-muted').trim() || '#8b949e';
-  var border     = styles.getPropertyValue('--border').trim() || '#30363d';
-
-  // Points dropping below the B-grade threshold (70) are highlighted so
-  // the regression jumps out at a glance. Red for <50, amber for 50-69.
-  var CRIT  = '#f85149';
-  var WARN  = '#d29922';
-  var pointColors = scores.map(function (v) {
-    if (v < 50) return CRIT;
-    if (v < 70) return WARN;
-    return accent;
-  });
+  var tok = function (name, fallback) { return styles.getPropertyValue(name).trim() || fallback; };
+  var brand = tok('--brand', '#12b981');
+  var dim   = tok('--text-dim', '#8b949e');
+  var grid  = tok('--bg-4', '#eaeef2');
+  var surface = tok('--bg-1', '#ffffff');
+  var bLine = GRADE_BANDS[1][0];
 
   if (_scoreChartInstance) { _scoreChartInstance.destroy(); }
 
-  // afterDraw plugin: draws a dashed horizontal reference line at y=70
-  // ("B grade threshold"). Kept inline — global Chart.register would
-  // leak the line into every other chart on the page.
+  // Dashed B-grade reference line. Inline plugin so it doesn't leak
+  // into other charts on the page.
   var bGradeLine = {
     id: 'bGradeLine',
-    afterDraw: function (chart) {
-      var yScale = chart.scales.y;
-      var xScale = chart.scales.x;
-      if (!yScale || !xScale) return;
-      var y = yScale.getPixelForValue(70);
+    afterDatasetsDraw: function (chart) {
+      var y = chart.scales.y, x = chart.scales.x;
+      if (!y || !x) return;
+      var py = y.getPixelForValue(bLine);
       var ctx = chart.ctx;
       ctx.save();
-      ctx.strokeStyle = textMuted;
+      ctx.strokeStyle = dim;
       ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.25;
       ctx.beginPath();
-      ctx.moveTo(xScale.left, y);
-      ctx.lineTo(xScale.right, y);
+      ctx.moveTo(x.left, py);
+      ctx.lineTo(x.right, py);
       ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = textMuted;
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('B grade threshold', xScale.right - 2, y - 2);
       ctx.restore();
     }
   };
@@ -1009,33 +1142,56 @@ export function _initScoreLineChart(dailyScores) {
       labels: labels,
       datasets: [{
         data: scores,
-        borderColor: accent,
-        backgroundColor: accent + '22',
-        borderWidth: 2,
+        borderColor: brand,
+        backgroundColor: function (context) {
+          var area = context.chart.chartArea;
+          if (!area) return 'transparent';
+          var g = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+          g.addColorStop(0, brand + '47');
+          g.addColorStop(1, brand + '00');
+          return g;
+        },
+        borderWidth: 2.5,
         fill: true,
         tension: 0.3,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: pointColors,
-        pointBorderColor: pointColors,
-        pointBorderWidth: 0,
+        pointRadius: function (ctx) { return ctx.dataIndex === scores.length - 1 ? 4.5 : 0; },
+        pointHoverRadius: 5,
+        pointBackgroundColor: brand,
+        pointBorderColor: surface,
+        pointBorderWidth: 2,
+        clip: false,
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: true } },
+      layout: { padding: { top: 6, right: 8, bottom: 2, left: 2 } },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          displayColors: false,
+          callbacks: {
+            label: function (item) {
+              return item.parsed.y + ' / 100 · grade ' + _gradeFor(item.parsed.y);
+            },
+          },
+        },
+      },
       scales: {
         x: {
-          ticks: { color: textMuted, font: { size: 10 } },
+          // One day of history: center the lone point instead of pinning it
+          // to the left edge.
+          offset: scores.length === 1,
+          ticks: { color: dim, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 7 },
           grid:  { display: false },
-          border: { color: border },
+          border: { display: false },
         },
         y: {
           min: 0, max: 100,
-          ticks: { color: textMuted, font: { size: 10 }, stepSize: 25 },
-          grid:  { display: false },
-          border: { color: border },
+          ticks: { color: dim, font: { size: 10 }, stepSize: 25 },
+          grid:  { color: grid, drawTicks: false },
+          border: { display: false },
         }
       }
     },
@@ -1162,6 +1318,15 @@ export async function renderDashboardPage() {
   // Bump fetch ceiling so 30/90-day filters have data to slice.
   invalidateScansCache();
   var allScans = await fetchScans(200);
+
+  // Brand-new account: the whole dashboard is one call to action. No
+  // gray zeros, no empty charts, no filter bar with nothing to filter.
+  if (!allScans.length) {
+    _stopDashUpdatedTimer();
+    c.innerHTML = '<div class="dash-page">' + _firstRunHeroHtml() + '</div>';
+    return;
+  }
+
   var rules    = await fetchRuleNames();
   var dailyResp = await apiDailyScores(90);
   var allDaily  = dailyResp.daily_scores || [];
@@ -1178,262 +1343,76 @@ export async function renderDashboardPage() {
   var dailyScores = filterDailyByDashState(allDaily);
   var sourceList  = _dashSources(allScans);
   var filtersOn   = _dashFiltersActive();
-
   var today = dailyScores[0];
 
-  var filteredDeductions = today ? filterFindingsByDashState(today.deductions || []) : [];
+  // One fetch per scan per render, shared by every zone below.
+  var cache = {};
+  var findingsFor = function (id) {
+    if (!cache[id]) cache[id] = fetchFindings(id).catch(function () { return []; });
+    return cache[id];
+  };
 
-  var scoreNum = today ? today.score : 100;
-  var scoreLabel = today ? today.label : 'SECURE';
-  var grade = today ? today.grade : 'A';
-  var score = today ? today.score : '--';
-  var totalFindings = scans.reduce(function (s, x) { return s + x.total_findings; }, 0);
+  // Findings in the filter window (severity bar + funnel line). Capped
+  // so a 90-day window on a busy install stays one screenful of fetches.
+  var windowScans = scans.filter(function (s) { return s.total_findings > 0; }).slice(0, 40);
+  var windowBatches = await Promise.all(windowScans.map(function (s) { return findingsFor(s.id); }));
+  var windowFindings = [];
+  windowBatches.forEach(function (b) { windowFindings = windowFindings.concat(b); });
+  windowFindings = filterFindingsByDashState(windowFindings);
 
-  var scoreDesc = !today
-    ? 'No scans yet in the selected window. Upload a log or start the live monitor to populate this panel.'
-    : scoreNum >= 90
-      ? 'No critical issues detected. Security posture is strong.'
-      : scoreNum >= 75
-        ? 'Minor issues found. Review findings and address high-severity items.'
-        : scoreNum >= 50
-          ? 'Significant findings detected. Multiple items need attention.'
-          : 'Critical issues detected. Immediate investigation recommended.';
-
-  var circumference = 2 * Math.PI * 58;
-  var dashOffset = circumference * (1 - scoreNum / 100);
-
-  var uniqueRulesFiltered = (function () {
-    var set = {};
-    filteredDeductions.forEach(function (d) { if (d.rule) set[d.rule] = true; });
-    return Object.keys(set).length;
-  })();
-
-  var scoreTrend = _trendFor(today && today.score,
-                             dailyScores[1] && dailyScores[1].score,
-                             { upIsGood: true });
-  var rulesTrend = _trendFor(uniqueRulesFiltered,
-                             dailyScores[1] && dailyScores[1].unique_rules,
-                             { upIsGood: false });
-  var findTrend = _trendFor(scans[0] && scans[0].total_findings,
-                            scans[1] && scans[1].total_findings,
-                            { upIsGood: false });
-
-  // Top triggered rules — aggregate deductions in the filtered window
-  // and keep the worst severity seen per rule so the badge color maps
-  // to how dangerous the rule is, not the severity of the last hit.
-  var ruleAgg = {};
-  filteredDeductions.forEach(function (d) {
-    var r = d.rule || 'Unknown';
-    if (!ruleAgg[r]) ruleAgg[r] = { count: 0, severity: 'LOW' };
-    ruleAgg[r].count++;
-    var sv = (d.severity || 'LOW').toUpperCase();
-    var rank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
-    if ((rank[sv] || 0) > (rank[ruleAgg[r].severity] || 0)) {
-      ruleAgg[r].severity = sv;
-    }
-  });
-  var topRules = Object.keys(ruleAgg).map(function (r) {
-    return { rule: r, count: ruleAgg[r].count, severity: ruleAgg[r].severity };
-  }).sort(function (a, b) {
-    return b.count - a.count;
-  }).slice(0, 5);
-  var topRulesHtml = topRules.length === 0
-    ? '<div class="dash-empty-note" style="font-size:12px; margin:4px 0 0 0;">No rules triggered in this window.</div>'
-    : '<div class="top-rules-list">' +
-        topRules.map(function (r) {
-          return '<div class="top-rules-row">' +
-            '<span class="top-rules-name">' + escapeHtml(r.rule) + '</span>' +
-            '<span class="top-rules-count sev-' + r.severity.toLowerCase() + '">' + r.count + '</span>' +
-          '</div>';
-        }).join('') +
-      '</div>';
-
+  // Needs attention + the two finding stats use a fixed 7-day window
+  // across every scan, independent of the filter bar.
+  _openFindings = await _fetchRecentFindings(allScans, findingsFor);
+  _attentionFindings = _attentionFrom(_openFindings);
+  _latestFindings = [];
   var latestWithFindings = scans.find(function (s) { return s.total_findings > 0; });
-  var recentFindings = [];
   if (latestWithFindings) {
-    var all = await fetchFindings(latestWithFindings.id);
-    recentFindings = filterFindingsByDashState(all)
-      .slice().sort(function (a, b) {
-        var at = a.timestamp || _extractTime(a) || '';
-        var bt = b.timestamp || _extractTime(b) || '';
-        return at < bt ? 1 : at > bt ? -1 : 0;
-      }).slice(0, 5);
+    var latest = await findingsFor(latestWithFindings.id);
+    _latestFindings = filterFindingsByDashState(latest).slice().sort(function (a, b) {
+      var at = a.timestamp || _extractTime(a) || '';
+      var bt = b.timestamp || _extractTime(b) || '';
+      return at < bt ? 1 : at > bt ? -1 : 0;
+    });
   }
 
-  var filterBarHtml = _dashFilterBarHtml(rules, sourceList);
+  var windowLabels = { today: 'today', '24h': 'last 24 hours', '7d': 'last 7 days',
+                       '30d': 'last 30 days', '90d': 'last 90 days', all: 'all time', custom: 'custom range' };
+  var windowLabel = windowLabels[dashFilterState.time] || 'this window';
 
-  // "Last updated" reference is the newest scan we've seen — not the
-  // newest scan in the filtered slice, so the timestamp reflects how
-  // fresh the data is, not how old the filter window is.
-  var newestScan = allScans[0];
-  var updatedIso = newestScan ? (newestScan.scanned_at || '') : '';
-  var updatedLabel = updatedIso
-    ? ('Last updated ' + formatRelativeTime(updatedIso))
-    : 'No scans yet';
+  // "Last updated" reflects the newest scan overall, not the filter slice.
+  var updatedIso = allScans[0].scanned_at || '';
   var dashMetaHtml =
     '<div class="dash-meta-row">' +
-      '<span class="dash-updated" id="dash-updated-ts">' + escapeHtml(updatedLabel) + '</span>' +
+      '<span class="dash-updated" id="dash-updated-ts">' +
+        escapeHtml('Last updated ' + formatRelativeTime(updatedIso)) + '</span>' +
     '</div>';
 
-  // Needs Attention always uses a fixed 7-day window on the full scan
-  // list, independent of the dashboard filter bar. Runs after the other
-  // fetches since it reuses allScans and issues its own per-scan fetches.
-  _lastFilteredScanCount = scans.length;
-  _attentionFindings = await _fetchAttentionFindings(allScans);
-  var attentionInner = _needsAttentionHtml(_attentionFindings, scans.length);
-  var attentionHtml = '<div id="dash-needs-attention">' + attentionInner + '</div>';
-
-  // Slim inline empty-state row. Only shown when no scans fall in the
-  // selected filter window. Same visual height as the "Needs Attention"
-  // clear bar — left-border accent flips to blue to differentiate.
-  var emptyBannerHtml = '';
-  if (scans.length === 0) {
-    var bannerMsg = filtersOn
-      ? 'No scans match these filters'
-      : (dashFilterState.time === 'today'
-          ? 'No scans yet today'
-          : 'No scans in this window yet');
-    var inboxIcon =
-      '<svg class="dash-empty-ico" viewBox="0 0 24 24" width="14" height="14" ' +
-        'fill="none" stroke="currentColor" stroke-width="2" ' +
-        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-        '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>' +
-        '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>' +
-      '</svg>';
-    var actionsHtml = filtersOn
-      ? '<a class="dash-empty-link primary" data-action="resetDashFilters">Reset filters</a>'
-      : '<a class="dash-empty-link primary" data-action="openUploadModal">Upload .evtx</a>' +
-        '<span class="dash-empty-divider" aria-hidden="true"></span>' +
-        '<a class="dash-empty-link secondary" data-action="navigate" data-arg="monitor">Open Monitor</a>';
-    emptyBannerHtml =
-      '<div class="dash-empty-inline">' +
-        inboxIcon +
-        '<span class="dash-empty-text">' + bannerMsg + '</span>' +
-        '<span class="dash-empty-actions">' + actionsHtml + '</span>' +
-      '</div>';
-  }
-
-  var kpiHtml =
-    '<div class="stat-row stat-row-6">' +
-      _trendStatCard('Daily Score',
-                     score + ' <span style="font-size:14px; opacity:0.7;">(' + grade + ')</span>',
-                     scoreLabel, scoreTrend, _accentForScore(scoreNum), scoreColorClass(scoreNum),
-                     'score') +
-      _trendStatCard('Unique Rules',
-                     uniqueRulesFiltered,
-                     filtersOn ? 'Matching filter' : 'Triggered today', rulesTrend,
-                     uniqueRulesFiltered > 0 ? 'accent-high' : 'accent-neutral',
-                     null, 'rules') +
-      _trendStatCard('Total Findings', totalFindings,
-                     filtersOn ? 'In filtered window' : 'Across all scans', findTrend, 'accent-info',
-                     null, 'findings') +
-      _trendStatCard('Scans Run', scans.length,
-                     filtersOn ? 'In filtered window' : 'Since first install', null, 'accent-neutral',
-                     null, 'scans') +
-      _trendStatCard('MTTD',
-                     _formatDuration(_computeMTTDSeconds(_attentionFindings)),
-                     _attentionFindings.length ? 'Avg detection lag' : 'No findings to measure',
-                     null, 'accent-info', null, null) +
-      _trendStatCard('Open Findings',
-                     _attentionFindings.length,
-                     'Unreviewed crit / high', null,
-                     _attentionFindings.length > 0 ? 'accent-high' : 'accent-neutral',
-                     null, null) +
-    '</div>';
-
-  var standupHtml =
-    '<div class="standup-row">' +
-      '<div class="card standup-card">' +
-        '<div class="section-label">Data reduction — events through to critical</div>' +
-        _dashFunnelHtml(scans, filteredDeductions) +
-      '</div>' +
-      '<div class="card standup-card">' +
-        '<div class="section-label">Repeat offenders — top hosts</div>' +
-        _dashTopHostsHtml(scans) +
+  var heroHtml =
+    '<div class="dash-hero">' +
+      _heroScoreHtml({
+        today: today, prev: dailyScores[1], top: _attentionFindings[0],
+        windowLabel: windowLabel, filtersOn: filtersOn,
+      }) +
+      '<div class="dash-card dash-attention" id="dash-needs-attention">' +
+        _needsAttentionHtml() +
       '</div>' +
     '</div>';
 
-  // Two-column chart row: score ring (left) + score history line (right).
-  // The Severity Breakdown donut moved out \u2014 Trends owns severity now and
-  // the dashboard donut was redundant. MITRE coverage lives on the Rules
-  // page coverage matrix; the dashboard's inline bars went with it.
-  var chartsHtml =
-    '<div class="dash-chart-row">' +
-      '<div class="card dash-chart-card today-security-score">' +
-        '<div class="section-label">Today\u2019s Security Score</div>' +
-        '<div class="score-display">' +
-          '<div class="score-ring-container">' +
-            '<svg class="score-ring" viewBox="0 0 140 140">' +
-              '<circle class="track" cx="70" cy="70" r="58" />' +
-              '<circle class="fill" cx="70" cy="70" r="58" ' +
-                'stroke-dasharray="' + circumference + '" ' +
-                'stroke-dashoffset="' + dashOffset + '" ' +
-                'style="stroke:' + scoreColor(scoreNum) + '" ' +
-                'transform="rotate(-90 70 70)" />' +
-            '</svg>' +
-            '<div class="score-ring-label">' +
-              '<div class="number" style="color:' + scoreColor(scoreNum) + '">' + score + '</div>' +
-              '<div class="out-of">/ 100</div>' +
-            '</div>' +
-          '</div>' +
-          '<div class="score-info">' +
-            '<div class="risk-label" style="color:' + scoreColor(scoreNum) + '">' +
-              '<span class="grade-badge" style="background:' + scoreColor(scoreNum) + '; margin-right:8px;">' + grade + '</span>' +
-              scoreLabel +
-            '</div>' +
-            '<div class="risk-desc">' + scoreDesc + '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="card dash-chart-card">' +
-        '<div class="section-label">Score History</div>' +
-        '<div class="score-chart-wrap"><canvas id="score-line-chart"></canvas></div>' +
-        '<div class="history-footer"><a href="#" data-action="navigate" data-arg="history">View full history &rarr;</a></div>' +
-      '</div>' +
+  var rowHtml =
+    '<div class="dash-row">' +
+      _historyPanelHtml(dailyScores, filtersOn) +
+      _severityPanelHtml(windowFindings, scans) +
     '</div>';
-
-  var topRulesCardHtml =
-    '<div class="card">' +
-      '<div class="section-label">Top Triggered Rules</div>' +
-      topRulesHtml +
-    '</div>';
-
-  var findingsHtml = (recentFindings.length > 0)
-    ? '<div class="card">' +
-        '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">' +
-          '<span>Last Scan Findings</span>' +
-          '<a href="#" data-action="navigate" data-arg="findings" style="color:var(--accent); font-size:11px; font-weight:600; text-decoration:none;">View all findings →</a>' +
-        '</div>' +
-        _dashFindingsHtml(recentFindings) +
-      '</div>'
-    : (filtersOn && latestWithFindings
-        ? '<div class="card"><div class="dash-empty-note">No findings match the current filters in the latest scan.</div></div>'
-        : '');
-
-  // Brand-new account with no scans at all: lead with the first-run hero
-  // and suppress the Getting Started checklist + the inline empty banner
-  // (the hero is the single, focused call to action). The rest of the
-  // dashboard still renders below it in its empty state, but the hero is
-  // what the eye lands on. Any scan in the account flips this off forever.
-  var hasAnyScan = allScans.length > 0;
-  var onboardingHtml = hasAnyScan ? _onboardingCardHtml(_onboardingState) : '';
-  var firstRunHtml   = hasAnyScan ? '' : _firstRunHeroHtml();
-  if (!hasAnyScan) emptyBannerHtml = '';
-  // Team Workload moved to its own "Team" page (manager/admin) — it felt out
-  // of place mixed into the dashboard. See renderTeamPage() below.
 
   c.innerHTML =
-    firstRunHtml +
-    onboardingHtml +
-    dashMetaHtml +
-    filterBarHtml +
-    emptyBannerHtml +
-    attentionHtml +
-    kpiHtml +
-    standupHtml +
-    chartsHtml +
-    topRulesCardHtml +
-    findingsHtml;
+    '<div class="dash-page">' +
+      dashMetaHtml +
+      _dashFilterBarHtml(rules, sourceList) +
+      heroHtml +
+      _statStripHtml({ allScans: allScans }) +
+      rowHtml +
+      _onboardingCardHtml(_onboardingState) +
+    '</div>';
 
   _initScoreLineChart(dailyScores);
   _startDashUpdatedTimer(updatedIso);
@@ -1492,46 +1471,28 @@ const ONBOARDING_STEPS = [
 // run your first scan. Once any scan exists, this never shows again and
 // the normal dashboard (plus the Getting Started checklist) takes over.
 function _firstRunHeroHtml() {
-  return '<div class="card first-run-hero">' +
-    '<div class="first-run-icon" aria-hidden="true">' +
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-        'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z"/>' +
-        '<path d="M3 12h4l2 5 4-10 2 5h4"/>' +
-      '</svg>' +
+  return '<div class="dash-card dash-firstrun">' +
+    '<div class="dash-firstrun-gauge" aria-hidden="true">' +
+      _scoreGaugeSvg(null, '') +
+      '<div class="dash-gauge-label"><span class="dash-firstrun-q">?</span></div>' +
     '</div>' +
-    '<h2 class="first-run-title">Run your first scan</h2>' +
-    '<p class="first-run-sub">' +
-      'Pulse has nothing to show yet because no logs have been analyzed. ' +
-      'Scan this computer, upload a Windows <span class="mono">.evtx</span> ' +
-      'log, or try a bundled sample to see your security posture, findings, ' +
-      'and plain-language guidance.' +
-    '</p>' +
-    '<div class="first-run-steps">' +
-      '<div class="first-run-step">' +
-        '<span class="first-run-step-num">1</span>' +
-        '<span>Scan a log</span>' +
+    '<div class="dash-firstrun-body">' +
+      '<div class="dash-eyebrow">Security posture</div>' +
+      '<h2 class="dash-firstrun-title">Run your first scan</h2>' +
+      '<p class="dash-firstrun-sub">' +
+        'Pulse hasn’t analyzed any logs yet, so there’s no score to show. ' +
+        'Scan this computer or upload a Windows <span class="mono">.evtx</span> log, and ' +
+        'this page fills in with your A–F grade, the findings that need attention, ' +
+        'and what to do about each one.' +
+      '</p>' +
+      '<div class="dash-score-actions">' +
+        '<button class="btn btn-primary" data-action="openSystemScanModal">Scan my system</button>' +
+        '<button class="btn" data-action="openUploadModal">Upload a .evtx log</button>' +
       '</div>' +
-      '<span class="first-run-step-arrow" aria-hidden="true">&rarr;</span>' +
-      '<div class="first-run-step">' +
-        '<span class="first-run-step-num">2</span>' +
-        '<span>Pulse scores your posture A&ndash;F</span>' +
+      '<div class="dash-firstrun-hint">' +
+        'No log handy? Upload any file from the <span class="mono">samples/</span> ' +
+        'folder to see a fully populated dashboard.' +
       '</div>' +
-      '<span class="first-run-step-arrow" aria-hidden="true">&rarr;</span>' +
-      '<div class="first-run-step">' +
-        '<span class="first-run-step-num">3</span>' +
-        '<span>Review findings &amp; what to do</span>' +
-      '</div>' +
-    '</div>' +
-    '<div class="first-run-actions">' +
-      '<button class="btn btn-primary btn-with-icon" data-action="openSystemScanModal">' +
-        '<i data-lucide="scan-line"></i><span>Scan my system</span></button>' +
-      '<button class="btn btn-with-icon" data-action="openUploadModal">' +
-        '<i data-lucide="upload"></i><span>Upload a .evtx log</span></button>' +
-    '</div>' +
-    '<div class="first-run-hint">' +
-      'No log handy? Upload any file from the <span class="mono">samples/</span> ' +
-      'folder to see a fully populated dashboard.' +
     '</div>' +
   '</div>';
 }

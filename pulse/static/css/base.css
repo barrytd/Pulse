@@ -35,6 +35,17 @@
   --accent:      #3b82f6;
   --accent-glow: rgba(59,130,246,0.15);
 
+  /* Brand — the Pulse logo green. Reserved for the few brand moments
+     (score history line, dashboard links, the one highlighted number);
+     --accent stays the blue UI accent everywhere else. */
+  --brand:       #12b981;
+  --brand-soft:  rgba(18, 185, 129, 0.10);
+
+  /* Soft elevation for the few "real" cards (dashboard hero, stat strip,
+     chart panels). Inner blocks get no border and no shadow. */
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  --radius-card: 14px;
+
   /* Severity palette — desaturated for both themes */
   --severity-critical:    #ef4444;
   --severity-high:        #f97316;
@@ -98,6 +109,10 @@
   --shadow:      0 1px 3px rgba(0,0,0,0.3);
   --accent:      #58a6ff;
   --accent-glow: rgba(88,166,255,0.12);
+
+  --brand:       #3ddc97;
+  --brand-soft:  rgba(61, 220, 151, 0.13);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
 
   /* Severity — brighter for dark background contrast */
   --severity-critical:    #f87171;

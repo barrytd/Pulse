@@ -521,11 +521,17 @@ def _score_tier(score):
         return "CRITICAL RISK", "#8e44ad"
 
 
+# Letter-grade bands: (minimum score, grade), highest first; below the
+# last band is F. This is the single source of truth for the dashboard:
+# pulse/static/js/dashboard.js GRADE_BANDS must match it, and
+# tests/test_grade_bands.py fails if the two drift apart.
+GRADE_BANDS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
+
+
 def _score_grade(score):
-    if score >= 90: return "A"
-    if score >= 75: return "B"
-    if score >= 50: return "C"
-    if score >= 25: return "D"
+    for floor, grade in GRADE_BANDS:
+        if score >= floor:
+            return grade
     return "F"
 
 

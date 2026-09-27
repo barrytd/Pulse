@@ -1,0 +1,299 @@
+<title>Pulse Dashboard</title>
+<meta name="description" content="A sleeker, calmer redesign concept for the Pulse threat-detection dashboard.">
+<style>
+:root{
+  /* light theme (default) */
+  --bg:#F4F6F9; --surface:#FFFFFF; --surface-2:#F0F3F7; --panel-ring:#E4E9F0;
+  --ink:#111823; --ink-dim:#4A5765; --ink-mute:#8A97A6;
+  --line:#E4E9F0; --hair:#EEF1F6;
+  --accent:#12B981; --accent-soft:#12b9811a;
+  --crit:#E5484D; --high:#F2760B; --med:#E8A013; --low:#3E7BFA; --good:#12B981;
+  --crit-soft:#e5484d14; --high-soft:#f2760b14; --med-soft:#e8a01314; --low-soft:#3e7bfa14; --good-soft:#12b98114;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.06);
+  color-scheme:light;
+}
+:root:not([data-theme="light"]){
+  @media (prefers-color-scheme: dark){
+    --bg:#0B0F15; --surface:#131A23; --surface-2:#0F151D; --panel-ring:#1F2A36;
+    --ink:#E7EEF6; --ink-dim:#9DABBA; --ink-mute:#64717F;
+    --line:#1E2833; --hair:#18212B;
+    --accent:#3DDC97; --accent-soft:#3ddc9722;
+    --crit:#FF5C61; --high:#FF8A3D; --med:#F6C445; --low:#5B9DF9; --good:#3DDC97;
+    --crit-soft:#ff5c611f; --high-soft:#ff8a3d1f; --med-soft:#f6c4451f; --low-soft:#5b9df91f; --good-soft:#3ddc971f;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0B0F15; --surface:#131A23; --surface-2:#0F151D; --panel-ring:#1F2A36;
+  --ink:#E7EEF6; --ink-dim:#9DABBA; --ink-mute:#64717F;
+  --line:#1E2833; --hair:#18212B;
+  --accent:#3DDC97; --accent-soft:#3ddc9722;
+  --crit:#FF5C61; --high:#FF8A3D; --med:#F6C445; --low:#5B9DF9; --good:#3DDC97;
+  --crit-soft:#ff5c611f; --high-soft:#ff8a3d1f; --med-soft:#f6c4451f; --low-soft:#5b9df91f; --good-soft:#3ddc971f;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased; line-height:1.5;
+}
+h1,h2,h3{font-family:"Sora","Manrope",sans-serif; text-wrap:balance; margin:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px; margin:0 auto; padding-inline:20px; padding-block:0}
+
+/* top bar */
+.topbar{display:flex; align-items:center; gap:16px; padding-block:16px; border-bottom:1px solid var(--hair)}
+.brand{display:flex; align-items:center; gap:9px; font-family:"Sora"; font-weight:700; letter-spacing:.2px}
+.spark{width:20px;height:20px;color:var(--accent)}
+.brand .sub{color:var(--ink-mute); font-weight:500; font-size:12px; font-family:"Manrope"; padding-left:9px; border-left:1px solid var(--line)}
+.topbar .right{margin-left:auto; display:flex; align-items:center; gap:10px}
+.pill{display:inline-flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink-dim);
+  background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:6px 12px}
+.pill.click{cursor:pointer}
+.avatar{width:30px;height:30px;border-radius:50%; background:var(--accent); color:#04140d; display:grid; place-items:center; font-weight:700; font-size:13px}
+
+/* section rhythm */
+.stack{display:flex; flex-direction:column; gap:18px; padding-block:22px 40px}
+.eyebrow{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-mute); font-weight:600}
+
+/* hero */
+.hero{display:grid; grid-template-columns:340px 1fr; gap:18px}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow)}
+.score-card{padding:24px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:2px}
+.gauge{position:relative; width:184px; height:184px; margin:4px 0 8px}
+.gauge svg{transform:rotate(-90deg)}
+.gauge .grade{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px}
+.gauge .grade .g{font-family:"Sora"; font-size:52px; font-weight:700; line-height:1}
+.gauge .grade .n{font-size:12.5px; color:var(--ink-mute)}
+.verdict{font-size:15px; color:var(--ink-dim); max-width:250px}
+.verdict b{color:var(--ink)}
+.trend{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--crit); background:var(--crit-soft); padding:4px 10px; border-radius:999px; margin-top:8px}
+
+/* attention feed */
+.attention{padding:18px 20px 8px}
+.attention .head{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px}
+.attention .head a{font-size:12.5px; color:var(--accent); text-decoration:none}
+.finding{display:grid; grid-template-columns:4px 1fr auto; gap:14px; align-items:center; padding:13px 4px; border-top:1px solid var(--hair); cursor:pointer}
+.finding:first-of-type{border-top:none}
+.finding:hover{background:var(--surface-2); border-radius:10px; margin-inline:-8px; padding-inline:12px}
+.stripe{width:4px; height:38px; border-radius:4px; background:var(--ink-mute)}
+.stripe.crit{background:var(--crit)} .stripe.high{background:var(--high)} .stripe.med{background:var(--med)}
+.finding .t{font-weight:600; font-size:14.5px}
+.finding .m{font-size:12.5px; color:var(--ink-mute); margin-top:2px}
+.finding .m .ip{color:var(--ink-dim)}
+.sev{font-size:10.5px; font-weight:700; letter-spacing:.06em; padding:3px 8px; border-radius:6px; white-space:nowrap}
+.sev.crit{color:var(--crit); background:var(--crit-soft)} .sev.high{color:var(--high); background:var(--high-soft)} .sev.med{color:var(--med); background:var(--med-soft)}
+
+/* stat strip */
+.stats{display:grid; grid-template-columns:repeat(4,1fr); background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); overflow:hidden}
+.stat{padding:18px 22px; border-left:1px solid var(--hair)}
+.stat:first-child{border-left:none}
+.stat .k{font-size:12px; color:var(--ink-mute); font-weight:500}
+.stat .v{font-family:"Sora"; font-size:30px; font-weight:700; margin-top:3px; letter-spacing:-.5px}
+.stat .v small{font-size:14px; color:var(--ink-mute); font-weight:600; font-family:"Manrope"}
+.stat .d{font-size:12px; margin-top:1px}
+.up{color:var(--crit)} .down{color:var(--good)} .flat{color:var(--ink-mute)}
+
+/* two-up */
+.twoup{display:grid; grid-template-columns:1fr 380px; gap:18px}
+.panel{padding:18px 20px}
+.panel h3{font-size:14.5px; font-weight:600}
+.panel .sublabel{font-size:12px; color:var(--ink-mute); margin-top:1px}
+.chartwrap{margin-top:14px; position:relative}
+.legend-line{display:flex; gap:18px; margin-top:12px; font-size:12px; color:var(--ink-dim)}
+.legend-line span{display:inline-flex; align-items:center; gap:6px}
+.dot{width:8px;height:8px;border-radius:50%}
+
+/* severity bar */
+.sevbar{display:flex; height:14px; border-radius:8px; overflow:hidden; margin-top:16px; gap:2px}
+.sevbar > div{position:relative}
+.sevbar .s-crit{background:var(--crit)} .sevbar .s-high{background:var(--high)} .sevbar .s-med{background:var(--med)} .sevbar .s-low{background:var(--low)}
+.sevkey{display:grid; grid-template-columns:1fr 1fr; gap:10px 20px; margin-top:18px}
+.sevkey .row{display:flex; align-items:center; gap:9px; font-size:13px}
+.sevkey .row .c{width:9px;height:9px;border-radius:3px}
+.sevkey .row .lab{color:var(--ink-dim)}
+.sevkey .row .num{margin-left:auto; font-family:"JetBrains Mono"; font-weight:600; color:var(--ink)}
+
+/* offenders */
+.off{display:flex; align-items:center; gap:12px; padding:11px 4px; border-top:1px solid var(--hair)}
+.off:first-of-type{border-top:none}
+.off .ip{font-family:"JetBrains Mono"; font-size:13px}
+.off .co{font-size:11.5px; color:var(--ink-mute)}
+.off .ct{margin-left:auto; font-size:12px; color:var(--ink-dim)}
+.off .ct b{color:var(--crit)}
+
+.tip{position:fixed; pointer-events:none; opacity:0; transition:opacity .1s; background:var(--ink); color:var(--bg);
+  font-size:12px; padding:6px 9px; border-radius:7px; z-index:20; font-family:"JetBrains Mono"; white-space:nowrap; transform:translate(-50%,-130%)}
+
+.note{font-size:12.5px; color:var(--ink-mute); text-align:center; padding-top:6px}
+
+@media (max-width:840px){
+  .hero{grid-template-columns:1fr}
+  .twoup{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .stat:nth-child(3){border-left:none}
+}
+@media (max-width:460px){ .stats{grid-template-columns:1fr} .stat{border-left:none; border-top:1px solid var(--hair)} .stat:first-child{border-top:none} }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <svg class="spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3 8 4-16 3 8h6"/></svg>
+      Pulse <span class="sub">Threat Detection</span>
+    </div>
+    <div class="right">
+      <span class="pill click" id="themeBtn">◐ Theme</span>
+      <span class="pill">Last 24 hours ▾</span>
+      <div class="avatar">R</div>
+    </div>
+  </div>
+
+  <div class="stack">
+
+    <div class="hero">
+      <div class="card score-card">
+        <div class="eyebrow">Security posture · DC01</div>
+        <div class="gauge">
+          <svg width="184" height="184" viewBox="0 0 184 184">
+            <circle cx="92" cy="92" r="80" fill="none" stroke="var(--hair)" stroke-width="12"/>
+            <circle cx="92" cy="92" r="80" fill="none" stroke="var(--high)" stroke-width="12" stroke-linecap="round"
+              stroke-dasharray="502" stroke-dashoffset="291"/>
+          </svg>
+          <div class="grade"><span class="g" style="color:var(--high)">D</span><span class="n mono">58 / 100</span></div>
+        </div>
+        <div class="verdict"><b>Under active attack.</b> A brute-force sign-in succeeded on this domain controller in the last hour.</div>
+        <span class="trend">▼ down 22 pts since yesterday</span>
+      </div>
+
+      <div class="card attention">
+        <div class="head">
+          <div><div class="eyebrow">Needs attention</div><h3 style="margin-top:3px; font-size:16px">3 critical findings, newest first</h3></div>
+          <a href="#">All findings →</a>
+        </div>
+        <div class="finding">
+          <div class="stripe crit"></div>
+          <div><div class="t">Brute-force sign-in succeeded</div><div class="m">Account <b style="color:var(--ink-dim)">svc-backup</b> · source <span class="ip mono">203.0.113.44</span> · 47 tries then success</div></div>
+          <div class="sev crit">CRITICAL</div>
+        </div>
+        <div class="finding">
+          <div class="stripe crit"></div>
+          <div><div class="t">Credential dumping (LSASS access)</div><div class="m">Memory read handle to <span class="ip mono">lsass.exe</span> · looks like Mimikatz</div></div>
+          <div class="sev crit">CRITICAL</div>
+        </div>
+        <div class="finding">
+          <div class="stripe crit"></div>
+          <div><div class="t">Account takeover chain</div><div class="m">Same IP, 3 accounts, lateral movement to <span class="ip mono">FS02</span></div></div>
+          <div class="sev crit">CRITICAL</div>
+        </div>
+        <div class="finding">
+          <div class="stripe high"></div>
+          <div><div class="t">Suspicious PowerShell</div><div class="m">Base64-encoded command, download cradle</div></div>
+          <div class="sev high">HIGH</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Open findings</div><div class="v">12</div><div class="d up">▲ 7 new today</div></div>
+      <div class="stat"><div class="k">Critical, unreviewed</div><div class="v" style="color:var(--crit)">3</div><div class="d up">needs action now</div></div>
+      <div class="stat"><div class="k">Scans today</div><div class="v">4</div><div class="d flat">last one 6 min ago</div></div>
+      <div class="stat"><div class="k">Mean time to detect</div><div class="v">6<small> min</small></div><div class="d down">▼ 40% faster</div></div>
+    </div>
+
+    <div class="twoup">
+      <div class="card panel">
+        <h3>Score history</h3>
+        <div class="sublabel">Posture over the last 14 days · B-grade line at 75</div>
+        <div class="chartwrap">
+          <svg id="hist" width="100%" height="180" viewBox="0 0 620 180" preserveAspectRatio="none" style="display:block"></svg>
+        </div>
+        <div class="legend-line"><span><span class="dot" style="background:var(--accent)"></span>Daily score</span><span><span class="dot" style="background:var(--ink-mute)"></span>B-grade threshold</span></div>
+      </div>
+
+      <div class="card panel">
+        <h3>Findings by severity</h3>
+        <div class="sublabel">14 open, this window</div>
+        <div class="sevbar">
+          <div class="s-crit" style="flex:3" data-t="Critical · 3"></div>
+          <div class="s-high" style="flex:5" data-t="High · 5"></div>
+          <div class="s-med" style="flex:4" data-t="Medium · 4"></div>
+          <div class="s-low" style="flex:2" data-t="Low · 2"></div>
+        </div>
+        <div class="sevkey">
+          <div class="row"><span class="c" style="background:var(--crit)"></span><span class="lab">Critical</span><span class="num">3</span></div>
+          <div class="row"><span class="c" style="background:var(--high)"></span><span class="lab">High</span><span class="num">5</span></div>
+          <div class="row"><span class="c" style="background:var(--med)"></span><span class="lab">Medium</span><span class="num">4</span></div>
+          <div class="row"><span class="c" style="background:var(--low)"></span><span class="lab">Low</span><span class="num">2</span></div>
+        </div>
+        <div class="eyebrow" style="margin-top:22px">Repeat offenders</div>
+        <div style="margin-top:8px">
+          <div class="off"><span class="ip">203.0.113.44</span><span class="co">RU · hosting</span><span class="ct"><b>5 hits</b></span></div>
+          <div class="off"><span class="ip">198.51.100.9</span><span class="co">CN · unknown</span><span class="ct">3 hits</span></div>
+          <div class="off"><span class="ip">45.155.205.7</span><span class="co">NL · VPN</span><span class="ct">2 hits</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">Design concept with sample data · not your live figures. Toggle light and dark with the Theme button.</div>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+// theme toggle (per-viewer convenience only)
+(function(){
+  var btn=document.getElementById('themeBtn'), root=document.documentElement;
+  function cur(){ if(root.getAttribute('data-theme'))return root.getAttribute('data-theme');
+    return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'; }
+  try{ var s=localStorage.getItem('pulse-theme'); if(s)root.setAttribute('data-theme',s); }catch(e){}
+  btn.addEventListener('click',function(){ var n=cur()==='dark'?'light':'dark'; root.setAttribute('data-theme',n);
+    try{localStorage.setItem('pulse-theme',n)}catch(e){} });
+})();
+
+// score-history area line (single series)
+(function(){
+  var svg=document.getElementById('hist'), W=620,H=180, pad={l:8,r:8,t:14,b:20};
+  var data=[82,80,84,79,81,78,80,77,74,72,70,66,63,58]; // score per day, trending down
+  var min=40,max=100;
+  var x=function(i){return pad.l+(W-pad.l-pad.r)*i/(data.length-1)};
+  var y=function(v){return pad.t+(H-pad.t-pad.b)*(1-(v-min)/(max-min))};
+  var NS='http://www.w3.org/2000/svg';
+  function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+  // grid + threshold
+  [40,60,80,100].forEach(function(v){ svg.appendChild(el('line',{x1:pad.l,y1:y(v),x2:W-pad.r,y2:y(v),stroke:'var(--hair)','stroke-width':1})); });
+  svg.appendChild(el('line',{x1:pad.l,y1:y(75),x2:W-pad.r,y2:y(75),stroke:'var(--ink-mute)','stroke-width':1.5,'stroke-dasharray':'4 4'}));
+  // area
+  var d='M'+x(0)+' '+y(data[0]); data.forEach(function(v,i){ if(i)d+=' L'+x(i)+' '+y(v); });
+  var area=d+' L'+x(data.length-1)+' '+(H-pad.b)+' L'+x(0)+' '+(H-pad.b)+' Z';
+  var grad=el('linearGradient',{id:'g',x1:0,y1:0,x2:0,y2:1}); grad.appendChild(el('stop',{offset:0,'stop-color':'var(--accent)','stop-opacity':.28})); grad.appendChild(el('stop',{offset:1,'stop-color':'var(--accent)','stop-opacity':0})); svg.appendChild(grad);
+  svg.appendChild(el('path',{d:area,fill:'url(#g)'}));
+  svg.appendChild(el('path',{d:d,fill:'none',stroke:'var(--accent)','stroke-width':2.5,'stroke-linecap':'round','stroke-linejoin':'round'}));
+  // endpoint
+  svg.appendChild(el('circle',{cx:x(data.length-1),cy:y(data[data.length-1]),r:4.5,fill:'var(--accent)',stroke:'var(--surface)','stroke-width':2}));
+  // hover
+  var tip=document.getElementById('tip');
+  data.forEach(function(v,i){
+    var c=el('circle',{cx:x(i),cy:y(v),r:12,fill:'transparent',style:'cursor:pointer'});
+    c.addEventListener('mousemove',function(e){ tip.textContent='Day '+(i+1)+' · '+v+'/100'; tip.style.left=e.clientX+'px'; tip.style.top=e.clientY+'px'; tip.style.opacity=1; });
+    c.addEventListener('mouseleave',function(){ tip.style.opacity=0; });
+    svg.appendChild(c);
+  });
+})();
+
+// severity bar hover
+(function(){
+  var tip=document.getElementById('tip');
+  document.querySelectorAll('.sevbar > div').forEach(function(seg){
+    seg.addEventListener('mousemove',function(e){ tip.textContent=seg.getAttribute('data-t'); tip.style.left=e.clientX+'px'; tip.style.top=e.clientY+'px'; tip.style.opacity=1; });
+    seg.addEventListener('mouseleave',function(){ tip.style.opacity=0; });
+  });
+})();
+</script>

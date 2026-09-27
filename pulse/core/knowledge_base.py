@@ -1072,7 +1072,10 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
 
 
 # A generic fallback so the UI never has to guard for missing entries.
+# `generic` lets a UI tell this apart from a real entry (the dashboard
+# shows the finding's own description instead of this boilerplate).
 _FALLBACK: Dict[str, Any] = {
+    "generic": True,
     "plain_language": (
         "Something the detection engine flagged as worth a look. The technical "
         "description and event details below explain what fired the rule."

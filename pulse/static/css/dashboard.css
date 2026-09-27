@@ -12,68 +12,6 @@
   margin-bottom: 16px;
   min-width: 0;
 }
-/* Density-pass variant: 6 KPI cards on one row at 1440+. Below
-   1100px they wrap to 3x2, below 700 to 2x3 so everything still reads. */
-.stat-row.stat-row-6 {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-}
-@media (max-width: 1280px) {
-  .stat-row.stat-row-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (max-width: 700px) {
-  .stat-row.stat-row-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-/* Denser stat card for the 6-up row — reduces internal padding so the
-   row doesn't grow too tall when we cram 6 into the horizontal space. */
-.stat-row.stat-row-6 .stat-card {
-  padding: 12px 14px;
-}
-.stat-row.stat-row-6 .stat-card .value {
-  font-size: 24px;
-}
-
-/* Three-column chart row (severity donut | score ring | score history).
-   Score ring is a compact circle, history is a line chart that needs
-   horizontal room — give it the larger 1.5fr column. The Severity
-   Breakdown donut and the MITRE Categories bars previously lived in
-   this band and the row below; both moved out (Trends owns severity,
-   Rules owns MITRE coverage). */
-.dash-chart-row {
-  display: grid;
-  grid-template-columns: 1fr 1.5fr;
-  gap: 16px;
-  margin-bottom: 16px;
-  min-width: 0;
-}
-.dash-chart-card {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.dash-chart-card .score-chart-wrap {
-  flex: 1;
-  min-height: 180px;
-}
-@media (max-width: 720px) {
-  .dash-chart-row { grid-template-columns: 1fr; }
-}
-
-/* Compact score display inside the narrower three-column card — stacks
-   ring above the label block instead of side-by-side. */
-.score-display.score-display-compact {
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  text-align: center;
-}
-.score-display.score-display-compact .score-info {
-  text-align: center;
-}
-.score-display.score-display-compact .risk-desc {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
 .stat-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -974,89 +912,6 @@
   flex-direction: column;
 }
 
-.history-footer {
-  margin-top: auto;
-  padding-top: 12px;
-  text-align: center;
-}
-.history-footer a {
-  color: var(--accent);
-  font-size: 12px;
-  text-decoration: none;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Score ring */
-.score-display {
-  display: flex;
-  align-items: center;
-  gap: 32px;
-  max-height: 200px;
-  overflow: hidden;
-}
-
-.score-ring-container {
-  position: relative;
-  width: 180px;
-  height: 180px;
-  flex-shrink: 0;
-}
-
-.score-ring {
-  width: 180px;
-  height: 180px;
-  max-width: 180px;
-  max-height: 180px;
-}
-
-.score-ring .track  { stroke-width: 10; }
-.score-ring .fill   { stroke-width: 10; }
-
-.score-ring .track {
-  fill: none;
-  stroke: var(--border);
-  stroke-width: 8;
-}
-
-.score-ring .fill {
-  fill: none;
-  stroke-width: 8;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.8s ease;
-}
-
-.score-ring-label {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-}
-
-.score-ring-label .number {
-  font-size: 36px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.score-ring-label .out-of {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.score-info .risk-label {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
-.score-info .risk-desc {
-  font-size: 13px;
-  color: var(--text-muted);
-  line-height: 1.6;
-}
-
 /* History table */
 .history-table {
   width: 100%;
@@ -1497,186 +1352,6 @@
   margin-bottom: 16px;
   min-width: 0;
 }
-
-/* -----------------------------------------------------------------
-   Dashboard empty-state inline bar
-   Slim single-line notice shown above "Needs Attention" when no scans
-   fall in the selected filter window. Same height as the clear-state
-   green bar — blue left-border accent differentiates it.
------------------------------------------------------------------ */
-.dash-empty-inline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-.dash-empty-inline .dash-empty-ico { color: var(--text-muted); flex-shrink: 0; }
-.dash-empty-inline .dash-empty-text { flex: 1; }
-.dash-empty-inline .dash-empty-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.dash-empty-inline .dash-empty-divider {
-  width: 1px;
-  height: 14px;
-  background: var(--border);
-}
-.dash-empty-inline .dash-empty-link {
-  font-size: 13px;
-  cursor: pointer;
-  text-decoration: none;
-  transition: color 150ms ease, filter 150ms ease;
-}
-.dash-empty-inline .dash-empty-link.primary { color: var(--accent); font-weight: 500; }
-.dash-empty-inline .dash-empty-link.primary:hover { filter: brightness(1.15); }
-.dash-empty-inline .dash-empty-link.secondary { color: var(--text-muted); }
-.dash-empty-inline .dash-empty-link.secondary:hover { color: var(--text); }
-
-/* -----------------------------------------------------------------
-   Needs Attention widget
-   Dashboard-only panel that surfaces unreviewed CRITICAL/HIGH findings
-   from the last 7 days. Left-border accent colour flips red/amber/green
-   based on the worst severity currently in the list.
------------------------------------------------------------------ */
-.needs-attention {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-left-width: 4px;
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-}
-.needs-attention.accent-critical { border-left-color: #f85149; }
-.needs-attention.accent-high     { border-left-color: #d29922; }
-.needs-attention.clear {
-  border-left-color: #3fb950;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #3fb950;
-  font-weight: 500;
-  font-size: 13px;
-}
-.needs-attention.clear .na-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #3fb950;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-}
-.needs-attention .na-header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.needs-attention .na-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.needs-attention .na-sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.75;
-}
-.needs-attention .na-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.needs-attention .na-row {
-  display: grid;
-  grid-template-columns: 1fr 80px 140px 140px;
-  gap: 12px;
-  align-items: center;
-  padding: 6px 8px;
-  border-radius: 4px;
-  font-size: 13px;
-  transition: background 0.12s;
-}
-.needs-attention .na-row:hover { background: var(--hover-bg); }
-.needs-attention .na-rule { font-weight: 500; }
-.needs-attention .na-host {
-  font-family: var(--mono, monospace);
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.needs-attention .na-time {
-  font-family: var(--mono, monospace);
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: right;
-  white-space: nowrap;
-}
-.needs-attention .na-more {
-  display: inline-block;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--accent);
-  text-decoration: none;
-}
-.needs-attention .na-more:hover { text-decoration: underline; }
-
-/* -----------------------------------------------------------------
-   Top Triggered Rules list (security score card)
------------------------------------------------------------------ */
-.top-rules-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.top-rules-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
-  padding: 4px 8px;
-  margin: 0 -8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 150ms ease;
-}
-.top-rules-row:hover { background: var(--hover-bg); }
-.top-rules-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.top-rules-count {
-  min-width: 28px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 700;
-  text-align: center;
-  color: #fff;
-  background: var(--border);
-}
-.top-rules-count.sev-critical { background: #f85149; }
-.top-rules-count.sev-high     { background: #d29922; }
-.top-rules-count.sev-medium   { background: #58a6ff; }
-.top-rules-count.sev-low      { background: #3fb950; }
 
 /* -----------------------------------------------------------------
    Dashboard live-monitor compact row (collapsed state)
@@ -3578,122 +3253,6 @@ tr.pending-flash {
 }
 .fw-row-action svg { width: 12px; height: 12px; }
 
-/* ------------------------------------------------------------------ */
-/* Dashboard standup row — funnel + repeat offenders                   */
-/* ------------------------------------------------------------------ */
-.standup-row {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-.standup-card {
-  padding: var(--space-4);
-}
-
-.dash-funnel {
-  display: flex;
-  /* stretch (not center) so every stage box is the same height even if a
-     label wraps — otherwise "Crit + High" grows taller than its neighbors
-     and breaks the row alignment. */
-  align-items: stretch;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-  flex-wrap: wrap;
-}
-.funnel-stage {
-  flex: 1;
-  min-width: 90px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-}
-.funnel-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text-high);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-.funnel-label {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 600;
-  /* keep "Crit + High" on a single line so every box stays the same
-     height; the letter-spacing is trimmed enough that it still fits the
-     90px min-width box. */
-  white-space: nowrap;
-}
-.funnel-stage.tone-info  .funnel-value { color: var(--severity-low); }
-.funnel-stage.tone-warn  .funnel-value { color: var(--severity-high); }
-.funnel-stage.tone-error .funnel-value { color: var(--severity-critical); }
-.funnel-arrow {
-  color: var(--text-dim);
-  font-size: 18px;
-  flex-shrink: 0;
-  /* The row uses align-items: stretch so the boxes match height; without
-     this the arrow span stretches too and its glyph pins to the top. Center
-     it so every arrow sits at the same mid-height between the boxes. */
-  align-self: center;
-  display: flex;
-  align-items: center;
-  line-height: 1;
-}
-
-.repeat-offenders {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: var(--space-3);
-}
-.offender-row {
-  display: grid;
-  grid-template-columns: minmax(80px, 1fr) 2fr auto auto;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: 12px;
-}
-.offender-host {
-  color: var(--text-high);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.offender-bar-wrap {
-  height: 6px;
-  background: var(--bg-3);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.offender-bar {
-  height: 100%;
-  background: linear-gradient(90deg, var(--severity-low), var(--severity-high));
-  border-radius: 3px;
-}
-.offender-count {
-  font-weight: 700;
-  color: var(--text-high);
-  font-variant-numeric: tabular-nums;
-  min-width: 32px;
-  text-align: right;
-}
-.offender-last {
-  color: var(--text-dim);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-@media (max-width: 1100px) {
-  .standup-row { grid-template-columns: 1fr; }
-}
-
 /* --- Compliance hero gauge + stacked coverage bar ---------------------- */
 .compliance-hero {
   display: flex;
@@ -4810,82 +4369,6 @@ tr.pending-flash {
 .tw-stat-num.tw-stale { color: #f85149; }
 .tw-stat-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); margin-top: 2px; }
 
-/* First-run hero — the empty-dashboard call to action for new accounts. */
-.first-run-hero {
-  text-align: center;
-  padding: 40px 28px;
-  margin-bottom: 16px;
-}
-.first-run-icon {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 16px;
-  border-radius: 14px;
-  background: var(--accent-glow);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.first-run-icon svg { width: 30px; height: 30px; }
-.first-run-title {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0 0 8px;
-  color: var(--text);
-}
-.first-run-sub {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--text-muted);
-  max-width: 560px;
-  margin: 0 auto 22px;
-}
-.first-run-steps {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 24px;
-}
-.first-run-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 14px;
-}
-.first-run-step-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-}
-.first-run-step-arrow { color: var(--text-muted); font-size: 14px; }
-.first-run-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-.first-run-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 .onboard-card {
   margin-bottom: 16px;
   padding: 16px 18px;
@@ -5204,4 +4687,483 @@ tr.pending-flash {
 }
 .notif-row.is-unread .notif-row-msg {
   font-weight: 600;
+}
+
+/* ================================================================== */
+/* Dashboard (2026-09 redesign)                                        */
+/*                                                                     */
+/* Four zones, one hero: score + "needs attention", a 4-stat strip,    */
+/* then score history + findings by severity. Only the zone            */
+/* containers (.dash-card) get elevation: a soft shadow, a large       */
+/* radius, no outline. Everything inside them is borderless; rows are  */
+/* split by hairlines. Colors come only from the base.css tokens:      */
+/* severity for severity, --brand for the few brand moments.           */
+/* See docs/2026-09-26-dashboard-redesign.md.                          */
+/* ================================================================== */
+
+.dash-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.dash-page > .dash-meta-row,
+.dash-page > .dash-filter-bar,
+.dash-page > .onboard-card { margin-bottom: 0; }
+/* The filter bar and the Getting Started checklist are distinct objects,
+   so on the dashboard they take the same soft card treatment as the
+   zones instead of an outline (and the checklist drops its blue edge). */
+.dash-page > .dash-filter-bar,
+.dash-page > .onboard-card {
+  border: none;
+  border-radius: var(--radius-card);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-soft);
+}
+[data-theme="dark"] .dash-page > .dash-filter-bar,
+[data-theme="dark"] .dash-page > .onboard-card {
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--bg-3);
+}
+
+.dash-card {
+  background: var(--bg-1);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft);
+  min-width: 0;
+}
+/* Dark surfaces swallow shadows, so a 1px ring (drawn as a shadow, not
+   a border) keeps the card edge readable without an outline. */
+[data-theme="dark"] .dash-card {
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--bg-3);
+}
+
+.dash-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.dash-sublabel {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.dash-link {
+  color: var(--brand);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dash-link:hover { text-decoration: underline; }
+
+/* --- Zone 1: hero ------------------------------------------------- */
+.dash-hero {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.dash-score {
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+.dash-gauge {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  margin: 8px 0 10px;
+}
+.dash-gauge-svg { width: 100%; height: 100%; display: block; }
+.dash-gauge-track {
+  fill: none;
+  stroke: var(--bg-4);
+  stroke-width: 12;
+}
+.dash-gauge-fill {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+}
+.dash-gauge-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.dash-grade-letter {
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+}
+.dash-grade-num {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.dash-gauge-empty {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.dash-verdict {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-body);
+  max-width: 270px;
+}
+.dash-verdict b { color: var(--text-high); }
+.dash-verdict-host {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.dash-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.dash-chip.bad  { color: var(--severity-critical); background: var(--severity-critical-bg); }
+.dash-chip.good { color: var(--status-ok); background: var(--brand-soft); }
+.dash-chip.flat { color: var(--text-dim); background: var(--bg-3); }
+.dash-score-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.dash-attention {
+  padding: 18px 20px 10px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dash-att-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.dash-att-heading {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-high);
+  margin-top: 3px;
+}
+.dash-att-list { display: flex; flex-direction: column; }
+.dash-att-row {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 8px;
+  margin: 0 -8px;
+  border-radius: 10px;
+  cursor: pointer;
+  position: relative;
+}
+.dash-att-row + .dash-att-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  border-top: 1px solid var(--bg-4);
+}
+.dash-att-row:hover,
+.dash-att-row:focus-visible { background: var(--bg-3); outline: none; }
+.dash-att-row:hover::before,
+.dash-att-row:hover + .dash-att-row::before { border-top-color: transparent; }
+.dash-stripe {
+  width: 4px;
+  height: 38px;
+  border-radius: 4px;
+  background: var(--text-dim);
+}
+.dash-stripe.sev-critical { background: var(--severity-critical); }
+.dash-stripe.sev-high     { background: var(--severity-high); }
+.dash-stripe.sev-medium   { background: var(--severity-medium); }
+.dash-stripe.sev-low      { background: var(--severity-low); }
+.dash-att-main { min-width: 0; }
+.dash-att-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-high);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-att-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 0;
+  white-space: nowrap;
+}
+.dash-att-meta > .mono { color: var(--text-body); flex: 0 0 auto; }
+.dash-att-meta .rel-time { flex: 0 0 auto; }
+.dash-att-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-sev {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.dash-sev.sev-critical { color: var(--severity-critical); background: var(--severity-critical-bg); }
+.dash-sev.sev-high     { color: var(--severity-high);     background: var(--severity-high-bg); }
+.dash-sev.sev-medium   { color: var(--severity-medium);   background: var(--severity-medium-bg); }
+.dash-sev.sev-low      { color: var(--severity-low);      background: var(--severity-low-bg); }
+.dash-att-more { align-self: flex-start; margin: 6px 0 4px; }
+.dash-att-clear {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 0;
+  font-size: 13px;
+  color: var(--text-body);
+}
+.dash-att-clear-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-ok);
+  flex: 0 0 auto;
+}
+
+/* --- Zone 2: stat strip ------------------------------------------ */
+.dash-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+}
+.dash-stat {
+  padding: 16px 22px;
+  border-left: 1px solid var(--bg-4);
+  min-width: 0;
+}
+.dash-stat:first-child { border-left: none; }
+.dash-stat[role="button"] { cursor: pointer; }
+.dash-stat[role="button"]:hover { background: var(--bg-3); }
+.dash-stat-k {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.dash-stat-v {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 2px;
+  color: var(--text-high);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.dash-stat-v small {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
+.dash-stat-crit { color: var(--severity-critical); }
+.dash-stat-d {
+  font-size: 12px;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-stat-d.bad  { color: var(--severity-critical); }
+.dash-stat-d.good { color: var(--status-ok); }
+.dash-stat-d.flat { color: var(--text-dim); }
+
+/* --- Zone 3: history + severity ---------------------------------- */
+.dash-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  min-width: 0;
+}
+.dash-panel {
+  padding: 18px 20px;
+  min-width: 0;
+}
+.dash-panel h3 {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-high);
+}
+.dash-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dash-chart-wrap {
+  position: relative;
+  height: 200px;
+  margin-top: 14px;
+}
+.dash-panel-empty {
+  padding: 28px 0 18px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.dash-panel-empty-sm { padding: 8px 0 2px; font-size: 12px; }
+
+.dash-sevbar {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+  margin-top: 16px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.dash-sevbar > span { min-width: 3px; }
+.dash-sevbar .sev-critical, .dash-sevkey-dot.sev-critical { background: var(--severity-critical); }
+.dash-sevbar .sev-high,     .dash-sevkey-dot.sev-high     { background: var(--severity-high); }
+.dash-sevbar .sev-medium,   .dash-sevkey-dot.sev-medium   { background: var(--severity-medium); }
+.dash-sevbar .sev-low,      .dash-sevkey-dot.sev-low      { background: var(--severity-low); }
+.dash-sevkey {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 20px;
+  margin-top: 16px;
+}
+.dash-sevkey-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+.dash-sevkey-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.dash-sevkey-lab { color: var(--text-body); }
+.dash-sevkey-num {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text-high);
+}
+
+.dash-offenders-label { margin-top: 22px; }
+.dash-offenders { margin-top: 6px; }
+.dash-off-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--bg-4);
+  min-width: 0;
+}
+.dash-off-row:first-child { border-top: none; }
+.dash-off-host {
+  font-size: 13px;
+  color: var(--text-high);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-off-last { font-size: 11.5px; color: var(--text-dim); flex: 0 0 auto; }
+.dash-off-ct {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-body);
+  white-space: nowrap;
+}
+.dash-off-ct.top { color: var(--severity-critical); font-weight: 600; }
+
+/* --- Empty account: first-run hero ------------------------------- */
+.dash-firstrun {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  align-items: center;
+  gap: 36px;
+  padding: 36px 40px;
+}
+.dash-firstrun-gauge {
+  position: relative;
+  width: 176px;
+  height: 176px;
+}
+.dash-firstrun-q {
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--bg-4);
+}
+.dash-firstrun-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-high);
+  margin: 4px 0 8px;
+}
+.dash-firstrun-sub {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-body);
+  max-width: 560px;
+}
+.dash-firstrun .dash-score-actions { justify-content: flex-start; }
+.dash-firstrun-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* --- Responsive ---------------------------------------------------
+   Breakpoints are viewport widths; the sidebar takes ~200px of them. */
+@media (max-width: 1180px) {
+  .dash-hero { grid-template-columns: minmax(0, 1fr); }
+  .dash-row  { grid-template-columns: minmax(0, 1fr); }
+  .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-stat:nth-child(3) { border-left: none; }
+  .dash-stat:nth-child(n+3) { border-top: 1px solid var(--bg-4); }
+}
+@media (max-width: 640px) {
+  .dash-stats { grid-template-columns: minmax(0, 1fr); }
+  .dash-stat { border-left: none; }
+  .dash-stat + .dash-stat { border-top: 1px solid var(--bg-4); }
+  .dash-firstrun {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+    padding: 28px 20px;
+    gap: 12px;
+  }
+  .dash-firstrun .dash-score-actions { justify-content: center; }
+  .dash-att-head { flex-wrap: wrap; }
+  .dash-att-sub { display: none; }
 }
