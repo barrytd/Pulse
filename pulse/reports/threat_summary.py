@@ -34,6 +34,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from pulse import __version__ as _PULSE_VERSION
 from pulse.core.rules_config import RULE_META
+from pulse.reports.reporter import grade_for_score
 
 
 # ---------------------------------------------------------------------------
@@ -87,19 +88,9 @@ TACTIC_ORDER: List[str] = [
 # Severity ordering for the summary band + sorting passes.
 SEVERITY_ORDER = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
-# Score thresholds (matches calculate_score_from_findings in pulse.scoring).
 def _grade_for_score(score: int) -> str:
-    if score is None:
-        return "?"
-    if score >= 90:
-        return "A"
-    if score >= 75:
-        return "B"
-    if score >= 60:
-        return "C"
-    if score >= 40:
-        return "D"
-    return "F"
+    """Letter grade via the shared GRADE_BANDS; "?" when there's no score."""
+    return grade_for_score(score, default="?")
 
 
 def _tactic_for_rule(rule_name: str) -> str:

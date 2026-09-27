@@ -16,36 +16,30 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from pulse import __version__ as _PULSE_VERSION
+from pulse.reports.reporter import grade_for_score
 
 
 # ---------------------------------------------------------------------------
-# Risk tier thresholds. Match the score-grade thresholds elsewhere so a
-# host showing grade B on the dashboard reads as "Healthy" here, not
-# "Moderate". Auditors notice when scales drift.
+# Risk tiers are derived from the letter grade, which comes from the
+# shared GRADE_BANDS, so a host showing grade B on the dashboard reads as
+# "Healthy" here, not "Moderate". Auditors notice when scales drift.
 # ---------------------------------------------------------------------------
 
-def _tier(score: Optional[int]) -> str:
-    if score is None:
-        return "Unknown"
-    if score >= 90:
-        return "Healthy"      # A
-    if score >= 75:
-        return "Healthy"      # B
-    if score >= 60:
-        return "Moderate"     # C
-    if score >= 40:
-        return "At Risk"      # D
-    return "Critical"         # F
+_TIER_FOR_GRADE = {
+    "A": "Healthy",
+    "B": "Healthy",
+    "C": "Moderate",
+    "D": "At Risk",
+    "F": "Critical",
+}
 
 
 def _grade(score: Optional[int]) -> str:
-    if score is None:
-        return "?"
-    if score >= 90: return "A"
-    if score >= 75: return "B"
-    if score >= 60: return "C"
-    if score >= 40: return "D"
-    return "F"
+    return grade_for_score(score, default="?")
+
+
+def _tier(score: Optional[int]) -> str:
+    return _TIER_FOR_GRADE.get(_grade(score), "Unknown")
 
 
 # ---------------------------------------------------------------------------

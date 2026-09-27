@@ -28,6 +28,7 @@ from reportlab.platypus import (
 )
 
 from pulse.remediation import get_mitigations, get_remediation
+from pulse.reports.reporter import grade_for_score
 
 
 # -------- colors (aligned with .claude/skills/pulse-design.md) --------
@@ -91,22 +92,8 @@ CONTENT_WIDTH = PAGE_WIDTH - LEFT_MARGIN - RIGHT_MARGIN
 # ---------------------------------------------------------------------------
 
 def _grade_for_score(score):
-    """Map a numeric score to a letter grade per the spec."""
-    if score is None:
-        return None
-    try:
-        s = int(score)
-    except (TypeError, ValueError):
-        return None
-    if s >= 90:
-        return "A"
-    if s >= 75:
-        return "B"
-    if s >= 60:
-        return "C"
-    if s >= 40:
-        return "D"
-    return "F"
+    """Letter grade via the shared GRADE_BANDS; None when there's no score."""
+    return grade_for_score(score)
 
 
 def _ring_color(score, score_label):

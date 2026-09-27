@@ -33,7 +33,8 @@ def _ago(**delta):
 @pytest.fixture
 def fleet_rows():
     return [
-        {"hostname": "DC01", "latest_score": 35, "latest_grade": "F",
+        # 20 is an F on the shared GRADE_BANDS (below 25) -> "Critical".
+        {"hostname": "DC01", "latest_score": 20, "latest_grade": "F",
          "worst_severity": "CRITICAL", "scan_count": 5,
          "total_findings": 12, "last_scan_at": _ago(hours=1)},
         {"hostname": "WS-FIN", "latest_score": 82, "latest_grade": "B",

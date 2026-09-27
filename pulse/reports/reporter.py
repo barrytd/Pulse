@@ -535,6 +535,22 @@ def _score_grade(score):
     return "F"
 
 
+def grade_for_score(score, default=None):
+    """Letter grade for a score, via GRADE_BANDS. Every report module
+    grades through this so a score gets the same letter on the dashboard,
+    in the PDF, and in the executive, board-ready, threat-summary and
+    fleet-health reports. Returns `default` when there's no usable score
+    (None, or not a number); tests/test_grade_bands.py fails if a report
+    module grows its own thresholds again."""
+    if score is None:
+        return default
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return default
+    return _score_grade(value)
+
+
 def _build_executive_summary(findings, severity_counts):
     """
     Generates a short executive summary paragraph based on what was found.

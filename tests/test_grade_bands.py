@@ -75,3 +75,104 @@ def test_score_history_threshold_line_uses_the_b_band():
     src = _js_source()
     assert "GRADE_BANDS[1][0]" in src
     assert GRADE_BANDS[1] == (75, "B")
+
+
+# ---------------------------------------------------------------------------
+# Report modules grade through the same bands
+# ---------------------------------------------------------------------------
+# The PDF, executive-summary, board-ready, threat-summary and fleet-health
+# reports each used to carry their own 90/75/60/40 scale, so a 30 was a D on
+# the dashboard and an F in a board report. They now call
+# reporter.grade_for_score. The structural test below fails if any report
+# module grows its own score -> letter thresholds again.
+
+import ast
+
+REPORTS_DIR = DASHBOARD_JS.parent.parent.parent / "reports"
+_LETTERS = {"A", "B", "C", "D", "E", "F"}
+
+
+def _report_modules():
+    return sorted(p for p in REPORTS_DIR.glob("*.py") if p.name != "reporter.py")
+
+
+def _local_grade_scales(path):
+    """Functions that compare against a number and return a letter grade:
+    the shape of a hand-rolled grade scale."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        returns_letter = any(
+            isinstance(n, ast.Return) and isinstance(n.value, ast.Constant)
+            and n.value.value in _LETTERS
+            for n in ast.walk(fn))
+        compares_number = any(
+            isinstance(n, ast.Compare) and any(
+                isinstance(c, ast.Constant) and isinstance(c.value, (int, float))
+                and not isinstance(c.value, bool)
+                for c in [n.left, *n.comparators])
+            for n in ast.walk(fn))
+        if returns_letter and compares_number:
+            found.append(fn.name)
+    return found
+
+
+@pytest.mark.parametrize("path", _report_modules(), ids=lambda p: p.name)
+def test_no_report_module_defines_its_own_grade_bands(path):
+    scales = _local_grade_scales(path)
+    assert not scales, (
+        f"{path.name} maps scores to letters itself in {scales}; "
+        "use pulse.reports.reporter.grade_for_score (GRADE_BANDS) instead")
+
+
+def test_scale_detector_catches_a_hand_rolled_scale(tmp_path):
+    """Guard the guard: the old 90/75/60/40 shape must be flagged."""
+    p = tmp_path / "old_report.py"
+    p.write_text(
+        "def _grade(score):\n"
+        "    if score >= 90: return 'A'\n"
+        "    if score >= 75: return 'B'\n"
+        "    if score >= 60: return 'C'\n"
+        "    if score >= 40: return 'D'\n"
+        "    return 'F'\n")
+    assert _local_grade_scales(p) == ["_grade"]
+
+
+def _report_graders():
+    from pulse.reports import executive_summary, fleet_health, pdf_report, threat_summary
+    return {
+        "executive_summary (and board_ready)": executive_summary._grade_for_score,
+        "threat_summary": threat_summary._grade_for_score,
+        "fleet_health": fleet_health._grade,
+        "pdf_report": pdf_report._grade_for_score,
+    }
+
+
+@pytest.mark.parametrize("score", range(0, 101))
+def test_every_report_grades_like_the_dashboard(score):
+    for name, grade in _report_graders().items():
+        assert grade(score) == _score_grade(score), name
+
+
+def test_board_ready_uses_the_shared_grader():
+    from pulse.reports import board_ready, executive_summary
+    assert board_ready._grade_for_score is executive_summary._grade_for_score
+
+
+def test_fleet_tiers_follow_the_grade():
+    from pulse.reports.fleet_health import _tier
+    expected = {"A": "Healthy", "B": "Healthy", "C": "Moderate",
+                "D": "At Risk", "F": "Critical"}
+    for score in range(0, 101):
+        assert _tier(score) == expected[_score_grade(score)]
+    assert _tier(None) == "Unknown"
+
+
+def test_missing_scores_keep_their_placeholders():
+    from pulse.reports import executive_summary, fleet_health, pdf_report
+    assert executive_summary._grade_for_score(None) == "?"
+    assert fleet_health._grade(None) == "?"
+    assert pdf_report._grade_for_score(None) is None
+    assert pdf_report._grade_for_score("n/a") is None

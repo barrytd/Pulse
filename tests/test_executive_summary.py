@@ -74,9 +74,11 @@ def prev_scans():
 # Grade + interpretation
 # ---------------------------------------------------------------------------
 
+# Boundaries of the shared GRADE_BANDS (reporter.py), the same letters
+# the dashboard shows.
 @pytest.mark.parametrize("score,grade", [
     (100, "A"), (90, "A"), (89, "B"), (75, "B"), (74, "C"),
-    (60, "C"), (59, "D"), (40, "D"), (39, "F"), (0, "F"),
+    (50, "C"), (49, "D"), (25, "D"), (24, "F"), (0, "F"),
     (None, "?"),
 ])
 def test_grade_thresholds(score, grade):

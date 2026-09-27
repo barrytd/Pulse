@@ -32,6 +32,7 @@ from pulse import __version__ as _PULSE_VERSION
 from pulse.core.knowledge_base import get_knowledge as _kb
 from pulse.core.rules_config import RULE_META
 from pulse.reports.threat_summary import _finding_timestamp
+from pulse.reports.reporter import grade_for_score
 
 
 # ---------------------------------------------------------------------------
@@ -50,17 +51,8 @@ GRADE_INTERPRETATION: Dict[str, str] = {
 
 
 def _grade_for_score(score: Optional[int]) -> str:
-    if score is None:
-        return "?"
-    if score >= 90:
-        return "A"
-    if score >= 75:
-        return "B"
-    if score >= 60:
-        return "C"
-    if score >= 40:
-        return "D"
-    return "F"
+    """Letter grade via the shared GRADE_BANDS; "?" when there's no score."""
+    return grade_for_score(score, default="?")
 
 
 _SEV_ORDER = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
