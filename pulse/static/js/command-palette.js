@@ -40,6 +40,7 @@ const _COMMANDS = [
   { id: 'nav.firewall',   label: 'Firewall',        group: 'Go to', keywords: 'block list ip', run: () => navigate('firewall') },
   { id: 'nav.whitelist',  label: 'Whitelist',       group: 'Go to', keywords: 'allow list exceptions', run: () => navigate('whitelist') },
   { id: 'nav.rules',      label: 'Rules',           group: 'Go to', keywords: 'detection mitre', run: () => navigate('rules') },
+  { id: 'nav.automations', label: 'Automations',    group: 'Go to', keywords: 'playbooks soar approve', run: () => navigate('automations') },
   { id: 'nav.audit',      label: 'Audit log',       group: 'Go to', keywords: 'audit trail', run: () => navigate('audit') },
   { id: 'nav.compliance', label: 'Compliance',      group: 'Go to', keywords: 'nist iso 27001 csf', run: () => navigate('compliance') },
   { id: 'nav.trends',     label: 'Trends',          group: 'Go to', keywords: 'analytics chart', run: () => navigate('trends') },

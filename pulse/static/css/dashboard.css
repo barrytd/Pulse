@@ -5167,3 +5167,150 @@ tr.pending-flash {
   .dash-att-head { flex-wrap: wrap; }
   .dash-att-sub { display: none; }
 }
+
+/* ================================================================== */
+/* Automations page + drawer section (SOAR playbooks, phase 2)         */
+/* ================================================================== */
+
+.automations-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.automations-page > .card { margin: 0; }
+.soar-intro { margin: -8px 0 0; font-size: 13px; max-width: 760px; }
+.soar-card { min-width: 0; }
+.soar-subhead {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-body);
+  margin: 4px 0 8px;
+}
+
+/* Status pills (run + step). */
+.soar-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.soar-ok    { color: var(--status-ok);    background: rgba(16, 185, 129, 0.12); }
+.soar-warn  { color: var(--status-warn);  background: rgba(245, 158, 11, 0.14); }
+.soar-error { color: var(--status-error); background: rgba(239, 68, 68, 0.12); }
+.soar-info  { color: var(--accent);       background: var(--accent-glow); }
+.soar-muted { color: var(--text-muted);   background: var(--hover-row); }
+
+/* Waiting-for-approval card: the one place that needs attention. */
+.soar-card-await { border-left: 3px solid var(--status-warn); }
+.soar-await { padding: 12px 0; }
+.soar-await + .soar-await { border-top: 1px solid var(--border); }
+.soar-await-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.soar-await-title { font-weight: 600; color: var(--text-high); }
+.soar-await-sub { font-size: 12px; margin-top: 2px; }
+
+/* Step log. */
+.soar-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--border);
+}
+.soar-step { position: relative; padding: 6px 0 6px 10px; }
+.soar-step::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  border: 2px solid var(--card-bg);
+}
+.soar-step-done::before,
+.soar-step-approved::before  { background: var(--status-ok); }
+.soar-step-failed::before    { background: var(--status-error); }
+.soar-step-awaiting_approval::before { background: var(--status-warn); }
+.soar-step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.soar-step-label { font-size: 13px; font-weight: 500; color: var(--text); min-width: 0; }
+.soar-step-msg { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.soar-step-who { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.soar-inputs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.soar-input {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--hover-row);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.soar-input .k { color: var(--text-muted); }
+.soar-input .v { color: var(--text); }
+.soar-approve-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.soar-approve-note { font-size: 12px; }
+.soar-empty { font-size: 12px; }
+
+/* Playbooks + runs tables. */
+.soar-table td { vertical-align: top; }
+.soar-when { font-size: 12px; color: var(--text-body); max-width: 320px; }
+.soar-runs { white-space: nowrap; }
+.soar-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.soar-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--hover-row);
+  color: var(--text-body);
+}
+.soar-chip-response { background: rgba(245, 158, 11, 0.12); color: var(--status-warn); }
+.soar-run-row { cursor: pointer; }
+.soar-run-row:hover, .soar-run-row.open { background: var(--hover-row); }
+.soar-run-detail > td { padding: 12px 16px 16px 28px; background: var(--hover-row); }
+
+/* Templates + import. */
+.soar-templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.soar-template {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--hover-row);
+}
+.soar-template .btn { align-self: flex-start; margin-top: auto; }
+.soar-template-name { font-weight: 600; color: var(--text-high); }
+.soar-template-sum { font-size: 12px; }
+.soar-errors { margin: 6px 0 0 18px; padding: 0; }
+.soar-errors li { margin: 2px 0; }
+
+/* Finding drawer. */
+.soar-drawer-run + .soar-drawer-run { margin-top: 14px; }
+.soar-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.soar-drawer-name { font-weight: 600; font-size: 13px; color: var(--text); }

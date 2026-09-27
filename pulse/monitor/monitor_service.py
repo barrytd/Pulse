@@ -57,10 +57,12 @@ class MonitorManager:
     returns the existing task).
     """
 
-    def __init__(self, db_path, config_path, config_getter):
+    def __init__(self, db_path, config_path, config_getter, on_scan_saved=None):
         self.db_path      = db_path
         self.config_path  = config_path
         self._get_config  = config_getter   # callable -> fresh config dict
+        # Called with the new scan id after each save (playbook engine).
+        self._on_scan_saved = on_scan_saved
 
         # --- Runtime state --------------------------------------------------
         self.active         = False
@@ -424,7 +426,7 @@ class MonitorManager:
             # Persist so the rest of the dashboard (history, findings page,
             # score trend) sees the new data immediately.
             try:
-                await asyncio.to_thread(
+                scan_id = await asyncio.to_thread(
                     save_scan,
                     self.db_path,
                     findings,
@@ -435,6 +437,8 @@ class MonitorManager:
                     "Live monitor",
                     self.session_id,
                 )
+                if self._on_scan_saved:
+                    self._on_scan_saved(scan_id)
             except Exception:
                 pass
 

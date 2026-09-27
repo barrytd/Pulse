@@ -429,6 +429,70 @@ CREATE TABLE IF NOT EXISTS user_ai_usage (
 """
 
 
+# SOAR playbooks (phase 2 of docs/2026-09-26-soar-playbooks-and-
+# integrations.md). All three are org-scoped. organization_id is NOT NULL
+# with 0 meaning "no organization" (auth-disabled / single-user installs),
+# so UNIQUE(organization_id, ...) works the same on SQLite and Postgres,
+# where NULLs never collide.
+#
+# playbooks: one stored JSON recipe per row (validated by
+# pulse/soar/recipe.py before it's saved).
+_CREATE_PLAYBOOKS = """
+CREATE TABLE IF NOT EXISTS playbooks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL DEFAULT 0,
+    name            TEXT    NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    recipe_json     TEXT    NOT NULL,
+    origin          TEXT    NOT NULL DEFAULT 'import',
+    created_at      TEXT    NOT NULL,
+    created_by      INTEGER,
+    updated_at      TEXT
+);
+"""
+
+# playbook_runs: one row per playbook execution against one finding. The
+# recipe is snapshotted at run start so editing a playbook never changes
+# what an in-flight run (e.g. one waiting for approval) will do. `step_cursor`
+# is the index of the next step to run; `steps_json` is the step-by-step
+# log; `context_json` holds each step's saved result.
+_CREATE_PLAYBOOK_RUNS = """
+CREATE TABLE IF NOT EXISTS playbook_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL DEFAULT 0,
+    playbook_id     INTEGER NOT NULL,
+    playbook_name   TEXT    NOT NULL,
+    finding_id      INTEGER,
+    scan_id         INTEGER,
+    dedupe_key      TEXT,
+    status          TEXT    NOT NULL,
+    step_cursor     INTEGER NOT NULL DEFAULT 0,
+    recipe_json     TEXT    NOT NULL,
+    context_json    TEXT    NOT NULL,
+    steps_json      TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT,
+    finished_at     TEXT
+);
+"""
+
+# connectors_config: per-org on/off switch for each connector. A missing
+# row means enabled. API keys stay in pulse.yaml for now (encrypting them
+# is the roadmap's "Encrypted config secrets" item).
+_CREATE_CONNECTORS_CONFIG = """
+CREATE TABLE IF NOT EXISTS connectors_config (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL DEFAULT 0,
+    connector_key   TEXT    NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    settings_json   TEXT,
+    updated_at      TEXT,
+    updated_by      INTEGER,
+    UNIQUE (organization_id, connector_key)
+);
+"""
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -464,6 +528,9 @@ def init_db(db_path):
         _CREATE_SIGMA_RULES,
         _CREATE_REPORTS,
         _CREATE_USER_AI_USAGE,
+        _CREATE_PLAYBOOKS,
+        _CREATE_PLAYBOOK_RUNS,
+        _CREATE_CONNECTORS_CONFIG,
     )
     # ALTER TABLE ... ADD COLUMN for every column that was added after the
     # initial schema shipped. SQLite raises when the column already exists;

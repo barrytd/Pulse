@@ -5,6 +5,52 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-26 — Playbook engine (SOAR phase 2)
+
+Phase 2 of [the SOAR design](docs/2026-09-26-soar-playbooks-and-integrations.md): playbooks that react to new findings. Lookups run on their own; every response action waits for a person. The visual builder and new connectors are phase 3.
+
+- **Engine ([`pulse/soar/`](pulse/soar/)).** A playbook is a stored JSON recipe: a `finding_created` trigger, conditions on finding fields (`severity_at_least`, `in`, `contains`, `is_public`, …), and ordered steps (`connector` + `action` + inputs like `{{ finding.source_ip }}`, optional `save_as`, and `if` blocks such as `{{ abuse.score >= 80 or vt.malicious >= 3 }}`).
+  - Every server path that saves a scan hands it to a background worker: agent ingest, upload, system scan, scheduled scan and the live monitor. The worker matches each finding against the org's enabled playbooks and walks the steps, logging each one to a run record.
+  - A connector that fails, returns nothing, or is switched off is logged on its step and the run continues. An unexpected error fails only that run.
+  - A playbook runs at most once per rule and source every 24 hours, so a burst of 50 identical findings means one run and one approval.
+- **Human approval, no full-auto.** Response steps always pause the run as `awaiting_approval` with the exact inputs they'll use. A recipe that sets `requires_approval: false` on a response step is rejected at import.
+  - Approving needs a manager or admin, plus the existing **security PIN** step-up when the user has one set. It runs the values the approver was shown.
+  - A conditional update makes each approval single-use, so two approvers can't run a step twice. Deny stops the run.
+  - Runs snapshot their recipe, so editing a playbook never changes a block that's already waiting.
+- **Safe expressions.** Conditions and placeholders are parsed with Python's `ast` and walked by a whitelist (and / or / not, comparisons, dotted names, literals). Calls, subscripts, arithmetic and dunder names are rejected when the recipe is validated. There is no `eval`.
+- **Response connectors** wrapping existing features: `firewall.block_ip`, using the same blocker and safety checks as the Block button and never forced for private IPs, and `webhook.post_message` to the Slack/Discord webhooks already set under Settings (a recipe can't supply a URL). `push_pending` gained `only_ips`, so approving one block never pushes other staged rows.
+- **Storage.** New org-scoped tables `playbooks`, `playbook_runs` and `connectors_config`, created by `init_db` on SQLite and Postgres. Server-level scans (live monitor, scheduled) belong to the install's only organization; with several organizations they trigger nothing rather than guess.
+- **API:**
+  - Playbooks: list, templates, validate, create (from JSON or a template), get, update, enable/disable, delete. `GET /api/playbooks` lists; changes are admin-only; import errors come back as a list.
+  - Runs: `/api/playbook-runs` list and detail, plus `/approve` and `/deny`.
+  - `/api/findings/{id}/playbook-runs` for the finding drawer.
+  - `/api/connectors` with a per-org on/off switch.
+  - Another org's ids return 404. Playbook changes, run lifecycle events, approvals, denials and executed actions all go to the audit log, tagged with the org.
+- **Automations page** (manager+, sidebar and command palette):
+  - A "Waiting for approval" list with Approve / Deny.
+  - Playbooks, with on/off and delete.
+  - Recent runs with an expandable step log.
+  - Three built-in examples to add in one click, and a JSON paste box with Check / Import.
+  - Connectors, with on/off switches.
+  - The **finding drawer** shows the runs a finding triggered, with Approve / Deny.
+- **Built-in examples** (added on request, never installed automatically):
+  - Enrich critical external IPs.
+  - Enrich and contain a malicious IP: look it up, then propose a block and a team alert.
+  - Alert the team on credential theft.
+- **Fixes found along the way:**
+  - `/team`, `/advisor` and `/intel` (and the new `/automations`) returned 404 on refresh because the server's SPA route list had drifted from `navigation.js`. A test now keeps them in sync.
+  - `textarea-mono` and `link`, used by the SIGMA and playbook paste boxes, were never defined. The boxes rendered at default width and the links were near-invisible in dark mode.
+  - The drawer showed "Could not load threat intel" for reserved-range IPs; it now hides the section.
+- **Tests:** new [`tests/test_soar.py`](tests/test_soar.py) covers:
+  - the expression language, including rejected code
+  - recipe validation, including the no-full-auto rule
+  - matching, enrichment, pause / approve / deny, single-use approval, `if` guards and failure isolation
+  - switched-off connectors, dedupe, recipe snapshots and org scoping
+  - the response connectors
+  - the API: PIN step-up, analyst forbidden, cross-org 404s, audit entries, and an upload triggering a run
+
+  Nothing in the tests touches the network or the real firewall.
+
 ## 2026-09-26 — Security score: keep-factor model, one scorer everywhere
 
 Implements step 1 of [the scoring review](docs/2026-09-26-scoring-model-review.md). The old model subtracted a flat amount per finding (Critical −25, High −15, Medium −8, Low −3) and floored at 0, so 4, 8 and 40 criticals all scored 0/F and the number stopped carrying information.

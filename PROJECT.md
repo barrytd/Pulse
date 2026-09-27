@@ -65,6 +65,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - A custom whitelist to suppress known-good activity.
 - Threat intel lookups against AbuseIPDB and VirusTotal. Both verdicts show in the finding panel right above the block button, so an analyst can check an IP's reputation without opening another site. VirusTotal uses the customer's own API key; Pulse never ships one.
 - Alerts by email, Slack, and Discord.
+- Automations (playbooks): saved recipes that react to new findings on their own. A playbook can look the attacker up on AbuseIPDB and VirusTotal the moment a finding fires, then propose a response such as blocking the IP or alerting the team. Lookups run by themselves; every response waits for a manager or admin to approve it on the Automations page or in the finding. Three ready-made examples can be added with one click, and admins can paste their own as JSON.
 
 ### Team and access
 - Three roles: admin, manager, analyst.
@@ -91,7 +92,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - Database: SQLite for single-machine use, PostgreSQL for hosted and multi-user use.
 - Sign-in: session cookies, scrypt password hashing, and API tokens for automation.
 - Agent: a separate Python program that ships as a Windows executable.
-- Integrations: a connector layer in `pulse/connectors/`. Each outside service (AbuseIPDB, VirusTotal) is one file with the same small interface, and it registers itself, so adding a new one needs no changes to the core. This is the base for automated response playbooks.
+- Integrations: a connector layer in `pulse/connectors/`. Each outside service (AbuseIPDB, VirusTotal) is one file with the same small interface, and it registers itself, so adding a new one needs no changes to the core. Playbooks (`pulse/soar/`) run on top of it: a background worker matches each new finding against the organization's playbooks and records every step of every run.
 - Hosting: runs on one server (for example Render) or self-hosted on your own machine.
 
 ## Security
@@ -103,6 +104,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - A security PIN asks for a second confirmation before destructive actions like blocking an IP or removing a user, so a stolen login cannot do real damage. It is a separate secret from the password, opt-in per user, and locks out after repeated wrong tries.
 - The detection engine runs on the customer's own machine, so raw logs stay on their network.
 - Threat intel lookups never send private IP addresses or internal domain names to outside services. API keys stay on the server, every lookup is cached, and each provider's free-tier limit is respected so a noisy host cannot burn the quota. A failed lookup shows "no intel" instead of breaking the page.
+- Playbooks can never block an IP or send a message on their own. Every response step waits for a person with manager or admin rights to approve it, with their security PIN when they have one set, and it runs exactly the values they were shown. There is no fully automatic mode. Playbook expressions are a small, limited language, never code, so a stored playbook cannot run commands on the server.
 - The Pip AI assistant is off unless an administrator adds an Anthropic API key, the key stays on the server (never in the browser), and the chat panel discloses that questions are sent to Anthropic to be answered. Pip is read-only and cannot take any action in Pulse.
 
 ## Pricing direction
@@ -111,7 +113,7 @@ Pulse is open source and free to self-host, and that will not change. The plan i
 
 ## What is next
 
-- Automated response playbooks (SOAR): when a finding fires, Pulse looks the attacker up, decides, and responds (block, alert, open a ticket), with a human approval step before anything is blocked. The connector layer is built; the playbook engine is next. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
+- Automations, phase 3: a click-together playbook builder so nobody has to write JSON, plus more connectors (GreyNoise, AlienVault OTX, ClickUp/Jira tickets, a generic outbound webhook). The connector layer and the playbook engine are built. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
 - A simple "add a host" flow with a one-line installer.
 - Tenant hardening before public sign-up: the core is done (each workspace's admin is now scoped to their own workspace, with a private platform-owner role set by an environment variable). Still to add before opening sign-up to strangers: cross-site request protection and trusting the right network address behind a proxy.
 - Invite teammates by code.
@@ -123,5 +125,5 @@ See `ROADMAP.md` for the full current list. See `CHANGELOG.md` for the day-to-da
 
 - Open source on GitHub: github.com/barrytd/Pulse
 - License: MIT
-- Over 1,200 automated tests, all passing.
+- Over 1,600 automated tests, all passing.
 - Active development.

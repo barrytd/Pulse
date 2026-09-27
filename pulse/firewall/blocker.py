@@ -368,14 +368,22 @@ def list_blocks(db_path: str) -> list[dict]:
         return []
 
 
-def push_pending(db_path: str, source: str = "cli", user: Optional[str] = None) -> dict:
+def push_pending(db_path: str, source: str = "cli", user: Optional[str] = None,
+                 only_ips=None) -> dict:
     """Push every pending row to Windows Firewall.
 
     Returns {ok, pushed, skipped, failures, message}. The CLI prints the
     summary; the dashboard toasts it. Non-Windows platforms short-circuit
     with ok=False so the caller knows nothing was touched.
+
+    `only_ips` limits the push to those addresses. An approved playbook
+    step uses it so approving one block never pushes other rows someone
+    else has staged.
     """
     pending = [r for r in list_blocks(db_path) if r["status"] == "pending"]
+    if only_ips is not None:
+        wanted = set(only_ips)
+        pending = [r for r in pending if r["ip_address"] in wanted]
     if not pending:
         return {"ok": True, "pushed": 0, "skipped": 0, "failures": [], "message": "No pending entries to push."}
 

@@ -84,3 +84,30 @@ def test_fleet_incident_path_surfaces_errors():
         "fleet.js's incident-report path lost its error surfacing (.catch + "
         "toastError), which combined with the promise fix keeps it non-silent."
     )
+
+
+# ---------------------------------------------------------------------------
+# Bug 3 — deep links to some pages 404'd on refresh
+# ---------------------------------------------------------------------------
+# The server only serves the SPA at paths listed in api._SPA_PAGES. Team,
+# Security Advisor and Threat Intel were in navigation.js but not there, so
+# refreshing those pages (or opening a link to them) returned
+# {"detail":"Not Found"}. Every client page must have a server route.
+
+def test_every_spa_page_has_a_server_route(tmp_path):
+    import re
+    from fastapi.testclient import TestClient
+    from pulse.api import create_app
+
+    src = _read("navigation.js")
+    m = re.search(r"export const validPages = \[(.*?)\];", src)
+    pages = re.findall(r"'([a-z]+)'", m.group(1))
+    assert "automations" in pages
+
+    cfg = tmp_path / "pulse.yaml"
+    cfg.write_text("whitelist:\n  accounts: []\n")
+    app = create_app(db_path=str(tmp_path / "t.db"), config_path=str(cfg),
+                     disable_auth=True)
+    client = TestClient(app)
+    missing = [p for p in pages if client.get("/" + p).status_code == 404]
+    assert missing == [], f"no server route for SPA page(s): {missing}"

@@ -1987,3 +1987,26 @@ body.light .admin-banner-close {
 .toggle-switch:hover .toggle-switch-label { color: var(--text); }
 .toggle-switch-label { transition: color 120ms ease; }
 
+
+
+/* Monospace paste boxes (SIGMA import, playbook import) and inline text
+   links. Both classes were used by the Rules and Automations pages but
+   never defined, so the boxes rendered at browser-default width and the
+   links were default blue on the dark theme. */
+textarea.textarea-mono {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+textarea.textarea-mono:focus { outline: none; border-color: var(--accent); }
+a.link { color: var(--accent); text-decoration: none; cursor: pointer; }
+a.link:hover { text-decoration: underline; }

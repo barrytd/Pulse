@@ -242,6 +242,17 @@ import {
   deleteSigmaRule,
 } from './rules.js';
 import {
+  approvePlaybookRun,
+  denyPlaybookRun,
+  toggleRunDetail,
+  validatePlaybook,
+  importPlaybook,
+  addPlaybookTemplate,
+  togglePlaybook,
+  deletePlaybook,
+  toggleConnector,
+} from './automations.js';
+import {
   openAuditDrawer,
   openAuditFinding,
   openAuditFindingByRef,
@@ -551,6 +562,15 @@ const actions = {
   previewSigmaRule,
   uploadSigmaRule,
   toggleSigmaRule,
+  approvePlaybookRun,
+  denyPlaybookRun,
+  toggleRunDetail,
+  validatePlaybook,
+  importPlaybook,
+  addPlaybookTemplate,
+  togglePlaybook,
+  deletePlaybook,
+  toggleConnector,
   deleteSigmaRule,
 
   // audit log

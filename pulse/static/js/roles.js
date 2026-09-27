@@ -12,6 +12,7 @@ var ROLE_RANK = { analyst: 1, manager: 2, admin: 3 };
 var PAGE_MIN_ROLE = {
   team:      'manager',   // team workload oversight (manager/admin)
   firewall:  'manager',   // blocking/unblocking is a response action
+  automations: 'manager', // playbooks propose response actions
   whitelist: 'manager',   // detection config
   rules:     'manager',   // detection config
   audit:     'admin',     // security audit log

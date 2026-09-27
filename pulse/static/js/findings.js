@@ -40,6 +40,8 @@ import {
   roleBadgeHtml,
 } from './dashboard.js';
 import { navigate } from './navigation.js';
+import { runStepsHtml, runStatusPill } from './automations.js';
+import { canAccessPage, getCurrentRole } from './roles.js';
 import { openAssignDialog } from './assign-dialog.js';
 
 // ---------------------------------------------------------------
@@ -2341,6 +2343,13 @@ async function _loadDrawerIntel(f) {
   if (!document.body.contains(body)) return;
   body.classList.remove('intel-loading');
 
+  // 404 = the backend says this isn't a public IP (e.g. a reserved or
+  // documentation range the client-side check lets through). Nothing to
+  // look up, so drop the section rather than show an error.
+  if (resp.status === 404) {
+    wrap.remove();
+    return;
+  }
   if (!resp.ok || !resp.data || !Array.isArray(resp.data.verdicts)) {
     body.innerHTML = '<div class="intel-error">Could not load threat intel. Try again later.</div>';
     return;
@@ -2383,6 +2392,51 @@ async function _loadDrawerIntel(f) {
     headBadge.hidden = false;
   }
 }
+
+// ---------------------------------------------------------------------
+// Automations: playbook runs this finding triggered (SOAR phase 2).
+// The section stays hidden unless there's at least one run. A run that
+// is waiting for approval shows Approve / Deny right here, for managers
+// and admins (the server enforces it either way).
+// ---------------------------------------------------------------------
+
+function _renderAutomationsSection(f) {
+  if (!f || f.id == null) return '';
+  return '<div class="finding-drawer-section" id="drawer-automations-wrap" ' +
+    'data-finding-id="' + escapeHtml(String(f.id)) + '" hidden></div>';
+}
+
+async function _loadDrawerAutomations(f) {
+  var wrap = document.getElementById('drawer-automations-wrap');
+  if (!wrap || !f || f.id == null) return;
+  var runs = [];
+  try {
+    var resp = await fetch('/api/findings/' + encodeURIComponent(f.id) + '/playbook-runs');
+    if (resp.ok) runs = (await resp.json()).runs || [];
+  } catch (e) { runs = []; }
+  if (!document.body.contains(wrap)) return;
+  if (!runs.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
+  var canApprove = canAccessPage('automations', getCurrentRole());
+  wrap.innerHTML =
+    '<div class="sec-label">Automations</div>' +
+    runs.map(function (run) {
+      return '<div class="soar-drawer-run">' +
+        '<div class="soar-drawer-head">' +
+          '<span class="soar-drawer-name">' + escapeHtml(run.playbook_name) + '</span>' +
+          runStatusPill(run.status) +
+        '</div>' +
+        runStepsHtml(run, { canApprove: canApprove }) +
+      '</div>';
+    }).join('');
+  wrap.hidden = false;
+}
+
+// Approve / Deny (from here or the Automations page) -> refresh the
+// drawer's section if it's showing.
+document.addEventListener('pulse:playbook-run-updated', function () {
+  var wrap = document.getElementById('drawer-automations-wrap');
+  if (wrap) _loadDrawerAutomations({ id: wrap.getAttribute('data-finding-id') });
+});
 
 function _stageBlockSection(f) {
   if (!f || !_BLOCKABLE_RULES[f.rule]) return '';
@@ -2707,6 +2761,7 @@ export function openFindingDrawer(f) {
       _drawerFrameworkRefs(f) +
       _renderIntelSection(f) +
       _stageBlockSection(f) +
+      _renderAutomationsSection(f) +
       '<div class="drawer-tracking-divider"><span>Tracking</span></div>' +
       _renderAssignSection(f) +
       _renderNotesSection(f) +
@@ -2750,6 +2805,8 @@ export function openFindingDrawer(f) {
   // Threat-intel lookup. Section only renders when a public source IP
   // was extracted, so this no-ops on findings without one.
   _loadDrawerIntel(f);
+  // Playbook runs this finding triggered (hidden when there are none).
+  _loadDrawerAutomations(f);
 
 }
 

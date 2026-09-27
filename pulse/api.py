@@ -266,10 +266,17 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
     # Live monitor — one MonitorManager per app. It owns the async polling
     # loop and fans out findings to SSE subscribers. Lazy: doesn't start
     # polling until POST /api/monitor/start is called.
+    # Playbook engine (SOAR phase 2). Every server path that saves a scan
+    # hands the scan id to scan_saved(); matching playbooks run on a
+    # background thread so an upload never waits on threat-intel lookups.
+    from pulse.soar.engine import SoarRunner
+    app.state.soar = SoarRunner(db_path, lambda: _read_config(config_path))
+
     app.state.monitor = MonitorManager(
         db_path=db_path,
         config_path=config_path,
         config_getter=lambda: _read_config(config_path),
+        on_scan_saved=app.state.soar.scan_saved,
     )
 
     # Scheduled-scan runner. Reads scheduled_scan from pulse.yaml every loop,
@@ -297,6 +304,7 @@ def create_app(db_path: Optional[str] = None, config_path: Optional[str] = None,
             days,
             send_alerts,
         )
+        app.state.soar.scan_saved((result or {}).get("scan_id"))
         # Bell-feed notification — fan-out to admins so whoever's logged in
         # next sees the scheduled scan finished. Best-effort; a hiccup must
         # not break the scheduler loop.
@@ -1080,10 +1088,13 @@ def _register_routes(app: FastAPI) -> None:
     # client reads `location.pathname` on boot and navigates accordingly.
     # Order matters: these must be registered before any catch-all so
     # /login and /docs keep winning against `/{page}` matching.
+    # Must match validPages in pulse/static/js/navigation.js (pinned by
+    # tests/test_frontend_regressions.py).
     _SPA_PAGES = (
-        "dashboard", "queue", "monitor", "scans", "reports", "history",
-        "fleet", "firewall", "whitelist", "rules", "settings", "findings",
-        "compliance", "trends", "audit",
+        "dashboard", "queue", "team", "monitor", "advisor", "scans",
+        "reports", "history", "fleet", "firewall", "whitelist", "rules",
+        "settings", "findings", "compliance", "trends", "audit", "intel",
+        "automations",
     )
     for _page in _SPA_PAGES:
         app.add_api_route(
@@ -2324,6 +2335,7 @@ def _register_routes(app: FastAPI) -> None:
             user_id=agent.get("user_id"),
             agent_id=agent["id"],
         )
+        app.state.soar.scan_saved(scan_id)   # playbooks (runs in background)
         try:
             _agent_label = agent.get("name") or agent.get("hostname") or "Pulse Agent"
             _msg = (f"{_agent_label} reported a scan — score {score_data['score']}, "
@@ -3013,6 +3025,7 @@ def _register_routes(app: FastAPI) -> None:
                 duration_sec=duration_sec,
                 user_id=user_id,
             )
+            app.state.soar.scan_saved(scan_id)   # playbooks (runs in background)
 
             # Audit the scan so the Audit Log page shows who uploaded
             # what. Failure never blocks the response — log_audit
@@ -5562,6 +5575,7 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(400, detail=str(exc))
         except FileNotFoundError as exc:
             raise HTTPException(500, detail=str(exc))
+        app.state.soar.scan_saved((result or {}).get("scan_id"))
 
         # Include admin status so the dashboard can warn when a scan comes
         # back empty because the Security.evtx log wasn't readable.
@@ -6293,6 +6307,14 @@ def _register_routes(app: FastAPI) -> None:
         if not ok:
             raise HTTPException(404, detail="SIGMA rule not found.")
         return {"status": "ok", "id": rule_id}
+
+    # -------------------------------------------------------------------
+    # SOAR playbooks, runs, approvals, connector switches (pulse/soar/).
+    # -------------------------------------------------------------------
+    from pulse.soar import routes as _soar_routes
+    _soar_routes.register(app, require_elevation=_require_elevation,
+                          check_finding_scope=_check_finding_scope,
+                          read_config=_read_config)
 
     # -------------------------------------------------------------------
     # Live monitor endpoints
