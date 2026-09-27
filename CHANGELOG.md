@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-26 — Security score: keep-factor model, one scorer everywhere
+
+Implements step 1 of [the scoring review](docs/2026-09-26-scoring-model-review.md). The old model subtracted a flat amount per finding (Critical −25, High −15, Medium −8, Low −3) and floored at 0, so 4, 8 and 40 criticals all scored 0/F and the number stopped carrying information.
+
+- **Multiplicative keep factors.** `calculate_score_from_findings` in [`pulse/reports/reporter.py`](pulse/reports/reporter.py) now computes score = 100 × the product of each unique rule's keep factor (Critical 0.72, High 0.85, Medium 0.93, Low 0.97), rounded. One critical is 72 (C), 4 are 27 (D), 8 are 7 (F), and 40 are 0. Every extra finding moves the score. Findings still dedupe per rule; when a rule fires several times, its heaviest occurrence counts.
+- **Status weighting.** Open findings (new / acknowledged / investigating) count fully. Resolved findings, and the legacy `reviewed` flag, count at 20%. False positives don't count at all. A weighted finding removes that share of its penalty: keep = 1 − (1 − factor) × weight.
+- **Recency weighting, measured from when Pulse recorded the finding.** Full weight for 7 days, then it fades to half weight by about 3 weeks and never goes below half. Age runs from the finding's `recorded_at` / `scanned_at` (scan or ingest time), **not** the raw event timestamp. An incident responder who uploads a three-month-old log sees its true severity today: one critical scores a C, not a discounted B. A finding that has sat open for weeks still fades. The daily-score endpoint stamps each finding with its scan's time, and scores each past day as of the end of that day, so the trend chart doesn't drift upward as findings age.
+- **One scorer for the CLI and reports.** The flat `_calculate_score(severity_counts)` is gone. The CLI (`main.py`: one-shot scans and `--watch`) and the HTML/JSON reports now go through `calculate_score_from_findings` via a small `_report_score(findings)` helper, so the same findings produce the same score on the dashboard, in a report, and on a CLI-saved scan. The PDF, executive, threat-summary and board-ready reports read the scores stored on scans, so they now match too. The A–F bands and every output shape are unchanged. The return dict keeps all its keys: each deduction's `points` is now the share of health that finding removes, `total_deducted` is 100 − score, and deductions gain a `weight`.
+- **Tests:** new [`tests/test_scoring.py`](tests/test_scoring.py). It pins the design doc's table (1/2/3/4/8/40 criticals → 72/52/37/27/7/0), proves 8 and 40 criticals score differently, and covers:
+  - recency from record time, including the uploaded-old-log case, with a check that the event timestamp is ignored
+  - status weights and the return shape
+  - the same findings scoring identically through `_report_score`, the JSON and HTML reports, an exported report, and `/api/score/daily`
+
 ## 2026-09-26 — Connector layer + VirusTotal (SOAR phase 1)
 
 Phase 1 of [the SOAR design](docs/2026-09-26-soar-playbooks-and-integrations.md): a common shape for integrations with outside services, AbuseIPDB moved onto it, and VirusTotal added as the second connector. There is no playbook engine yet; that's phase 2.

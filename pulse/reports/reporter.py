@@ -14,7 +14,7 @@ import io
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # Maps each rule to its MITRE ATT&CK technique ID.
@@ -248,7 +248,7 @@ def _build_json_report(findings, severity_counts, scan_stats=None):
     }
     """
 
-    score, score_label, _ = _calculate_score(severity_counts)
+    score, score_label, _ = _report_score(findings)
 
     # --- METADATA: information about the scan itself ---
     metadata = {
@@ -331,56 +331,139 @@ RULE_CATEGORIES = {
     "Lateral Movement via Network Share": "Lateral Movement",
 }
 
-SEVERITY_DEDUCTIONS = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3}
+# Keep factors for the multiplicative score: the share of remaining health
+# that survives one unique finding of that severity. Each finding removes a
+# fraction of what's left, so the score approaches 0 without slamming into
+# it, and 8 criticals vs 40 criticals stay distinguishable. Lower = harsher.
+# See docs/2026-09-26-scoring-model-review.md.
+SEVERITY_KEEP_FACTORS = {"CRITICAL": 0.72, "HIGH": 0.85, "MEDIUM": 0.93, "LOW": 0.97}
+
+# Recency: full weight for a week, then fades to half weight by three
+# weeks. Never below half, so an old finding nobody has resolved still
+# counts.
+#
+# Age is measured from when Pulse *recorded* the finding (scan / ingest
+# time), never from the raw event timestamp. An incident responder who
+# uploads a three-month-old log today gets its criticals at full weight,
+# because that's the first Pulse has heard of them; a finding that has
+# sat open in a live system for weeks fades. A finding with no record
+# time (being scored at the moment it's detected) is brand new: full
+# weight.
+RECORDED_AT_FIELDS = ("recorded_at", "scanned_at")
+RECENCY_FULL_DAYS = 7
+RECENCY_HALF_LIFE_DAYS = 14
+RECENCY_FLOOR = 0.5
+
+# Status: an open finding (new / acknowledged / investigating) weighs full;
+# a resolved one keeps a little weight because the host was still hit.
+# False positives aren't threats, so they don't count at all.
+RESOLVED_WEIGHT = 0.2
+
+_FRACTION_RE = re.compile(r"(\.\d{6})\d+")
 
 
-def _calculate_score(severity_counts):
-    """
-    Calculates a security score out of 100 based on severity counts.
-
-    This is the legacy per-count version used by the CLI and HTML reports.
-    The API uses calculate_score_from_findings() for smarter deduplication.
-
-    Returns:
-        tuple: (score int, label str, hex_colour str)
-    """
-    deductions = (
-        severity_counts.get("CRITICAL", 0) * 25 +
-        severity_counts.get("HIGH",     0) * 15 +
-        severity_counts.get("MEDIUM",   0) *  8 +
-        severity_counts.get("LOW",      0) *  3
-    )
-    score = max(0, 100 - deductions)
-    return score, *_score_tier(score)
+def _parse_recorded_time(raw):
+    """Record timestamp -> aware datetime, or None. Accepts ISO-8601 with
+    or without 'Z' / an offset, and 7-digit fractional seconds. Naive
+    values are local time, which is how Pulse stores `scanned_at`."""
+    if not raw or not isinstance(raw, str):
+        return None
+    text = _FRACTION_RE.sub(r"\1", raw.strip()).replace("Z", "+00:00")
+    try:
+        ts = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.astimezone()  # naive = local wall-clock time
+    return ts
 
 
-def calculate_score_from_findings(findings):
+def _recorded_time(finding):
+    for field in RECORDED_AT_FIELDS:
+        ts = _parse_recorded_time(finding.get(field))
+        if ts is not None:
+            return ts
+    return None
+
+
+def _recency_weight(finding, now):
+    ts = _recorded_time(finding)
+    if ts is None:
+        return 1.0
+    age_days = (now - ts).total_seconds() / 86400
+    if age_days <= RECENCY_FULL_DAYS:
+        return 1.0
+    fade = 0.5 ** ((age_days - RECENCY_FULL_DAYS) / RECENCY_HALF_LIFE_DAYS)
+    return max(RECENCY_FLOOR, fade)
+
+
+def _status_weight(finding):
+    if finding.get("false_positive"):
+        return 0.0
+    # `reviewed` is the pre-workflow-column resolved flag.
+    if finding.get("workflow_status") == "resolved" or finding.get("reviewed"):
+        return RESOLVED_WEIGHT
+    return 1.0
+
+
+def calculate_score_from_findings(findings, now=None):
     """
     Calculates a deduplicated security score from a list of findings.
 
-    Only unique rules are penalized — 50 brute force events count as one
-    "Brute Force Attempt" deduction, not 50. This prevents noisy but
-    low-risk events from tanking the score.
+    Multiplicative model: score = 100 x product of per-rule keep factors,
+    rounded. A finding at full weight multiplies health by its severity's
+    keep factor (Critical 0.72, High 0.85, Medium 0.93, Low 0.97). A
+    weighted finding removes only that share of its penalty:
+    keep = 1 - (1 - factor) x weight, where weight = recency x status.
+
+    Only unique rules are penalized: 50 brute force events count once.
+    When a rule fired several times, its heaviest occurrence counts (a
+    fresh open one outweighs an old resolved one).
+
+    Recency ages each finding from when Pulse recorded it (`recorded_at`,
+    else `scanned_at`), not from its event `timestamp`; a finding with no
+    record time counts as recorded now. `now` is the reference time
+    (defaults to the current time). Pass the end of a past day to score
+    that day as it stood then.
 
     Returns:
-        dict with: score, label, colour, grade, deductions (list),
-                   categories (dict of category -> {score, rules})
+        dict with: score, label, colour, grade, total_deducted,
+                   deductions (list), categories (dict of category ->
+                   {deducted, rules_triggered, status})
+        Each deduction's `points` is the share of health that finding
+        alone would remove (0-100). Because penalties compound, they
+        don't add up to `total_deducted`, which is 100 - score.
     """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    # rule -> (penalty, severity, weight); keep the heaviest per rule.
     unique_rules = {}
     for f in findings:
         rule = f.get("rule", "Unknown")
         sev = f.get("severity", "LOW")
-        if rule not in unique_rules or SEVERITY_ORDER.index(sev) < SEVERITY_ORDER.index(unique_rules[rule]):
-            unique_rules[rule] = sev
+        if sev not in SEVERITY_KEEP_FACTORS:
+            sev = "LOW"
+        weight = _recency_weight(f, now) * _status_weight(f)
+        if weight <= 0:
+            continue
+        penalty = (1 - SEVERITY_KEEP_FACTORS[sev]) * weight
+        if rule not in unique_rules or penalty > unique_rules[rule][0]:
+            unique_rules[rule] = (penalty, sev, weight)
 
     deduction_list = []
-    for rule, sev in unique_rules.items():
-        pts = SEVERITY_DEDUCTIONS.get(sev, 3)
-        deduction_list.append({"rule": rule, "severity": sev, "points": pts,
-                               "category": RULE_CATEGORIES.get(rule, "Other")})
+    keep = 1.0
+    for rule, (penalty, sev, weight) in unique_rules.items():
+        keep *= 1 - penalty
+        deduction_list.append({"rule": rule, "severity": sev,
+                               "points": round(100 * penalty),
+                               "weight": round(weight, 2),
+                               "category": RULE_CATEGORIES.get(rule, "Other"),
+                               "_penalty": penalty})
 
-    total_deducted = sum(d["points"] for d in deduction_list)
-    score = max(0, 100 - total_deducted)
+    score = round(100 * keep)
     label, colour = _score_tier(score)
     grade = _score_grade(score)
 
@@ -389,21 +472,40 @@ def calculate_score_from_findings(findings):
                 "Persistence", "Privilege Escalation", "Execution", "Defense Evasion"]
     for cat in all_cats:
         cat_rules = [d for d in deduction_list if d["category"] == cat]
-        cat_deducted = sum(d["points"] for d in cat_rules)
+        cat_keep = 1.0
+        for d in cat_rules:
+            cat_keep *= 1 - d["_penalty"]
+        cat_deducted = round(100 * (1 - cat_keep))
         categories[cat] = {
             "deducted": cat_deducted,
             "rules_triggered": [d["rule"] for d in cat_rules],
-            "status": "clear" if cat_deducted == 0 else
+            "status": "clear" if not cat_rules else
                       "low" if cat_deducted <= 5 else
                       "medium" if cat_deducted <= 15 else "high",
         }
 
+    deduction_list.sort(key=lambda d: d["_penalty"], reverse=True)
+    for d in deduction_list:
+        del d["_penalty"]
+
     return {
         "score": score, "label": label, "colour": colour, "grade": grade,
-        "total_deducted": total_deducted,
-        "deductions": sorted(deduction_list, key=lambda d: d["points"], reverse=True),
+        "total_deducted": 100 - score,
+        "deductions": deduction_list,
         "categories": categories,
     }
+
+
+def _report_score(findings):
+    """(score, label, colour) for a report or a CLI scan.
+
+    Goes through calculate_score_from_findings, the same scorer the
+    dashboard and every API scan path use, so one set of findings gets
+    one score everywhere. (This replaced a flat per-severity subtraction
+    that only saw severity counts and bottomed out at 0.)
+    """
+    data = calculate_score_from_findings(findings)
+    return data["score"], data["label"], data["colour"]
 
 
 def _score_tier(score):
@@ -472,7 +574,7 @@ def _build_html_report(findings, severity_counts, scan_stats=None):
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(findings)
-    score, score_label, score_colour = _calculate_score(severity_counts)
+    score, score_label, score_colour = _report_score(findings)
 
     # --- DETECTIONS TAB: table rows ---
     rows = []

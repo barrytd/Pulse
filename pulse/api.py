@@ -113,7 +113,7 @@ from pulse import rate_limit
 from pulse.monitor.monitor_service import MonitorManager
 from pulse.core.parser import parse_evtx
 from pulse.reports.reporter import (
-    _build_html_report, _build_json_report, _calculate_score,
+    _build_html_report, _build_json_report,
     calculate_score_from_findings,
 )
 from pulse.monitor.scheduled_scan import (
@@ -4294,12 +4294,24 @@ def _register_routes(app: FastAPI) -> None:
             filenames = []
             for scan in group:
                 findings = get_scan_findings(app.state.db_path, scan["id"], **scope_kw)
+                # Recency ages a finding from when Pulse recorded it.
+                for f in findings:
+                    f.setdefault("scanned_at", scan.get("scanned_at"))
                 all_findings.extend(findings)
                 total_events += scan.get("total_events", 0)
                 if scan.get("filename"):
                     filenames.append(scan["filename"])
 
-            score_data = calculate_score_from_findings(all_findings)
+            # Score each day as it stood at the end of that day, so the
+            # recency weighting doesn't quietly raise past days' scores
+            # on the trend chart as their findings age.
+            try:
+                day_end = datetime.strptime(date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=timezone.utc)
+                as_of = min(day_end, datetime.now(timezone.utc))
+            except ValueError:
+                as_of = None
+            score_data = calculate_score_from_findings(all_findings, now=as_of)
             daily.append({
                 "date": date,
                 "score": score_data["score"],

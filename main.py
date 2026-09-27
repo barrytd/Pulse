@@ -32,7 +32,7 @@ from pulse.alerts.emailer import (
     send_report, validate_email_config, dispatch_alerts,
 )
 from pulse.database import init_db, save_scan, get_history
-from pulse.reports.reporter import _calculate_score
+from pulse.reports.reporter import _report_score
 from pulse.monitor.monitor import start_monitor
 from pulse.whitelist import filter_whitelist
 
@@ -802,10 +802,7 @@ def main():
             findings = filter_whitelist(findings, whitelist_cfg)
             findings = filter_by_enabled(findings, get_disabled_rules(config))
 
-            sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-            for f in findings:
-                sev_counts[f.get("severity", "LOW")] += 1
-            score, score_label, _ = _calculate_score(sev_counts)
+            score, score_label, _ = _report_score(findings)
 
             stats = {
                 "total_events": len(events or []),
@@ -1105,12 +1102,7 @@ def main():
     # --- STEP 7: SAVE TO DATABASE ---
     # Always save the scan result so --history works over time.
     if db_path:
-        severity_counts_db = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-        for f in findings:
-            sev = f.get("severity", "LOW")
-            severity_counts_db[sev] = severity_counts_db.get(sev, 0) + 1
-
-        score, score_label, _ = _calculate_score(severity_counts_db)
+        score, score_label, _ = _report_score(findings)
         scan_id = save_scan(db_path, findings, scan_stats=scan_stats,
                             score=score, score_label=score_label)
         log(f"  [*] Scan #{scan_id} saved to database ({db_path})")

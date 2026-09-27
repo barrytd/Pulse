@@ -44,6 +44,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 
 ### Dashboard and triage
 - A single-page web app with a security score, charts, and a view that shows raw events narrowing down to critical findings.
+- The security score (0 to 100, graded A to F) uses diminishing returns: each unique finding removes a share of the health that is left, so the score gets close to 0 without hitting it, and a host with 40 critical findings scores lower than one with 8. Open findings count fully, resolved ones count a little, and false positives don't count. A finding fades after it has been open for a week, measured from when Pulse recorded it, so an old log uploaded today is scored at full strength. The dashboard, the command line, and every report use the same scorer, so one host gets one score everywhere.
 - A finding panel that leads with a plain summary, the actions to take, and the framework references, with the raw event data tucked into a section you can expand.
 - My Queue: each analyst's assigned, unresolved findings, sorted by priority.
 - Team: its own page for managers and admins, with a per-analyst view (open count, oldest item, average time to fix).
