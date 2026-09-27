@@ -135,7 +135,7 @@ class TestRegistry:
         assert keys == sorted(keys)
         assert {"abuseipdb", "virustotal"} <= set(keys)
         responses = [c.key for c in connectors.all_connectors(kind="response")]
-        assert responses == ["firewall", "webhook"]
+        assert responses == ["firewall", "outbound_webhook", "ticket", "webhook"]
 
     def test_connectors_declare_their_shape(self):
         for c in connectors.all_connectors():

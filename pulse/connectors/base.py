@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import threading
+import urllib.request
 import time
 from collections import deque
 from datetime import datetime, timedelta
@@ -378,3 +379,90 @@ class QuotaGuard:
             self._minute.clear()
             self._day_key = None
             self._day_count = 0
+
+
+# ---------------------------------------------------------------------------
+# Outbound requests to admin-configured URLs (response connectors)
+# ---------------------------------------------------------------------------
+# A URL an admin types into Settings (a generic webhook, a self-hosted
+# Jira) could point Pulse at its own network: http://169.254.169.254/
+# (cloud metadata), http://localhost:8000/..., an internal admin panel.
+# post_json_guarded() refuses those before connecting:
+#   * https only (http is allowed only together with allow_private, for
+#     LAN tools like a self-hosted n8n);
+#   * every address the host resolves to is checked: loopback,
+#     link-local (incl. metadata), multicast, reserved and unspecified
+#     are always refused; private (RFC 1918 / ULA) only with
+#     allow_private;
+#   * redirects are never followed, so a public URL can't bounce the
+#     request inside.
+# Residual risk: DNS can change between the check and the connect (DNS
+# rebinding). The redirect block and the address check still stop the
+# common cases; admins set these URLs, never playbooks.
+
+class DestinationRefused(ValueError):
+    """The URL points somewhere Pulse won't send to."""
+
+
+def check_destination(url, allow_private=False):
+    """Raise DestinationRefused unless `url` is an acceptable outbound
+    target. Returns the parsed URL."""
+    import socket
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    if parsed.scheme not in ("https", "http") or not parsed.hostname:
+        raise DestinationRefused("The URL must start with https://.")
+    if parsed.scheme == "http" and not allow_private:
+        raise DestinationRefused("The URL must use https:// (plain http is only allowed "
+                                 "for private destinations, when those are enabled).")
+    if parsed.username or parsed.password:
+        raise DestinationRefused("Put credentials in the settings fields, not in the URL.")
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        raise DestinationRefused("The URL has an invalid port.")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OSError):
+        raise DestinationRefused(f"Can't resolve {parsed.hostname}.")
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0].split("%", 1)[0])
+        mapped = getattr(addr, "ipv4_mapped", None)
+        addr = mapped or addr
+        if (addr.is_loopback or addr.is_link_local or addr.is_multicast
+                or addr.is_unspecified or addr.is_reserved):
+            raise DestinationRefused(f"{parsed.hostname} resolves to {addr}, a loopback, "
+                                     "link-local or reserved address. Pulse never sends there.")
+        # is_global, not is_private: also catches carrier-grade NAT
+        # (100.64.0.0/10) and other non-public ranges.
+        if not addr.is_global and not allow_private:
+            raise DestinationRefused(f"{parsed.hostname} resolves to the private address {addr}. "
+                                     "Turn on private destinations to allow it.")
+    return parsed
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None     # the 3xx surfaces as an HTTPError instead
+
+
+def request_guarded(url, *, method="POST", payload=None, headers=None, allow_private=False,
+                    timeout=10, body=None):
+    """Guarded HTTP request. Returns (status, parsed_json_or_None). Raises
+    DestinationRefused for a refused URL, and urllib / OS errors for
+    network failures; callers turn both into an ok=False result."""
+    check_destination(url, allow_private=allow_private)
+    data = body if body is not None else (
+        json.dumps(payload).encode("utf-8") if payload is not None else None)
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Content-Type": "application/json", "Accept": "application/json",
+        "User-Agent": USER_AGENT, **(headers or {})})
+    opener = urllib.request.build_opener(_NoRedirect)
+    with opener.open(req, timeout=timeout) as resp:
+        raw = resp.read(256 * 1024)
+        try:
+            parsed = json.loads(raw.decode("utf-8")) if raw else None
+        except (ValueError, UnicodeDecodeError):
+            parsed = None
+        return resp.status, parsed

@@ -105,7 +105,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - A security PIN asks for a second confirmation before destructive actions like blocking an IP or removing a user, so a stolen login cannot do real damage. It is a separate secret from the password, opt-in per user, and locks out after repeated wrong tries.
 - The detection engine runs on the customer's own machine, so raw logs stay on their network.
 - Threat intel lookups never send private IP addresses or internal domain names to outside services. API keys stay on the server, every lookup is cached, and each provider's free-tier limit is respected so a noisy host cannot burn the quota. A failed lookup shows "no intel" instead of breaking the page.
-- Playbooks can never block an IP or send a message on their own. Every response step waits for a person with manager or admin rights to approve it, with their security PIN when they have one set, and it runs exactly the values they were shown. There is no fully automatic mode. Playbook expressions are a small, limited language, never code, so a stored playbook cannot run commands on the server.
+- Playbooks can never block an IP, send a message, open a ticket or call a webhook on their own. Every response step waits for a person with manager or admin rights to approve it, with their security PIN when they have one set, and it runs exactly the values they were shown. There is no fully automatic mode. Playbook expressions are a small, limited language, never code, so a stored playbook cannot run commands on the server.
 - The Pip AI assistant is off unless an administrator adds an Anthropic API key, the key stays on the server (never in the browser), and the chat panel discloses that questions are sent to Anthropic to be answered. Pip is read-only and cannot take any action in Pulse.
 
 ## Pricing direction
@@ -114,7 +114,7 @@ Pulse is open source and free to self-host, and that will not change. The plan i
 
 ## What is next
 
-- Automations, phase 3 (the rest): ClickUp/Jira tickets and a generic outbound webhook. The connector layer, the playbook engine, the click-together builder, the Investigate panel and the GreyNoise, OTX, GeoIP, Whois and DNS connectors are built. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
+- Automations: phases 1 to 3 are built (the connector layer, the playbook engine, the click-together builder, the Investigate panel, seven enrichment connectors, and four response connectors: firewall block, Slack/Discord, ClickUp/Jira tickets and an outbound webhook). Next is phase 4, a Toolkit page that runs any lookup without a finding open. Shodan and MISP / OpenCTI were left out of phase 3 and stay on the roadmap. Design: `docs/2026-09-26-soar-playbooks-and-integrations.md`.
 - A simple "add a host" flow with a one-line installer.
 - Tenant hardening before public sign-up: the core is done (each workspace's admin is now scoped to their own workspace, with a private platform-owner role set by an environment variable). Still to add before opening sign-up to strangers: cross-site request protection and trusting the right network address behind a proxy.
 - Invite teammates by code.

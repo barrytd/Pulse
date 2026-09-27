@@ -54,7 +54,8 @@ Security issues I am interested in:
 - Any way to make a playbook run a response action (block an IP, post a message) **without** a person approving it, run it twice from one approval, or run different values from the ones the approver was shown.
 - Escaping the playbook expression language (conditions / `{{ placeholders }}`) to run code on the server.
 - Getting a connector to send a private IP, an internal hostname, or data to a host other than its configured provider (SSRF).
-- API keys (AbuseIPDB, VirusTotal, GreyNoise, OTX) or webhook URLs leaking to the browser, logs, or reports.
+- API keys (AbuseIPDB, VirusTotal, GreyNoise, OTX), ticketing tokens (ClickUp, Jira), webhook URLs or signing secrets leaking to the browser, logs, or reports.
+- Getting the outbound webhook or Jira connector to reach loopback, cloud metadata, or a private address that wasn't allowed (for example through DNS or a redirect).
 
 Out of scope:
 
@@ -68,11 +69,12 @@ Out of scope:
 
 Playbooks ([`pulse/soar/`](pulse/soar/)) react to new findings automatically, but they can't act on their own:
 
-- **Lookups run by themselves; responses never do.** Every response step (a firewall block, a Slack/Discord post) pauses the run until a person approves it. A playbook that sets `requires_approval: false` on a response step is rejected when it's saved, whether it was built with the click-together builder, pasted as JSON, or sent to the API directly (all three go through the same server-side validation). There is no fully automatic mode.
+- **Lookups run by themselves; responses never do.** Every response step (a firewall block, a Slack/Discord post, a ClickUp/Jira ticket, an outbound webhook) pauses the run until a person approves it. A playbook that sets `requires_approval: false` on a response step is rejected when it's saved, whether it was built with the click-together builder, pasted as JSON, or sent to the API directly (all three go through the same server-side validation). There is no fully automatic mode.
 - **Who can approve:** managers and admins only, and only for their own organization's runs. Approving requires the user's **security PIN** step-up when they have one set (the same gate as the dashboard's Block button). Denying stops the rest of the run.
 - **What runs is what was shown.** The step runs exactly the inputs the approver saw. Each approval is single-use (a conditional database update), so two people approving at once can't run it twice. Runs snapshot their playbook, so editing a playbook can't change a step that's already waiting.
 - **No code execution.** Conditions and `{{ placeholders }}` are parsed with Python's `ast` and walked against a whitelist (and / or / not, comparisons, dotted names, literals). Calls, subscripts, arithmetic and dunder access are rejected at import. Nothing is ever passed to `eval`.
-- **Response connectors reuse existing safeguards.** A playbook block goes through the same blocker as the Block button (loopback, link-local, multicast, self-block and private addresses refused) and pushes only its own IP. A playbook post can only reach the Slack/Discord webhooks configured in Settings; a recipe can't supply a URL.
+- **Response connectors reuse existing safeguards.** A playbook block goes through the same blocker as the Block button (loopback, link-local, multicast, self-block and private addresses refused) and pushes only its own IP. A playbook post can only reach the Slack/Discord webhooks configured in Settings; tickets go only to the list or project set in Settings, and the outbound webhook only to its configured URL. A recipe can't supply a URL.
+- **Guarded outbound requests.** The Jira site and the outbound webhook URL are chosen by an admin, so each call goes through `request_guarded` (`pulse/connectors/base.py`): https only (plain http only when private destinations are allowed), no credentials in the URL, and the host is resolved and refused if any address is loopback, link-local (including `169.254.169.254` cloud metadata), multicast, unspecified or reserved. Private and CGNAT ranges are refused unless the admin turns on "allow private". Redirects are never followed. Known limit: the host is resolved again when the request is made, so a DNS answer that changes in between (DNS rebinding) isn't caught; only admins can set these URLs.
 - **Audit trail.** Playbook changes, runs, approvals, denials and executed actions are written to the audit log, tagged with the organization.
 
 ---
@@ -103,6 +105,19 @@ Safeguards:
 - **Quotas are respected.** Every answer is cached, and each provider is held to its free-tier limits, so a burst of findings can't exhaust a key. Failures show "no intel" instead of retrying.
 - Investigations are written to the audit log with the indicators that were sent.
 - VirusTotal's free public API is for non-commercial use; that choice stays with the key's owner.
+
+### Playbook response connectors
+
+These send nothing until an admin configures them, and then only when a person approves a playbook step.
+
+| Connector | Sent to | What's sent |
+|---|---|---|
+| Ticket (ClickUp) | api.clickup.com | the step's title, description and priority, into the list set in Settings |
+| Ticket (Jira) | your Jira site | the step's title and description, into the project set in Settings |
+| Outbound webhook | the URL set in Settings | `{"source","event","message","sent_at"}`, with the step's event and message; optionally HMAC-SHA256 signed |
+| Slack / Discord | the webhook URLs set in Settings | the step's message |
+
+Only the step's own text is sent. A finding's details are included only where the step puts a placeholder such as `{{ finding.source_ip }}`, and the approver sees the filled-in text before it's sent. Tokens, webhook URLs and the signing secret stay on the server; `GET /api/config` shows only whether each is set (and the webhook's host).
 
 ### The Pip AI assistant
 

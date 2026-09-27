@@ -5057,6 +5057,10 @@ def _register_routes(app: FastAPI) -> None:
             # key is set; users can explicitly toggle off without
             # removing the keys.
             "threat_intel": _threat_intel_view(intel),
+            # Response connectors (playbooks). Tokens, the webhook URL and
+            # its signing secret are credentials: only *_set flags leave.
+            "ticketing": _ticketing_view(config.get("ticketing")),
+            "outbound_webhook": _outbound_webhook_view(config.get("outbound_webhook")),
             "scheduled_scan": _scheduled_scan_view(config),
         }
 
@@ -5332,6 +5336,108 @@ def _register_routes(app: FastAPI) -> None:
     # -------------------------------------------------------------------
     # PUT /api/config/threat_intel — save AbuseIPDB/VirusTotal keys + toggles
     # -------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # PUT /api/config/ticketing, /api/config/outbound_webhook — settings
+    # for the playbook response connectors. Secret fields follow the same
+    # rules as the threat-intel keys: omitted or "" keeps the stored
+    # value, "null" clears it. The URLs are checked for shape here and
+    # checked again (resolved, no loopback / metadata) every time they're
+    # used.
+    # -------------------------------------------------------------------
+    def _apply_secret(block, body, field):
+        if field not in body:
+            return
+        raw = body.get(field)
+        if raw == "null":
+            block[field] = None
+        elif raw not in (None, ""):
+            value = str(raw).strip()
+            if value:
+                block[field] = value
+
+    def _check_url_shape(url, allow_private, label):
+        import urllib.parse
+        u = urllib.parse.urlparse(url)
+        if u.scheme not in ("https", "http") or not u.hostname:
+            raise HTTPException(400, detail=f"{label} must be a full URL starting with https://.")
+        if u.scheme == "http" and not allow_private:
+            raise HTTPException(400, detail=f"{label} must use https:// (http is only allowed "
+                                            "when private destinations are turned on).")
+        if u.username or u.password:
+            raise HTTPException(400, detail=f"Don't put credentials in {label}; use the fields.")
+
+    @app.put("/api/config/ticketing")
+    async def update_ticketing(request: Request, user_id: int = Depends(require_admin)):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        config = _read_config(app.state.config_path)
+        block = dict(config.get("ticketing") or {})
+        if "provider" in body:
+            provider = str(body.get("provider") or "").strip().lower()
+            if provider not in ("", "clickup", "jira"):
+                raise HTTPException(400, detail="provider must be clickup, jira, or empty.")
+            block["provider"] = provider or None
+        for field in ("clickup_list_id", "jira_email", "jira_project", "jira_issue_type"):
+            if field in body:
+                value = str(body.get(field) or "").strip()[:200]
+                block[field] = value or None
+        if "allow_private" in body:
+            block["allow_private"] = bool(body.get("allow_private"))
+        if "jira_url" in body:
+            url = str(body.get("jira_url") or "").strip().rstrip("/")
+            if url:
+                _check_url_shape(url, bool(block.get("allow_private")), "The Jira URL")
+            block["jira_url"] = url or None
+        for field in ("clickup_token", "jira_token"):
+            _apply_secret(block, body, field)
+        config["ticketing"] = block
+        _write_config(app.state.config_path, config)
+        return dict(_ticketing_view(block), status="ok")
+
+    @app.put("/api/config/outbound_webhook")
+    async def update_outbound_webhook(request: Request, user_id: int = Depends(require_admin)):
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="Body must be a JSON object.")
+        config = _read_config(app.state.config_path)
+        block = dict(config.get("outbound_webhook") or {})
+        if "allow_private" in body:
+            block["allow_private"] = bool(body.get("allow_private"))
+        if "url" in body:
+            raw = body.get("url")
+            if raw == "null":
+                block["url"] = None
+            elif raw not in (None, ""):
+                url = str(raw).strip()
+                _check_url_shape(url, bool(block.get("allow_private")), "The webhook URL")
+                block["url"] = url
+        _apply_secret(block, body, "secret")
+        config["outbound_webhook"] = block
+        _write_config(app.state.config_path, config)
+        return dict(_outbound_webhook_view(block), status="ok")
+
+    @app.post("/api/config/{section}/test")
+    def test_response_connector(section: str, request: Request,
+                                user_id: int = Depends(require_admin)):
+        """Settings "Test" buttons. Ticketing: a read-only credentials
+        check (creates nothing). Outbound webhook: sends one clearly
+        marked test payload."""
+        if section not in ("ticketing", "outbound_webhook"):
+            raise HTTPException(404, detail="Unknown section.")
+        rate_limit.hit(request, "response_connector_test", window_sec=60, max_hits=10)
+        config = _read_config(app.state.config_path) or {}
+        if section == "ticketing":
+            from pulse.connectors import ticketing
+            result = ticketing.check_credentials(config)
+        else:
+            from pulse.connectors import outbound_webhook as ow
+            result = ow.send(ow._settings(config), ow.build_payload(
+                "pulse.test", "Test message from Pulse Settings. You can ignore it."))
+        if not result.get("ok"):
+            raise HTTPException(502, detail=result.get("message") or "The test failed.")
+        return {"status": "ok", "message": result.get("message")}
+
     @app.put("/api/config/threat_intel")
     async def update_threat_intel(request: Request,
                                   user_id: int = Depends(require_admin)):
@@ -6642,6 +6748,41 @@ def _write_config(config_path, config):
 def _get_rule_names():
     """Return a sorted list of all detection rule names."""
     return get_rule_names()
+
+
+def _ticketing_view(block):
+    """GET /api/config slice for ticketing. Tokens never leave; the rest
+    (provider, list / project, Jira site) isn't secret."""
+    b = block or {}
+    s = lambda k: (str(b.get(k) or "")).strip()  # noqa: E731
+    from pulse.connectors import ticketing
+    return {
+        "provider":          s("provider") or None,
+        "clickup_token_set": bool(s("clickup_token")),
+        "clickup_list_id":   s("clickup_list_id") or None,
+        "jira_url":          s("jira_url") or None,
+        "jira_email":        s("jira_email") or None,
+        "jira_token_set":    bool(s("jira_token")),
+        "jira_project":      s("jira_project") or None,
+        "jira_issue_type":   s("jira_issue_type") or "Task",
+        "allow_private":     bool(b.get("allow_private")),
+        "configured":        ticketing.configured(ticketing._settings({"ticketing": b})),
+    }
+
+
+def _outbound_webhook_view(block):
+    """GET /api/config slice for the outbound webhook. The URL can carry a
+    token in its path, so like the Slack/Discord URL only its host is
+    shown, never the whole thing."""
+    import urllib.parse
+    b = block or {}
+    url = str(b.get("url") or "").strip()
+    return {
+        "url_set":       bool(url),
+        "host":          urllib.parse.urlparse(url).hostname if url else None,
+        "secret_set":    bool(str(b.get("secret") or "").strip()),
+        "allow_private": bool(b.get("allow_private")),
+    }
 
 
 def _threat_intel_view(intel):

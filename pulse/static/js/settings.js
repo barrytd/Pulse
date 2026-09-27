@@ -911,7 +911,8 @@ export async function renderSettingsPage() {
     profile:       profileHtml,
     account:       accountHtml,
     billing:       billingHtml,
-    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml,
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml +
+                   _responseConnectorsHtml(config.ticketing || {}, config.outbound_webhook || {}),
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
@@ -2263,6 +2264,137 @@ export async function saveThreatIntelSettings() {
 }
 
 // `connector` comes from the button's data-arg: 'abuseipdb' or 'virustotal'.
+// ----- Playbook response connectors: ticketing + outbound webhook -----
+// Same secret rules as the other keys: a blank field keeps what's saved,
+// and tokens / the webhook URL / its secret never come back from the
+// server (only "saved" flags and the webhook's host).
+function _secretInput(id, label, isSet, placeholder) {
+  return '<div class="form-row"><label for="' + id + '">' + label + '</label>' +
+    '<input type="password" id="' + id + '" autocomplete="new-password" placeholder="' +
+      (isSet ? 'leave blank to keep current' : placeholder) + '"/></div>';
+}
+
+function _textInput(id, label, value, placeholder) {
+  return '<div class="form-row"><label for="' + id + '">' + label + '</label>' +
+    '<input type="text" id="' + id + '" value="' + escapeHtml(value || '') + '" placeholder="' +
+      escapeHtml(placeholder || '') + '"/></div>';
+}
+
+function _responseConnectorsHtml(tk, ow) {
+  var provider = tk.provider || '';
+  var providerOpt = function (v, label) {
+    return '<option value="' + v + '"' + (provider === v ? ' selected' : '') + '>' + label + '</option>';
+  };
+  var tkStatus = tk.configured
+    ? '<span class="password-status set">✓ Ticketing is set up (' + escapeHtml(provider === 'jira' ? 'Jira' : 'ClickUp') + ')</span>'
+    : '<span class="password-status">Not set up yet</span>';
+  var owStatus = ow.url_set
+    ? '<span class="password-status set">✓ Sending to ' + escapeHtml(ow.host || 'your URL') +
+        (ow.secret_set ? ', signed' : ', unsigned') + '</span>'
+    : '<span class="password-status">No webhook URL saved yet</span>';
+  return '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="section-label">Playbook responses: tickets and your own webhook</div>' +
+    '<p style="color:var(--text-muted); font-size:12px; margin:0 0 14px;">' +
+      'Playbooks can open a ticket or send to your own tools. Like every response, each one waits for a ' +
+      'manager or admin to approve it, and it sends only what the playbook step says. Nothing about a ' +
+      'finding is added on its own.' +
+    '</p>' +
+
+    '<div class="soar-subhead">Tickets (ClickUp or Jira)</div>' +
+    '<div class="form-row"><label for="tk-provider">Service</label>' +
+      '<select id="tk-provider">' + providerOpt('', 'Off') + providerOpt('clickup', 'ClickUp') +
+        providerOpt('jira', 'Jira') + '</select></div>' +
+    _secretInput('tk-clickup-token', 'ClickUp API token', tk.clickup_token_set, 'pk_...') +
+    _textInput('tk-clickup-list', 'ClickUp list ID', tk.clickup_list_id, 'the list new tasks go into') +
+    _textInput('tk-jira-url', 'Jira site URL', tk.jira_url, 'https://your-team.atlassian.net') +
+    _textInput('tk-jira-email', 'Jira account email', tk.jira_email, 'you@example.com') +
+    _secretInput('tk-jira-token', 'Jira API token', tk.jira_token_set, 'paste your Jira API token') +
+    _textInput('tk-jira-project', 'Jira project key', tk.jira_project, 'e.g. SEC') +
+    _textInput('tk-jira-type', 'Jira issue type', tk.jira_issue_type, 'Task') +
+    '<div class="form-row"><label>Private address</label><label class="form-checkbox">' +
+      '<input type="checkbox" id="tk-allow-private"' + (tk.allow_private ? ' checked' : '') +
+      '/> Allow a Jira server on your private network (Jira Data Center)</label></div>' +
+    '<div class="form-row"><span></span><span>' + tkStatus + '</span></div>' +
+    '<div class="form-actions">' +
+      '<button class="btn btn-primary" data-action="saveTicketingSettings">Save ticketing</button>' +
+      '<button class="btn" data-action="testResponseConnector" data-arg="ticketing"' +
+        (tk.configured ? '' : ' disabled') + '>Test credentials</button>' +
+    '</div>' +
+
+    '<div class="soar-subhead" style="margin-top:18px;">Outbound webhook</div>' +
+    '<p style="color:var(--text-muted); font-size:12px; margin:0 0 10px;">Pulse POSTs JSON ' +
+      '(<span class="mono">{"source","event","message","sent_at"}</span>) to this URL. With a signing ' +
+      'secret, each request carries <span class="mono">X-Pulse-Signature</span> (HMAC-SHA256 of ' +
+      '<span class="mono">timestamp.body</span>) and <span class="mono">X-Pulse-Timestamp</span>. ' +
+      'Pulse never sends to loopback or cloud-metadata addresses and never follows redirects.</p>' +
+    _secretInput('ow-url', 'Webhook URL', ow.url_set, 'https://...') +
+    _secretInput('ow-secret', 'Signing secret', ow.secret_set, 'optional, recommended') +
+    '<div class="form-row"><label>Private address</label><label class="form-checkbox">' +
+      '<input type="checkbox" id="ow-allow-private"' + (ow.allow_private ? ' checked' : '') +
+      '/> Allow a URL on your private network (e.g. a self-hosted n8n)</label></div>' +
+    '<div class="form-row"><span></span><span>' + owStatus + '</span></div>' +
+    '<div class="form-actions">' +
+      '<button class="btn btn-primary" data-action="saveOutboundWebhookSettings">Save webhook</button>' +
+      '<button class="btn" data-action="testResponseConnector" data-arg="outbound_webhook"' +
+        (ow.url_set ? '' : ' disabled') + '>Send test</button>' +
+    '</div>' +
+  '</div>';
+}
+
+async function _putConfig(section, body, okMessage, clearIds) {
+  try {
+    var r = await fetch('/api/config/' + section, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      toastError(err.detail || 'Save failed.');
+      return;
+    }
+    showToast(okMessage);
+    (clearIds || []).forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+    renderSettingsPage();
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
+function _val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+
+export async function saveTicketingSettings() {
+  await _putConfig('ticketing', {
+    provider: _val('tk-provider'),
+    clickup_token: _val('tk-clickup-token'),
+    clickup_list_id: _val('tk-clickup-list'),
+    jira_url: _val('tk-jira-url'),
+    jira_email: _val('tk-jira-email'),
+    jira_token: _val('tk-jira-token'),
+    jira_project: _val('tk-jira-project'),
+    jira_issue_type: _val('tk-jira-type'),
+    allow_private: !!(document.getElementById('tk-allow-private') || {}).checked,
+  }, 'Ticketing settings saved', ['tk-clickup-token', 'tk-jira-token']);
+}
+
+export async function saveOutboundWebhookSettings() {
+  await _putConfig('outbound_webhook', {
+    allow_private: !!(document.getElementById('ow-allow-private') || {}).checked,
+    url: _val('ow-url'),
+    secret: _val('ow-secret'),
+  }, 'Webhook settings saved', ['ow-url', 'ow-secret']);
+}
+
+export async function testResponseConnector(section) {
+  showToast(section === 'ticketing' ? 'Checking the ticketing credentials...' : 'Sending a test payload...');
+  try {
+    var r = await fetch('/api/config/' + encodeURIComponent(section) + '/test', { method: 'POST' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) { toastError(data.detail || 'The test failed.'); return; }
+    showToast(data.message || 'It works.');
+  } catch (e) {
+    toastError('Network error: ' + e.message);
+  }
+}
+
 export async function testThreatIntelKey(connector) {
   var labels = { abuseipdb: 'AbuseIPDB', virustotal: 'VirusTotal', greynoise: 'GreyNoise', otx: 'OTX' };
   connector = labels[connector] ? connector : 'abuseipdb';

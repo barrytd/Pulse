@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Tickets + outbound webhook (SOAR phase 3, part 3; phase 3 complete)
+
+- **Open a ticket from a playbook.** New response connector **Ticket (ClickUp / Jira)** (`pulse/connectors/ticketing.py`), action "Open a ticket" with a title, an optional description and an optional priority (ClickUp only). Bring your own token and list (ClickUp) or site, email, API token and project key (Jira Cloud; a Jira server on your own network needs "allow private" turned on). The result carries the new ticket's link.
+- **Send to your own tools.** New response connector **Outbound webhook** (`pulse/connectors/outbound_webhook.py`), action "Send to your webhook": POSTs `{"source","event","message","sent_at"}` to the URL set in Settings, for n8n, Zapier, Tines or an internal service. With a signing secret each request carries `X-Pulse-Timestamp` and `X-Pulse-Signature: sha256=HMAC(secret, "<timestamp>.<body>")`.
+- **Same approval rules as block and Slack.** Both are `kind="response"`, so every step waits for a manager or admin to approve it; `requires_approval: false` is rejected on save. Both show up in the playbook builder with no builder change.
+- **Only what the step says.** The ticket and payload contain only the step's inputs. Nothing about the finding is added unless the step puts a placeholder in its text. A playbook can't choose the destination: the URL, list and project come from Settings.
+- **Guarded requests.** New `request_guarded` / `check_destination` in `pulse/connectors/base.py`: https only (http only with "allow private"), no credentials in the URL, the host is resolved and refused if any address is loopback, link-local (incl. cloud metadata `169.254.169.254`), multicast, unspecified or reserved. Private and shared (CGNAT) ranges are refused unless the admin allows them. Redirects are never followed. Nothing is cached; failures return a clear "didn't work" result.
+- **Settings → Notifications** gets a "Playbook responses" card: provider picker, ClickUp / Jira fields, webhook URL and signing secret, allow-private switches, and Test buttons (the ticketing test is a read-only credentials check that creates nothing; the webhook test sends one payload marked `pulse.test`). New admin-only endpoints `PUT /api/config/ticketing`, `PUT /api/config/outbound_webhook` and `POST /api/config/{ticketing|outbound_webhook}/test` (rate-limited). Tokens, the webhook URL and its secret never come back from the server; the page sees only "saved" flags and the webhook's host.
+- Tests: new [`tests/test_response_connectors.py`](tests/test_response_connectors.py) (51) checks that:
+  - ClickUp and Jira requests have the right URL, auth header and body, and failures (bad credentials, not found, redirect, offline) come back as `ok: false`
+  - loopback, metadata, link-local and private destinations are refused before any request, redirects aren't followed, and http needs "allow private"
+  - the webhook payload holds only the step inputs, its signature verifies, and a step can't override the URL
+  - both need approval, appear in the builder, and send nothing until approved; an approved run sends only the templated text, not other finding fields
+  - the settings API validates input, never returns secrets, and is admin-only
+
 ## 2026-09-27 — Click-together playbook builder (SOAR phase 3, part 2)
 
 - **Build a playbook without JSON.** Admins get a **New playbook** button on the Automations page:
