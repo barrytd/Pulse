@@ -410,7 +410,9 @@ export function filterDailyByDashState(daily) {
   });
 }
 
-export function _dashFilterBarHtml(rules, sources) {
+// `trailingHtml` (optional) sits at the right end of the bar, e.g. the
+// dashboard's "Last updated" line.
+export function _dashFilterBarHtml(rules, sources, trailingHtml) {
   var timeOpts = [
     { v: 'today',  l: 'Today' },
     { v: '7d',     l: 'Last 7 days' },
@@ -453,7 +455,7 @@ export function _dashFilterBarHtml(rules, sources) {
       '</div>'
     : '';
 
-  return '<div class="dash-filter-bar">' +
+  return '<div class="ui-card dash-filter-bar">' +
     '<div class="dash-filter-group">' +
       '<label class="dash-filter-label">Time Range</label>' +
       '<select class="dash-filter-select" id="f-time" data-action-change="applyDashFilters">' +
@@ -485,6 +487,7 @@ export function _dashFilterBarHtml(rules, sources) {
         'data-action-keydown="dashFilterQueryKey" />' +
     '</div>' +
     '<a class="dash-filter-reset" data-action="resetDashFilters">Reset</a>' +
+    (trailingHtml || '') +
   '</div>';
 }
 
@@ -728,8 +731,8 @@ function _heroScoreHtml(opts) {
       ? '<button class="btn btn-primary" data-action="resetDashFilters">Reset filters</button>'
       : '<button class="btn btn-primary" data-action="openSystemScanModal">Scan my system</button>' +
         '<button class="btn" data-action="openUploadModal">Upload a log</button>';
-    return '<div class="dash-card dash-score today-security-score">' +
-      '<div class="dash-eyebrow">Security posture</div>' +
+    return '<div class="ui-card dash-score dash-score-empty today-security-score">' +
+      '<div class="ui-eyebrow">Security posture</div>' +
       '<div class="dash-gauge">' + _scoreGaugeSvg(null, '') +
         '<div class="dash-gauge-label"><span class="dash-gauge-empty">No scans</span></div>' +
       '</div>' +
@@ -742,8 +745,8 @@ function _heroScoreHtml(opts) {
   }
   var grade = today.grade || _gradeFor(today.score);
   var tone = _GRADE_TONE[grade] || 'var(--text-dim)';
-  return '<div class="dash-card dash-score today-security-score">' +
-    '<div class="dash-eyebrow">Security posture · ' + escapeHtml(opts.windowLabel) + '</div>' +
+  return '<div class="ui-card dash-score today-security-score">' +
+    '<div class="ui-eyebrow">Security posture · ' + escapeHtml(opts.windowLabel) + '</div>' +
     '<div class="dash-gauge">' + _scoreGaugeSvg(today.score, tone) +
       '<div class="dash-gauge-label">' +
         '<span class="dash-grade-letter" style="color:' + tone + '">' + escapeHtml(grade) + '</span>' +
@@ -824,7 +827,7 @@ function _heroRowHtml(f, i) {
         (sub ? '<span class="dash-att-sub">' + escapeHtml(sub) + '</span>' : '') +
       '</div>' +
     '</div>' +
-    '<span class="dash-sev sev-' + sk + '">' + escapeHtml((f.severity || 'LOW').toUpperCase()) + '</span>' +
+    '<span class="ui-sev sev-' + sk + '">' + escapeHtml((f.severity || 'LOW').toUpperCase()) + '</span>' +
   '</div>';
 }
 
@@ -840,7 +843,7 @@ export function _needsAttentionHtml() {
     if (high) parts.push(high + ' high');
     head = parts.join(', ') + ', unreviewed';
     if (att.length > 5) {
-      more = '<a class="dash-link dash-att-more" data-action="openUnreviewedCriticalHigh">' +
+      more = '<a class="ui-link dash-att-more" data-action="openUnreviewedCriticalHigh">' +
         '+ ' + (att.length - 5) + ' more →</a>';
     }
   } else {
@@ -853,11 +856,11 @@ export function _needsAttentionHtml() {
     : (_heroList.length ? 'Newest findings from the latest scan' : 'No findings in the last 7 days');
   return '<div class="dash-att-head">' +
       '<div>' +
-        '<div class="dash-eyebrow">Needs attention</div>' +
+        '<div class="ui-eyebrow">Needs attention</div>' +
         '<h3 class="dash-att-heading">' + escapeHtml(head) + '</h3>' +
-        '<div class="dash-sublabel">' + sub + '</div>' +
+        '<div class="ui-sublabel">' + sub + '</div>' +
       '</div>' +
-      '<a class="dash-link" data-action="' + (att.length ? 'openUnreviewedCriticalHigh' : 'navigate') +
+      '<a class="ui-link" data-action="' + (att.length ? 'openUnreviewedCriticalHigh' : 'navigate') +
         '" data-arg="findings">All findings →</a>' +
     '</div>' +
     (rows
@@ -911,10 +914,10 @@ document.addEventListener('pulse:review-toggled', _onReviewToggled);
 var _lastStatCtx = null;
 
 function _statHtml(label, valueHtml, sub, subTone, attrs) {
-  return '<div class="dash-stat"' + (attrs || '') + '>' +
-    '<div class="dash-stat-k">' + label + '</div>' +
-    '<div class="dash-stat-v mono">' + valueHtml + '</div>' +
-    '<div class="dash-stat-d ' + (subTone || 'flat') + '">' + sub + '</div>' +
+  return '<div class="ui-stat"' + (attrs || '') + '>' +
+    '<div class="ui-stat-k">' + label + '</div>' +
+    '<div class="ui-stat-v mono">' + valueHtml + '</div>' +
+    '<div class="ui-stat-d ' + (subTone || 'flat') + '">' + sub + '</div>' +
   '</div>';
 }
 
@@ -940,12 +943,12 @@ function _statStripHtml(ctx) {
     return ' data-action="clickStatCard" data-arg="' + kind + '" data-stat-kind="' + kind +
            '" role="button" tabindex="0"';
   };
-  return '<div class="dash-card dash-stats" id="dash-stats">' +
+  return '<div class="ui-card ui-stats" id="dash-stats">' +
     _statHtml('Open findings', String(open),
       newToday ? '▲ ' + newToday + ' new today' : (open ? 'none new today' : 'nothing open'),
       newToday ? 'bad' : 'flat', clickable('findings')) +
     _statHtml('Critical, unreviewed',
-      '<span' + (crit ? ' class="dash-stat-crit"' : '') + '>' + crit + '</span>',
+      '<span' + (crit ? ' class="ui-text-critical"' : '') + '>' + crit + '</span>',
       crit ? 'needs action now' : 'none waiting', crit ? 'bad' : 'good',
       ' data-action="openUnreviewedCriticalHigh" role="button" tabindex="0"') +
     _statHtml('Scans today', String(scansToday.length),
@@ -962,9 +965,9 @@ function _historyPanelHtml(dailyScores, filtersOn) {
   var bLine = GRADE_BANDS[1][0];
   var body;
   if (!dailyScores.length) {
-    body = '<div class="dash-panel-empty">' +
+    body = '<div class="ui-panel-empty">' +
       (filtersOn
-        ? 'No scores in this window. <a class="dash-link" data-action="resetDashFilters">Reset filters</a>'
+        ? 'No scores in this window. <a class="ui-link" data-action="resetDashFilters">Reset filters</a>'
         : 'Your score history starts with the first scan in this window.') +
     '</div>';
   } else {
@@ -973,10 +976,10 @@ function _historyPanelHtml(dailyScores, filtersOn) {
   var sub = dailyScores.length === 1
     ? 'One day so far · the line fills in as you scan on more days'
     : 'Daily posture · dashed line is the B grade (' + bLine + ')';
-  return '<div class="dash-card dash-panel">' +
-    '<div class="dash-panel-head">' +
-      '<div><h3>Score history</h3><div class="dash-sublabel">' + sub + '</div></div>' +
-      '<a class="dash-link" data-action="navigate" data-arg="history">Full history →</a>' +
+  return '<div class="ui-card ui-panel">' +
+    '<div class="ui-panel-head">' +
+      '<div><h3>Score history</h3><div class="ui-sublabel">' + sub + '</div></div>' +
+      '<a class="ui-link" data-action="navigate" data-arg="history">Full history →</a>' +
     '</div>' +
     body +
   '</div>';
@@ -995,7 +998,7 @@ function _severityPanelHtml(windowFindings, scans) {
   if (!total) {
     // The sublabel already says whether anything was scanned; only add a
     // line when scans ran and came back clean.
-    body = scans.length ? '<div class="dash-panel-empty">No findings in this window.</div>' : '';
+    body = scans.length ? '<div class="ui-panel-empty">No findings in this window.</div>' : '';
   } else {
     body =
       '<div class="dash-sevbar" role="img" aria-label="' +
@@ -1019,13 +1022,13 @@ function _severityPanelHtml(windowFindings, scans) {
   var funnel = total
     ? '<span class="mono">' + _compactNum(events) + '</span> events → ' +
       '<span class="mono">' + _compactNum(total) + '</span> findings → ' +
-      '<span class="mono dash-stat-crit">' + counts.critical + '</span> critical'
+      '<span class="mono ui-text-critical">' + counts.critical + '</span> critical'
     : (scans.length ? _compactNum(events) + ' events scanned in this window' : 'Nothing scanned in this window');
-  return '<div class="dash-card dash-panel">' +
+  return '<div class="ui-card ui-panel">' +
     '<h3>Findings by severity</h3>' +
-    '<div class="dash-sublabel">' + funnel + '</div>' +
+    '<div class="ui-sublabel">' + funnel + '</div>' +
     body +
-    '<div class="dash-eyebrow dash-offenders-label">Repeat offenders</div>' +
+    '<div class="ui-eyebrow dash-offenders-label">Repeat offenders</div>' +
     _offendersHtml(scans) +
   '</div>';
 }
@@ -1046,7 +1049,7 @@ function _offendersHtml(scans) {
     .sort(function (a, b) { return b.count - a.count; })
     .slice(0, 3);
   if (!rows.length) {
-    return '<div class="dash-panel-empty dash-panel-empty-sm">No host activity in this window.</div>';
+    return '<div class="ui-panel-empty ui-panel-empty-sm">No host activity in this window.</div>';
   }
   return '<div class="dash-offenders">' + rows.map(function (r, i) {
     return '<div class="dash-off-row">' +
@@ -1323,7 +1326,7 @@ export async function renderDashboardPage() {
   // gray zeros, no empty charts, no filter bar with nothing to filter.
   if (!allScans.length) {
     _stopDashUpdatedTimer();
-    c.innerHTML = '<div class="dash-page">' + _firstRunHeroHtml() + '</div>';
+    c.innerHTML = '<div class="ui-stack dash-page">' + _firstRunHeroHtml() + '</div>';
     return;
   }
 
@@ -1381,33 +1384,30 @@ export async function renderDashboardPage() {
 
   // "Last updated" reflects the newest scan overall, not the filter slice.
   var updatedIso = allScans[0].scanned_at || '';
-  var dashMetaHtml =
-    '<div class="dash-meta-row">' +
-      '<span class="dash-updated" id="dash-updated-ts">' +
-        escapeHtml('Last updated ' + formatRelativeTime(updatedIso)) + '</span>' +
-    '</div>';
+  var updatedHtml =
+    '<span class="dash-updated" id="dash-updated-ts">' +
+      escapeHtml('Last updated ' + formatRelativeTime(updatedIso)) + '</span>';
 
   var heroHtml =
-    '<div class="dash-hero">' +
+    '<div class="ui-split ui-split-aside-start dash-hero">' +
       _heroScoreHtml({
         today: today, prev: dailyScores[1], top: _attentionFindings[0],
         windowLabel: windowLabel, filtersOn: filtersOn,
       }) +
-      '<div class="dash-card dash-attention" id="dash-needs-attention">' +
+      '<div class="ui-card dash-attention" id="dash-needs-attention">' +
         _needsAttentionHtml() +
       '</div>' +
     '</div>';
 
   var rowHtml =
-    '<div class="dash-row">' +
+    '<div class="ui-split dash-row">' +
       _historyPanelHtml(dailyScores, filtersOn) +
       _severityPanelHtml(windowFindings, scans) +
     '</div>';
 
   c.innerHTML =
-    '<div class="dash-page">' +
-      dashMetaHtml +
-      _dashFilterBarHtml(rules, sourceList) +
+    '<div class="ui-stack dash-page">' +
+      _dashFilterBarHtml(rules, sourceList, updatedHtml) +
       heroHtml +
       _statStripHtml({ allScans: allScans }) +
       rowHtml +
@@ -1471,13 +1471,13 @@ const ONBOARDING_STEPS = [
 // run your first scan. Once any scan exists, this never shows again and
 // the normal dashboard (plus the Getting Started checklist) takes over.
 function _firstRunHeroHtml() {
-  return '<div class="dash-card dash-firstrun">' +
+  return '<div class="ui-card dash-firstrun">' +
     '<div class="dash-firstrun-gauge" aria-hidden="true">' +
       _scoreGaugeSvg(null, '') +
       '<div class="dash-gauge-label"><span class="dash-firstrun-q">?</span></div>' +
     '</div>' +
     '<div class="dash-firstrun-body">' +
-      '<div class="dash-eyebrow">Security posture</div>' +
+      '<div class="ui-eyebrow">Security posture</div>' +
       '<h2 class="dash-firstrun-title">Run your first scan</h2>' +
       '<p class="dash-firstrun-sub">' +
         'Pulse hasn’t analyzed any logs yet, so there’s no score to show. ' +
@@ -1545,7 +1545,7 @@ function _onboardingCardHtml(state) {
     '</li>';
   }).join('');
 
-  return '<div class="card onboard-card">' +
+  return '<div class="card ui-card onboard-card">' +
     '<div class="onboard-head">' +
       '<div class="onboard-head-text">' +
         '<div class="onboard-title">Getting started</div>' +

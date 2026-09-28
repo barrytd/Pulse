@@ -21,6 +21,7 @@ The visual target is `docs/dashboard-redesign-mockup.html`. Open it and toggle l
 ## Hard constraints (do not break these)
 
 - **No CDNs, no web fonts.** Pulse renders fully offline and air-gapped on purpose (`static/vendor/` is vendored, fonts use a system stack). The mockup uses Google Fonts for convenience; the real build must keep the existing `--font-body` system stack in `base.css`. Do not add Sora, Manrope, or any Google font.
+  - *Update 2026-09-27:* the look-and-feel pass bundled **Inter** locally in `static/vendor/inter/` and put it first in `--font-body`. Still no CDN or remotely loaded font. The dashboard's card, spacing and type rules also moved into the shared `.ui-*` kit in `components.css`.
 - **Reuse the existing token system.** `base.css` already has `--bg-0…--bg-4`, `--text-high/body/dim`, `--severity-*`, `--status-*`, and a `[data-theme="dark"]` block. Build on those tokens. Do not invent a parallel palette.
 - **Keep it a string-built SPA.** The dashboard renders via `innerHTML` in `pulse/static/js/dashboard.js` with helpers like `statCard`, `sevBadge`, `buildDailyScoreTable`. Refactor those, do not switch frameworks.
 - **Chart.js is already vendored.** Use it for the score-history chart rather than hand-rolled SVG if that is simpler; either is fine as long as it stays offline.

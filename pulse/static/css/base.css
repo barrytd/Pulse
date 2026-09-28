@@ -64,14 +64,20 @@
   --status-error: #ef4444;
   --status-off:   #6b7280;
 
-  /* Typography — system font stack (no external webfont) so the dashboard
-     renders identically offline / air-gapped and leaks nothing to a CDN. */
-  --font-body:          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, 'Helvetica Neue', Arial, sans-serif;
+  /* Typography — Inter, bundled in static/vendor/inter/ (inter.css is
+     linked from each HTML shell), so every page gets it with no font CDN
+     and the UI renders the same offline / air-gapped. System fonts are the
+     fallback for scripts outside Latin / Latin Extended. */
+  --font-body:          'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, 'Helvetica Neue', Arial, sans-serif;
   --font-mono:          'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
   --mono:               var(--font-mono); /* legacy alias used by older rules */
   --font-size-body:     13px;
   --font-size-kpi:      28px;
   --font-size-kpi-lg:   36px;
+  /* Headings sit slightly tighter than body text (Inter runs wide at
+     display sizes). */
+  --tracking-heading:   -0.015em;
+  --tracking-display:   -0.022em;
 
   /* Spacing (8-pt grid) */
   --space-1:  4px;
@@ -81,6 +87,18 @@
   --space-6:  24px;
   --space-8:  32px;
   --space-12: 48px;
+
+  /* Layout rhythm for the shared surface kit (components.css). Built
+     from the spacing grid; pages that adopt the kit share one density. */
+  --gap-section: var(--space-3);   /* between stacked cards / columns */
+  --pad-card:    var(--space-4);   /* inside a card */
+  --aside-w:     340px;            /* side column of a .ui-split */
+
+  /* Type scale used by the kit (body stays --font-size-body). */
+  --font-size-xs:    11px;         /* eyebrows, tags */
+  --font-size-sm:    12px;         /* sublabels, meta, captions */
+  --font-size-title: 14.5px;       /* card / panel titles */
+  --font-size-stat:  24px;         /* stat-strip values */
 }
 
 [data-theme="dark"] {
@@ -144,7 +162,16 @@ body {
   line-height: 1.5;
   font-size: var(--font-size-body);
   -webkit-font-smoothing: antialiased;
+  /* Inter's contextual alternates + the open-digit "cv11" read cleaner
+     in dense tables; tabular figures are applied separately below. */
+  font-feature-settings: 'cv11', 'calt';
 }
+
+h1, h2, h3, h4, h5, h6,
+.page-title, .card-title, .app-page-crumb {
+  letter-spacing: var(--tracking-heading);
+}
+h1, .page-title { letter-spacing: var(--tracking-display); }
 
 /* ------------------------------------------------------------------ */
 /* Global dark-theme scrollbars                                       */

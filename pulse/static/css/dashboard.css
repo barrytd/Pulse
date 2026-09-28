@@ -1192,19 +1192,14 @@
   border-bottom-color: var(--accent);
 }
 
-/* "Last updated Xm ago" line above the filter bar — right-aligned,
-   muted, 12px, no card chrome. Refreshed every 60s by dashboard.js. */
-.dash-meta-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  margin: 0 0 8px 0;
-}
-
+/* "Last updated Xm ago" at the right end of the filter bar, level with
+   the controls. Refreshed every 60s by dashboard.js. */
 .dash-updated {
-  font-size: 12px;
+  margin-left: auto;
+  padding: 4px 0;
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
-  letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 /* Splunk-style dashboard filter toolbar — dropdowns + Apply + Reset */
@@ -1216,17 +1211,9 @@
      floors force the bar wider than the viewport and trigger page-level
      horizontal scroll. */
   flex-wrap: wrap;
-  gap: 18px;
-  row-gap: 12px;
-  padding: 10px 16px;
-  margin: 0 0 16px 0;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-[data-theme="dark"] .dash-filter-bar {
-  background: #11161f;
+  gap: 14px;
+  row-gap: 10px;
+  padding: 10px var(--pad-card);
 }
 
 .dash-filter-group {
@@ -4693,82 +4680,26 @@ tr.pending-flash {
 /* Dashboard (2026-09 redesign)                                        */
 /*                                                                     */
 /* Four zones, one hero: score + "needs attention", a 4-stat strip,    */
-/* then score history + findings by severity. Only the zone            */
-/* containers (.dash-card) get elevation: a soft shadow, a large       */
-/* radius, no outline. Everything inside them is borderless; rows are  */
-/* split by hairlines. Colors come only from the base.css tokens:      */
-/* severity for severity, --brand for the few brand moments.           */
+/* then score history + findings by severity. The card, spacing, type  */
+/* and stat-strip rules live in the shared surface kit (.ui-* in       */
+/* components.css); this block holds only what is dashboard-specific,  */
+/* sized so the page fits about one screen.                            */
 /* See docs/2026-09-26-dashboard-redesign.md.                          */
 /* ================================================================== */
 
-.dash-page {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-}
-.dash-page > .dash-meta-row,
-.dash-page > .dash-filter-bar,
-.dash-page > .onboard-card { margin-bottom: 0; }
-/* The filter bar and the Getting Started checklist are distinct objects,
-   so on the dashboard they take the same soft card treatment as the
-   zones instead of an outline (and the checklist drops its blue edge). */
-.dash-page > .dash-filter-bar,
+/* The filter bar and the Getting Started checklist take the kit card
+   (.ui-card) instead of their older outline / blue edge. */
 .dash-page > .onboard-card {
   border: none;
-  border-radius: var(--radius-card);
   background: var(--bg-1);
-  box-shadow: var(--shadow-soft);
+  padding: var(--space-3) var(--pad-card);
 }
-[data-theme="dark"] .dash-page > .dash-filter-bar,
-[data-theme="dark"] .dash-page > .onboard-card {
-  box-shadow: var(--shadow-soft), 0 0 0 1px var(--bg-3);
-}
-
-.dash-card {
-  background: var(--bg-1);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-soft);
-  min-width: 0;
-}
-/* Dark surfaces swallow shadows, so a 1px ring (drawn as a shadow, not
-   a border) keeps the card edge readable without an outline. */
-[data-theme="dark"] .dash-card {
-  box-shadow: var(--shadow-soft), 0 0 0 1px var(--bg-3);
-}
-
-.dash-eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-.dash-sublabel {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 2px;
-}
-.dash-link {
-  color: var(--brand);
-  font-size: 12.5px;
-  font-weight: 500;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.dash-link:hover { text-decoration: underline; }
 
 /* --- Zone 1: hero ------------------------------------------------- */
-.dash-hero {
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 18px;
-  min-width: 0;
-}
+.dash-hero { --aside-w: 300px; }
 
 .dash-score {
-  padding: 22px 24px;
+  padding: var(--pad-card);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4778,10 +4709,13 @@ tr.pending-flash {
 }
 .dash-gauge {
   position: relative;
-  width: 176px;
-  height: 176px;
-  margin: 8px 0 10px;
+  width: 148px;
+  height: 148px;
+  margin: 6px 0 8px;
 }
+/* No scans in this window: a smaller ring, so an empty card doesn't
+   stand taller than the list beside it. */
+.dash-score-empty .dash-gauge { width: 104px; height: 104px; margin: 6px 0; }
 .dash-gauge-svg { width: 100%; height: 100%; display: block; }
 .dash-gauge-track {
   fill: none;
@@ -4803,40 +4737,41 @@ tr.pending-flash {
   gap: 2px;
 }
 .dash-grade-letter {
-  font-size: 56px;
+  font-size: 48px;
   font-weight: 700;
   line-height: 1;
+  letter-spacing: var(--tracking-display);
 }
 .dash-grade-num {
   font-size: 13px;
   color: var(--text-dim);
 }
 .dash-gauge-empty {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--text-dim);
 }
 .dash-verdict {
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.5;
   color: var(--text-body);
-  max-width: 270px;
+  max-width: 260px;
 }
 .dash-verdict b { color: var(--text-high); }
 .dash-verdict-host {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--text-dim);
 }
 .dash-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: var(--space-2);
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 .dash-chip.bad  { color: var(--severity-critical); background: var(--severity-critical-bg); }
@@ -4846,12 +4781,12 @@ tr.pending-flash {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
-  margin-top: 14px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .dash-attention {
-  padding: 18px 20px 10px;
+  padding: var(--space-3) var(--pad-card) var(--space-2);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -4860,22 +4795,23 @@ tr.pending-flash {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  margin-bottom: 4px;
 }
 .dash-att-heading {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-high);
-  margin-top: 3px;
+  letter-spacing: var(--tracking-heading);
+  margin-top: 2px;
 }
 .dash-att-list { display: flex; flex-direction: column; }
 .dash-att-row {
   display: grid;
   grid-template-columns: 4px minmax(0, 1fr) auto;
-  gap: 14px;
+  gap: var(--space-3);
   align-items: center;
-  padding: 12px 8px;
+  padding: 8px;
   margin: 0 -8px;
   border-radius: 10px;
   cursor: pointer;
@@ -4895,7 +4831,7 @@ tr.pending-flash {
 .dash-att-row:hover + .dash-att-row::before { border-top-color: transparent; }
 .dash-stripe {
   width: 4px;
-  height: 38px;
+  height: 32px;
   border-radius: 4px;
   background: var(--text-dim);
 }
@@ -4905,7 +4841,7 @@ tr.pending-flash {
 .dash-stripe.sev-low      { background: var(--severity-low); }
 .dash-att-main { min-width: 0; }
 .dash-att-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text-high);
   overflow: hidden;
@@ -4915,9 +4851,9 @@ tr.pending-flash {
 .dash-att-meta {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-top: 2px;
-  font-size: 12px;
+  gap: var(--space-2);
+  margin-top: 1px;
+  font-size: var(--font-size-sm);
   color: var(--text-dim);
   min-width: 0;
   white-space: nowrap;
@@ -4929,24 +4865,12 @@ tr.pending-flash {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.dash-sev {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 3px 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-.dash-sev.sev-critical { color: var(--severity-critical); background: var(--severity-critical-bg); }
-.dash-sev.sev-high     { color: var(--severity-high);     background: var(--severity-high-bg); }
-.dash-sev.sev-medium   { color: var(--severity-medium);   background: var(--severity-medium-bg); }
-.dash-sev.sev-low      { color: var(--severity-low);      background: var(--severity-low-bg); }
-.dash-att-more { align-self: flex-start; margin: 6px 0 4px; }
+.dash-att-more { align-self: flex-start; margin: 4px 0 2px; }
 .dash-att-clear {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 18px 0;
+  padding: var(--space-4) 0;
   font-size: 13px;
   color: var(--text-body);
 }
@@ -4958,92 +4882,18 @@ tr.pending-flash {
   flex: 0 0 auto;
 }
 
-/* --- Zone 2: stat strip ------------------------------------------ */
-.dash-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  overflow: hidden;
-}
-.dash-stat {
-  padding: 16px 22px;
-  border-left: 1px solid var(--bg-4);
-  min-width: 0;
-}
-.dash-stat:first-child { border-left: none; }
-.dash-stat[role="button"] { cursor: pointer; }
-.dash-stat[role="button"]:hover { background: var(--bg-3); }
-.dash-stat-k {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-dim);
-}
-.dash-stat-v {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.2;
-  margin-top: 2px;
-  color: var(--text-high);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.5px;
-}
-.dash-stat-v small {
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-dim);
-  letter-spacing: 0;
-}
-.dash-stat-crit { color: var(--severity-critical); }
-.dash-stat-d {
-  font-size: 12px;
-  margin-top: 1px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dash-stat-d.bad  { color: var(--severity-critical); }
-.dash-stat-d.good { color: var(--status-ok); }
-.dash-stat-d.flat { color: var(--text-dim); }
-
 /* --- Zone 3: history + severity ---------------------------------- */
-.dash-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 18px;
-  min-width: 0;
-}
-.dash-panel {
-  padding: 18px 20px;
-  min-width: 0;
-}
-.dash-panel h3 {
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--text-high);
-}
-.dash-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
 .dash-chart-wrap {
   position: relative;
-  height: 200px;
-  margin-top: 14px;
+  height: 168px;
+  margin-top: var(--space-3);
 }
-.dash-panel-empty {
-  padding: 28px 0 18px;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.dash-panel-empty-sm { padding: 8px 0 2px; font-size: 12px; }
 
 .dash-sevbar {
   display: flex;
   gap: 2px;
-  height: 12px;
-  margin-top: 16px;
+  height: 10px;
+  margin-top: var(--space-3);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -5055,8 +4905,8 @@ tr.pending-flash {
 .dash-sevkey {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 20px;
-  margin-top: 16px;
+  gap: 6px 20px;
+  margin-top: var(--space-3);
 }
 .dash-sevkey-row {
   display: flex;
@@ -5077,13 +4927,13 @@ tr.pending-flash {
   color: var(--text-high);
 }
 
-.dash-offenders-label { margin-top: 22px; }
-.dash-offenders { margin-top: 6px; }
+.dash-offenders-label { margin-top: var(--space-4); }
+.dash-offenders { margin-top: 4px; }
 .dash-off-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 9px 0;
+  padding: 7px 0;
   border-top: 1px solid var(--bg-4);
   min-width: 0;
 }
@@ -5099,35 +4949,46 @@ tr.pending-flash {
 .dash-off-last { font-size: 11.5px; color: var(--text-dim); flex: 0 0 auto; }
 .dash-off-ct {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--text-body);
   white-space: nowrap;
 }
 .dash-off-ct.top { color: var(--severity-critical); font-weight: 600; }
 
+/* --- Getting started: steps flow across instead of one tall list -- */
+.dash-page > .onboard-card .onboard-head { margin-bottom: var(--space-2); }
+.dash-page > .onboard-card .onboard-progress-bar { margin-bottom: var(--space-2); background: var(--bg-4); }
+.dash-page > .onboard-card .onboard-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0 var(--space-6);
+}
+.dash-page > .onboard-card .onboard-step { padding: 4px 2px; }
+
 /* --- Empty account: first-run hero ------------------------------- */
 .dash-firstrun {
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-columns: 148px minmax(0, 1fr);
   align-items: center;
-  gap: 36px;
-  padding: 36px 40px;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-8);
 }
 .dash-firstrun-gauge {
   position: relative;
-  width: 176px;
-  height: 176px;
+  width: 148px;
+  height: 148px;
 }
 .dash-firstrun-q {
-  font-size: 56px;
+  font-size: 48px;
   font-weight: 700;
   line-height: 1;
   color: var(--bg-4);
 }
 .dash-firstrun-title {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-high);
+  letter-spacing: var(--tracking-display);
   margin: 4px 0 8px;
 }
 .dash-firstrun-sub {
@@ -5138,30 +4999,20 @@ tr.pending-flash {
 }
 .dash-firstrun .dash-score-actions { justify-content: flex-start; }
 .dash-firstrun-hint {
-  margin-top: 14px;
-  font-size: 12px;
+  margin-top: var(--space-3);
+  font-size: var(--font-size-sm);
   color: var(--text-dim);
 }
 
 /* --- Responsive ---------------------------------------------------
-   Breakpoints are viewport widths; the sidebar takes ~200px of them. */
-@media (max-width: 1180px) {
-  .dash-hero { grid-template-columns: minmax(0, 1fr); }
-  .dash-row  { grid-template-columns: minmax(0, 1fr); }
-  .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .dash-stat:nth-child(3) { border-left: none; }
-  .dash-stat:nth-child(n+3) { border-top: 1px solid var(--bg-4); }
-}
+   Column + stat-strip collapse lives in the kit (components.css). */
 @media (max-width: 640px) {
-  .dash-stats { grid-template-columns: minmax(0, 1fr); }
-  .dash-stat { border-left: none; }
-  .dash-stat + .dash-stat { border-top: 1px solid var(--bg-4); }
   .dash-firstrun {
     grid-template-columns: minmax(0, 1fr);
     justify-items: center;
     text-align: center;
     padding: 28px 20px;
-    gap: 12px;
+    gap: var(--space-3);
   }
   .dash-firstrun .dash-score-actions { justify-content: center; }
   .dash-att-head { flex-wrap: wrap; }

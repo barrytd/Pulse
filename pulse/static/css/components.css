@@ -676,7 +676,7 @@ body.light .admin-banner-close {
   font-size: 20px;
   font-weight: 600;
   color: var(--text);
-  letter-spacing: -0.1px;
+  letter-spacing: var(--tracking-display);
 }
 .page-head-actions {
   display: flex;
@@ -1448,7 +1448,7 @@ body.light .admin-banner-close {
   font-size: 20px;
   font-weight: 600;
   color: var(--text-high, var(--text));
-  letter-spacing: -0.1px;
+  letter-spacing: var(--tracking-display);
   margin: 0;
 }
 .page-title-count {
@@ -2010,3 +2010,169 @@ textarea.textarea-mono {
 textarea.textarea-mono:focus { outline: none; border-color: var(--accent); }
 a.link { color: var(--accent); text-decoration: none; cursor: pointer; }
 a.link:hover { text-decoration: underline; }
+/* ================================================================== */
+/* Shared surface kit                                                  */
+/*                                                                     */
+/* The card, spacing and type rules the dashboard is built from, as    */
+/* page-agnostic classes so other pages can adopt them. Only tokens    */
+/* from base.css; works in light and dark.                             */
+/*                                                                     */
+/*   .ui-stack          vertical stack of sections, --gap-section apart */
+/*   .ui-split          main column + side column (--aside-w); add      */
+/*                      .ui-split-aside-start to put the side first     */
+/*   .ui-card           elevated surface: soft shadow, big radius, no   */
+/*                      outline (a 1px ring in dark mode)               */
+/*   .ui-panel          padded card body; .ui-panel-head / h3 /         */
+/*                      .ui-panel-title / .ui-panel-empty inside        */
+/*   .ui-eyebrow        small uppercase section label                   */
+/*   .ui-sublabel       muted line under a title                        */
+/*   .ui-link           brand-colored inline action                     */
+/*   .ui-stats          stat strip; .ui-stat > .ui-stat-k / -v / -d     */
+/*   .ui-sev            severity tag (.sev-critical/high/medium/low)    */
+/*   .ui-text-critical  critical-colored number or word                 */
+/* ================================================================== */
+
+.ui-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-section);
+  min-width: 0;
+}
+.ui-stack > * { margin-top: 0; margin-bottom: 0; }
+
+.ui-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--aside-w);
+  gap: var(--gap-section);
+  min-width: 0;
+}
+.ui-split.ui-split-aside-start { grid-template-columns: var(--aside-w) minmax(0, 1fr); }
+
+.ui-card {
+  background: var(--bg-1);
+  border: none;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft);
+  min-width: 0;
+}
+/* Dark surfaces swallow shadows, so a 1px ring (a shadow, not a border)
+   keeps the edge readable without an outline. */
+[data-theme="dark"] .ui-card {
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--bg-3);
+}
+
+.ui-panel { padding: var(--pad-card); min-width: 0; }
+.ui-panel h3,
+.ui-panel-title {
+  font-size: var(--font-size-title);
+  font-weight: 600;
+  color: var(--text-high);
+  letter-spacing: var(--tracking-heading);
+}
+.ui-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.ui-panel-empty {
+  padding: var(--space-4) 0 var(--space-2);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.ui-panel-empty-sm { padding: var(--space-2) 0 2px; font-size: var(--font-size-sm); }
+
+.ui-eyebrow {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ui-sublabel {
+  font-size: var(--font-size-sm);
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.ui-link {
+  color: var(--brand);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui-link:hover { text-decoration: underline; }
+
+.ui-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+}
+.ui-stat {
+  padding: var(--space-3) var(--space-4);
+  border-left: 1px solid var(--bg-4);
+  min-width: 0;
+}
+.ui-stat:first-child { border-left: none; }
+.ui-stat[role="button"] { cursor: pointer; }
+.ui-stat[role="button"]:hover { background: var(--bg-3); }
+.ui-stat-k {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.ui-stat-v {
+  font-size: var(--font-size-stat);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 2px;
+  color: var(--text-high);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.ui-stat-v small {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
+.ui-stat-d {
+  font-size: var(--font-size-sm);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-stat-d.bad  { color: var(--severity-critical); }
+.ui-stat-d.good { color: var(--status-ok); }
+.ui-stat-d.flat { color: var(--text-dim); }
+.ui-text-critical { color: var(--severity-critical); }
+
+.ui-sev {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.ui-sev.sev-critical { color: var(--severity-critical); background: var(--severity-critical-bg); }
+.ui-sev.sev-high     { color: var(--severity-high);     background: var(--severity-high-bg); }
+.ui-sev.sev-medium   { color: var(--severity-medium);   background: var(--severity-medium-bg); }
+.ui-sev.sev-low      { color: var(--severity-low);      background: var(--severity-low-bg); }
+
+/* Breakpoints are viewport widths; the sidebar takes ~200px of them. */
+@media (max-width: 1180px) {
+  .ui-split,
+  .ui-split.ui-split-aside-start { grid-template-columns: minmax(0, 1fr); }
+  .ui-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ui-stat:nth-child(3) { border-left: none; }
+  .ui-stat:nth-child(n+3) { border-top: 1px solid var(--bg-4); }
+}
+@media (max-width: 640px) {
+  .ui-stats { grid-template-columns: minmax(0, 1fr); }
+  .ui-stat { border-left: none; }
+  .ui-stat + .ui-stat { border-top: 1px solid var(--bg-4); }
+}

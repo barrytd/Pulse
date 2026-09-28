@@ -5,6 +5,26 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 1: Inter + shared surface kit
+
+- **Inter, bundled.** The UI now uses Inter 5.3.0 (variable weight, Latin + Latin Extended, SIL OFL 1.1), vendored in `pulse/static/vendor/inter/` (about 130 KB) and declared in `inter/inter.css`. The dashboard, login and landing pages all link it, and `--font-body` starts with `'Inter'`, so every page picks it up. Nothing loads from a font CDN; the app still renders fully offline, and other scripts fall back to system fonts.
+- **Tighter headings.** New `--tracking-heading` (-0.015em) and `--tracking-display` (-0.022em) tokens apply to `h1`–`h6`, page titles, card titles and the topbar crumb.
+- **Dashboard fits about one screen.** With data, the hero, stat strip, score history and severity panels now end around 915px at 1440px wide (was about 1,230px for the same account):
+  - section gaps 18 → 12px and card padding 16px
+  - the "no scans in this window" score ring shrinks (176 → 104px), and the scored ring to 148px
+  - tighter needs-attention rows, stat strip and chart (200 → 168px)
+  - "Last updated" moves into the filter bar instead of taking its own row
+  - the Getting started steps flow across one line instead of a tall list
+
+  Checked in headless Chrome, light and dark, at 1440px and 420px, for a populated account, one with no scans in the selected window, and an empty account. No horizontal scroll at 420px.
+- **Shared surface kit.** The dashboard's card, spacing, type and stat-strip rules moved out of `dashboard.css` into page-agnostic `.ui-*` classes in `components.css`: `.ui-stack`, `.ui-split`, `.ui-card`, `.ui-panel` (+ head / title / empty), `.ui-eyebrow`, `.ui-sublabel`, `.ui-link`, `.ui-stats` / `.ui-stat-*`, `.ui-sev`, `.ui-text-critical`. They're backed by new tokens in `base.css` (`--gap-section`, `--pad-card`, `--aside-w`, `--font-size-xs/sm/title/stat`). The dashboard now uses them, and `dashboard.css` keeps only dashboard-specific rules. Other pages aren't restyled yet.
+- Tests: new [`tests/test_ui_foundation.py`](tests/test_ui_foundation.py) checks that:
+  - the font files are real WOFF2 with their license, `@font-face` points only at local files, and they're served
+  - every HTML shell links the font, and no page or stylesheet references a font CDN or remote stylesheet
+  - headings use the tracking token
+  - every `.ui-*` class the dashboard uses is defined, only in `components.css`, from tokens (no raw colors), with dark-mode and narrow-screen rules
+  - `dashboard.css` no longer keeps its own copies
+
 ## 2026-09-27 — Tickets + outbound webhook (SOAR phase 3, part 3; phase 3 complete)
 
 - **Open a ticket from a playbook.** New response connector **Ticket (ClickUp / Jira)** (`pulse/connectors/ticketing.py`), action "Open a ticket" with a title, an optional description and an optional priority (ClickUp only). Bring your own token and list (ClickUp) or site, email, API token and project key (Jira Cloud; a Jira server on your own network needs "allow private" turned on). The result carries the new ticket's link.

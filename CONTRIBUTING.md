@@ -219,13 +219,14 @@ The dashboard is a single-page app under [`pulse/static/js/`](pulse/static/js/).
 3. **Register the SPA route** — add the same name to `_SPA_PAGES` in [`pulse/api.py`](pulse/api.py) so deep links and refreshes (`/yourpage`) load the dashboard instead of 404ing. [`tests/test_frontend_regressions.py`](tests/test_frontend_regressions.py) fails if `validPages` and `_SPA_PAGES` drift apart.
 4. **Add the nav item** — sidebar links live in `pulse/web/index.html`. Match the existing pattern (Lucide icon + `data-action="navigate" data-arg="yourpage"`).
 5. **Follow the existing page anatomy**: page header → KPI tile strip → filter bar → primary list/table → detail drawer. The [universal drawer primitive](pulse/static/js/drawer.js) and the filter chip framework are reusable — don't roll your own.
+6. **Build new layout from the shared surface kit** in [`components.css`](pulse/static/css/components.css) (the "Shared surface kit" block), the same classes the dashboard uses: `.ui-stack` (sections spaced by `--gap-section`), `.ui-split` (main + side column), `.ui-card` (elevated card, light and dark), `.ui-panel` with `.ui-panel-head` / `h3` / `.ui-panel-empty`, `.ui-eyebrow` / `.ui-sublabel` / `.ui-link` for type, `.ui-stats` for a stat strip and `.ui-sev` for severity tags. It collapses at 1180px and 640px on its own. Keep kit rules in `components.css` only and page-specific rules in the page's own stylesheet; [`tests/test_ui_foundation.py`](tests/test_ui_foundation.py) checks both.
 
 ---
 
 ## Code style
 
 - **Python** — PEP 8. snake_case for function names, dataclasses for record types where ownership matters. Docstrings on every public function. Type hints welcome but not required.
-- **JavaScript** — ES modules, no transpiler. `function` declarations for top-level handlers; arrow functions inside callbacks. No frameworks. Use the design tokens in [`pulse/static/css/`](pulse/static/css/) (CSS variables) rather than hardcoded colors / spacing.
+- **JavaScript** — ES modules, no transpiler. `function` declarations for top-level handlers; arrow functions inside callbacks. No frameworks. Use the design tokens in [`pulse/static/css/`](pulse/static/css/) (CSS variables) rather than hardcoded colors / spacing. The font is `var(--font-body)` (bundled Inter); don't add another font or load one from a CDN.
 - **HTML escaping** — **every** user-supplied string rendered into the dashboard must go through `escapeHtml()` (exported from `pulse/static/js/dashboard.js`). The security-hardening audit (2026-05-14) checked all 20 JS modules; new pages must keep that 100%.
 - **SQL** — parameterized queries (`?` for SQLite, `%s` for Postgres via the `db_backend.py` adapter) for every value. The codebase has zero string-concatenated SQL with user input; new code keeps that bar.
 
