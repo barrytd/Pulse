@@ -69,22 +69,23 @@ export async function renderHistoryPage() {
   var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
   c.innerHTML =
-    '<div class="page-head">' +
-      '<div class="page-head-title"><strong>' + scans.length + '</strong> scans tracked</div>' +
+    '<div class="ui-page-head">' +
+      '<div><h1 class="ui-page-title">History</h1>' +
+        '<div class="ui-sublabel">' + scans.length + ' scan' + (scans.length === 1 ? '' : 's') + ' tracked</div></div>' +
       '<div class="page-head-actions">' +
         '<button class="btn btn-primary btn-with-icon" data-action="openUploadModal">' +
           '<i data-lucide="upload"></i><span>Upload .evtx</span></button>' +
       '</div>' +
     '</div>' +
 
-    '<div class="summary-row">' +
+    '<div class="ui-stats ui-stats-tiles summary-row">' +
       _trendStatCard('Average Score', avg, 'Across all scans', null, _accentForScore(avg === '-' ? null : avg), scoreColorClass(avg === '-' ? null : avg)) +
       _trendStatCard('Best Score',  best, 'Highest recorded', null, 'accent-info', scoreColorClass(best === '-' ? null : best)) +
       _trendStatCard('Worst Score', worst, 'Lowest recorded', null, 'accent-critical', scoreColorClass(worst === '-' ? null : worst)) +
       _trendStatCard('Total Scans', scans.length, 'Runs to date', null, 'accent-neutral') +
     '</div>' +
 
-    '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="card">' +
       '<div class="section-label">Security Score Trend</div>' +
       '<div class="score-chart-wrap" style="height:220px;"><canvas id="history-line-chart"></canvas></div>' +
     '</div>' +
@@ -121,7 +122,7 @@ function _buildComparePanel(scans) {
   var defaultA = scans[1] ? scans[1].id : '';
   var defaultB = scans[0] ? scans[0].id : '';
 
-  return '<div class="card" style="margin-bottom:16px;">' +
+  return '<div class="card">' +
     '<div class="section-label">Compare scans</div>' +
     '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' +
       '<label style="font-size:11px; text-transform:uppercase; letter-spacing:0.7px; color:var(--text-muted);">Before</label>' +

@@ -36,11 +36,10 @@ export async function renderTrendsPage() {
   var sev = data.severity_breakdown || {};
 
   c.innerHTML =
-    '<div class="page-head">' +
-      '<div class="page-head-title">' +
-        '<strong>' + totals.this_window + '</strong> finding' +
-          (totals.this_window === 1 ? '' : 's') + ' in the ' + escapeHtml(windowLabel) +
-      '</div>' +
+    '<div class="ui-page-head">' +
+      '<div><h1 class="ui-page-title">Trends</h1>' +
+        '<div class="ui-sublabel">' + totals.this_window + ' finding' +
+          (totals.this_window === 1 ? '' : 's') + ' in the ' + escapeHtml(windowLabel) + '</div></div>' +
       '<div class="page-head-actions">' +
         '<select id="trends-window" oninput="window.__trendsChangeWindow(this.value)" ' +
                 'style="padding:6px 10px; border-radius:6px; background:var(--bg); ' +
@@ -52,21 +51,21 @@ export async function renderTrendsPage() {
       '</div>' +
     '</div>' +
 
-    '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">' +
+    '<div class="ui-stats ui-stats-tiles">' +
       _statCard('This window',      totals.this_window, 'findings in ' + windowLabel) +
       _statCard('Previous window',  totals.prev_window, 'same length, one step back') +
       _deltaCard(totals.delta_pct) +
-      _statCard('CRITICAL + HIGH',  (sev.CRITICAL || 0) + (sev.HIGH || 0), 'top-severity findings in window') +
+      _statCard('Critical + high',  (sev.CRITICAL || 0) + (sev.HIGH || 0), 'top-severity findings in window') +
     '</div>' +
 
-    '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="card">' +
       '<div class="section-label">Daily finding volume</div>' +
       '<div style="height:260px; position:relative;">' +
         '<canvas id="trends-daily-chart"></canvas>' +
       '</div>' +
     '</div>' +
 
-    '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">' +
+    '<div class="ui-split ui-split-even">' +
       '<div class="card">' +
         '<div class="section-label">Severity breakdown</div>' +
         _renderSeverityTable(sev) +
@@ -103,38 +102,33 @@ function _windowOpt(n, cur) {
   return '<option value="' + n + '"' + sel + '>Last ' + n + ' days</option>';
 }
 
+// Kit stat tiles (.ui-card .ui-stat), like every other page's KPIs.
 function _statCard(label, value, sub) {
-  return '<div style="border:1px solid var(--border); border-radius:6px; padding:14px; background:var(--bg);">' +
-           '<div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:1px;">' +
-             escapeHtml(label) +
-           '</div>' +
-           '<div style="font-size:26px; font-weight:700; color:var(--accent); margin:4px 0 2px;">' +
-             escapeHtml(String(value)) +
-           '</div>' +
-           '<div style="color:var(--text-muted); font-size:12px;">' + escapeHtml(sub) + '</div>' +
+  return '<div class="ui-card ui-stat">' +
+           '<div class="ui-stat-k">' + escapeHtml(label) + '</div>' +
+           '<div class="ui-stat-v mono">' + escapeHtml(String(value)) + '</div>' +
+           '<div class="ui-stat-d flat">' + escapeHtml(sub) + '</div>' +
          '</div>';
 }
 
 function _deltaCard(pct) {
   var body;
   if (pct === null || pct === undefined) {
-    body = '<div style="font-size:26px; font-weight:700; color:var(--text-muted); margin:4px 0 2px;">n/a</div>' +
-           '<div style="color:var(--text-muted); font-size:12px;">no prior-window data</div>';
+    body = '<div class="ui-stat-v mono ui-text-dim">n/a</div>' +
+           '<div class="ui-stat-d flat">no prior-window data</div>';
   } else {
     var up = pct > 0;
     // More findings isn't necessarily bad (it could mean Pulse is seeing
     // more log data), but for a security dashboard "up" usually reads as
-    // worse — so paint the arrow red when findings climb.
-    var color = up ? 'var(--severity-high, #f85149)' : (pct < 0 ? 'var(--severity-low, #10b981)' : 'var(--text-muted)');
+    // worse, so the value takes the high-severity color when findings climb.
+    var tone = up ? 'ui-text-high' : (pct < 0 ? 'ui-text-low' : 'ui-text-dim');
     var arrow = up ? '\u2191' : (pct < 0 ? '\u2193' : '\u2192');
     var sign = (pct > 0) ? '+' : '';
-    body = '<div style="font-size:26px; font-weight:700; color:' + color + '; margin:4px 0 2px;">' +
-             arrow + ' ' + sign + pct + '%' +
-           '</div>' +
-           '<div style="color:var(--text-muted); font-size:12px;">vs. previous window</div>';
+    body = '<div class="ui-stat-v mono ' + tone + '">' + arrow + ' ' + sign + pct + '%</div>' +
+           '<div class="ui-stat-d flat">vs. previous window</div>';
   }
-  return '<div style="border:1px solid var(--border); border-radius:6px; padding:14px; background:var(--bg);">' +
-           '<div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:1px;">Window delta</div>' +
+  return '<div class="ui-card ui-stat">' +
+           '<div class="ui-stat-k">Window delta</div>' +
            body +
          '</div>';
 }
@@ -151,8 +145,8 @@ function _renderSeverityTable(sev) {
       '<td style="padding:6px 10px;"><span class="badge badge-' + k.toLowerCase() + '">' + k + '</span></td>' +
       '<td style="padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums;"><strong>' + n + '</strong></td>' +
       '<td style="padding:6px 10px; width:55%;">' +
-        '<div style="height:8px; background:var(--bg); border-radius:4px; overflow:hidden;">' +
-          '<div style="width:' + pct + '%; height:100%; background:var(--accent);"></div>' +
+        '<div style="height:8px; background:var(--bg-4); border-radius:4px; overflow:hidden;">' +
+          '<div style="width:' + pct + '%; height:100%; background:var(--severity-' + k.toLowerCase() + ');"></div>' +
         '</div>' +
       '</td>' +
     '</tr>';

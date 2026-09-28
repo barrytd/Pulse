@@ -50,12 +50,13 @@ export async function renderCompliancePage() {
   var gapsCard = _renderCoverageGaps(gaps);
 
   c.innerHTML =
-    '<div class="page-head">' +
-      '<div class="page-head-title">Coverage across compliance frameworks</div>' +
+    '<div class="ui-page-head">' +
+      '<div><h1 class="ui-page-title">Compliance</h1>' +
+        '<div class="ui-sublabel">Coverage across compliance frameworks</div></div>' +
     '</div>' +
     gapKpi +
     hero +
-    '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="card">' +
       '<div class="section-label">NIST Cybersecurity Framework</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
         'Detection rules grouped by the five CSF functions. A rule counts as ' +
@@ -66,7 +67,7 @@ export async function renderCompliancePage() {
         nistCards +
       '</div>' +
     '</div>' +
-    '<div class="card" style="margin-bottom:16px;">' +
+    '<div class="card">' +
       '<div class="section-label">ISO 27001 Annex A</div>' +
       '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
         'Pulse rules grouped by Annex A clause. Blank clauses mean no current ' +
@@ -183,7 +184,7 @@ function _renderCoverageGaps(gaps) {
   // Three sub-panels stacked. Each renders its own empty-state copy so a
   // clean install (zero of any kind) reads as "you're good" rather than
   // an unexplained absence of content.
-  return '<div class="card" style="margin-bottom:16px;">' +
+  return '<div class="card">' +
     '<div class="section-label">Coverage gaps</div>' +
     '<p style="color:var(--text-muted); font-size:13px; margin:0 0 14px;">' +
       'Three signals worth reviewing. Compliance percentages above only count ' +
@@ -329,7 +330,7 @@ function _renderHero(rules) {
   var enabledPct  = total ? (enabled  / total) * 100 : 0;
   var disabledPct = total ? (disabled / total) * 100 : 0;
 
-  return '<div class="card compliance-hero" style="margin-bottom:16px;">' +
+  return '<div class="card compliance-hero">' +
     '<div class="compliance-gauge">' +
       '<svg viewBox="0 0 140 140" width="140" height="140">' +
         '<circle cx="70" cy="70" r="56" fill="none" stroke="var(--bg-3, #30363d)" stroke-width="12"></circle>' +
@@ -382,7 +383,7 @@ function _renderNistCards(nist) {
           }).join('') +
         '</ul>'
       : '<p style="color:var(--text-muted); font-size:12px; margin:6px 0 0;">No rules mapped.</p>';
-    return '<div style="border:1px solid var(--border); border-radius:6px; padding:14px; background:var(--bg);">' +
+    return '<div class="ui-inset">' +
              '<div style="font-weight:600; font-size:14px;">' + escapeHtml(label) + '</div>' +
              '<div style="font-size:22px; font-weight:700; color:' + (total ? 'var(--accent)' : 'var(--text-muted)') + '; margin:4px 0 2px;">' +
                bucket.enabled + ' / ' + total +
@@ -412,7 +413,7 @@ function _renderIsoCards(iso) {
           }).join('') +
         '</ul>'
       : '';
-    return '<div style="border:1px solid var(--border); border-radius:6px; padding:14px; background:var(--bg);">' +
+    return '<div class="ui-inset">' +
              '<div style="font-weight:600; font-size:14px;">' + escapeHtml(label) + '</div>' +
              '<div style="font-size:22px; font-weight:700; color:var(--accent); margin:4px 0 2px;">' +
                bucket.enabled + ' / ' + total +

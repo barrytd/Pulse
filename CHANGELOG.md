@@ -5,6 +5,24 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 2, batch 4: Reports, History, Trends, Compliance
+
+- **Page titles are the page name.** History, Trends and Compliance used a sentence as the title ("38 scans tracked", "119 findings in the last 30 days", "Coverage across compliance frameworks"). Each now shows its name as the title with that sentence as a sublabel beneath it. Reports keeps "Reports".
+- **Reports:**
+  - The KPI strip is kit tiles; its icons are gone and so are the one-off `reports-kpi` styles. This fixes the Reports sideways scroll at 420px (it had no narrow-screen rule).
+  - Report-type cards are kit cards that keep their category color as a left accent edge, with a ring on hover.
+- **History:** the stat row is kit tiles (the `summary-row` grid rules are gone).
+- **Trends:**
+  - The four stat cards are kit tiles instead of inline-styled boxes. The window delta keeps its meaning: up shows in the high-severity color, down in the low.
+  - Severity breakdown and Top hosts sit in an even two-up, and the severity bars take their severity's color, like the dashboard.
+- **Compliance:**
+  - The framework boxes are the new kit `.ui-inset` (a flat block inside a card) instead of outlined wells.
+  - The coverage-gaps card is a kit card with its tone as a left edge, and the gap rows use an inset fill instead of outlines. Colors come from tokens.
+- **Spacing:** top-level cards on these pages drop their inline `margin-bottom:16px`, which stacked on the page rhythm into about 28px gaps.
+- **Kit:** new `.ui-inset` (the flat inset block that a card inside a card already rendered as) and a `.ui-text-dim` tone.
+- Styling and layout only; no behavior changed. Checked in light and dark at 1440px and 420px, with no sideways scroll.
+- Tests: `tests/test_ui_foundation.py` checks the four page titles, the kit tile strips, that the one-off strips, inline boxes and extra margins are gone, the Trends severity colors, and `.ui-inset`.
+
 ## 2026-09-27 — Look-and-feel pass, part 2, batch 3: Monitor, Security Advisor, Threat Intel
 
 - **Monitor:**

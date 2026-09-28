@@ -2004,6 +2004,7 @@ a.link:hover { text-decoration: underline; }
 /*   .ui-split          main column + side column (--aside-w); add      */
 /*                      .ui-split-aside-start to put the side first,    */
 /*                      or .ui-split-even for two equal columns         */
+/*   .ui-inset          flat inset block inside a card (no elevation)   */
 /*   .ui-card           elevated surface: soft shadow, big radius, no   */
 /*                      outline (a 1px ring in dark mode). The legacy   */
 /*                      .card shares it.                                */
@@ -2019,7 +2020,7 @@ a.link:hover { text-decoration: underline; }
 /*                      .ui-stats-auto to fit any count (min 160px)     */
 /*   .ui-sev            severity tag (.sev-critical/high/medium/low)    */
 /*   .ui-text-critical  critical-colored number or word; also -high,    */
-/*                      -medium, -low, -warn, -ok, -info                */
+/*                      -medium, -low, -warn, -ok, -info, -dim          */
 /*   .ui-table          hairline table: quiet header, no zebra, hover   */
 /*                      tint (the legacy .data-table shares it)         */
 /* ================================================================== */
@@ -2085,10 +2086,16 @@ a.link:hover { text-decoration: underline; }
   min-width: 0;
 }
 /* A card inside a card is a flat inset block, not a second elevation. */
+.ui-inset,
 .ui-card .card,
 .card .card {
   background: var(--bg-3);
   box-shadow: none;
+}
+.ui-inset {
+  border-radius: 10px;
+  padding: var(--pad-card);
+  min-width: 0;
 }
 
 .ui-panel { padding: var(--pad-card); min-width: 0; }
@@ -2186,6 +2193,7 @@ a.link:hover { text-decoration: underline; }
 .ui-text-warn     { color: var(--status-warn); }
 .ui-text-ok       { color: var(--status-ok); }
 .ui-text-info     { color: var(--accent); }
+.ui-text-dim      { color: var(--text-dim); }
 
 /* Tile variant: no shared card or dividers; each .ui-stat is its own
    .ui-card in an even grid. */

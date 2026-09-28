@@ -173,22 +173,18 @@ function _updateDeleteBar() {
 
 function _kpiTilesHtml() {
   var k = _kpisCache || {};
-  // Icon + number + label, matching the Findings + Fleet KPI tile
-  // component so the Reports page reads as part of the same app.
-  function tile(icon, num, label) {
-    return '<div class="reports-kpi">' +
-      '<div class="reports-kpi-icon"><i data-lucide="' + icon + '"></i></div>' +
-      '<div class="reports-kpi-text">' +
-        '<div class="reports-kpi-num">' + num + '</div>' +
-        '<div class="reports-kpi-label">' + label + '</div>' +
-      '</div>' +
+  // Kit stat tiles, the same as every other page's KPI strip.
+  function tile(num, label) {
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + label + '</div>' +
+      '<div class="ui-stat-v mono">' + num + '</div>' +
     '</div>';
   }
-  return '<div class="reports-kpi-strip">' +
-    tile('file-text',        (k.total || 0),          'Total reports') +
-    tile('file-badge',       (k.pdf || 0),            'PDF reports') +
-    tile('calendar-days',    (k.this_week || 0),      'This week') +
-    tile('database',         _formatBytes(k.storage_bytes), 'Storage used') +
+  return '<div class="ui-stats ui-stats-tiles">' +
+    tile((k.total || 0),          'Total reports') +
+    tile((k.pdf || 0),            'PDF reports') +
+    tile((k.this_week || 0),      'This week') +
+    tile(_formatBytes(k.storage_bytes), 'Storage used') +
   '</div>';
 }
 
@@ -455,8 +451,8 @@ export async function renderReportsPage() {
   var deleteBarStyle = nSelected > 0 ? 'flex' : 'none';
 
   var headHtml =
-    '<div class="page-head">' +
-      '<div class="page-head-title">Reports</div>' +
+    '<div class="ui-page-head">' +
+      '<h1 class="ui-page-title">Reports</h1>' +
       '<div class="page-head-actions">' +
         '<button class="btn btn-primary btn-with-icon" data-action="openGenerateReportModal" data-arg="threat_detection_summary">' +
           '<i data-lucide="file-plus-2"></i><span>Generate Report</span></button>' +

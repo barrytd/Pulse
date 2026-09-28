@@ -301,3 +301,40 @@ class TestBatch3:
         assert re.search(r"\.ui-stats\.ui-stats-auto\s*\{\s*grid-template-columns:\s*repeat\(auto-fit", kit)
         for tone in ("high", "medium", "low"):
             assert re.search(r"\.ui-text-%s\s*\{\s*color:\s*var\(--severity-%s\)" % (tone, tone), kit)
+
+
+# ---------------------------------------------------------------------------
+# Part 2, batch 4: Reports, History, Trends, Compliance
+# ---------------------------------------------------------------------------
+
+class TestBatch4:
+    @pytest.mark.parametrize("page,title", [("reports", "Reports"), ("history", "History"),
+                                            ("trends", "Trends"), ("compliance", "Compliance")])
+    def test_page_title_is_the_page_name(self, page, title):
+        assert '<h1 class="ui-page-title">%s</h1>' % title in _read(JS / (page + ".js"))
+
+    @pytest.mark.parametrize("page", ["reports", "history", "trends"])
+    def test_kpi_strip_is_kit_tiles(self, page):
+        assert "ui-stats ui-stats-tiles" in _read(JS / (page + ".js"))
+
+    def test_one_off_strips_and_inline_boxes_are_gone(self):
+        assert "reports-kpi" not in _read(JS / "reports.js")
+        assert not re.search(r"\.reports-kpi|\.summary-row\s*\{", _read(CSS / "dashboard.css"))
+        assert "summary-row {" not in _read(CSS / "base.css") and ".summary-row { grid" not in _read(CSS / "base.css")
+        t = _read(JS / "trends.js")
+        old_box = "border:1px solid var(--border); border-radius:6px; padding:14px"
+        assert old_box not in t
+        c = _read(JS / "compliance.js")
+        assert old_box not in c and c.count('class="ui-inset"') == 2
+        # Top-level cards rely on the page rhythm, not their own margins.
+        for page in ("trends", "history", "compliance"):
+            assert "margin-bottom:16px" not in _read(JS / (page + ".js")), page
+
+    def test_trends_severity_bars_use_severity_colors(self):
+        t = _read(JS / "trends.js")
+        fn = t.split("function _renderSeverityTable(sev)", 1)[1].split("\n}", 1)[0]
+        assert "var(--severity-' + k.toLowerCase() + ')" in fn
+
+    def test_kit_inset_block(self):
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        assert re.search(r"\.ui-inset,\s*\.ui-card \.card,\s*\.card \.card\s*\{", kit)
