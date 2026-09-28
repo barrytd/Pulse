@@ -43,17 +43,17 @@ function _dueCell(due) {
 
 function _kpiTilesHtml(k) {
   k = k || {};
-  function tile(icon, num, label, cls) {
-    return '<div class="q-kpi ' + (cls || '') + '">' +
-      '<div class="q-kpi-icon"><i data-lucide="' + icon + '"></i></div>' +
-      '<div class="q-kpi-text"><div class="q-kpi-num">' + num + '</div>' +
-      '<div class="q-kpi-label">' + label + '</div></div></div>';
+  function tile(num, label, tone) {
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + label + '</div>' +
+      '<div class="ui-stat-v mono' + (tone ? ' ' + tone : '') + '">' + num + '</div>' +
+    '</div>';
   }
-  return '<div class="q-kpi-strip">' +
-    tile('inbox',        (k.in_queue || 0),       'In queue', '') +
-    tile('alert-circle', (k.overdue || 0),        'Overdue', (k.overdue ? 'q-kpi-red' : '')) +
-    tile('calendar-clock', (k.due_today || 0),    'Due today', (k.due_today ? 'q-kpi-amber' : '')) +
-    tile('check-circle-2', (k.resolved_today || 0), 'Resolved today', 'q-kpi-green') +
+  return '<div class="ui-stats ui-stats-tiles">' +
+    tile((k.in_queue || 0),       'In queue', '') +
+    tile((k.overdue || 0),        'Overdue', (k.overdue ? 'ui-text-critical' : '')) +
+    tile((k.due_today || 0),      'Due today', (k.due_today ? 'ui-text-warn' : '')) +
+    tile((k.resolved_today || 0), 'Resolved today', (k.resolved_today ? 'ui-text-ok' : '')) +
   '</div>';
 }
 
@@ -94,8 +94,8 @@ export async function renderMyQueuePage() {
   }
   var rows = _cache.queue || [];
   c.innerHTML =
-    '<div class="page-head">' +
-      '<div class="page-head-title">My Queue</div>' +
+    '<div class="ui-page-head">' +
+      '<h1 class="ui-page-title">My Queue</h1>' +
     '</div>' +
     _kpiTilesHtml(_cache.kpis) +
     '<div class="card">' +

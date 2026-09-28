@@ -5,6 +5,25 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 2, batch 2: My Queue, Team, Findings, finding drawer
+
+- **My Queue:** the KPI strip is kit stat tiles (`.ui-stats-tiles`), and "My Queue" is a real page title. Overdue shows in the critical color, due today in warn, resolved in ok. The tile icons are gone, since Lucide stays in the chrome only, and the one-off `q-kpi` styles are removed.
+- **Team:** gets a "Team" page title in every state (loading, no access, empty, list), like the other pages.
+- **Findings:**
+  - The sticky filter bar (shared with Audit Log, Fleet and Firewall) is a kit card with the soft shadow and edge ring, instead of a fixed-height 40px outline. At 420px its chips spilled out and overlapped the table; they now wrap onto their own row under a full-width search.
+  - The scan-detail header uses kit tiles.
+- **Finding drawer:**
+  - It pushes the page aside where there's room. At 1100px and below it now overlays with its backdrop (which already closes it) instead of pushing, so opening it on a phone no longer scrolls the page sideways.
+  - The drawer sits on the card surface with a hairline edge.
+- **Shared, used by most pages:**
+  - Tables (`.data-table`) take the new kit `.ui-table` look: a quiet uppercase header, hairline rows and a hover tint, with no zebra striping or grey header band.
+  - The `statCard()` / `_trendStatCard()` helpers (Findings scan header, History, Monitor) render kit tiles; the colored left edge is gone, since the value's color already says it.
+  - Score colors (`.score-*`) read from tokens.
+  - New kit tones `.ui-text-warn`, `.ui-text-ok` and `.ui-text-info`, and a three-tile variant `.ui-stats-3`.
+- Styling and layout only; no behavior changed. Checked every page in light and dark at 1440px and 420px. Only the three known later-batch overflows remain (Reports, Fleet, Settings).
+- README: new Findings screenshot. The finding-drawer screenshot still shows the old shell, because it includes a live Pip answer and regenerating it needs a real call to Anthropic's API.
+- Tests: `tests/test_ui_foundation.py` covers the Queue tiles (no icons, old styles gone), the stat helpers rendering kit tiles, the Team title, the kit table (no zebra), the wrapping filter bar and the narrow-screen drawer overlay.
+
 ## 2026-09-27 — Look-and-feel pass, part 2, batch 1: every page on the kit's frame, cards and titles
 
 The first part-2 batch works at the shared level, so every page moves at once; the page batches that follow convert each page's own KPI strips and layouts.

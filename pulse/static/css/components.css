@@ -1570,15 +1570,20 @@ body.light .admin-banner-close {
   z-index: 8;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  height: 40px;
-  padding: 0 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin-bottom: 0;
+  background: var(--bg-1);
+  border: none;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--card-edge);
 }
 .filter-bar-search {
-  flex: 0 0 240px;
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 320px;
   height: 28px;
   padding: 0 10px;
   background: var(--card-bg);
@@ -1588,9 +1593,13 @@ body.light .admin-banner-close {
   font-size: 13px;
   outline: none;
 }
+@media (max-width: 640px) {
+  .filter-bar-search { max-width: none; }
+}
 .filter-bar-search:focus { border-color: var(--accent); }
 .filter-bar-chips {
-  flex: 1;
+  /* Sits beside the search; wraps onto its own row when narrow. */
+  flex: 1 1 280px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2006,9 +2015,12 @@ a.link:hover { text-decoration: underline; }
 /*   .ui-link           brand-colored inline action                     */
 /*   .ui-stats          stat strip; .ui-stat > .ui-stat-k / -v / -d.    */
 /*                      .ui-stats-tiles: an even grid, each stat its    */
-/*                      own .ui-card tile                               */
+/*                      own .ui-card tile; .ui-stats-3 for three        */
 /*   .ui-sev            severity tag (.sev-critical/high/medium/low)    */
-/*   .ui-text-critical  critical-colored number or word                 */
+/*   .ui-text-critical  critical-colored number or word; also -warn,    */
+/*                      -ok, -info                                      */
+/*   .ui-table          hairline table: quiet header, no zebra, hover   */
+/*                      tint (the legacy .data-table shares it)         */
 /* ================================================================== */
 
 .ui-page {
@@ -2167,6 +2179,9 @@ a.link:hover { text-decoration: underline; }
 .ui-stat-d.good { color: var(--status-ok); }
 .ui-stat-d.flat { color: var(--text-dim); }
 .ui-text-critical { color: var(--severity-critical); }
+.ui-text-warn     { color: var(--status-warn); }
+.ui-text-ok       { color: var(--status-ok); }
+.ui-text-info     { color: var(--accent); }
 
 /* Tile variant: no shared card or dividers; each .ui-stat is its own
    .ui-card in an even grid. */
@@ -2180,6 +2195,43 @@ a.link:hover { text-decoration: underline; }
   padding: var(--pad-card);
 }
 .ui-stats-tiles > .ui-stat[role="button"] { transition: background 0.12s; }
+.ui-stats.ui-stats-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* Tables: quiet uppercase header, hairline rows, a hover tint, no
+   zebra striping (the dashboard's list look). */
+.ui-table,
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ui-table thead th,
+.data-table thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bg-4);
+  background: transparent;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  user-select: none;
+}
+.ui-table tbody td,
+.data-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--bg-4);
+  vertical-align: middle;
+  line-height: 16px;
+}
+.ui-table tbody tr:last-child td,
+.data-table tbody tr:last-child td { border-bottom: none; }
+.ui-table tbody tr,
+.data-table tbody tr { transition: background 150ms ease; }
+.ui-table tbody tr:hover td,
+.data-table tbody tr:hover td { background: var(--hover-bg); }
 
 .ui-sev {
   font-size: 10.5px;
@@ -2198,7 +2250,7 @@ a.link:hover { text-decoration: underline; }
 @media (max-width: 1180px) {
   .ui-split.ui-split-aside-start,
   .ui-split:not(.ui-split-even) { grid-template-columns: minmax(0, 1fr); }
-  .ui-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ui-stats:not(.ui-stats-3) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ui-stat:nth-child(3) { border-left: none; }
   .ui-stat:nth-child(n+3) { border-top: 1px solid var(--bg-4); }
 }
@@ -2207,7 +2259,8 @@ a.link:hover { text-decoration: underline; }
   .ui-split.ui-split-even { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
-  .ui-stats:not(.ui-stats-tiles) { grid-template-columns: minmax(0, 1fr); }
+  .ui-stats:not(.ui-stats-tiles),
+  .ui-stats.ui-stats-3 { grid-template-columns: minmax(0, 1fr); }
   .ui-stat { border-left: none; }
   .ui-stat + .ui-stat { border-top: 1px solid var(--bg-4); }
 }

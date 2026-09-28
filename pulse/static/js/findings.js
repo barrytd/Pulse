@@ -79,7 +79,7 @@ export async function viewScan(scanId, opts) {
 
   c.innerHTML =
     '<div class="back-link" data-action="navigate" data-arg="history">\u2190 Back to History</div>' +
-    '<div class="scan-header">' +
+    '<div class="ui-stats ui-stats-tiles scan-header">' +
       statCard('File', fname, scan ? (scan.hostname || '') : '', '') +
       statCard('Score', scan ? (scan.score != null ? scan.score : '-') : '-', scan ? (scan.score_label || '') : '', scan ? scoreColorClass(scan.score) : '') +
       statCard('Findings', findings.length, 'In this scan', '') +

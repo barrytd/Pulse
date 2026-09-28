@@ -12,47 +12,11 @@
   margin-bottom: 16px;
   min-width: 0;
 }
-.stat-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--text-muted);
-  border-radius: 6px;
-  padding: 12px 16px;
-  box-shadow: var(--shadow);
-  transition: background 150ms ease;
-}
-
+/* statCard() / _trendStatCard() render kit tiles (.ui-card .ui-stat);
+   .stat-card stays as the hook for the clickable / selected states. */
 .stat-card.stat-card-clickable { cursor: pointer; }
 .stat-card.stat-card-clickable:hover,
 .stat-card.selected { background: var(--hover-bg); }
-
-/* Left-border accent variants — Splunk-style status colour */
-.stat-card.accent-critical { border-left-color: #f85149; }
-.stat-card.accent-high     { border-left-color: #f0883e; }
-.stat-card.accent-medium   { border-left-color: #d29922; }
-.stat-card.accent-info     { border-left-color: var(--accent); }
-.stat-card.accent-neutral  { border-left-color: #8b949e; }
-
-.stat-card .label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-
-.stat-card .value {
-  font-size: 26px;
-  font-weight: 700;
-  margin: 2px 0 0 0;
-  line-height: 1.1;
-}
-
-.stat-card .sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
 
 /* Trend pill under each stat card value */
 .trend {
@@ -156,11 +120,11 @@
   height: auto;
 }
 
-.score-secure  { color: #10b981; }
-.score-low     { color: #3b82f6; }
-.score-medium  { color: #f59e0b; }
+.score-secure  { color: var(--status-ok); }
+.score-low     { color: var(--severity-low); }
+.score-medium  { color: var(--severity-medium); }
 .score-high    { color: #ef4444; }
-.score-critical { color: #dc2626; }
+.score-critical { color: var(--severity-critical); }
 
 /* ------------------------------------------------------------------ */
 /* Live monitor panel                                                   */
@@ -1077,15 +1041,7 @@
 .scan-row { cursor: pointer; }
 .scan-row:hover td { background: var(--hover-row); }
 
-/* Scan detail header */
-.scan-header {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-.scan-header .stat-card { flex: 1; min-width: 150px; }
+/* Scan detail header: a kit tile strip (.ui-stats .ui-stats-tiles). */
 
 /* History page — grouped day rows */
 .history-group {

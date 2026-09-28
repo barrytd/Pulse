@@ -215,3 +215,54 @@ class TestAppShell:
         active = _block(sidebar, ".sidebar-nav.active")
         assert "var(--nav-active-bg)" in active
         assert re.search(r"--nav-active-bg:\s*var\(--brand-soft\)", _read(CSS / "base.css"))
+
+
+# ---------------------------------------------------------------------------
+# Part 2, batch 2: My Queue, Team, Findings, finding drawer
+# ---------------------------------------------------------------------------
+
+JS = STATIC / "js"
+
+
+class TestBatch2:
+    def test_queue_uses_kit_tiles_without_icons(self):
+        q = _read(JS / "queue.js")
+        assert '"ui-stats ui-stats-tiles"' in q and '"ui-card ui-stat"' in q
+        assert "q-kpi" not in q and "data-lucide" not in q
+        # The one-off KPI styles are gone.
+        for f in CSS.glob("*.css"):
+            assert "q-kpi" not in _read(f), f.name
+
+    def test_shared_stat_helpers_render_kit_tiles(self):
+        d = _read(JS / "dashboard.js")
+        for fn in ("export function statCard(", "export function _trendStatCard("):
+            body = d.split(fn, 1)[1].split("\n}\n", 1)[0]
+            assert "ui-card ui-stat stat-card" in body and "ui-stat-k" in body and "ui-stat-v" in body
+        assert '"ui-stats ui-stats-tiles scan-header"' in _read(JS / "findings.js")
+
+    def test_team_page_has_a_page_title(self):
+        d = _read(JS / "dashboard.js")
+        team = d.split("export async function renderTeamPage(", 1)[1].split("\n}\n", 1)[0]
+        assert '<h1 class="ui-page-title">Team</h1>' in team
+        assert team.count("head +") == 4       # loading, no access, empty, list
+
+    def test_tables_are_the_kit_table(self):
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        assert re.search(r"\.ui-table,\s*\.data-table\s*\{", kit)
+        # Hairline rows, no zebra striping anywhere for .data-table.
+        for f in CSS.glob("*.css"):
+            assert not re.search(r"\.data-table tbody tr:nth-child\(even\)", _read(f)), f.name
+
+    def test_list_filter_bar_wraps_instead_of_overflowing(self):
+        comp = _css_rules_without_comments(_read(CSS / "components.css"))
+        bars = re.findall(r"\.filter-bar\s*\{([^}]*)\}", comp)
+        sticky = next(b for b in bars if "sticky" in b)
+        assert "flex-wrap: wrap" in sticky
+        assert not re.search(r"(?<!-)height:\s*40px", sticky)
+        assert "var(--card-edge)" in sticky
+
+    def test_drawer_overlays_where_it_cannot_push(self):
+        f = _css_rules_without_comments(_read(CSS / "findings.css"))
+        m = re.search(r"@media \(max-width: (\d+)px\)\s*\{\s*body\.flyout-push-open \.findings-page\s*\{\s*padding-right:\s*0", f)
+        assert m and int(m.group(1)) >= 900
+        assert "body.flyout-push-open .finding-drawer-backdrop { display: block; }" in f

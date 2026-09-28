@@ -278,11 +278,14 @@ export function downloadReport(scanId, target, e) {
 // ---------------------------------------------------------------
 // Shared HTML builders
 // ---------------------------------------------------------------
+// Stat tiles are the kit's (.ui-card .ui-stat inside a .ui-stats
+// .ui-stats-tiles grid); .stat-card is kept as the hook for clickable /
+// selected states.
 export function statCard(label, value, sub, colorClass) {
-  return '<div class="stat-card">' +
-    '<div class="label">' + label + '</div>' +
-    '<div class="value ' + (colorClass || '') + '">' + value + '</div>' +
-    '<div class="sub">' + (sub || '') + '</div></div>';
+  return '<div class="ui-card ui-stat stat-card">' +
+    '<div class="ui-stat-k">' + label + '</div>' +
+    '<div class="ui-stat-v ' + (colorClass || '') + '">' + value + '</div>' +
+    '<div class="ui-stat-d flat">' + (sub || '') + '</div></div>';
 }
 
 // ---------------------------------------------------------------
@@ -578,12 +581,14 @@ export function _trendStatCard(label, value, sub, trend, accentClass, valueColor
   var kindAttr = statKind
     ? ' data-action="clickStatCard" data-arg="' + statKind + '" data-stat-kind="' + statKind + '" role="button" tabindex="0"'
     : '';
-  return '<div class="stat-card ' + (accentClass || 'accent-neutral') +
+  // accentClass is accepted for callers' sake; kit tiles carry no
+  // colored edge (the value's color says it).
+  return '<div class="ui-card ui-stat stat-card' +
          (statKind ? ' stat-card-clickable' : '') + '"' + kindAttr + '>' +
-    '<div class="label">' + label + '</div>' +
-    '<div class="value ' + (valueColorClass || '') + '">' + value + '</div>' +
+    '<div class="ui-stat-k">' + label + '</div>' +
+    '<div class="ui-stat-v ' + (valueColorClass || '') + '">' + value + '</div>' +
     _renderTrend(trend) +
-    (sub ? '<div class="sub">' + sub + '</div>' : '') +
+    (sub ? '<div class="ui-stat-d flat">' + sub + '</div>' : '') +
   '</div>';
 }
 
@@ -1285,25 +1290,26 @@ function _teamWorkloadCardHtml(analysts) {
 export async function renderTeamPage() {
   var c = document.getElementById('content');
   if (!c) return;
-  c.innerHTML = '<div class="card"><div class="section-label">Team Workload</div>' +
+  var head = '<div class="ui-page-head"><h1 class="ui-page-title">Team</h1></div>';
+  c.innerHTML = head + '<div class="card"><div class="section-label">Team Workload</div>' +
     '<p style="color:var(--text-muted); margin:8px 0 0;">Loading the team…</p></div>';
 
   var analysts = null;
   try { analysts = await _fetchTeamWorkload(); } catch (e) { analysts = null; }
 
   if (analysts === null) {
-    c.innerHTML = '<div class="card"><div class="section-label">Team Workload</div>' +
+    c.innerHTML = head + '<div class="card"><div class="section-label">Team Workload</div>' +
       '<p style="color:var(--text-muted); margin:8px 0 0;">You don’t have access to the ' +
       'team view. This page is for managers and admins.</p></div>';
     return;
   }
   if (!analysts.length) {
-    c.innerHTML = '<div class="card"><div class="section-label">Team Workload</div>' +
+    c.innerHTML = head + '<div class="card"><div class="section-label">Team Workload</div>' +
       '<p style="color:var(--text-muted); margin:8px 0 0;">No analysts have assigned ' +
       'work yet. Assign findings from the Findings page and they’ll show up here.</p></div>';
     return;
   }
-  c.innerHTML = _teamWorkloadCardHtml(analysts);
+  c.innerHTML = head + _teamWorkloadCardHtml(analysts);
 }
 
 // Deep-link to an analyst's findings. Lazy-import navigation.js to avoid a

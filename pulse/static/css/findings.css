@@ -86,8 +86,8 @@
   bottom: 0;
   width: 460px;
   max-width: 92vw;
-  background: var(--card-bg);
-  border-left: 1px solid var(--border);
+  background: var(--bg-1);
+  border-left: 1px solid var(--shell-line);
   box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25);
   z-index: 250;
   transform: translateX(100%);
@@ -270,39 +270,6 @@
 /* ------------------------------------------------------------------
  * My Queue page — analyst daily work surface
  * ------------------------------------------------------------------ */
-.q-kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.q-kpi {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-}
-.q-kpi-icon {
-  flex: 0 0 auto;
-  width: 36px; height: 36px;
-  border-radius: 8px;
-  background: var(--accent-glow);
-  color: var(--accent);
-  display: flex; align-items: center; justify-content: center;
-}
-.q-kpi-icon i { width: 18px; height: 18px; }
-.q-kpi-text { display: flex; flex-direction: column; gap: 2px; }
-.q-kpi-num   { font-size: 22px; font-weight: 700; line-height: 1.1; }
-.q-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
-.q-kpi-red   .q-kpi-icon { background: rgba(248,81,73,0.15);  color: #f85149; }
-.q-kpi-red   .q-kpi-num  { color: #f85149; }
-.q-kpi-amber .q-kpi-icon { background: rgba(210,153,34,0.15); color: #d29922; }
-.q-kpi-amber .q-kpi-num  { color: #d29922; }
-.q-kpi-green .q-kpi-icon { background: rgba(63,185,80,0.15);  color: #3fb950; }
-
 /* Priority badge (P1 worst -> P4) */
 .q-pri {
   display: inline-block;
@@ -336,10 +303,6 @@
 }
 .q-status-investigating { color: #d29922; }
 .q-status-acknowledged  { color: var(--accent); }
-
-@media (max-width: 900px) {
-  .q-kpi-strip { grid-template-columns: repeat(2, 1fr); }
-}
 
 /* Collapsible "Technical details" — collapsed by default so the drawer
    opens on the human-readable summary. The summary row reuses .sec-label
@@ -797,49 +760,12 @@
 .col-status { white-space: nowrap; }
 .col-host   { white-space: nowrap; font-family: var(--mono, monospace); font-size: 12px; color: var(--text-muted); }
 
-/* Splunk-style data table — alternating rows, hover, colored left border */
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.data-table thead th {
-  text-align: left;
-  font-weight: 600;
-  color: var(--text-muted);
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  user-select: none;
-}
-
+/* .data-table: the table look (header, hairlines, hover) is the kit's
+   .ui-table in components.css; only its extras live here. */
 .data-table thead th.sortable { cursor: pointer; }
 .data-table thead th.sortable:hover { color: var(--text); }
-
-.data-table tbody tr {
-  transition: background 150ms ease;
-}
-
-.data-table tbody tr:nth-child(even) td { background: var(--hover-row); }
-.data-table tbody tr:hover td { background: var(--hover-bg); }
 .data-table tbody tr.clickable,
 .data-table tbody tr[data-action] { cursor: pointer; }
-
-.data-table tbody td {
-  /* 36px target row height (10px vertical + ~16px line) with 12px
-     horizontal padding — the shared density for every list page. */
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-  line-height: 16px;
-}
-
-.data-table tbody tr.clickable { cursor: pointer; }
 
 /* Severity-left-border variant for rows on findings tables */
 .data-table tbody tr.sev-row td:first-child {
@@ -1962,6 +1888,11 @@ body.flyout-push-open .findings-page { padding-right: 460px; }
  * ================================================================== */
 body.flyout-push-open .finding-drawer-backdrop { display: none; }
 body.flyout-push-open .finding-drawer { box-shadow: none; }
+@media (max-width: 1100px) {
+  body.flyout-push-open .findings-page { padding-right: 0; }
+  body.flyout-push-open .finding-drawer-backdrop { display: block; }
+  body.flyout-push-open .finding-drawer { box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25); }
+}
 
 /* Investigate panel (finding drawer): verdicts from every enrichment
    connector, grouped by indicator. Pills reuse the .soar-pill tones. */
