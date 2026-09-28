@@ -24,25 +24,29 @@ function _diffPill(diff) {
 
 function _postureCard(p) {
   var t = p.totals || {};
-  return '<div class="advisor-page-card">' +
-    '<div class="advisor-page-posture">' + escapeHtml(p.posture || '') + '</div>' +
-    '<div class="advisor-totals">' +
-      '<div class="advisor-total"><span class="advisor-total-num">' + (t.critical || 0) + '</span>' +
-        '<span class="advisor-total-label sev-critical">Critical</span></div>' +
-      '<div class="advisor-total"><span class="advisor-total-num">' + (t.high || 0) + '</span>' +
-        '<span class="advisor-total-label sev-high">High</span></div>' +
-      '<div class="advisor-total"><span class="advisor-total-num">' + (t.medium || 0) + '</span>' +
-        '<span class="advisor-total-label sev-medium">Medium</span></div>' +
-      '<div class="advisor-total"><span class="advisor-total-num">' + (t.low || 0) + '</span>' +
-        '<span class="advisor-total-label sev-low">Low</span></div>' +
+  function tile(n, label, tone) {
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + label + '</div>' +
+      '<div class="ui-stat-v mono' + (n ? ' ' + tone : '') + '">' + n + '</div>' +
+    '</div>';
+  }
+  // Posture sentence in its own card, the four counts as kit tiles
+  // beneath it (tiles inside a card would stack two elevations).
+  return '<div class="ui-card ui-panel advisor-page-card">' +
+      '<div class="advisor-page-posture">' + escapeHtml(p.posture || '') + '</div>' +
     '</div>' +
-  '</div>';
+    '<div class="ui-stats ui-stats-tiles advisor-totals">' +
+      tile(t.critical || 0, 'Critical', 'ui-text-critical') +
+      tile(t.high || 0, 'High', 'ui-text-high') +
+      tile(t.medium || 0, 'Medium', 'ui-text-medium') +
+      tile(t.low || 0, 'Low', 'ui-text-low') +
+    '</div>';
 }
 
 function _concernsCard(concerns) {
   if (!concerns || !concerns.length) {
-    return '<div class="advisor-page-card">' +
-      '<div class="advisor-page-section-label">Top concerns</div>' +
+    return '<div class="ui-card ui-panel advisor-page-card">' +
+      '<div class="ui-eyebrow advisor-page-section-label">Top concerns</div>' +
       '<div class="advisor-empty">No unresolved findings right now. Nothing demands attention.</div>' +
     '</div>';
   }
@@ -68,8 +72,8 @@ function _concernsCard(concerns) {
         : '') +
     '</div>';
   }).join('');
-  return '<div class="advisor-page-card">' +
-    '<div class="advisor-page-section-label">Top concerns (ranked by impact and how easy they are to pull off)</div>' +
+  return '<div class="ui-card ui-panel advisor-page-card">' +
+    '<div class="ui-eyebrow advisor-page-section-label">Top concerns (ranked by impact and how easy they are to pull off)</div>' +
     rows +
   '</div>';
 }
@@ -93,8 +97,8 @@ function _conceptsCard(concepts) {
       '</div>' +
     '</details>';
   }).join('');
-  return '<div class="advisor-page-card">' +
-    '<div class="advisor-page-section-label">Security concepts (read before you need them)</div>' +
+  return '<div class="ui-card ui-panel advisor-page-card">' +
+    '<div class="ui-eyebrow advisor-page-section-label">Security concepts (read before you need them)</div>' +
     cards +
   '</div>';
 }
@@ -119,8 +123,8 @@ function _checklistCard(items) {
       '<span class="advisor-check-status">' + status + '</span>' +
     '</div>';
   }).join('');
-  return '<div class="advisor-page-card">' +
-    '<div class="advisor-page-section-label">Hardening checklist (Windows essentials)</div>' +
+  return '<div class="ui-card ui-panel advisor-page-card">' +
+    '<div class="ui-eyebrow advisor-page-section-label">Hardening checklist (Windows essentials)</div>' +
     rows +
   '</div>';
 }
@@ -137,10 +141,10 @@ export async function renderSecurityAdvisorPage() {
     return;
   }
   c.innerHTML =
-    '<div class="advisor-page">' +
-      '<div class="advisor-page-header">' +
-        '<h2 class="advisor-page-title">Security Advisor</h2>' +
-        '<div class="advisor-page-sub">Pulse explains what your findings mean and what to do about them.</div>' +
+    '<div class="ui-stack advisor-page">' +
+      '<div class="ui-page-head advisor-page-header">' +
+        '<div><h1 class="ui-page-title">Security Advisor</h1>' +
+        '<div class="ui-sublabel">Pulse explains what your findings mean and what to do about them.</div></div>' +
       '</div>' +
       _postureCard(_cache) +
       _concernsCard(_cache.top_concerns) +

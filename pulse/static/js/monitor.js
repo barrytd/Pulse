@@ -628,7 +628,7 @@ function _monitorIdlePanelHtml(sessions) {
       }).join('');
 
   return '<div class="live-feed empty mon-idle-panel" id="mon-live-feed">' +
-    '<div class="mon-idle-stats">' +
+    '<div class="ui-stats ui-stats-tiles ui-stats-3 mon-idle-stats">' +
       statCard('Sessions this week', weekSessions.length) +
       statCard('Findings all time', findingsAllTime) +
       statCard('Channels configured', configuredChannels) +
@@ -979,10 +979,10 @@ function _sparklineSvg(values, w, h, color) {
 }
 
 function _kpiTile(label, valueHtml, subHtml, sparkHtml) {
-  return '<div class="mon-kpi-tile">' +
-    '<div class="mon-kpi-label">' + label + '</div>' +
-    '<div class="mon-kpi-value">' + valueHtml + '</div>' +
-    (subHtml ? '<div class="mon-kpi-sub">' + subHtml + '</div>' : '') +
+  return '<div class="ui-card ui-stat mon-kpi-tile">' +
+    '<div class="ui-stat-k mon-kpi-label">' + label + '</div>' +
+    '<div class="ui-stat-v mon-kpi-value">' + valueHtml + '</div>' +
+    (subHtml ? '<div class="ui-stat-d flat mon-kpi-sub">' + subHtml + '</div>' : '') +
     (sparkHtml || '') +
   '</div>';
 }
@@ -998,10 +998,10 @@ function _connTile(state) {
   var valCls = ({
     live: 'ok', reconnecting: 'medium', disconnected: 'crit', idle: 'off',
   })[state] || 'off';
-  return '<div class="mon-kpi-tile">' +
-    '<div class="mon-kpi-label"><span class="mon-conn-dot ' + dotCls + '"></span>Stream</div>' +
-    '<div class="mon-kpi-value small ' + valCls + '">' + label + '</div>' +
-    '<div class="mon-kpi-sub">SSE /api/monitor/stream</div>' +
+  return '<div class="ui-card ui-stat mon-kpi-tile">' +
+    '<div class="ui-stat-k mon-kpi-label"><span class="mon-conn-dot ' + dotCls + '"></span>Stream</div>' +
+    '<div class="ui-stat-v mon-kpi-value small ' + valCls + '">' + label + '</div>' +
+    '<div class="ui-stat-d flat mon-kpi-sub">SSE /api/monitor/stream</div>' +
   '</div>';
 }
 
@@ -1032,7 +1032,7 @@ function _kpiStripHtml() {
              'resets at midnight'),
     _connTile(k.connState),
   ].join('');
-  return '<div class="mon-kpi-strip">' + tiles + '</div>';
+  return '<div class="ui-stats ui-stats-tiles ui-stats-auto mon-kpi-strip">' + tiles + '</div>';
 }
 
 // ---------- Histogram ----------
@@ -1097,9 +1097,9 @@ function _histogramHtml() {
     ? '<svg class="mon-histogram-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' + bars + '</svg>'
     : '<div class="mon-histogram-empty">No alerts in the last 2 hours.</div>';
 
-  return '<div class="mon-histogram-card" id="mon-histogram">' +
+  return '<div class="ui-card ui-panel mon-histogram-card" id="mon-histogram">' +
     '<div class="mon-histogram-header">' +
-      '<div class="mon-histogram-title">Last 2 hours — alerts by severity</div>' +
+      '<div class="ui-eyebrow">Last 2 hours — alerts by severity</div>' +
       '<div class="mon-histogram-meta">' + feed.length + ' event' + (feed.length === 1 ? '' : 's') + ' in buffer</div>' +
     '</div>' +
     body +
@@ -1118,8 +1118,8 @@ function _throughputCard() {
     if (prior > 0) delta = (recent / prior).toFixed(1) + 'x baseline';
     else if (recent > 0) delta = 'no prior baseline';
   }
-  return '<div class="mon-rail-card">' +
-    '<div class="mon-rail-title">Throughput' +
+  return '<div class="ui-card ui-panel mon-rail-card">' +
+    '<div class="ui-eyebrow mon-rail-title">Throughput' +
       '<span class="mon-rail-hint">' + (k.eventsPerMin || 0) + '/min</span>' +
     '</div>' +
     _sparklineSvg(spark, 280, 36, 'var(--accent)').replace('mon-kpi-spark', 'mon-rail-spark').replace('width="280"', 'width="100%"') +
@@ -1154,8 +1154,8 @@ function _topSourcesCard() {
           '</div>';
         }).join('') +
       '</div>';
-  return '<div class="mon-rail-card">' +
-    '<div class="mon-rail-title">Top Sources<span class="mon-rail-hint">last hour</span></div>' +
+  return '<div class="ui-card ui-panel mon-rail-card">' +
+    '<div class="ui-eyebrow mon-rail-title">Top Sources<span class="mon-rail-hint">last hour</span></div>' +
     body +
   '</div>';
 }
@@ -1203,8 +1203,8 @@ function _severityDonutCard() {
       '<span class="count">' + counts[sev] + '</span>' +
     '</div>';
   }).join('');
-  return '<div class="mon-rail-card">' +
-    '<div class="mon-rail-title">Severity<span class="mon-rail-hint">last 2h</span></div>' +
+  return '<div class="ui-card ui-panel mon-rail-card">' +
+    '<div class="ui-eyebrow mon-rail-title">Severity<span class="mon-rail-hint">last 2h</span></div>' +
     '<div class="mon-donut-wrap">' + svg + '<div class="mon-donut-legend">' + legend + '</div></div>' +
   '</div>';
 }
@@ -1236,8 +1236,8 @@ function _patternsCard() {
           '<div class="mon-pattern-count">' + r.count + '</div>' +
         '</div>';
       }).join('');
-  return '<div class="mon-rail-card">' +
-    '<div class="mon-rail-title">Patterns<span class="mon-rail-hint">' + escapeHtml(hint) + '</span></div>' +
+  return '<div class="ui-card ui-panel mon-rail-card">' +
+    '<div class="ui-eyebrow mon-rail-title">Patterns<span class="mon-rail-hint">' + escapeHtml(hint) + '</span></div>' +
     body +
   '</div>';
 }
@@ -1258,8 +1258,8 @@ function _sessionsMiniCard() {
   var testBtn = '<button class="live-btn" data-action="sendMonitorTestAlertFromRail" ' +
                 (active ? '' : 'disabled title="Start monitor to send a test alert"') +
                 '>Send test alert</button>';
-  return '<div class="mon-rail-card">' +
-    '<div class="mon-rail-title">Sessions<span class="mon-rail-hint">' +
+  return '<div class="ui-card ui-panel mon-rail-card">' +
+    '<div class="ui-eyebrow mon-rail-title">Sessions<span class="mon-rail-hint">' +
       (_monitorSessions ? _monitorSessions.length : 0) + ' total</span></div>' +
     lastHtml +
     '<div style="margin-top:10px;">' + testBtn + '</div>' +
@@ -1357,7 +1357,7 @@ function _monFeedCardHtml(feed, active) {
       '</div>' +
     '</div>';
 
-  return '<div class="mon-feed-card">' +
+  return '<div class="ui-card mon-feed-card">' +
     '<div class="mon-feed-head">' +
       '<div class="mon-feed-head-left">' +
         '<div class="live-dot ' + (active ? '' : 'idle') + '"></div>' +
@@ -1430,11 +1430,13 @@ export async function renderMonitorPage() {
     // live mode — surface it just above the live panel so users see it
     // before they hit Start.
     var platformWarning = (s.platform_supports_live === false)
-      ? '<div class="card" style="padding:10px 16px; margin-bottom:16px; color:#d29922; font-size:12px;">Live mode requires Windows \u2014 falling back to file mode.</div>'
+      ? '<div class="card ui-text-warn" style="font-size:12px;">Live mode requires Windows \u2014 falling back to file mode.</div>'
       : '';
 
     c.innerHTML =
-      '<div id="monitor-page-root">' +
+      '<div id="monitor-page-root" class="ui-stack">' +
+
+      '<div class="ui-page-head"><h1 class="ui-page-title">Monitor</h1></div>' +
 
       platformWarning +
 
@@ -1452,7 +1454,7 @@ export async function renderMonitorPage() {
 
       // Supporting cards below the hero bands — detail history
       // (Poll History, Sessions) stays out of the top-of-page bands.
-      '<div class="card mon-settings-card" style="margin-bottom:16px;">' +
+      '<div class="card mon-settings-card">' +
         '<div class="mon-settings-row ' + (_pollHistoryExpanded ? 'open' : '') + '" ' +
              'data-action="togglePollHistoryExpand" role="button" tabindex="0" ' +
              'aria-expanded="' + (_pollHistoryExpanded ? 'true' : 'false') + '">' +

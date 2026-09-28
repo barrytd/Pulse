@@ -266,3 +266,38 @@ class TestBatch2:
         m = re.search(r"@media \(max-width: (\d+)px\)\s*\{\s*body\.flyout-push-open \.findings-page\s*\{\s*padding-right:\s*0", f)
         assert m and int(m.group(1)) >= 900
         assert "body.flyout-push-open .finding-drawer-backdrop { display: block; }" in f
+
+
+# ---------------------------------------------------------------------------
+# Part 2, batch 3: Monitor, Security Advisor, Threat Intel
+# ---------------------------------------------------------------------------
+
+class TestBatch3:
+    def test_monitor_uses_kit_tiles_cards_and_a_title(self):
+        m = _read(JS / "monitor.js")
+        assert '"ui-stats ui-stats-tiles ui-stats-auto mon-kpi-strip"' in m
+        assert m.count("ui-card ui-stat mon-kpi-tile") == 2
+        assert m.count('ui-card ui-panel mon-rail-card') == 5
+        assert '"ui-card ui-panel mon-histogram-card"' in m and '"ui-card mon-feed-card"' in m
+        assert '<h1 class="ui-page-title">Monitor</h1>' in m
+        assert 'id="monitor-page-root" class="ui-stack"' in m
+        d = _css_rules_without_comments(_read(CSS / "dashboard.css"))
+        for cls in (".mon-kpi-tile", ".mon-rail-card", ".mon-histogram-card", ".mon-feed-card"):
+            for body in re.findall(re.escape(cls) + r"\s*\{([^}]*)\}", d):
+                assert "border:" not in body and "background:" not in body, cls
+
+    def test_advisor_uses_the_frame_and_kit_tiles(self):
+        a = _read(JS / "advisor.js")
+        assert '"ui-stack advisor-page"' in a and '<h1 class="ui-page-title">Security Advisor</h1>' in a
+        assert '"ui-stats ui-stats-tiles advisor-totals"' in a
+        for tone in ("ui-text-critical", "ui-text-high", "ui-text-medium", "ui-text-low"):
+            assert tone in a
+        f = _css_rules_without_comments(_read(CSS / "findings.css"))
+        assert "max-width: 960px" not in f      # no private narrower column
+        assert ".advisor-total {" not in f
+
+    def test_auto_fit_tile_strip_is_in_the_kit(self):
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        assert re.search(r"\.ui-stats\.ui-stats-auto\s*\{\s*grid-template-columns:\s*repeat\(auto-fit", kit)
+        for tone in ("high", "medium", "low"):
+            assert re.search(r"\.ui-text-%s\s*\{\s*color:\s*var\(--severity-%s\)" % (tone, tone), kit)

@@ -995,49 +995,18 @@
 /* -----------------------------------------------------------------
  * Security Advisor page
  * ----------------------------------------------------------------- */
-.advisor-page { max-width: 960px; margin: 0 auto; padding: 16px 0 32px; }
-.advisor-page-header { margin-bottom: 18px; }
-.advisor-page-title { margin: 0; font-size: 22px; }
-.advisor-page-sub   { color: var(--text-muted); margin-top: 4px; font-size: 13px; }
-.advisor-page-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 18px;
-  margin-bottom: 16px;
-}
-.advisor-page-section-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-}
+/* Layout, cards, title and labels come from the kit (.ui-stack,
+   .ui-page-head, .ui-card .ui-panel, .ui-eyebrow, .ui-stats-tiles). */
+.advisor-page-section-label { margin-bottom: 12px; }
 .advisor-page-posture {
   font-size: 16px;
   line-height: 1.55;
-  margin-bottom: 14px;
+  color: var(--text-high);
 }
-.advisor-totals {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-.advisor-total {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.04);
-}
-.advisor-total-num   { font-size: 24px; font-weight: 700; }
-.advisor-total-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
 
 .advisor-concern {
   padding: 14px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--bg-4);
 }
 .advisor-concern:last-child { border-bottom: none; }
 .advisor-concern-head {
@@ -1053,7 +1022,7 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #3b82f6;
+  background: var(--accent);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -1078,12 +1047,12 @@
   padding: 8px 0;
 }
 
+/* Concepts: a hairline list inside the card, not boxes in a box. */
 .advisor-concept {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--bg-4);
 }
+.advisor-page-section-label + .advisor-concept { border-top: none; }
 .advisor-concept summary {
   cursor: pointer;
   display: flex;

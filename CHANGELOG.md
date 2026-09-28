@@ -5,6 +5,22 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 2, batch 3: Monitor, Security Advisor, Threat Intel
+
+- **Monitor:**
+  - It gets a "Monitor" page title and stacks its bands with the kit rhythm instead of hand-set margins.
+  - The six KPI tiles are kit tiles in one auto-fitting strip: six across on desktop, two columns on a phone.
+  - The alerts histogram, event feed and right-rail panels are kit cards with kit labels, and the idle-panel stats use the three-tile variant.
+  - The one-off `mon-*` borders and backgrounds are gone. The live-update code targets ids, so nothing it touches changed.
+- **Security Advisor:**
+  - It drops its private 960px column and uses the page frame like every other page, with a kit title and subtitle.
+  - The four severity counts move out of the posture card into kit tiles in severity tones (tiles inside a card would stack two elevations).
+  - Cards and labels come from the kit, and the concepts list is hairline rows instead of boxes inside a box.
+- **Threat Intel:** grid gaps and card padding use the kit tokens. The page already matched the kit at both widths.
+- **Kit:** new `.ui-stats-auto` (a tile strip that fits any count, 160px minimum) and severity tones `.ui-text-high`, `.ui-text-medium` and `.ui-text-low`.
+- Styling and layout only; no behavior changed. Checked in light and dark at 1440px and 420px, with no sideways scroll.
+- Tests: `tests/test_ui_foundation.py` checks Monitor's tiles, cards, title and stack (and that its own card borders are gone), the Advisor's frame and severity tiles (and that its private column and grey boxes are gone), and the new kit variants.
+
 ## 2026-09-27 — Look-and-feel pass, part 2, batch 2: My Queue, Team, Findings, finding drawer
 
 - **My Queue:** the KPI strip is kit stat tiles (`.ui-stats-tiles`), and "My Queue" is a real page title. Overdue shows in the critical color, due today in warn, resolved in ok. The tile icons are gone, since Lucide stays in the chrome only, and the one-off `q-kpi` styles are removed.

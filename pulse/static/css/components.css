@@ -2015,10 +2015,11 @@ a.link:hover { text-decoration: underline; }
 /*   .ui-link           brand-colored inline action                     */
 /*   .ui-stats          stat strip; .ui-stat > .ui-stat-k / -v / -d.    */
 /*                      .ui-stats-tiles: an even grid, each stat its    */
-/*                      own .ui-card tile; .ui-stats-3 for three        */
+/*                      own .ui-card tile; .ui-stats-3 for three,       */
+/*                      .ui-stats-auto to fit any count (min 160px)     */
 /*   .ui-sev            severity tag (.sev-critical/high/medium/low)    */
-/*   .ui-text-critical  critical-colored number or word; also -warn,    */
-/*                      -ok, -info                                      */
+/*   .ui-text-critical  critical-colored number or word; also -high,    */
+/*                      -medium, -low, -warn, -ok, -info                */
 /*   .ui-table          hairline table: quiet header, no zebra, hover   */
 /*                      tint (the legacy .data-table shares it)         */
 /* ================================================================== */
@@ -2179,6 +2180,9 @@ a.link:hover { text-decoration: underline; }
 .ui-stat-d.good { color: var(--status-ok); }
 .ui-stat-d.flat { color: var(--text-dim); }
 .ui-text-critical { color: var(--severity-critical); }
+.ui-text-high     { color: var(--severity-high); }
+.ui-text-medium   { color: var(--severity-medium); }
+.ui-text-low      { color: var(--severity-low); }
 .ui-text-warn     { color: var(--status-warn); }
 .ui-text-ok       { color: var(--status-ok); }
 .ui-text-info     { color: var(--accent); }
@@ -2196,6 +2200,7 @@ a.link:hover { text-decoration: underline; }
 }
 .ui-stats-tiles > .ui-stat[role="button"] { transition: background 0.12s; }
 .ui-stats.ui-stats-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ui-stats.ui-stats-auto { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 
 /* Tables: quiet uppercase header, hairline rows, a hover tint, no
    zebra striping (the dashboard's list look). */
@@ -2250,7 +2255,7 @@ a.link:hover { text-decoration: underline; }
 @media (max-width: 1180px) {
   .ui-split.ui-split-aside-start,
   .ui-split:not(.ui-split-even) { grid-template-columns: minmax(0, 1fr); }
-  .ui-stats:not(.ui-stats-3) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ui-stats:not(.ui-stats-3):not(.ui-stats-auto) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ui-stat:nth-child(3) { border-left: none; }
   .ui-stat:nth-child(n+3) { border-top: 1px solid var(--bg-4); }
 }
