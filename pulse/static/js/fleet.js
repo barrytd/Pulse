@@ -52,7 +52,7 @@ function _selectOptions(opts, current) {
 function _filterBarHtml() {
   var risk = [['all', 'All risk'], ['critical', 'Critical'], ['high', 'High'], ['fair', 'Fair'], ['secure', 'Secure']];
   var status = [['all', 'All status'], ['online', 'Online'], ['stale', 'Stale'], ['offline', 'Offline']];
-  return '<div class="fleet-filter-bar">' +
+  return '<div class="ui-card ui-toolbar fleet-filter-bar">' +
     '<input type="search" id="fleet-search" class="dash-filter-search fleet-search" ' +
       'placeholder="Filter by hostname…" value="' + escapeHtml(_search) + '" ' +
       'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
@@ -170,10 +170,11 @@ export async function renderFleetPage() {
   }
 
   c.innerHTML =
-    '<div class="fleet-wrap">' +
-      '<div class="page-head">' +
-        '<div class="page-head-title"><strong>' + _fleetCache.length + '</strong> host' +
-          (_fleetCache.length === 1 ? '' : 's') + ' tracked</div>' +
+    '<div class="ui-stack fleet-wrap">' +
+      '<div class="ui-page-head">' +
+        '<div><h1 class="ui-page-title">Fleet</h1>' +
+          '<div class="ui-sublabel">' + _fleetCache.length + ' host' +
+          (_fleetCache.length === 1 ? '' : 's') + ' tracked</div></div>' +
       '</div>' +
       '<div id="fleet-filter-bar-wrap">' + _filterBarHtml() + '</div>' +
       '<div class="card fleet-table-card">' +

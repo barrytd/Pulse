@@ -249,13 +249,13 @@ function _auditKpiRowHtml(filtered) {
     if (r.comment)    targets.add(r.comment);
   });
   function tile(label, n, sub) {
-    return '<div class="kpi-tile" style="cursor:default;">' +
-      '<div class="kpi-tile-number">' + n.toLocaleString() + '</div>' +
-      '<div class="kpi-tile-label">' + escapeHtml(label) + '</div>' +
-      '<div class="kpi-tile-sub">' + escapeHtml(sub) + '</div>' +
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + escapeHtml(label) + '</div>' +
+      '<div class="ui-stat-v mono">' + n.toLocaleString() + '</div>' +
+      '<div class="ui-stat-d flat">' + escapeHtml(sub) + '</div>' +
     '</div>';
   }
-  return '<div class="kpi-row">' +
+  return '<div class="ui-stats ui-stats-tiles">' +
     tile('Events last 24h',  last24h, 'inside the current view') +
     tile('Failed actions',   failed,  'denials / errors') +
     tile('Distinct users',   users.size,   'unique actors') +

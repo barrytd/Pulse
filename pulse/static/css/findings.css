@@ -1797,7 +1797,7 @@
  * Findings page — Sentinel-style header (breadcrumb / title / KPIs /
  * severity bar / sticky filter bar) + push-flyout layout. Reusable
  * primitives (.page-header, .page-breadcrumb, .page-title-block,
- * .kpi-row + .kpi-tile, .sev-bar, .filter-bar, .filter-chip,
+ * .sev-bar, .filter-bar, .filter-chip,
  * .filter-chip-dd, .toggle-switch) live in components.css so other
  * list pages can adopt them.
  * ================================================================== */

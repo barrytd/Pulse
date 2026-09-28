@@ -59,7 +59,6 @@
   min-width: 0;
 }
 
-
 .dash-finding-row .finding-status-col {
   display: flex;
   justify-content: center;
@@ -2211,13 +2210,9 @@
    of the app (Findings, Audit Log, …) for cross-page consistency. */
 
 /* Top filter bar (search + risk + status + export) */
-.fleet-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-.fleet-search { width: 260px; flex: 0 0 auto; }
+/* The filter row is a kit card + toolbar (.ui-card .ui-toolbar), so it
+   wraps on narrow screens instead of pushing past the edge. */
+.fleet-search { flex: 1 1 220px; min-width: 0; max-width: 320px; }
 .fleet-filter-field {
   display: flex;
   align-items: center;
@@ -2232,7 +2227,9 @@
 .fleet-export-btn { margin-left: auto; }
 
 /* Table: constrained, fixed columns, aligned text vs numbers */
-.fleet-table { table-layout: fixed; width: 100%; }
+.fleet-table { table-layout: fixed; width: 100%; min-width: 720px; }
+/* Narrow screens scroll the table inside its card, not the page. */
+.fleet-table-card { overflow-x: auto; }
 .fleet-table thead th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .fleet-table thead th.sorted { color: var(--text); }
 .fleet-sort-arrow { font-size: 9px; color: var(--accent); }
@@ -2345,90 +2342,22 @@ tr.pending-flash {
   100% { background: transparent; }
 }
 
-.firewall-kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-.firewall-kpi-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.firewall-kpi-label {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 600;
-}
-.firewall-kpi-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text-high);
-  font-variant-numeric: tabular-nums;
-}
-.firewall-kpi-tile.tone-ok   .firewall-kpi-value { color: var(--status-ok); }
-.firewall-kpi-tile.tone-warn .firewall-kpi-value { color: var(--severity-medium); }
 @media (max-width: 640px) {
-  .firewall-kpi-strip { grid-template-columns: 1fr; }
-  .pending-banner { flex-direction: column; align-items: flex-start; }
-}
 
-/* ------------------------------------------------------------------ */
-/* Whitelist page — compact KPI strip (one tile per type + built-in)   */
-/* ------------------------------------------------------------------ */
-.whitelist-kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-.whitelist-kpi-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--space-3);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.whitelist-kpi-label {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 600;
-}
-.whitelist-kpi-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-high);
-  font-variant-numeric: tabular-nums;
-}
-.whitelist-kpi-tile.tone-info .whitelist-kpi-value { color: var(--severity-low); }
-.whitelist-kpi-tile.tone-off  .whitelist-kpi-value { color: var(--status-off); }
-@media (max-width: 1100px) {
-  .whitelist-kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (max-width: 640px) {
-  .whitelist-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pending-banner { flex-direction: column; align-items: flex-start; }
 }
 
 /* ------------------------------------------------------------------ */
 /* Whitelist empty state — first-run / cleared-out onboarding panel    */
 /* ------------------------------------------------------------------ */
 .wl-empty {
+  /* A kit card (surface, radius, soft shadow + edge ring). */
   text-align: center;
   padding: 48px 24px;
-  background: var(--card-bg, #161b22);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--bg-1);
+  border: none;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--card-edge);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2869,42 +2798,6 @@ tr.pending-flash {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
   font-size: 11.5px;
-}
-
-/* KPI strip — same density as the Whitelist KPI tiles, four columns. */
-.fw-kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.fw-kpi-tile {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-radius: 6px;
-  background: var(--card-bg);
-}
-.fw-kpi-tile.tone-neutral { border-left-color: var(--text-muted); }
-.fw-kpi-tile.tone-info    { border-left-color: #58a6ff; }
-.fw-kpi-tile.tone-ok      { border-left-color: #3fb950; }
-.fw-kpi-tile.tone-error   { border-left-color: #f85149; }
-.fw-kpi-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-.fw-kpi-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-@media (max-width: 900px) {
-  .fw-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Suspicious activity card — amber accent left border so it reads as

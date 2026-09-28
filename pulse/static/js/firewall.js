@@ -45,7 +45,9 @@ function _tabsBarHtml() {
       escapeHtml(label) +
     '</div>';
   }
-  return '<div class="scans-tabs">' +
+  // Page title sits above the tabs (every render path starts here).
+  return '<div class="ui-page-head"><h1 class="ui-page-title">Firewall</h1></div>' +
+    '<div class="scans-tabs">' +
     tab('block-list', 'Block List') +
     tab('rules',      'Firewall Rules') +
   '</div>';
@@ -120,24 +122,24 @@ function _renderBlockListTab() {
   }
 
   var kpiStrip =
-    '<div class="firewall-kpi-strip">' +
-      '<div class="firewall-kpi-tile tone-ok">' +
-        '<div class="firewall-kpi-label">Active</div>' +
-        '<div class="firewall-kpi-value">' + active + '</div>' +
+    '<div class="ui-stats ui-stats-tiles ui-stats-3">' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Active</div>' +
+        '<div class="ui-stat-v mono' + (active ? ' ui-text-ok' : '') + '">' + active + '</div>' +
       '</div>' +
-      '<div class="firewall-kpi-tile tone-warn">' +
-        '<div class="firewall-kpi-label">Pending push</div>' +
-        '<div class="firewall-kpi-value">' + pending + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Pending push</div>' +
+        '<div class="ui-stat-v mono' + (pending ? ' ui-text-warn' : '') + '">' + pending + '</div>' +
       '</div>' +
-      '<div class="firewall-kpi-tile tone-neutral">' +
-        '<div class="firewall-kpi-label">Total entries</div>' +
-        '<div class="firewall-kpi-value">' + total + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Total entries</div>' +
+        '<div class="ui-stat-v mono">' + total + '</div>' +
       '</div>' +
     '</div>';
 
   var head =
     '<div class="page-head">' +
-      '<div class="page-head-title">Block list</div>' +
+      '<h2 class="ui-panel-title">Block list</h2>' +
       '<div class="page-head-actions">' +
         '<button class="btn" data-action="firewallPushAll"' +
           (pending === 0 ? ' disabled' : '') + '>Push all pending</button>' +
@@ -401,13 +403,14 @@ function _fwIdleStateHtml() {
 
 function _fwKpiStripHtml() {
   var s = _fwLog.summary;
+  var tones = { ok: ' ui-text-ok', error: ' ui-text-critical', info: ' ui-text-info', neutral: '' };
   function tile(label, value, tone) {
-    return '<div class="fw-kpi-tile tone-' + tone + '">' +
-      '<div class="fw-kpi-label">' + escapeHtml(label) + '</div>' +
-      '<div class="fw-kpi-value">' + escapeHtml(String(value)) + '</div>' +
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + escapeHtml(label) + '</div>' +
+      '<div class="ui-stat-v mono' + (tones[tone] || '') + '">' + escapeHtml(String(value)) + '</div>' +
     '</div>';
   }
-  return '<div class="fw-kpi-strip">' +
+  return '<div class="ui-stats ui-stats-tiles">' +
     tile('Total Entries',     s.total.toLocaleString(),          'neutral') +
     tile('Allowed',           s.allowed.toLocaleString(),        'ok') +
     tile('Dropped',           s.dropped.toLocaleString(),        'error') +

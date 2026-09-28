@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 2, batch 5: Fleet, Firewall, Whitelist, Rules, Audit Log
+
+- **Page titles:** Fleet ("9 hosts tracked" moves to a sublabel), Firewall (a "Firewall" title above its Block List / Firewall Rules tabs, with "Block list" as the tab's section title) and Rules (it had none) now have page-name titles like every other page.
+- **KPI tiles:** Audit Log, the Firewall block list, the firewall-log summary and Whitelist all use kit tiles. The four one-off KPI families (the generic `kpi-row` / `kpi-tile` and the `firewall-kpi`, `fw-kpi` and `whitelist-kpi` families) are removed, about 40 rules. Tones map to the kit: active and allowed in ok, pending in warn, dropped in critical, the built-in whitelist count dimmed.
+- **Fleet at 420px:**
+  - The filter row is a kit card with the new `.ui-toolbar`, so it wraps instead of pushing the page sideways (the last known sideways scroll outside Settings).
+  - The host table keeps a 720px minimum and scrolls inside its card, so columns no longer overlap.
+- **Whitelist:** the empty-state panel is a kit card, and the add-entry card drops its extra inline margin.
+- **Kit:** new `.ui-toolbar`, a wrapping row of controls; pair it with `.ui-card` for a filter bar.
+- README: new Fleet screenshot with the host drawer open.
+- Styling and layout only; no behavior changed. Checked in light and dark at 1440px and 420px, with no sideways scroll.
+- Tests: `tests/test_ui_foundation.py` checks the three new titles, the kit tiles on Audit, Firewall and Whitelist, that the retired KPI families are gone from every stylesheet, and the wrapping Fleet filter bar and in-card table scroll.
+
 ## 2026-09-27 — Look-and-feel pass, part 2, batch 4: Reports, History, Trends, Compliance
 
 - **Page titles are the page name.** History, Trends and Compliance used a sentence as the title ("38 scans tracked", "119 findings in the last 30 days", "Coverage across compliance frameworks"). Each now shows its name as the title with that sentence as a sublabel beneath it. Reports keeps "Reports".

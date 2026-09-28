@@ -97,30 +97,30 @@ export async function renderWhitelistPage() {
     rules:    (wl.rules || []).length,
   };
   var kpiStripHtml =
-    '<div class="whitelist-kpi-strip">' +
-      '<div class="whitelist-kpi-tile tone-neutral">' +
-        '<div class="whitelist-kpi-label">Custom entries</div>' +
-        '<div class="whitelist-kpi-value">' + customRows.length + '</div>' +
+    '<div class="ui-stats ui-stats-tiles ui-stats-auto">' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Custom entries</div>' +
+        '<div class="ui-stat-v mono">' + customRows.length + '</div>' +
       '</div>' +
-      '<div class="whitelist-kpi-tile tone-info">' +
-        '<div class="whitelist-kpi-label">Accounts</div>' +
-        '<div class="whitelist-kpi-value">' + counts.accounts + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Accounts</div>' +
+        '<div class="ui-stat-v mono ui-text-info">' + counts.accounts + '</div>' +
       '</div>' +
-      '<div class="whitelist-kpi-tile tone-info">' +
-        '<div class="whitelist-kpi-label">Services</div>' +
-        '<div class="whitelist-kpi-value">' + counts.services + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Services</div>' +
+        '<div class="ui-stat-v mono ui-text-info">' + counts.services + '</div>' +
       '</div>' +
-      '<div class="whitelist-kpi-tile tone-info">' +
-        '<div class="whitelist-kpi-label">IPs</div>' +
-        '<div class="whitelist-kpi-value">' + counts.ips + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">IPs</div>' +
+        '<div class="ui-stat-v mono ui-text-info">' + counts.ips + '</div>' +
       '</div>' +
-      '<div class="whitelist-kpi-tile tone-info">' +
-        '<div class="whitelist-kpi-label">Rules</div>' +
-        '<div class="whitelist-kpi-value">' + counts.rules + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Rules</div>' +
+        '<div class="ui-stat-v mono ui-text-info">' + counts.rules + '</div>' +
       '</div>' +
-      '<div class="whitelist-kpi-tile tone-off">' +
-        '<div class="whitelist-kpi-label">Built-in</div>' +
-        '<div class="whitelist-kpi-value">' + builtin.length + '</div>' +
+      '<div class="ui-card ui-stat">' +
+        '<div class="ui-stat-k">Built-in</div>' +
+        '<div class="ui-stat-v mono ui-text-dim">' + builtin.length + '</div>' +
       '</div>' +
     '</div>';
 
@@ -136,7 +136,7 @@ export async function renderWhitelistPage() {
     '</div>' +
     kpiStripHtml +
 
-    '<div class="card form-column" style="margin-bottom:16px;">' +
+    '<div class="card form-column">' +
       '<div class="section-label">Add Entry</div>' +
       '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
         '<select id="wl-add-type" data-action-change="setWhitelistAddType" style="padding:8px 10px; background:var(--card-bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:13px;">' +

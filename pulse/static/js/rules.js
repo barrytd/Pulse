@@ -578,6 +578,7 @@ function _renderPage() {
       '</div>';
   }
   c.innerHTML =
+    '<div class="ui-page-head"><h1 class="ui-page-title">Rules</h1></div>' +
     '<div class="card">' +
       '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
         '<span>Detection Rules <span id="rules-enabled-count" style="color:var(--text-muted); font-weight:400; margin-left:8px; font-size:11px;">' +

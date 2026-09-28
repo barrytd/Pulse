@@ -338,3 +338,31 @@ class TestBatch4:
     def test_kit_inset_block(self):
         kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
         assert re.search(r"\.ui-inset,\s*\.ui-card \.card,\s*\.card \.card\s*\{", kit)
+
+
+# ---------------------------------------------------------------------------
+# Part 2, batch 5: Fleet, Firewall, Whitelist, Rules, Audit Log
+# ---------------------------------------------------------------------------
+
+class TestBatch5:
+    @pytest.mark.parametrize("page,title", [("fleet", "Fleet"), ("firewall", "Firewall"), ("rules", "Rules")])
+    def test_page_title_is_the_page_name(self, page, title):
+        assert '<h1 class="ui-page-title">%s</h1>' % title in _read(JS / (page + ".js"))
+
+    @pytest.mark.parametrize("page", ["audit", "firewall", "whitelist"])
+    def test_kpi_strips_are_kit_tiles(self, page):
+        js = _read(JS / (page + ".js"))
+        assert "ui-stats ui-stats-tiles" in js and "ui-card ui-stat" in js
+
+    def test_one_off_kpi_families_are_gone(self):
+        pattern = re.compile(r"(?<![\w-])(kpi-row|kpi-tile|firewall-kpi|fw-kpi|whitelist-kpi)")
+        for f in list(CSS.glob("*.css")) + [JS / "audit.js", JS / "firewall.js", JS / "whitelist.js"]:
+            assert not pattern.search(_css_rules_without_comments(_read(f))), f.name
+
+    def test_fleet_filters_wrap_and_table_scrolls_in_its_card(self):
+        assert '"ui-card ui-toolbar fleet-filter-bar"' in _read(JS / "fleet.js")
+        d = _css_rules_without_comments(_read(CSS / "dashboard.css"))
+        assert re.search(r"\.fleet-table\s*\{[^}]*min-width:\s*\d+px", d)
+        assert re.search(r"\.fleet-table-card\s*\{\s*overflow-x:\s*auto", d)
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        assert re.search(r"\.ui-toolbar\s*\{[^}]*flex-wrap:\s*wrap", kit)
