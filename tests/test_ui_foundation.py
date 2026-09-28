@@ -132,10 +132,11 @@ class TestSurfaceKit:
     def test_dashboard_is_capped_centered_and_tiled(self):
         js = _read(STATIC / "js" / "dashboard.js")
         kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
-        # Content stops stretching on wide monitors (both the populated and
-        # first-run pages).
-        assert js.count('"ui-stack ui-page dash-page"') == 2
-        assert re.search(r"\.ui-page\s*\{[^}]*max-width:\s*var\(--content-max\)[^}]*margin-inline:\s*auto", kit)
+        # Content stops stretching on wide monitors: #content is the capped,
+        # centered .ui-page frame, so every page (dashboard included) gets it.
+        assert '<div class="content ui-page" id="content">' in _read(SHELLS[0])
+        assert js.count('"ui-stack dash-page"') == 2
+        assert re.search(r"\.ui-page\s*\{[^}]*max-width:\s*calc\(var\(--content-max\)[^}]*margin-inline:\s*auto", kit)
         m = re.search(r"--content-max:\s*(\d+)px", _read(CSS / "base.css"))
         assert m and 1200 <= int(m.group(1)) <= 1300
         # Four stats as separate tiles; history + severity as an even two-up.
@@ -143,6 +144,21 @@ class TestSurfaceKit:
         assert '"ui-card ui-stat"' in js
         assert '"ui-split ui-split-even dash-row"' in js
         assert re.search(r"\.ui-split\.ui-split-even\s*\{\s*grid-template-columns:\s*repeat\(2,", kit)
+
+    def test_every_page_shares_the_kit_look(self):
+        # Part 2 foundation: the legacy shared classes every page uses take
+        # the kit's look, so all pages match the dashboard without
+        # per-page copies.
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        assert re.search(r"\.ui-card,\s*\.card\s*\{", kit)
+        assert re.search(r"\.ui-eyebrow,\s*\.section-label\s*\{", kit)
+        assert re.search(r"\.ui-page-head,\s*\.page-head\s*\{", kit)
+        assert re.search(r"\.ui-page-title,\s*\.page-title,\s*\.page-head-title\s*\{", kit)
+        # No page stylesheet re-declares the old uppercase page-head title.
+        assert ".page-head .page-head-title" not in _css_rules_without_comments(_read(CSS / "dashboard.css"))
+        # Sections inside #content sit one --gap-section apart.
+        comp = _css_rules_without_comments(_read(CSS / "components.css"))
+        assert re.search(r"\.content > \* \+ \*,\s*\.content-stack > \* \+ \*\s*\{\s*margin-top:\s*var\(--gap-section\)", comp)
 
     def test_score_ring_is_the_biggest_thing_on_the_page(self):
         dash = _css_rules_without_comments(_read(CSS / "dashboard.css"))
@@ -154,7 +170,7 @@ class TestSurfaceKit:
     def test_kit_has_theme_aware_edges_and_narrow_rules(self):
         kit = _read(CSS / "components.css").split("Shared surface kit", 1)[1]
         # The card edge is a token ring, defined for light and dark.
-        assert re.search(r"\.ui-card\s*\{[^}]*box-shadow:[^;]*var\(--card-edge\)", kit)
+        assert re.search(r"\.ui-card(?:,\s*\.card)?\s*\{[^}]*box-shadow:[^;]*var\(--card-edge\)", kit)
         base = _read(CSS / "base.css")
         dark = base.split('[data-theme="dark"] {', 1)[1]
         assert "--card-edge:" in base.split('[data-theme="dark"] {', 1)[0] and "--card-edge:" in dark

@@ -5,6 +5,18 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 2, batch 1: every page on the kit's frame, cards and titles
+
+The first part-2 batch works at the shared level, so every page moves at once; the page batches that follow convert each page's own KPI strips and layouts.
+
+- **Page frame:** `#content` is now the capped, centered `.ui-page` frame, so every page (not just the dashboard) stops at `--content-max` (1280px) and centers on wide monitors. The dashboard drops its own copy. New `--page-gutter` token: 24px, 12px at 640px and below, which gives phones more room.
+- **Tighter rhythm:** sections inside a page sit `--gap-section` (12px) apart, down from 16px.
+- **Cards:** the legacy `.card` used across every page now shares the kit's `.ui-card` look (warm white on the ground, `--radius-card`, soft shadow plus edge ring) instead of an 8px outlined box. A card inside a card becomes a flat inset block.
+- **Page titles:** the two header styles (`.page-head` with a small grey uppercase label, and `.page-title-block` with a 20px title) now share one kit look, `.ui-page-head` / `.ui-page-title`: a 20px semibold title. So "My Queue", "Reports", "Whitelist" and the rest read as real page titles. The old uppercase override in `dashboard.css` is gone.
+- **Section labels:** `.section-label` shares the kit's `.ui-eyebrow` (the dashboard's small uppercase labels), so it's defined in one place.
+- Styling only; no behavior changed. Checked every page in light and dark at 1440px and 420px. Batch 1 adds no sideways scroll. Three pages already scrolled sideways at 420px (the Reports KPI strip, the Fleet filter bar, Settings buttons); their batches fix them.
+- Tests: `tests/test_ui_foundation.py` checks that `.card`, `.section-label` and both page-title styles share the kit rules, that no page stylesheet re-declares the old uppercase title, and that `#content` is the page frame.
+
 ## 2026-09-27 — One continuous app shell
 
 The app no longer reads as a dark sidebar next to a separate light page. The sidebar, topbar and page now share one ground, and cards float on it.

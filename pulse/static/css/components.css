@@ -648,37 +648,24 @@ body.light .admin-banner-close {
 /* Content area                                                        */
 /* ------------------------------------------------------------------ */
 .content {
-  /* Uniform 24px gutter on every side for a denser, more professional
-     feel — matches the global density pass inspired by QRadar /
-     InsightIDR. 48px bottom room left for the sticky bulk bar so it
-     never overlaps the last row of a long table. */
-  padding: 24px 24px 48px;
+  /* --page-gutter on the sides; 48px bottom room for the sticky bulk bar
+     so it never overlaps the last row of a long table. #content is also
+     the .ui-page frame (capped + centered). */
+  padding: var(--page-gutter) var(--page-gutter) var(--space-12);
+}
+@media (max-width: 640px) {
+  :root { --page-gutter: var(--space-3); }
 }
 
-/* Shared rhythm: every stacked section inside .content should sit
-   16px apart. Kept as a class so individual pages can still override
-   when a tighter or looser break reads better. */
+/* Shared rhythm: every stacked section inside .content sits
+   --gap-section apart, the same as the dashboard's .ui-stack. */
 .content > * + *,
 .content-stack > * + * {
-  margin-top: 16px;
+  margin-top: var(--gap-section);
 }
 
-/* Page head — the strip that sits above the first card on every
-   content page ("Findings (206 of 206)", "Settings", etc.). Title
-   is 20px semibold per the density pass. */
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.page-head-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: var(--tracking-display);
-}
+/* Page head: the title row above the first card on a page. Its look is
+   the kit's .ui-page-head / .ui-page-title (end of this file). */
 .page-head-actions {
   display: flex;
   gap: 8px;
@@ -686,14 +673,10 @@ body.light .admin-banner-close {
 }
 
 /* ------------------------------------------------------------------ */
-/* Section labels — small muted uppercase Splunk-style                  */
+/* Section labels: small uppercase labels, typed by the kit (.ui-eyebrow) */
 /* ------------------------------------------------------------------ */
 .section-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-muted);
+  /* Type comes from the kit (.ui-eyebrow). */
   margin: 0 0 10px 0;
 }
 
@@ -701,15 +684,9 @@ body.light .admin-banner-close {
 /* Cards                                                               */
 /* ------------------------------------------------------------------ */
 .card {
-  /* Canonical card for the density pass — --bg-2 surface, 8px radius,
-     subtle 1px white-alpha border so the edge reads against --bg-0 /
-     --bg-1 neighbors without a heavy divider. Shadow stays token-
-     controlled so light/dark themes carry their own weight. */
-  background: var(--bg-2, var(--card-bg));
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: var(--shadow);
+  /* Legacy card: same surface as the kit's .ui-card (see "Shared surface
+     kit" below, which styles both), plus the kit's card padding. */
+  padding: var(--pad-card);
 }
 
 .card-title {
@@ -1444,14 +1421,7 @@ body.light .admin-banner-close {
   gap: 16px;
   min-height: 48px;
 }
-.page-title {
-  flex: 1;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-high, var(--text));
-  letter-spacing: var(--tracking-display);
-  margin: 0;
-}
+.page-title { flex: 1; }   /* type: the kit's .ui-page-title */
 .page-title-count {
   font-weight: 500;
   color: var(--text-muted);
@@ -2018,16 +1988,20 @@ a.link:hover { text-decoration: underline; }
 /* page-agnostic classes so other pages can adopt them. Only tokens    */
 /* from base.css; works in light and dark.                             */
 /*                                                                     */
-/*   .ui-page           caps content at --content-max and centers it    */
+/*   .ui-page           caps content at --content-max and centers it;   */
+/*                      #content carries it, so every page is framed    */
+/*   .ui-page-head      page title row: .ui-page-title + actions        */
 /*   .ui-stack          vertical stack of sections, --gap-section apart */
 /*   .ui-split          main column + side column (--aside-w); add      */
 /*                      .ui-split-aside-start to put the side first,    */
 /*                      or .ui-split-even for two equal columns         */
 /*   .ui-card           elevated surface: soft shadow, big radius, no   */
-/*                      outline (a 1px ring in dark mode)               */
+/*                      outline (a 1px ring in dark mode). The legacy   */
+/*                      .card shares it.                                */
 /*   .ui-panel          padded card body; .ui-panel-head / h3 /         */
 /*                      .ui-panel-title / .ui-panel-empty inside        */
-/*   .ui-eyebrow        small uppercase section label                   */
+/*   .ui-eyebrow        small uppercase section label (legacy           */
+/*                      .section-label shares it)                       */
 /*   .ui-sublabel       muted line under a title                        */
 /*   .ui-link           brand-colored inline action                     */
 /*   .ui-stats          stat strip; .ui-stat > .ui-stat-k / -v / -d.    */
@@ -2039,9 +2013,36 @@ a.link:hover { text-decoration: underline; }
 
 .ui-page {
   width: 100%;
-  max-width: var(--content-max);
+  /* --content-max is the content width; the frame's own padding sits
+     outside it. */
+  max-width: calc(var(--content-max) + 2 * var(--page-gutter));
   margin-inline: auto;
 }
+
+/* Page title row. The legacy .page-head / .page-head-title and
+   .page-title-block / .page-title share the same look. */
+.ui-page-head,
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: 0;
+}
+.ui-page-title,
+.page-title,
+.page-head-title {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-high);
+  letter-spacing: var(--tracking-display);
+  text-transform: none;
+  margin: 0;
+}
+.page-head-title strong { color: inherit; font-weight: inherit; }
+.page-title-block { min-height: 0; flex-wrap: wrap; }
 
 .ui-stack {
   display: flex;
@@ -2060,7 +2061,8 @@ a.link:hover { text-decoration: underline; }
 .ui-split.ui-split-aside-start { grid-template-columns: var(--aside-w) minmax(0, 1fr); }
 .ui-split.ui-split-even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-.ui-card {
+.ui-card,
+.card {
   background: var(--bg-1);
   border: none;
   border-radius: var(--radius-card);
@@ -2068,6 +2070,12 @@ a.link:hover { text-decoration: underline; }
      card floats on the shared ground in both themes. */
   box-shadow: var(--shadow-soft), 0 0 0 1px var(--card-edge);
   min-width: 0;
+}
+/* A card inside a card is a flat inset block, not a second elevation. */
+.ui-card .card,
+.card .card {
+  background: var(--bg-3);
+  box-shadow: none;
 }
 
 .ui-panel { padding: var(--pad-card); min-width: 0; }
@@ -2091,7 +2099,8 @@ a.link:hover { text-decoration: underline; }
 }
 .ui-panel-empty-sm { padding: var(--space-2) 0 2px; font-size: var(--font-size-sm); }
 
-.ui-eyebrow {
+.ui-eyebrow,
+.section-label {
   font-size: var(--font-size-xs);
   font-weight: 600;
   letter-spacing: 0.12em;

@@ -1138,29 +1138,8 @@
 /* Splunk-style shared page elements                                   */
 /* ------------------------------------------------------------------ */
 
-/* Page heading bar — title + right-side action / counts */
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.page-head .page-head-title {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-muted);
-}
-
-.page-head .page-head-title strong {
-  color: var(--text);
-  font-weight: 700;
-}
-
+/* Page heading bar: the look lives in the shared kit (.ui-page-head in
+   components.css); only the actions cluster is defined here. */
 .page-head-actions {
   display: flex;
   gap: 8px;
