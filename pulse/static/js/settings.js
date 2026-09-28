@@ -1387,14 +1387,14 @@ function _renderFeedbackPanel(rows) {
   });
 
   function _tile(label, value, accent) {
-    return '<div class="feedback-kpi' + (accent ? ' feedback-kpi-' + accent : '') + '">' +
-      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
-      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + escapeHtml(label) + '</div>' +
+      '<div class="ui-stat-v mono' + (typeof accent !== 'undefined' && accent ? ' ' + ({bug: 'ui-text-high', idea: 'ui-text-info', general: '', muted: 'ui-text-dim'}[accent] || '') : '') + '">' + escapeHtml(String(value)) + '</div>' +
     '</div>';
   }
 
   var kpiHtml =
-    '<div class="feedback-kpi-strip">' +
+    '<div class="ui-stats ui-stats-tiles ui-stats-auto">' +
       _tile('Total', total, '') +
       _tile('Bugs', counts.bug, 'bug') +
       _tile('Ideas', counts.idea, 'idea') +
@@ -1466,14 +1466,14 @@ function _renderWaitlistPanel(rows) {
   })[0] || '—';
 
   function _tile(label, value) {
-    return '<div class="feedback-kpi">' +
-      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
-      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + escapeHtml(label) + '</div>' +
+      '<div class="ui-stat-v mono' + (typeof accent !== 'undefined' && accent ? ' ' + ({bug: 'ui-text-high', idea: 'ui-text-info', general: '', muted: 'ui-text-dim'}[accent] || '') : '') + '">' + escapeHtml(String(value)) + '</div>' +
     '</div>';
   }
 
   var kpiHtml =
-    '<div class="feedback-kpi-strip">' +
+    '<div class="ui-stats ui-stats-tiles ui-stats-auto">' +
       _tile('Total signups', total) +
       _tile('Top source', topSource) +
     '</div>';
@@ -1597,14 +1597,14 @@ function _renderNotesAdminPanel(rows) {
   });
 
   function _tile(label, value, accent) {
-    return '<div class="feedback-kpi' + (accent ? ' feedback-kpi-' + accent : '') + '">' +
-      '<div class="feedback-kpi-value">' + escapeHtml(String(value)) + '</div>' +
-      '<div class="feedback-kpi-label">' + escapeHtml(label) + '</div>' +
+    return '<div class="ui-card ui-stat">' +
+      '<div class="ui-stat-k">' + escapeHtml(label) + '</div>' +
+      '<div class="ui-stat-v mono' + (typeof accent !== 'undefined' && accent ? ' ' + ({bug: 'ui-text-high', idea: 'ui-text-info', general: '', muted: 'ui-text-dim'}[accent] || '') : '') + '">' + escapeHtml(String(value)) + '</div>' +
     '</div>';
   }
 
   var kpiHtml =
-    '<div class="feedback-kpi-strip">' +
+    '<div class="ui-stats ui-stats-tiles ui-stats-auto">' +
       _tile('Total Notes', total, '') +
       _tile('Last 7 Days', weekCount, 'idea') +
       _tile('Authors', Object.keys(authors).length, 'general') +

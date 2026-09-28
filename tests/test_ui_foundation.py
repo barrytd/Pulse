@@ -366,3 +366,41 @@ class TestBatch5:
         assert re.search(r"\.fleet-table-card\s*\{\s*overflow-x:\s*auto", d)
         kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
         assert re.search(r"\.ui-toolbar\s*\{[^}]*flex-wrap:\s*wrap", kit)
+
+
+# ---------------------------------------------------------------------------
+# Part 2, batch 6: Automations, Settings, modals
+# ---------------------------------------------------------------------------
+
+class TestBatch6:
+    def test_settings_stacks_on_narrow_screens(self):
+        # The logged bug: the 200px tab rail stayed put at every width and
+        # squeezed each Settings card to ~128px at 420px.
+        comp = _css_rules_without_comments(_read(CSS / "components.css"))
+        m = re.search(r"@media \(max-width: (\d+)px\)\s*\{\s*\.settings-layout\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)", comp)
+        assert m and int(m.group(1)) >= 640
+        narrow = comp[m.start():m.start() + 800]
+        assert "overflow-x: auto" in narrow and ".settings-tab-group-label { display: none; }" in narrow
+        assert re.search(r"\.settings-layout > \*\s*\{\s*min-width:\s*0", comp)
+
+    def test_settings_tabs_use_the_sidebar_pill(self):
+        comp = _css_rules_without_comments(_read(CSS / "components.css"))
+        active = re.search(r"\.settings-tab-link\.active\s*\{([^}]*)\}", comp).group(1)
+        assert "var(--nav-active-bg)" in active
+
+    def test_wide_tables_scroll_in_their_card_and_actions_wrap(self):
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        assert re.search(r"\.ui-table-scroll,\s*\.table-wrap\s*\{\s*overflow-x:\s*auto", kit)
+        comp = _css_rules_without_comments(_read(CSS / "components.css"))
+        assert re.search(r"\.form-actions\s*\{[^}]*flex-wrap:\s*wrap", comp)
+
+    def test_settings_kpi_strips_are_kit_tiles(self):
+        s = _read(JS / "settings.js")
+        assert "feedback-kpi" not in s and s.count('"ui-stats ui-stats-tiles ui-stats-auto"') == 3
+        for f in CSS.glob("*.css"):
+            assert "feedback-kpi" not in _read(f), f.name
+
+    def test_modal_uses_the_kit_surface(self):
+        m = _css_rules_without_comments(_read(CSS / "modals.css"))
+        body = re.search(r"\.modal\s*\{([^}]*)\}", m).group(1)
+        assert "var(--radius-card)" in body and "var(--card-edge)" in body and "border: none" in body

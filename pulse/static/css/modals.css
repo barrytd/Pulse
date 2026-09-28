@@ -24,13 +24,18 @@
 }
 
 .modal {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  /* Kit surface and radius; a floating layer keeps its heavier shadow,
+     plus the kit's faint edge ring instead of a hard border. */
+  background: var(--bg-1);
+  border: none;
+  border-radius: var(--radius-card);
   padding: 32px;
   width: 440px;
   max-width: 90vw;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.2), 0 0 0 1px var(--card-edge);
+}
+@media (max-width: 640px) {
+  .modal { padding: var(--space-6) var(--space-4); }
 }
 
 .modal.modal-lg {

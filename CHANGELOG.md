@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Look-and-feel pass, part 2, batch 6: Automations, Settings, modals (part 2 complete)
+
+- **Settings on narrow screens (logged bug, fixed):**
+  - At 900px and below the layout stacks. The tab rail becomes one horizontally scrolling row of tabs above the content (group labels hide), and the content takes the full width.
+  - Before, the 200px rail stayed at every width and squeezed every Settings card to about 128px at 420px, so seven tabs scrolled sideways (Notifications, Appearance, API Tokens, Users, Waitlist, Notes, Feedback). None do now.
+- **Settings tabs:** the active tab is the same soft green pill as the sidebar nav, with quiet text and a faint hover, so the two navs read as one system.
+- **Wide tables:** `.table-wrap` was used around 11 tables but had no CSS, so those tables could push the page sideways. It now shares the new kit `.ui-table-scroll`, so a wide table scrolls inside its card.
+- **Form buttons:** `.form-actions` rows wrap instead of running off narrow screens.
+- **Waitlist, Notes and Feedback tabs:** their KPI strips are kit tiles; the `feedback-kpi` styles are removed.
+- **Automations:** already on the kit through batch 1 (cards, title, rhythm); checked in both themes and widths.
+- **Modals:** the kit surface and radius with the faint edge ring instead of a hard border. They keep the heavier shadow allowed for floating layers, and tighter padding on phones. The Upload and Generate Report modals were checked in both themes at both widths.
+- **Part 2 is complete.** Every page, the finding drawer and the modals are on the shared kit, the one-surface shell and Inter. A final sweep of all 17 pages and all 13 Settings tabs, in light and dark at 1440px and 420px (120 views), found no sideways scroll and no script errors.
+- Styling and layout only; no behavior changed.
+- Tests: `tests/test_ui_foundation.py` checks the narrow Settings layout, the green-pill tabs, table scrolling and wrapping actions, the Settings tiles (and that `feedback-kpi` is gone), and the modal surface.
+
 ## 2026-09-27 — Look-and-feel pass, part 2, batch 5: Fleet, Firewall, Whitelist, Rules, Audit Log
 
 - **Page titles:** Fleet ("9 hosts tracked" moves to a sublabel), Firewall (a "Firewall" title above its Block List / Firewall Rules tabs, with "Block list" as the tab's section title) and Rules (it had none) now have page-name titles like every other page.

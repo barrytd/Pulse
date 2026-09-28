@@ -260,10 +260,11 @@
 /* ------------------------------------------------------------------ */
 .settings-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 28px;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-6);
   align-items: start;
 }
+.settings-layout > * { min-width: 0; }
 .settings-tab-nav {
   display: flex;
   flex-direction: column;
@@ -272,17 +273,18 @@
   top: 72px;
 }
 .settings-tab-link {
+  /* Same quiet-text + soft-green-pill treatment as the sidebar nav. */
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 8px 10px;
   font-size: 13px;
-  color: var(--text-muted);
-  border-radius: 6px;
+  color: var(--nav-text);
+  border-radius: 8px;
   cursor: pointer;
   text-decoration: none;
-  border: 1px solid transparent;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
 }
 .settings-tab-link i[data-lucide],
 .settings-tab-link svg {
@@ -292,15 +294,16 @@
   flex-shrink: 0;
 }
 .settings-tab-link:hover {
-  color: var(--text);
-  background: var(--hover-row);
+  color: var(--text-high);
+  background: var(--nav-hover);
 }
 .settings-tab-link.active {
-  color: var(--text);
-  background: var(--hover-row);
-  border-color: var(--border);
-  font-weight: 500;
+  color: var(--nav-active-fg);
+  background: var(--nav-active-bg);
+  font-weight: 600;
 }
+.settings-tab-link.active i[data-lucide],
+.settings-tab-link.active svg { color: var(--brand); }
 
 /* Grouped rail: uppercase muted group labels (matching the main sidebar) with
    the items indented below, and breathing room between groups. */
@@ -315,9 +318,27 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 0 12px;
+  color: var(--text-dim);
+  padding: 0 10px;
   margin-bottom: 6px;
+}
+
+/* Narrow screens: the tab rail becomes one horizontally scrolling row
+   above the content (group labels hide), and the content gets the full
+   width. Before this the 200px rail stayed put and squeezed every
+   Settings card to ~128px at 420px. */
+@media (max-width: 900px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+  .settings-tab-nav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 4px;
+    padding-bottom: 4px;
+  }
+  .settings-tab-group { flex-direction: row; gap: 4px; }
+  .settings-tab-group + .settings-tab-group { margin-top: 0; }
+  .settings-tab-group-label { display: none; }
 }
 
 /* Billing tab (placeholder) */
@@ -903,6 +924,7 @@ body.light .admin-banner-close {
 
 .form-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
@@ -1949,6 +1971,8 @@ a.link:hover { text-decoration: underline; }
 /*                      -medium, -low, -warn, -ok, -info, -dim          */
 /*   .ui-table          hairline table: quiet header, no zebra, hover   */
 /*                      tint (the legacy .data-table shares it)         */
+/*   .ui-table-scroll   wraps a wide table so it scrolls inside its     */
+/*                      card, never the page (.table-wrap shares it)    */
 /* ================================================================== */
 
 .ui-page {
@@ -2180,6 +2204,11 @@ a.link:hover { text-decoration: underline; }
 .data-table tbody tr { transition: background 150ms ease; }
 .ui-table tbody tr:hover td,
 .data-table tbody tr:hover td { background: var(--hover-bg); }
+.ui-table-scroll,
+.table-wrap {
+  overflow-x: auto;
+  min-width: 0;
+}
 
 .ui-sev {
   font-size: 10.5px;
