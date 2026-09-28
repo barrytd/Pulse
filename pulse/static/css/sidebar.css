@@ -35,11 +35,10 @@
   left: 0;
   bottom: 0;
   width: var(--sidebar-w);
-  /* Hard-coded dark navy per pulse-design.md — the sidebar stays
-     dark in both light and dark themes so app chrome reads as
-     scaffolding, not page surface. */
-  background: #0f1623;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  /* Same ground as the page (--shell-bg), split off by a hairline
+     only, so the window reads as one continuous surface. */
+  background: var(--shell-bg);
+  border-right: 1px solid var(--shell-line);
   display: flex;
   flex-direction: column;
   z-index: 95;
@@ -59,9 +58,8 @@
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 0 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: #f3f4f6;
+  padding: 0 16px;
+  color: var(--text-high);
   text-decoration: none;
   cursor: pointer;
   transition: opacity 120ms ease;
@@ -74,7 +72,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #3fb950; /* pulse/ECG green */
+  color: var(--brand); /* pulse/ECG green */
   flex: 0 0 auto;
   /* The 8px breathing room between the icon and the text group. */
   margin-right: 8px;
@@ -86,11 +84,11 @@
   /* Tighter tracking — the prior 1.2px pushed "PULSE" too far from
      the separator and made the whole brand feel airy. */
   letter-spacing: 0.8px;
-  color: #f3f4f6;
+  color: var(--text-high);
   line-height: 1;
 }
 .sidebar-brand-sep {
-  color: rgba(255, 255, 255, 0.22);
+  color: var(--border);
   font-weight: 300;
   /* Symmetric 6px breathing room either side of the pipe so the
      separator reads as part of the same compact lockup, not a stand-
@@ -100,7 +98,7 @@
 }
 .sidebar-brand-sub {
   font-size: 10px;
-  color: #8b949e;
+  color: var(--text-dim);
   letter-spacing: 0.3px;
   white-space: nowrap;
   line-height: 1;
@@ -134,10 +132,10 @@
   height: 28px;
   margin: 0 8px 12px;
   padding: 0 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  color: #8b949e;
+  background: var(--bg-1);
+  border: 1px solid var(--shell-line);
+  border-radius: 8px;
+  color: var(--text-dim);
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -145,14 +143,12 @@
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 .sidebar-search:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #d1d5db;
+  border-color: var(--border);
+  color: var(--text-body);
 }
 .sidebar-search:focus {
   outline: none;
-  border-color: rgba(88, 166, 255, 0.5);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--brand);
 }
 .sidebar-search-icon {
   width: 12px;
@@ -176,22 +172,20 @@
 
 .sidebar-group-label {
   display: block;
-  padding: 6px 12px 4px;
+  padding: 6px 18px 4px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  /* Hard-coded dark-theme muted so group labels stay readable on the
-     fixed navy sidebar in BOTH themes (the themed token flips dark in
-     light mode and vanishes). */
-  color: #6b7280;
+  color: var(--text-dim);
   user-select: none;
 }
 
 /* ==================================================================
  * NAV ITEMS
- * 32px row height, 8px inner padding (+ 3px left-accent reservation),
- * 13px body text with 16px icon.
+ * Quiet text on the shared ground. 32px rows inset 8px from the rail
+ * edges; hover is a faint tint and the active page a soft rounded pill
+ * in the Pulse green tint (--nav-active-bg), icon in green.
  * ================================================================== */
 
 .sidebar-nav {
@@ -199,29 +193,34 @@
   align-items: center;
   gap: 10px;
   height: 32px;
-  padding: 0 12px 0 8px;
-  color: #d1d5db;
+  margin: 1px 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--nav-text);
   text-decoration: none;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 450;
   line-height: 16px;
   white-space: nowrap;
   cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease;
 }
 .sidebar-nav:hover {
-  color: #f3f4f6;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-high);
+  background: var(--nav-hover);
+}
+.sidebar-nav:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
 }
 .sidebar-nav.active {
-  color: #f3f4f6;
-  background: rgba(255, 255, 255, 0.06);
-  /* Dark-theme accent blue, fixed — the active rail must read the same
-     in both themes against the navy sidebar. */
-  border-left-color: #58a6ff;
+  color: var(--nav-active-fg);
+  background: var(--nav-active-bg);
   font-weight: 600;
 }
+.sidebar-nav.active .icon,
+.sidebar-nav.active i[data-lucide],
+.sidebar-nav.active svg { color: var(--brand); }
 
 .sidebar-nav .icon,
 .sidebar-nav i[data-lucide] {
@@ -238,7 +237,7 @@
 .sidebar-footer {
   flex: 0 0 auto;
   padding: 8px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--shell-line);
   display: flex;
   flex-direction: column;
 }

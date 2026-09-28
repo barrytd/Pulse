@@ -9,28 +9,30 @@
 /* --bg-0…--bg-4 / --text-high…--text-dim tiers.                       */
 /* ------------------------------------------------------------------ */
 :root {
-  /* Surface elevation (light theme) */
-  --bg-0:        #f0f2f5;
+  /* Surface elevation (light theme). --bg-0 is the one continuous
+     ground the sidebar, topbar and page share; cards (--bg-1) float on
+     it. Warm neutrals, so the Pulse green reads as the only color. */
+  --bg-0:        #f6f5f2;
   --bg-1:        #ffffff;
   --bg-2:        #ffffff;
-  --bg-3:        #f6f8fa;
-  --bg-4:        #eaeef2;
+  --bg-3:        #f1f0ec;
+  --bg-4:        #e7e5df;
 
   /* Text tiers (contrast vs bg-1) */
   --text-high:   #1f2328;
   --text-body:   #3b4149;
-  --text-dim:    #8b949e;
+  --text-dim:    #8d8c86;
 
   /* Legacy aliases */
-  --bg:          #f0f2f5;
+  --bg:          var(--bg-0);
   --card-bg:     #ffffff;
-  --border:      #d0d7de;
+  --border:      #e2e0da;
   --text:        #1f2328;
-  --text-muted:  #656d76;
-  --text-light:  #8b949e;
-  --topbar-bg:   #ffffff;
-  --hover-row:   #f6f8fa;
-  --hover-bg:    rgba(0, 0, 0, 0.04);
+  --text-muted:  #66655f;
+  --text-light:  #8d8c86;
+  --topbar-bg:   var(--bg-0);
+  --hover-row:   #f4f3ef;
+  --hover-bg:    rgba(28, 25, 18, 0.04);
   --shadow:      0 1px 3px rgba(0,0,0,0.08);
   --accent:      #3b82f6;
   --accent-glow: rgba(59,130,246,0.15);
@@ -41,10 +43,21 @@
   --brand:       #12b981;
   --brand-soft:  rgba(18, 185, 129, 0.10);
 
-  /* Soft elevation for the few "real" cards (dashboard hero, stat strip,
-     chart panels). Inner blocks get no border and no shadow. */
-  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  /* Soft elevation for cards floating on the ground: a low, warm shadow
+     plus a faint edge (--card-edge, drawn as a ring, not a border). */
+  --shadow-soft: 0 1px 2px rgba(28, 25, 18, 0.04), 0 6px 20px rgba(28, 25, 18, 0.05);
+  --card-edge:   rgba(28, 25, 18, 0.07);
   --radius-card: 14px;
+
+  /* App shell: one ground for sidebar + topbar + page, split only by
+     hairlines. Nav is quiet text; the active item is a soft green pill. */
+  --shell-bg:      var(--bg-0);
+  --shell-line:    rgba(28, 25, 18, 0.08);
+  --nav-text:      var(--text-body);
+  --nav-hover:     rgba(28, 25, 18, 0.045);
+  --nav-active-bg: var(--brand-soft);
+  --nav-active-fg: var(--text-high);
+  --scroll-thumb:  rgba(28, 25, 18, 0.18);
 
   /* Severity palette — desaturated for both themes */
   --severity-critical:    #ef4444;
@@ -103,27 +116,29 @@
 }
 
 [data-theme="dark"] {
-  /* Surface elevation — never pure black, step up on each tier */
-  --bg-0:        #0B0F17;
-  --bg-1:        #111827;
-  --bg-2:        #161E2E;
-  --bg-3:        #1C2536;
-  --bg-4:        #232D42;
+  /* Surface elevation: never pure black, step up on each tier. A
+     charcoal with a faint green cast, so the shell sits with the Pulse
+     green. --bg-0 is the shared ground, as in light. */
+  --bg-0:        #0d1110;
+  --bg-1:        #141917;
+  --bg-2:        #181e1b;
+  --bg-3:        #1d2421;
+  --bg-4:        #262e2a;
 
   /* Text tiers */
   --text-high:   #F3F4F6;
   --text-body:   #D1D5DB;
-  --text-dim:    #6B7280;
+  --text-dim:    #6e7772;
 
   /* Legacy aliases */
-  --bg:          #0d1117;
-  --card-bg:     #161b22;
-  --border:      #21262d;
+  --bg:          var(--bg-0);
+  --card-bg:     var(--bg-1);
+  --border:      #252c29;
   --text:        #e6edf3;
-  --text-muted:  #8b949e;
-  --text-light:  #484f58;
-  --topbar-bg:   #161b22;
-  --hover-row:   #1c2129;
+  --text-muted:  #8f9893;
+  --text-light:  #4b534f;
+  --topbar-bg:   var(--bg-0);
+  --hover-row:   #1a201d;
   --hover-bg:    rgba(255, 255, 255, 0.04);
   --shadow:      0 1px 3px rgba(0,0,0,0.3);
   --accent:      #58a6ff;
@@ -132,6 +147,11 @@
   --brand:       #3ddc97;
   --brand-soft:  rgba(61, 220, 151, 0.13);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+  --card-edge:   rgba(255, 255, 255, 0.055);
+
+  --shell-line:    rgba(255, 255, 255, 0.06);
+  --nav-hover:     rgba(255, 255, 255, 0.04);
+  --scroll-thumb:  rgba(255, 255, 255, 0.15);
 
   /* Severity — brighter for dark background contrast */
   --severity-critical:    #f87171;
@@ -187,7 +207,7 @@ h1, .page-title { letter-spacing: var(--tracking-display); }
 /* ------------------------------------------------------------------ */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
@@ -197,11 +217,11 @@ h1, .page-title { letter-spacing: var(--tracking-display); }
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scroll-thumb);
   border-radius: 4px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--text-dim);
 }
 *::-webkit-scrollbar-corner {
   background: transparent;

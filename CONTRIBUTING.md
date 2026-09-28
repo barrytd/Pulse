@@ -226,7 +226,7 @@ The dashboard is a single-page app under [`pulse/static/js/`](pulse/static/js/).
 ## Code style
 
 - **Python** — PEP 8. snake_case for function names, dataclasses for record types where ownership matters. Docstrings on every public function. Type hints welcome but not required.
-- **JavaScript** — ES modules, no transpiler. `function` declarations for top-level handlers; arrow functions inside callbacks. No frameworks. Use the design tokens in [`pulse/static/css/`](pulse/static/css/) (CSS variables) rather than hardcoded colors / spacing. The font is `var(--font-body)` (bundled Inter); don't add another font or load one from a CDN.
+- **JavaScript** — ES modules, no transpiler. `function` declarations for top-level handlers; arrow functions inside callbacks. No frameworks. Use the design tokens in [`pulse/static/css/`](pulse/static/css/) (CSS variables) rather than hardcoded colors / spacing. The font is `var(--font-body)` (bundled Inter); don't add another font or load one from a CDN. The app shell (sidebar, topbar, page ground) is one surface driven by the shell tokens in `base.css` (`--shell-bg`, `--shell-line`, `--nav-*`, `--card-edge`); `sidebar.css` and the topbar only read them, so don't give the sidebar its own fill or hardcode a color there.
 - **HTML escaping** — **every** user-supplied string rendered into the dashboard must go through `escapeHtml()` (exported from `pulse/static/js/dashboard.js`). The security-hardening audit (2026-05-14) checked all 20 JS modules; new pages must keep that 100%.
 - **SQL** — parameterized queries (`?` for SQLite, `%s` for Postgres via the `db_backend.py` adapter) for every value. The codebase has zero string-concatenated SQL with user input; new code keeps that bar.
 

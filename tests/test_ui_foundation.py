@@ -151,7 +151,51 @@ class TestSurfaceKit:
         assert gauge and int(gauge.group(1)) >= 200
         assert grade and int(grade.group(1)) >= 64
 
-    def test_kit_has_dark_mode_and_narrow_rules(self):
+    def test_kit_has_theme_aware_edges_and_narrow_rules(self):
         kit = _read(CSS / "components.css").split("Shared surface kit", 1)[1]
-        assert '[data-theme="dark"] .ui-card' in kit
+        # The card edge is a token ring, defined for light and dark.
+        assert re.search(r"\.ui-card\s*\{[^}]*box-shadow:[^;]*var\(--card-edge\)", kit)
+        base = _read(CSS / "base.css")
+        dark = base.split('[data-theme="dark"] {', 1)[1]
+        assert "--card-edge:" in base.split('[data-theme="dark"] {', 1)[0] and "--card-edge:" in dark
         assert "@media (max-width: 640px)" in kit and "@media (max-width: 1180px)" in kit
+
+
+# ---------------------------------------------------------------------------
+# App shell: one continuous surface
+# ---------------------------------------------------------------------------
+
+def _block(css, selector):
+    m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", _css_rules_without_comments(css))
+    assert m, selector
+    return m.group(1)
+
+
+class TestAppShell:
+    def test_sidebar_topbar_and_page_share_one_ground(self):
+        base = _read(CSS / "base.css")
+        light, dark = base.split('[data-theme="dark"] {', 1)
+        for theme in (light, dark):
+            assert re.search(r"--bg:\s*var\(--bg-0\)", theme)
+            assert re.search(r"--topbar-bg:\s*var\(--bg-0\)", theme)
+        assert re.search(r"--shell-bg:\s*var\(--bg-0\)", light)
+        # Light ground is the soft warm off-white, cards are white.
+        assert re.search(r"--bg-0:\s*#f6f5f2", light, re.I)
+        assert re.search(r"--bg-1:\s*#ffffff", light, re.I)
+        assert "var(--shell-bg)" in _block(_read(CSS / "sidebar.css"), ".sidebar")
+        assert "var(--shell-bg)" in _block(_read(CSS / "components.css"), ".app-topbar")
+        assert "var(--bg)" in _block(base, "body")
+
+    def test_sidebar_is_themed_not_a_dark_block(self):
+        sidebar = _css_rules_without_comments(_read(CSS / "sidebar.css"))
+        # Every color comes from a token, so it follows light and dark.
+        assert not re.search(r"#[0-9a-fA-F]{3,8}|rgba?\(", sidebar)
+        assert "1px solid var(--shell-line)" in _block(sidebar, ".sidebar")
+
+    def test_active_nav_is_a_soft_green_pill(self):
+        sidebar = _read(CSS / "sidebar.css")
+        nav = _block(sidebar, ".sidebar-nav")
+        assert "border-radius" in nav and "border-left" not in nav
+        active = _block(sidebar, ".sidebar-nav.active")
+        assert "var(--nav-active-bg)" in active
+        assert re.search(r"--nav-active-bg:\s*var\(--brand-soft\)", _read(CSS / "base.css"))

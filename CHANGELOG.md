@@ -5,6 +5,24 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — One continuous app shell
+
+The app no longer reads as a dark sidebar next to a separate light page. The sidebar, topbar and page now share one ground, and cards float on it.
+
+- **Light:** the ground is a soft warm off-white (`--bg-0` `#f6f5f2`) with white cards. Neutrals are slightly warmed (borders, hover and inset surfaces, muted text) so the Pulse green is the only color in the chrome.
+- **Dark:** one charcoal ground with a faint green cast (`#0d1110`), cards one step up (`#141917`). It replaces the three different navies the sidebar, topbar and page used before.
+- **Sidebar:**
+  - no dark fill, just a hairline on its right edge (`--shell-line`)
+  - nav items are quiet body text with a faint hover tint
+  - the active page is a soft rounded pill in the Pulse green tint (`--brand-soft`) with a green icon, replacing the old hard block and blue left rail
+  - the brand, search launcher and group labels read from theme tokens
+- **Topbar:** same ground, hairline bottom edge.
+- **Cards** (`.ui-card`) get a faint edge ring (`--card-edge`) on top of the soft shadow, in both themes, so they float on the ground.
+- **Scrollbars** follow the theme (`--scroll-thumb`); the old white thumbs were invisible on the light ground.
+- **Where it lives:** new shell tokens in `base.css` (`--shell-bg`, `--shell-line`, `--nav-text`, `--nav-hover`, `--nav-active-bg`, `--nav-active-fg`, `--card-edge`, `--scroll-thumb`). `--bg` and `--topbar-bg` now alias `--bg-0`. `sidebar.css` no longer holds any hardcoded color, and every page inherits the shell with no page changes.
+- New README dashboard screenshot. The Findings, finding-drawer and Fleet screenshots will be regenerated with the part-2 batches that restyle those pages.
+- Tests: `tests/test_ui_foundation.py` checks that the sidebar, topbar and page share one ground in both themes, the sidebar has only token colors and a hairline edge, and the active nav item is the green pill.
+
 ## 2026-09-27 — Dashboard: bigger score, capped width, tiles and a two-up row
 
 The dashboard read too stretched on wide monitors. Changes:

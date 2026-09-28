@@ -14,8 +14,9 @@
   z-index: 110;
   height: 48px;
   box-sizing: border-box;
-  background: var(--bg-1, #111827);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  /* Same ground as the sidebar and page; a hairline marks its edge. */
+  background: var(--shell-bg);
+  border-bottom: 1px solid var(--shell-line);
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -2063,13 +2064,10 @@ a.link:hover { text-decoration: underline; }
   background: var(--bg-1);
   border: none;
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-soft);
+  /* Soft shadow + a faint edge ring (a shadow, not a border), so the
+     card floats on the shared ground in both themes. */
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--card-edge);
   min-width: 0;
-}
-/* Dark surfaces swallow shadows, so a 1px ring (a shadow, not a border)
-   keeps the edge readable without an outline. */
-[data-theme="dark"] .ui-card {
-  box-shadow: var(--shadow-soft), 0 0 0 1px var(--bg-3);
 }
 
 .ui-panel { padding: var(--pad-card); min-width: 0; }
