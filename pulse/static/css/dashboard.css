@@ -1246,6 +1246,9 @@
 }
 
 .dash-filter-select:focus { border-color: var(--accent); }
+/* A select sizes itself to its longest option (long rule names), which
+   would push "Last updated" onto a second line of the bar. */
+.dash-filter-bar .dash-filter-select { max-width: 220px; }
 
 .dash-filter-search {
   height: 30px;
@@ -4696,7 +4699,8 @@ tr.pending-flash {
 }
 
 /* --- Zone 1: hero ------------------------------------------------- */
-.dash-hero { --aside-w: 300px; }
+/* The score is the hero: a wider column and a bigger ring. */
+.dash-hero { --aside-w: 360px; }
 
 .dash-score {
   padding: var(--pad-card);
@@ -4709,13 +4713,13 @@ tr.pending-flash {
 }
 .dash-gauge {
   position: relative;
-  width: 148px;
-  height: 148px;
-  margin: 6px 0 8px;
+  width: 208px;
+  height: 208px;
+  margin: 10px 0 12px;
 }
 /* No scans in this window: a smaller ring, so an empty card doesn't
    stand taller than the list beside it. */
-.dash-score-empty .dash-gauge { width: 104px; height: 104px; margin: 6px 0; }
+.dash-score-empty .dash-gauge { width: 140px; height: 140px; margin: 8px 0; }
 .dash-gauge-svg { width: 100%; height: 100%; display: block; }
 .dash-gauge-track {
   fill: none;
@@ -4737,25 +4741,26 @@ tr.pending-flash {
   gap: 2px;
 }
 .dash-grade-letter {
-  font-size: 48px;
+  font-size: 76px;
   font-weight: 700;
   line-height: 1;
   letter-spacing: var(--tracking-display);
 }
 .dash-grade-num {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-dim);
 }
 .dash-gauge-empty {
-  font-size: var(--font-size-sm);
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-dim);
 }
 .dash-verdict {
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--text-body);
-  max-width: 260px;
+  max-width: 300px;
 }
 .dash-verdict b { color: var(--text-high); }
 .dash-verdict-host {
@@ -4882,10 +4887,12 @@ tr.pending-flash {
   flex: 0 0 auto;
 }
 
-/* --- Zone 3: history + severity ---------------------------------- */
+/* --- Zone 3: history + severity, an even two-up ------------------- */
+.dash-row > * { display: flex; flex-direction: column; }
 .dash-chart-wrap {
   position: relative;
-  height: 168px;
+  flex: 1 1 auto;
+  min-height: 180px;
   margin-top: var(--space-3);
 }
 
@@ -5007,6 +5014,8 @@ tr.pending-flash {
 /* --- Responsive ---------------------------------------------------
    Column + stat-strip collapse lives in the kit (components.css). */
 @media (max-width: 640px) {
+  .dash-gauge { width: 176px; height: 176px; }
+  .dash-grade-letter { font-size: 64px; }
   .dash-firstrun {
     grid-template-columns: minmax(0, 1fr);
     justify-items: center;

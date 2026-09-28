@@ -4,12 +4,12 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-1856%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1858%20passing-brightgreen)
 ![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
 ![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Pulse dashboard: security grade with a plain-language verdict, the needs-attention list, a four-stat strip, score history and findings by severity" width="900">
+  <img src="docs/screenshots/dashboard.png" alt="Pulse dashboard: security grade with a plain-language verdict, the needs-attention list, four stat tiles, and score history beside findings by severity" width="900">
 </p>
 
 ---
@@ -66,7 +66,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 | **Security Advisor** | Every finding ships a plain-language Security Guide — what happened, why it matters, immediate actions, exploit difficulty, false-positive tips. Security Advisor sidebar page with posture summary, top concerns, attack-concept explainers, hardening checklist. |
 | **Security Buddy ("Pip")** | Optional floating AI chat (bottom-right). Ask what a finding means, whether something looks dangerous, or any security question — answered in plain language by Claude Haiku, proxied server-side (`POST /api/buddy/ask`, key never in the browser). Read-only, prompt-injection-safe, 10 free questions/user/day. Suggests context-aware follow-ups, remembers the chat across refreshes, slides beside the finding drawer to discuss the open finding, and points out-of-scope questions to GitHub/Feedback. Off until an `ANTHROPIC_API_KEY` is set. |
 | **Reports** | 9 templates (Threat Detection Summary, Executive Summary, NIST CSF, ISO 27001, Incident Investigation, Fleet Health, Board-Ready Posture, MITRE Coverage, Compliance Gap) · 4 formats each (PDF/HTML/JSON/CSV) · DB-backed persistence with 90-day retention |
-| **Dashboard** | Single-page app. The home page leads with one hero (the grade plus a plain-language verdict, next to the unreviewed critical/high findings), then a 4-stat strip (open findings, critical unreviewed, scans today, mean time to detect), then score history and findings by severity. A new account sees a "Run your first scan" call to action instead of empty zeros · live monitor (SSE) · finding drawer with notes, workflow states, assignment · Ctrl+K palette · light and dark themes |
+| **Dashboard** | Single-page app. The home page leads with one hero (the grade plus a plain-language verdict, next to the unreviewed critical/high findings), then four stat tiles (open findings, critical unreviewed, scans today, mean time to detect), then score history beside findings by severity. Content is capped at 1280px and centered, so it doesn't stretch across a wide monitor. A new account sees a "Run your first scan" call to action instead of empty zeros · live monitor (SSE) · finding drawer with notes, workflow states, assignment · Ctrl+K palette · light and dark themes |
 | **Alerting** | SMTP email · Slack + Discord webhooks · per-rule cooldown · live monitor email alerts |
 | **Fleet** | Per-host security score · risk tier · stale-host spotlight · severity mix · drill-into-host view · CSV export |
 | **Firewall** | `pfirewall.log` parser · port-scan detection · Pulse-managed IP block list via `netsh advfirewall` · one-click block from finding drawer · approved playbook blocks push only their own IP |
@@ -134,7 +134,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 
 **Storage** — All scan history, findings, audit log, agents, notifications, organizations, users, API tokens, IP block list, finding notes, playbooks, playbook runs and per-org connector switches live in one schema ([`pulse/database.py`](pulse/database.py)). Multi-tenant rows carry an `organization_id`; the API helper `_read_scope_kwargs` enforces tenant isolation on every read/write.
 
-**Tests** — 1856 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
+**Tests** — 1858 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
 
 ---
 

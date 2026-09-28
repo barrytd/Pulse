@@ -5,6 +5,18 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-09-27 — Dashboard: bigger score, capped width, tiles and a two-up row
+
+The dashboard read too stretched on wide monitors. Changes:
+
+- **The score is the hero.** The grade ring is 208px (was 148px) and the letter 76px (was 48px), in a wider 360px column; the verdict text is slightly larger. At 640px and below the ring is 176px. With no scans in the selected window, the empty ring is 140px.
+- **Capped and centered.** Dashboard content stops at 1280px and centers, so panels no longer stretch edge to edge on a 1920px or 2560px screen. New kit class `.ui-page`, backed by a new `--content-max` token.
+- **Four stat tiles.** The stats are an even grid of four separate cards instead of one full-width strip with dividers: 4 across, 2 across below 1180px (including at 420px). New kit variant `.ui-stats-tiles`.
+- **Balanced bottom row.** Score history and findings by severity sit side by side at equal widths and equal heights; the chart grows to fill its card. This holds until 900px, then they stack. New kit variant `.ui-split-even`.
+- The filter bar's selects are capped at 220px, so a long rule name doesn't push "Last updated" onto a second line.
+- Checked in headless Chrome, light and dark, at 2560, 1920, 1440 and 420px, for a populated account and an empty one. No horizontal scroll. New README dashboard screenshot.
+- Tests: `tests/test_ui_foundation.py` now also checks that the dashboard is capped (`--content-max` within 1200–1300px) and centered, uses the tile grid and the even two-up, and that the ring and grade stay large.
+
 ## 2026-09-27 — Look-and-feel pass, part 1: Inter + shared surface kit
 
 - **Inter, bundled.** The UI now uses Inter 5.3.0 (variable weight, Latin + Latin Extended, SIL OFL 1.1), vendored in `pulse/static/vendor/inter/` (about 130 KB) and declared in `inter/inter.css`. The dashboard, login and landing pages all link it, and `--font-body` starts with `'Inter'`, so every page picks it up. Nothing loads from a font CDN; the app still renders fully offline, and other scripts fall back to system fonts.

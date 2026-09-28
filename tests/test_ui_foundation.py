@@ -129,6 +129,28 @@ class TestSurfaceKit:
                       "--font-size-title", "--font-size-stat"):
             assert re.search(re.escape(token) + r":", _read(CSS / "base.css")), token
 
+    def test_dashboard_is_capped_centered_and_tiled(self):
+        js = _read(STATIC / "js" / "dashboard.js")
+        kit = _css_rules_without_comments(_read(CSS / "components.css").split("Shared surface kit", 1)[1])
+        # Content stops stretching on wide monitors (both the populated and
+        # first-run pages).
+        assert js.count('"ui-stack ui-page dash-page"') == 2
+        assert re.search(r"\.ui-page\s*\{[^}]*max-width:\s*var\(--content-max\)[^}]*margin-inline:\s*auto", kit)
+        m = re.search(r"--content-max:\s*(\d+)px", _read(CSS / "base.css"))
+        assert m and 1200 <= int(m.group(1)) <= 1300
+        # Four stats as separate tiles; history + severity as an even two-up.
+        assert '"ui-stats ui-stats-tiles" id="dash-stats"' in js
+        assert '"ui-card ui-stat"' in js
+        assert '"ui-split ui-split-even dash-row"' in js
+        assert re.search(r"\.ui-split\.ui-split-even\s*\{\s*grid-template-columns:\s*repeat\(2,", kit)
+
+    def test_score_ring_is_the_biggest_thing_on_the_page(self):
+        dash = _css_rules_without_comments(_read(CSS / "dashboard.css"))
+        gauge = re.search(r"\.dash-gauge\s*\{[^}]*width:\s*(\d+)px", dash)
+        grade = re.search(r"\.dash-grade-letter\s*\{[^}]*font-size:\s*(\d+)px", dash)
+        assert gauge and int(gauge.group(1)) >= 200
+        assert grade and int(grade.group(1)) >= 64
+
     def test_kit_has_dark_mode_and_narrow_rules(self):
         kit = _read(CSS / "components.css").split("Shared surface kit", 1)[1]
         assert '[data-theme="dark"] .ui-card' in kit

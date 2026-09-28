@@ -914,7 +914,7 @@ document.addEventListener('pulse:review-toggled', _onReviewToggled);
 var _lastStatCtx = null;
 
 function _statHtml(label, valueHtml, sub, subTone, attrs) {
-  return '<div class="ui-stat"' + (attrs || '') + '>' +
+  return '<div class="ui-card ui-stat"' + (attrs || '') + '>' +
     '<div class="ui-stat-k">' + label + '</div>' +
     '<div class="ui-stat-v mono">' + valueHtml + '</div>' +
     '<div class="ui-stat-d ' + (subTone || 'flat') + '">' + sub + '</div>' +
@@ -943,7 +943,7 @@ function _statStripHtml(ctx) {
     return ' data-action="clickStatCard" data-arg="' + kind + '" data-stat-kind="' + kind +
            '" role="button" tabindex="0"';
   };
-  return '<div class="ui-card ui-stats" id="dash-stats">' +
+  return '<div class="ui-stats ui-stats-tiles" id="dash-stats">' +
     _statHtml('Open findings', String(open),
       newToday ? '▲ ' + newToday + ' new today' : (open ? 'none new today' : 'nothing open'),
       newToday ? 'bad' : 'flat', clickable('findings')) +
@@ -1326,7 +1326,7 @@ export async function renderDashboardPage() {
   // gray zeros, no empty charts, no filter bar with nothing to filter.
   if (!allScans.length) {
     _stopDashUpdatedTimer();
-    c.innerHTML = '<div class="ui-stack dash-page">' + _firstRunHeroHtml() + '</div>';
+    c.innerHTML = '<div class="ui-stack ui-page dash-page">' + _firstRunHeroHtml() + '</div>';
     return;
   }
 
@@ -1400,13 +1400,13 @@ export async function renderDashboardPage() {
     '</div>';
 
   var rowHtml =
-    '<div class="ui-split dash-row">' +
+    '<div class="ui-split ui-split-even dash-row">' +
       _historyPanelHtml(dailyScores, filtersOn) +
       _severityPanelHtml(windowFindings, scans) +
     '</div>';
 
   c.innerHTML =
-    '<div class="ui-stack dash-page">' +
+    '<div class="ui-stack ui-page dash-page">' +
       _dashFilterBarHtml(rules, sourceList, updatedHtml) +
       heroHtml +
       _statStripHtml({ allScans: allScans }) +

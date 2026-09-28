@@ -2017,9 +2017,11 @@ a.link:hover { text-decoration: underline; }
 /* page-agnostic classes so other pages can adopt them. Only tokens    */
 /* from base.css; works in light and dark.                             */
 /*                                                                     */
+/*   .ui-page           caps content at --content-max and centers it    */
 /*   .ui-stack          vertical stack of sections, --gap-section apart */
 /*   .ui-split          main column + side column (--aside-w); add      */
-/*                      .ui-split-aside-start to put the side first     */
+/*                      .ui-split-aside-start to put the side first,    */
+/*                      or .ui-split-even for two equal columns         */
 /*   .ui-card           elevated surface: soft shadow, big radius, no   */
 /*                      outline (a 1px ring in dark mode)               */
 /*   .ui-panel          padded card body; .ui-panel-head / h3 /         */
@@ -2027,10 +2029,18 @@ a.link:hover { text-decoration: underline; }
 /*   .ui-eyebrow        small uppercase section label                   */
 /*   .ui-sublabel       muted line under a title                        */
 /*   .ui-link           brand-colored inline action                     */
-/*   .ui-stats          stat strip; .ui-stat > .ui-stat-k / -v / -d     */
+/*   .ui-stats          stat strip; .ui-stat > .ui-stat-k / -v / -d.    */
+/*                      .ui-stats-tiles: an even grid, each stat its    */
+/*                      own .ui-card tile                               */
 /*   .ui-sev            severity tag (.sev-critical/high/medium/low)    */
 /*   .ui-text-critical  critical-colored number or word                 */
 /* ================================================================== */
+
+.ui-page {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+}
 
 .ui-stack {
   display: flex;
@@ -2047,6 +2057,7 @@ a.link:hover { text-decoration: underline; }
   min-width: 0;
 }
 .ui-split.ui-split-aside-start { grid-template-columns: var(--aside-w) minmax(0, 1fr); }
+.ui-split.ui-split-even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .ui-card {
   background: var(--bg-1);
@@ -2150,6 +2161,19 @@ a.link:hover { text-decoration: underline; }
 .ui-stat-d.flat { color: var(--text-dim); }
 .ui-text-critical { color: var(--severity-critical); }
 
+/* Tile variant: no shared card or dividers; each .ui-stat is its own
+   .ui-card in an even grid. */
+.ui-stats.ui-stats-tiles {
+  gap: var(--gap-section);
+  overflow: visible;
+}
+.ui-stats-tiles > .ui-stat,
+.ui-stats-tiles > .ui-stat + .ui-stat {
+  border: none;
+  padding: var(--pad-card);
+}
+.ui-stats-tiles > .ui-stat[role="button"] { transition: background 0.12s; }
+
 .ui-sev {
   font-size: 10.5px;
   font-weight: 700;
@@ -2165,14 +2189,18 @@ a.link:hover { text-decoration: underline; }
 
 /* Breakpoints are viewport widths; the sidebar takes ~200px of them. */
 @media (max-width: 1180px) {
-  .ui-split,
-  .ui-split.ui-split-aside-start { grid-template-columns: minmax(0, 1fr); }
+  .ui-split.ui-split-aside-start,
+  .ui-split:not(.ui-split-even) { grid-template-columns: minmax(0, 1fr); }
   .ui-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ui-stat:nth-child(3) { border-left: none; }
   .ui-stat:nth-child(n+3) { border-top: 1px solid var(--bg-4); }
 }
+/* Two equal columns hold on longer than a main + side split. */
+@media (max-width: 900px) {
+  .ui-split.ui-split-even { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 640px) {
-  .ui-stats { grid-template-columns: minmax(0, 1fr); }
+  .ui-stats:not(.ui-stats-tiles) { grid-template-columns: minmax(0, 1fr); }
   .ui-stat { border-left: none; }
   .ui-stat + .ui-stat { border-top: 1px solid var(--bg-4); }
 }

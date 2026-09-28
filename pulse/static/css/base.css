@@ -93,6 +93,7 @@
   --gap-section: var(--space-3);   /* between stacked cards / columns */
   --pad-card:    var(--space-4);   /* inside a card */
   --aside-w:     340px;            /* side column of a .ui-split */
+  --content-max: 1280px;           /* .ui-page: widest a page's content gets */
 
   /* Type scale used by the kit (body stays --font-size-body). */
   --font-size-xs:    11px;         /* eyebrows, tags */
