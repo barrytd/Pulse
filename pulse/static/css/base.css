@@ -9,10 +9,12 @@
 /* --bg-0…--bg-4 / --text-high…--text-dim tiers.                       */
 /* ------------------------------------------------------------------ */
 :root {
-  /* Surface elevation (light theme). --bg-0 is the one continuous
-     ground the sidebar, topbar and page share; cards (--bg-1) float on
-     it. Warm neutrals, so the Pulse green reads as the only color. */
-  --bg-0:        #f6f5f2;
+  /* Surface elevation (light theme). --bg-0 is the gray ground the
+     sidebar and topbar sit on; the page content is one white sheet
+     (--sheet-bg) floating on it with a gap all around; cards (--bg-1)
+     sit on the sheet. Warm neutrals, so the Pulse green reads as the
+     only color. */
+  --bg-0:        #e6e5e0;
   --bg-1:        #ffffff;
   --bg-2:        #ffffff;
   --bg-3:        #f1f0ec;
@@ -23,8 +25,8 @@
   --text-body:   #3b4149;
   --text-dim:    #8d8c86;
 
-  /* Legacy aliases */
-  --bg:          var(--bg-0);
+  /* Legacy aliases. --bg is "the page surface", which is now the sheet. */
+  --bg:          var(--sheet-bg);
   --card-bg:     #ffffff;
   --border:      #e2e0da;
   --text:        #1f2328;
@@ -49,8 +51,13 @@
   --card-edge:   rgba(28, 25, 18, 0.07);
   --radius-card: 14px;
 
-  /* App shell: one ground for sidebar + topbar + page, split only by
-     hairlines. Nav is quiet text; the active item is a soft green pill. */
+  /* App shell: sidebar + topbar share the gray ground with no divider
+     lines; the page is one rounded sheet floating on it. Nav is quiet
+     text; the active item is a soft green pill. */
+  --sheet-bg:      #ffffff;
+  --sheet-gap:     20px;     /* ground visible around the sheet */
+  --sheet-radius:  18px;
+  --sheet-shadow:  0 1px 3px rgba(28, 25, 18, 0.06), 0 14px 36px rgba(28, 25, 18, 0.09);
   --shell-bg:      var(--bg-0);
   --shell-line:    rgba(28, 25, 18, 0.08);
   --nav-text:      var(--text-body);
@@ -107,7 +114,7 @@
   --pad-card:    var(--space-4);   /* inside a card */
   --aside-w:     340px;            /* side column of a .ui-split */
   --content-max: 1280px;           /* .ui-page: widest a page's content gets */
-  --page-gutter: var(--space-6);   /* .ui-page side padding (narrow: --space-3) */
+  --page-gutter: var(--space-8);   /* padding inside the sheet (narrow: --space-4) */
 
   /* Type scale used by the kit (body stays --font-size-body). */
   --font-size-xs:    11px;         /* eyebrows, tags */
@@ -120,11 +127,11 @@
   /* Surface elevation: never pure black, step up on each tier. A
      charcoal with a faint green cast, so the shell sits with the Pulse
      green. --bg-0 is the shared ground, as in light. */
-  --bg-0:        #0d1110;
-  --bg-1:        #141917;
-  --bg-2:        #181e1b;
-  --bg-3:        #1d2421;
-  --bg-4:        #262e2a;
+  --bg-0:        #080a09;   /* darker ground */
+  --bg-1:        #19201d;   /* cards, a step up from the sheet */
+  --bg-2:        #1c2320;
+  --bg-3:        #212926;
+  --bg-4:        #2a322e;
 
   /* Text tiers */
   --text-high:   #F3F4F6;
@@ -132,9 +139,9 @@
   --text-dim:    #6e7772;
 
   /* Legacy aliases */
-  --bg:          var(--bg-0);
+  --bg:          var(--sheet-bg);
   --card-bg:     var(--bg-1);
-  --border:      #252c29;
+  --border:      #2a312d;
   --text:        #e6edf3;
   --text-muted:  #8f9893;
   --text-light:  #4b534f;
@@ -150,8 +157,10 @@
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
   --card-edge:   rgba(255, 255, 255, 0.055);
 
+  --sheet-bg:      #121715;
+  --sheet-shadow:  0 0 0 1px rgba(255, 255, 255, 0.04), 0 18px 44px rgba(0, 0, 0, 0.55);
   --shell-line:    rgba(255, 255, 255, 0.06);
-  --nav-hover:     rgba(255, 255, 255, 0.04);
+  --nav-hover:     rgba(255, 255, 255, 0.05);
   --scroll-thumb:  rgba(255, 255, 255, 0.15);
 
   /* Severity — brighter for dark background contrast */
@@ -179,7 +188,7 @@
 
 body {
   font-family: var(--font-body);
-  background: var(--bg);
+  background: var(--bg-0);   /* the ground; the page sheet is .main */
   color: var(--text);
   line-height: 1.5;
   font-size: var(--font-size-body);

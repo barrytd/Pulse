@@ -1332,7 +1332,9 @@ export async function renderDashboardPage() {
   // gray zeros, no empty charts, no filter bar with nothing to filter.
   if (!allScans.length) {
     _stopDashUpdatedTimer();
-    c.innerHTML = '<div class="ui-stack dash-page">' + _firstRunHeroHtml() + '</div>';
+    c.innerHTML = '<div class="ui-stack dash-page">' +
+      '<div class="ui-page-head"><h1 class="ui-page-title">Dashboard</h1></div>' +
+      _firstRunHeroHtml() + '</div>';
     return;
   }
 
@@ -1413,6 +1415,7 @@ export async function renderDashboardPage() {
 
   c.innerHTML =
     '<div class="ui-stack dash-page">' +
+      '<div class="ui-page-head"><h1 class="ui-page-title">Dashboard</h1></div>' +
       _dashFilterBarHtml(rules, sourceList, updatedHtml) +
       heroHtml +
       _statStripHtml({ allScans: allScans }) +

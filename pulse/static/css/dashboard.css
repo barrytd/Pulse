@@ -1177,7 +1177,7 @@
 .dash-filter-select:focus { border-color: var(--accent); }
 /* A select sizes itself to its longest option (long rule names), which
    would push "Last updated" onto a second line of the bar. */
-.dash-filter-bar .dash-filter-select { max-width: 220px; }
+.dash-filter-bar .dash-filter-select { max-width: 180px; }
 
 .dash-filter-search {
   height: 30px;
@@ -1391,12 +1391,11 @@
 }
 .report-catalog-grid {
   display: grid;
-  /* repeat(auto-fill, minmax(340px, 380px)) caps the upper width so
-   * cards never stretch to fill a wide viewport — the Tenable look is
-   * a uniform brick wall, not edge-to-edge billboards. */
-  grid-template-columns: repeat(auto-fill, minmax(340px, 380px));
-  gap: 16px;
-  margin-bottom: 24px;
+  /* Columns fill the row, so the cards line up edge to edge with the
+     full-width cards below (e.g. the "No reports generated yet" card). */
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--gap-section);
+  margin-bottom: 0;
 }
 /* A kit card (surface, radius, soft shadow + edge ring) that keeps its
    category color as a left accent edge. */
@@ -2460,11 +2459,13 @@ tr.pending-flash {
 /* Reports — empty state, generate-report modal, history quick action  */
 /* ------------------------------------------------------------------ */
 .reports-empty {
+  /* A kit card, the same width as the catalog grid above it. */
   text-align: center;
   padding: 56px 24px;
-  background: var(--card-bg, #161b22);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--bg-1);
+  border: none;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft), 0 0 0 1px var(--card-edge);
   display: flex;
   flex-direction: column;
   align-items: center;

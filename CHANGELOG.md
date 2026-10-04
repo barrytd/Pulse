@@ -5,6 +5,24 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-10-04 — Floating-sheet shell
+
+The one-surface shell was too subtle, so the page content is now one rounded sheet floating on a gray ground. It applies to every page and is visual only.
+
+- **Ground and sheet:**
+  - Light: the ground is a clearly gray warm `#e6e5e0` (was a near-white `#f6f5f2`) and the content is a white sheet.
+  - Dark: the ground is a darker charcoal `#080a09` with a raised `#121715` sheet, and cards sit a step above the sheet (`#19201d`).
+  - The sheet (`.main`) has an 18px radius, a soft shadow and a 20px gap on every side (10px on phones). Inside it, pages get 32px of padding (16px on phones).
+- **New tokens:** `--sheet-bg`, `--sheet-gap`, `--sheet-radius`, `--sheet-shadow`. `--bg` ("the page surface") now means the sheet, and `body` shows the ground (`--bg-0`).
+- **No divider lines:** none between the sidebar and the content, none under the top bar, and none above the sidebar footer.
+- **Page titles move into the sheet.** The top bar no longer shows the page name; the element stays (scripts still set it) but is hidden. The Dashboard (both states) and the scan-detail view, the only views without an in-page title, now have one.
+- **Logo:** "PULSE" is a 19px wordmark at the top of the sidebar. The "| Threat Detection" tag is removed.
+- **Reports:** the catalog grid capped each card at 380px, so it never reached the full-width "No reports generated yet" card below it. Its columns now fill the row (`minmax(300px, 1fr)`), so both share the same edges. The empty-state card is a kit card.
+- The dashboard's filter dropdowns are capped at 180px, so "Last updated" still fits on the row with the roomier padding.
+- Checked every page and Settings tab in light and dark at 1440px and 420px (120 views), with no sideways scroll and no script errors. A light-mode screenshot shows the white sheet floating on the gray ground with the gap visible on all sides.
+- README: new Dashboard, Findings and Fleet screenshots. The finding-drawer screenshot is still the older look, since it holds a live Pip answer.
+- Tests: `tests/test_ui_foundation.py` now checks the sheet tokens and the light ground-to-sheet contrast (a minimum luminance gap), that the sheet uses its radius, shadow and gap, that the shell has no divider lines, that page titles live in the sheet, the wordmark without a tagline, and the Reports grid alignment.
+
 ## 2026-09-27 — Look-and-feel pass, part 2, batch 6: Automations, Settings, modals (part 2 complete)
 
 - **Settings on narrow screens (logged bug, fixed):**

@@ -14,9 +14,10 @@
   z-index: 110;
   height: 48px;
   box-sizing: border-box;
-  /* Same ground as the sidebar and page; a hairline marks its edge. */
+  /* Same ground as the sidebar, no divider line; the page sheet sits
+     below it. */
   background: var(--shell-bg);
-  border-bottom: 1px solid var(--shell-line);
+  border-bottom: none;
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -26,6 +27,7 @@
 /* Current-page crumb — left edge of the topbar. Flex-grows into
    whatever space is left before the right-side action cluster. */
 .app-page-crumb {
+  display: none;   /* titles live inside the sheet (.ui-page-title) */
   flex: 1;
   margin: 0;
   font-size: 14px;
@@ -675,7 +677,7 @@ body.light .admin-banner-close {
   padding: var(--page-gutter) var(--page-gutter) var(--space-12);
 }
 @media (max-width: 640px) {
-  :root { --page-gutter: var(--space-3); }
+  :root { --page-gutter: var(--space-4); }
 }
 
 /* Shared rhythm: every stacked section inside .content sits

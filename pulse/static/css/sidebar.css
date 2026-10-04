@@ -35,10 +35,10 @@
   left: 0;
   bottom: 0;
   width: var(--sidebar-w);
-  /* Same ground as the page (--shell-bg), split off by a hairline
-     only, so the window reads as one continuous surface. */
+  /* Same ground as the topbar (--shell-bg) with no divider line; the
+     page sheet floats beside it. */
   background: var(--shell-bg);
-  border-right: 1px solid var(--shell-line);
+  border-right: none;
   display: flex;
   flex-direction: column;
   z-index: 95;
@@ -54,11 +54,11 @@
      the PULSE icon, name, separator, and tagline all share one line.
      gap:0 — the only intentional space lives between the icon and
      the rest of the brand (set on .sidebar-brand-mark below). */
-  flex: 0 0 48px;
+  flex: 0 0 64px;
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 0 16px;
+  padding: 0 18px;
   color: var(--text-high);
   text-decoration: none;
   cursor: pointer;
@@ -78,29 +78,14 @@
   margin-right: 8px;
 }
 .sidebar-brand-name {
+  /* The wordmark: Flow-style logo at the top of the rail. */
   font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 700;
   /* Tighter tracking — the prior 1.2px pushed "PULSE" too far from
      the separator and made the whole brand feel airy. */
-  letter-spacing: 0.8px;
+  letter-spacing: 0.06em;
   color: var(--text-high);
-  line-height: 1;
-}
-.sidebar-brand-sep {
-  color: var(--border);
-  font-weight: 300;
-  /* Symmetric 6px breathing room either side of the pipe so the
-     separator reads as part of the same compact lockup, not a stand-
-     alone divider. */
-  margin: 0 6px;
-  line-height: 1;
-}
-.sidebar-brand-sub {
-  font-size: 10px;
-  color: var(--text-dim);
-  letter-spacing: 0.3px;
-  white-space: nowrap;
   line-height: 1;
 }
 
@@ -237,7 +222,7 @@
 .sidebar-footer {
   flex: 0 0 auto;
   padding: 8px 0;
-  border-top: 1px solid var(--shell-line);
+  border-top: none;
   display: flex;
   flex-direction: column;
 }
@@ -252,11 +237,18 @@
   min-height: 100vh;
 }
 
+/* The page is one rounded sheet floating on the ground, with the gap
+   visible all around (the sidebar's nav pills already sit 8px in from
+   its edge, so the left margin adds the rest of the gap). */
 .main {
   flex: 1;
   min-width: 0;
-  margin-left: var(--sidebar-w);
-  min-height: calc(100vh - 48px);
+  margin: 8px var(--sheet-gap) var(--sheet-gap)
+          calc(var(--sidebar-w) + var(--sheet-gap) - 8px);
+  min-height: calc(100vh - 48px - 8px - var(--sheet-gap));
+  background: var(--sheet-bg);
+  border-radius: var(--sheet-radius);
+  box-shadow: var(--sheet-shadow);
 }
 
 /* ==================================================================
@@ -266,6 +258,7 @@
  * now the app is desktop-first and drops gracefully below 768px.
  * ================================================================== */
 @media (max-width: 768px) {
-  :root { --sidebar-w: 0px; } /* cascades to .main margin + .app-topbar left */
+  :root { --sidebar-w: 0px; --sheet-gap: 10px; } /* cascades to .main margin + .app-topbar left */
   .sidebar { display: none; }
+  .main { margin-left: var(--sheet-gap); }
 }

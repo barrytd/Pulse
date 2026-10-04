@@ -188,25 +188,57 @@ def _block(css, selector):
 
 
 class TestAppShell:
-    def test_sidebar_topbar_and_page_share_one_ground(self):
+    def test_page_is_a_sheet_floating_on_a_gray_ground(self):
         base = _read(CSS / "base.css")
         light, dark = base.split('[data-theme="dark"] {', 1)
+        # Sidebar + topbar sit on the ground; "the page surface" is the sheet.
         for theme in (light, dark):
-            assert re.search(r"--bg:\s*var\(--bg-0\)", theme)
+            assert re.search(r"--bg:\s*var\(--sheet-bg\)", theme)
             assert re.search(r"--topbar-bg:\s*var\(--bg-0\)", theme)
+            assert re.search(r"--sheet-bg:\s*#[0-9a-f]{6}", theme, re.I)
         assert re.search(r"--shell-bg:\s*var\(--bg-0\)", light)
-        # Light ground is the soft warm off-white, cards are white.
-        assert re.search(r"--bg-0:\s*#f6f5f2", light, re.I)
-        assert re.search(r"--bg-1:\s*#ffffff", light, re.I)
-        assert "var(--shell-bg)" in _block(_read(CSS / "sidebar.css"), ".sidebar")
-        assert "var(--shell-bg)" in _block(_read(CSS / "components.css"), ".app-topbar")
-        assert "var(--bg)" in _block(base, "body")
+        assert "var(--bg-0)" in _block(base, "body")
+
+        def lum(hexv):
+            r, g, b = (int(hexv[i:i + 2], 16) / 255 for i in (0, 2, 4))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        light_ground = re.search(r"--bg-0:\s*#([0-9a-f]{6})", light, re.I).group(1)
+        light_sheet = re.search(r"--sheet-bg:\s*#([0-9a-f]{6})", light, re.I).group(1)
+        dark_ground = re.search(r"--bg-0:\s*#([0-9a-f]{6})", dark, re.I).group(1)
+        dark_sheet = re.search(r"--sheet-bg:\s*#([0-9a-f]{6})", dark, re.I).group(1)
+        # Plainly visible contrast, not near-white on near-white.
+        assert lum(light_sheet) - lum(light_ground) >= 0.08
+        assert lum(dark_sheet) > lum(dark_ground)
+
+        main = _block(_read(CSS / "sidebar.css"), ".main")
+        for need in ("var(--sheet-bg)", "var(--sheet-radius)", "var(--sheet-shadow)", "var(--sheet-gap)"):
+            assert need in main, need
+        gap = int(re.search(r"--sheet-gap:\s*(\d+)px", light).group(1))
+        assert 16 <= gap <= 24
+
+    def test_no_divider_lines_in_the_shell(self):
+        sidebar = _read(CSS / "sidebar.css")
+        assert "border-right: none" in _block(sidebar, ".sidebar")
+        assert "border-top: none" in _block(sidebar, ".sidebar-footer")
+        assert "border-bottom: none" in _block(_read(CSS / "components.css"), ".app-topbar")
+
+    def test_page_names_live_in_the_sheet_not_the_top_bar(self):
+        assert "display: none" in _block(_read(CSS / "components.css"), ".app-page-crumb")
+        d = _read(JS_DIR / "dashboard.js")
+        assert d.count('<h1 class="ui-page-title">Dashboard</h1>') == 2
+        # The scan-detail view titles itself in the sheet too.
+        assert """class="ui-page-title">' + escapeHtml(fname)""" in _read(JS_DIR / "findings.js")
+
+    def test_logo_is_the_pulse_wordmark_without_a_tagline(self):
+        html = _read(SHELLS[0])
+        assert '<span class="sidebar-brand-name">PULSE</span>' in html
+        assert "Threat Detection</span>" not in html and "sidebar-brand-sep" not in html
+        assert re.search(r"font-size:\s*1[89]px", _block(_read(CSS / "sidebar.css"), ".sidebar-brand-name"))
 
     def test_sidebar_is_themed_not_a_dark_block(self):
         sidebar = _css_rules_without_comments(_read(CSS / "sidebar.css"))
         # Every color comes from a token, so it follows light and dark.
-        assert not re.search(r"#[0-9a-fA-F]{3,8}|rgba?\(", sidebar)
-        assert "1px solid var(--shell-line)" in _block(sidebar, ".sidebar")
+        assert not re.search(r"#[0-9a-fA-F]{3,8}|rgba?\(", sidebar)
 
     def test_active_nav_is_a_soft_green_pill(self):
         sidebar = _read(CSS / "sidebar.css")
@@ -215,6 +247,16 @@ class TestAppShell:
         active = _block(sidebar, ".sidebar-nav.active")
         assert "var(--nav-active-bg)" in active
         assert re.search(r"--nav-active-bg:\s*var\(--brand-soft\)", _read(CSS / "base.css"))
+
+    def test_reports_grid_lines_up_with_the_empty_card(self):
+        d = _read(CSS / "dashboard.css")
+        grid = _block(d, ".report-catalog-grid")
+        assert re.search(r"minmax\(\d+px, 1fr\)", grid)     # columns fill the row
+        empty = _block(d, ".reports-empty")
+        assert "var(--radius-card)" in empty and "var(--card-edge)" in empty
+
+
+JS_DIR = STATIC / "js"
 
 
 # ---------------------------------------------------------------------------
