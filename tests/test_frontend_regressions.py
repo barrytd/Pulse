@@ -190,3 +190,68 @@ def test_key_and_connector_links_open_integrations():
         src = _read(name)
         assert 'data-arg="settings:notifications"' not in src, name
         assert 'data-arg="settings:integrations"' in src, name
+
+
+# ---------------------------------------------------------------------------
+# Autofill guard: no filter / search / typeahead box takes the saved login
+# ---------------------------------------------------------------------------
+# Chrome ignores autocomplete="off" for saved logins but never fills a
+# readonly field, so these inputs render `readonly data-nofill="1"` and
+# app.js drops the readonly on focus.
+
+WEB = JS_DIR.parent.parent / "web"
+
+
+def _inputs(src):
+    """Each `<input ...>` tag in a JS string-built template or HTML file,
+    joined across the JS string concatenations that split it."""
+    flat = re.sub(r"'\s*\+\s*\n\s*'", "", src)        # join 'a' +\n 'b'
+    return re.findall(r"<input\b[^>]*>", flat)
+
+
+GUARDED = [
+    ("findings.js", 'class="filter-chip-dd-search"'),     # Severity/Status/Assignment/Host/Rule
+    ("audit.js", 'class="filter-chip-dd-search"'),        # Action/User/Target/Time range
+    ("command-palette.js", 'class="cmdk-input"'),
+    ("reports.js", 'id="reports-search"'),
+    ("threat-intel.js", 'id="ti-input"'),
+    ("whitelist.js", 'id="wl-add-value"'),
+    ("monitor.js", 'id="channel-custom-input"'),
+    ("firewall.js", 'id="fw-path-input"'),
+    ("firewall.js", 'id="add-block-ip"'),
+    ("firewall.js", 'id="add-block-comment"'),
+    ("playbook-builder.js", 'aria-label="Value"'),
+]
+
+
+def test_focus_handler_drops_readonly():
+    app = _read("app.js")
+    assert "document.addEventListener('focusin', _unlockNoFill)" in app
+    assert "t.hasAttribute('data-nofill')" in app and "t.removeAttribute('readonly')" in app
+    # Backstops so a box focused while the window was in the background
+    # can't stay stuck read-only: a click or the first keystroke unlocks it.
+    assert "document.addEventListener('pointerdown', _unlockNoFill, true)" in app
+    assert "document.addEventListener('keydown', _unlockNoFill, true)" in app
+
+
+def test_every_filter_and_search_input_is_guarded():
+    for name, marker in GUARDED:
+        tags = [t for t in _inputs(_read(name)) if marker in t]
+        assert tags, (name, marker)
+        for t in tags:
+            assert 'readonly data-nofill="1"' in t and 'data-form-type="other"' in t, (name, t[:120])
+
+
+def test_no_search_input_anywhere_is_left_unguarded():
+    files = list(JS_DIR.glob("*.js")) + [WEB / "index.html"]
+    for f in files:
+        for t in _inputs(f.read_text(encoding="utf-8")):
+            if 'type="search"' in t:
+                assert 'data-nofill="1"' in t, (f.name, t[:120])
+
+
+def test_pin_field_never_takes_the_saved_password():
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    pin = next(t for t in _inputs(html) if 'id="pin-input"' in t)
+    assert 'autocomplete="new-password"' in pin and 'data-nofill="1"' in pin
+    assert pin.count("autocomplete=") == 1

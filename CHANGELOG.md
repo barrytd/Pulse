@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-10-04 — Fix: Chrome autofilling the saved login into filter boxes
+
+- **The bug:** clicking a filter such as Severity on the Findings page opened a search box that Chrome filled with the saved login email. The main search boxes already had a guard: they render `readonly data-nofill="1"`, Chrome won't fill a read-only field, and focusing the box unlocks it. The filter dropdowns and several other boxes didn't have it.
+- **Guarded now, with the same attributes as the main search boxes:**
+  - the filter-chip dropdown search on Findings (Severity, Status, Assignment, Host, Rule) and Audit Log (Action, User, Target, Time range)
+  - the command palette, the Reports search, the Threat Intel IP lookup and the Whitelist value box
+  - Monitor's custom channel box, Firewall's log-path box and its block-an-IP / comment boxes, the force-block IP box, and the playbook builder's condition value
+- **Security PIN:** a password field, so Chrome could fill it with the saved login *password*. It's now `autocomplete="new-password"` plus the read-only guard.
+- **Sturdier unlock:** a box focused while the browser window was in the background (no focus event fires) used to stay read-only. A click or the first keystroke now unlocks it too, and that keystroke still types.
+- Settings form fields (your account email, SMTP sender, alert recipient) are real forms and keep normal browser behavior.
+- Checked in a browser: the Severity dropdown's box opens empty and types normally, including the stuck-focus case, where the first keystroke unlocked it and "crit" filtered the list to Critical. The command palette types normally. Headless Chrome has no saved logins, so the autofill itself can't be reproduced in tests.
+- Tests: `tests/test_frontend_regressions.py` checks that every listed box is guarded, that no `type="search"` input anywhere is left unguarded, the PIN's `new-password`, and the unlock handlers. With the guard stripped from the Findings dropdown, the tests fail.
+
 ## 2026-10-04 — Settings: new Integrations tab
 
 The Notifications tab mixed Pulse's own email alerts with the Slack/Discord webhook, every threat-intel key and the playbook connectors. It's now split by purpose. Every field, endpoint and save action is unchanged; the cards only moved.

@@ -180,7 +180,7 @@ function _conditionRowHtml(row, i, marks) {
       }).join('') + '</select>' +
       '<div class="pb-hint">' + (chosen.length ? chosen.length + ' selected' : 'Pick one or more (Ctrl or Shift to select several)') + '</div>';
   } else if (v.type === 'text') {
-    control = '<input class="pb-input" type="text" aria-label="Value" value="' + escapeHtml(row.value || '') + '" ' +
+    control = '<input class="pb-input" type="text" aria-label="Value" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="pb-cond-value-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" value="' + escapeHtml(row.value || '') + '" ' +
       'data-action-input="builderCondValue" data-arg="' + i + '"/>';
   }
   return '<div class="pb-row' + (marks.cond[i] ? ' pb-row-error' : '') + '">' +

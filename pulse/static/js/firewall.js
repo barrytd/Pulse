@@ -329,6 +329,7 @@ function _fwToolbarHtml() {
     '<div class="fw-toolbar-row">' +
       '<label class="fw-toolbar-label" for="fw-path-input">Log file path</label>' +
       '<input type="text" id="fw-path-input" class="fw-path-input" ' +
+        'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="fw-path-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" ' +
         'value="' + escapeHtml(path) + '" ' +
         'placeholder="' + escapeHtml(FW_DEFAULT_LOG_PATH) + '" ' +
         'spellcheck="false" autocomplete="off" ' +
@@ -764,11 +765,11 @@ function _renderAddBlockModal() {
         '<em>Push immediately</em> below (requires admin).' +
       '</p>' +
       '<label class="add-block-label" for="add-block-ip">IP address</label>' +
-      '<input type="text" id="add-block-ip" class="add-block-input" autocomplete="off" ' +
+      '<input type="text" id="add-block-ip" class="add-block-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="add-block-ip-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" ' +
         'spellcheck="false" placeholder="e.g. 203.0.113.5" ' +
         'data-action-input="addBlockInputCheck" />' +
       '<label class="add-block-label" for="add-block-comment">Comment (optional)</label>' +
-      '<input type="text" id="add-block-comment" class="add-block-input" autocomplete="off" ' +
+      '<input type="text" id="add-block-comment" class="add-block-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="add-block-comment-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" ' +
         'placeholder="Reason this IP is being blocked" />' +
       '<label class="add-block-checkbox">' +
         '<input type="checkbox" id="add-block-push" /> ' +

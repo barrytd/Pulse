@@ -911,6 +911,7 @@ export function openFilterChip(dimId, target) {
   dd.innerHTML =
     '<div class="filter-chip-dd-head">' +
       '<input type="search" class="filter-chip-dd-search" ' +
+      'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="findings-chip-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" ' +
         'placeholder="Find ' + escapeHtml(dim.label.toLowerCase()) + '..." ' +
         'data-action-input="filterChipDdFind" />' +
     '</div>' +

@@ -588,7 +588,7 @@ export async function renderReportsPage() {
     '<div class="card">' +
       '<div class="section-label" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
         '<span>Saved reports <span id="reports-count" style="color:var(--text-muted); font-weight:400; margin-left:8px; font-size:11px;"></span></span>' +
-        '<input type="search" id="reports-search" placeholder="Filter by filename, host, or generator…" ' +
+        '<input type="search" id="reports-search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="reports-search-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" placeholder="Filter by filename, host, or generator…" ' +
           'class="search-box" ' +
           'data-action-input="setReportsQueryFromInput" ' +
           'value="' + escapeHtml(_reportsQuery) + '" />' +

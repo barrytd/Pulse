@@ -303,8 +303,8 @@
       <div class="assign-field">
         <label for="pin-input">Security PIN</label>
         <div class="pin-input-wrap">
-          <input type="password" id="pin-input" class="assign-select" inputmode="numeric"
-                 autocomplete="off" maxlength="12" placeholder="••••••" />
+          <input type="password" id="pin-input" class="assign-select" autocomplete="new-password" name="pin-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" inputmode="numeric"
+                 maxlength="12" placeholder="••••••" />
           <button type="button" class="pin-reveal-btn" data-action="togglePinReveal"
                   aria-label="Show PIN" title="Show / hide" tabindex="-1"><i data-lucide="eye"></i></button>
         </div>
@@ -661,7 +661,7 @@
       <label class="force-block-label" for="force-block-input">
         Type the IP to confirm
       </label>
-      <input type="text" id="force-block-input" class="force-block-input"
+      <input type="text" id="force-block-input" class="force-block-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="force-block-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1"
              autocomplete="off" spellcheck="false"
              data-action-input="forceBlockInputCheck" />
       <div class="modal-actions">

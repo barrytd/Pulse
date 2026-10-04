@@ -106,6 +106,7 @@ function _lookupCardHtml() {
       '<label class="ti-lookup-label" for="ti-input">IP address</label>' +
       '<div class="ti-lookup-row">' +
         '<input type="search" id="ti-input" class="ti-lookup-input" ' +
+          'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="ti-lookup-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" ' +
           'placeholder="e.g. 8.8.8.8 or 2606:4700:4700::1111" ' +
           'autocomplete="off" spellcheck="false" ' +
           'value="' + escapeHtml(_input) + '" ' +

@@ -154,6 +154,7 @@ export function channelMultiSelectHtml(opts) {
         '<span>Custom\u2026</span>' +
       '</label>' +
       '<input type="text" class="channel-custom-input" id="channel-custom-input" ' +
+        'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="mon-channel-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" ' +
         'placeholder="Comma-separated channel names" ' +
         'value="' + escapeHtml(customRaw) + '" ' +
         'data-action-input="updateCustomChannels"' +

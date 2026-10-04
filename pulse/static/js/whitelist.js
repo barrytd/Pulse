@@ -142,7 +142,7 @@ export async function renderWhitelistPage() {
         '<select id="wl-add-type" data-action-change="setWhitelistAddType" style="padding:8px 10px; background:var(--card-bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:13px;">' +
           typeOpts +
         '</select>' +
-        '<input type="text" id="wl-add-value" class="search-box" style="flex:1;" placeholder="Value (e.g. service name, account, IP)" ' +
+        '<input type="text" id="wl-add-value" class="search-box" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="wl-value-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" style="flex:1;" placeholder="Value (e.g. service name, account, IP)" ' +
           'data-action-keydown="whitelistAddValueKey" />' +
         '<button class="btn btn-primary btn-with-icon" data-action="addWhitelistEntry"><i data-lucide="plus"></i><span>Add</span></button>' +
       '</div>' +

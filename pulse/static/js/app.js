@@ -874,12 +874,19 @@ async function _boot() {
 // field. Inputs render with `readonly data-nofill="1"`; we drop the readonly
 // the moment the user focuses one, so typing is unaffected and the saved
 // login email never gets pasted in on page load.
-document.addEventListener('focusin', function (e) {
+function _unlockNoFill(e) {
   var t = e.target;
   if (t && t.tagName === 'INPUT' && t.hasAttribute('data-nofill') && t.hasAttribute('readonly')) {
     t.removeAttribute('readonly');
   }
-});
+}
+document.addEventListener('focusin', _unlockNoFill);
+// Backstops for focus that arrived without a focusin (code focused the box
+// while the window was in the background, e.g. a filter dropdown opened
+// just before switching apps): a click or the first keystroke unlocks it.
+// Capture phase, so the keystroke itself still types into the field.
+document.addEventListener('pointerdown', _unlockNoFill, true);
+document.addEventListener('keydown', _unlockNoFill, true);
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _boot);

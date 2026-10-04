@@ -160,7 +160,7 @@ function _ensureMounted() {
         '<svg class="cmdk-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
           '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>' +
         '</svg>' +
-        '<input class="cmdk-input" type="text" placeholder="Search pages and actions…" spellcheck="false" autocomplete="off" />' +
+        '<input class="cmdk-input" type="search" placeholder="Search pages and actions…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="cmdk-nofill" data-lpignore="true" data-1p-ignore data-form-type="other" readonly data-nofill="1" />' +
         '<span class="cmdk-kbd">Esc</span>' +
       '</div>' +
       '<div class="cmdk-list" role="listbox"></div>' +
