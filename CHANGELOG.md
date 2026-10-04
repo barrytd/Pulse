@@ -5,6 +5,19 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-10-04 — Fix: sample uploads rejected, and "Antivirus Disabled" silently whitelisted
+
+- **Upload dialog rejected every real .evtx.** The browser-side header check in `upload.js` compared against `45 4C 66 46…` ("E**L**fFile") instead of `45 6C 66 46…` ("ElfFile", with a lowercase l). So every file failed with "not a valid .evtx file (header mismatch)" before it was sent. The server's check (`_EVTX_MAGIC` in `api.py`) was always correct, as were the sample files: their magic bytes, their `binary` attribute, and their content all checked out. The line-ending commits never touched them. The bad byte dates from the commit that added client-side upload checks.
+- **"Antivirus Disabled" never reached a report.** The built-in known-good service list (about 137 names) was matched against every finding's text, so the alert's own wording, "Windows Defender real-time protection was disabled…", matched the entry `windows defender`. The finding was dropped on every machine, in the API, the agent and the local system scan. The built-in list now applies only to "Service Installed" findings, the service names it was written for. Services you add in `pulse.yaml` still apply to any finding. This also restores `persistence-malware.evtx` to what its README row promises: Antivirus Disabled and a D (42), not a D (49).
+- Verified all five `samples/*.evtx` files through the real `POST /api/scan` path. Each uploads (HTTP 200) and produces exactly the events, rules, grade and score in `samples/README.md`.
+- Tests: new [`tests/test_sample_uploads.py`](tests/test_sample_uploads.py) (15):
+  - the browser and server magic bytes match
+  - every sample passes both header checks and parses
+  - every sample uploads, scans and matches its `samples/README.md` row. The test reads the README table, so adding a sample needs a row, and a detection or scoring change that shifts a sample fails until the README is updated.
+  - built-in known-good names quiet "Service Installed" but never an AV-tamper alert, while user-listed services still apply to any rule
+
+  With each bug put back, the matching tests fail (6 for the magic byte, 2 for the whitelist).
+
 ## 2026-10-04 — Floating-sheet shell
 
 The one-surface shell was too subtle, so the page content is now one rounded sheet floating on a gray ground. It applies to every page and is visual only.

@@ -19,6 +19,8 @@ These are **Pulse-synthetic .evtx** files — they begin with the standard `ElfF
 
 To regenerate / customize, edit and rerun `scripts/generate_sample_evtx.py`. The script is the source of truth; the files in this directory are its output.
 
+The table below is checked by `tests/test_sample_uploads.py`: every file must upload through the API and produce exactly the events, rules, grade and score listed here. Add a row when you add a sample, and update the row when a detection or scoring change moves a sample's result.
+
 ## What each file demonstrates
 
 | File | Scenario | Events | Triggers | Expected grade (score) |

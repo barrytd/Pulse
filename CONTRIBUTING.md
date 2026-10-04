@@ -46,7 +46,7 @@ python -m pytest tests/test_detections.py -v
 python -m pytest -m "not network"
 ```
 
-The suite covers every detection rule, the API surface, multi-tenant isolation, agent runtime cadence, firewall log parsing, IP block-list lifecycle, the auto-update channel, email verification, the security-hardening fixes, scoring, the connectors, and the playbook engine. No real `.evtx` files needed — synthetic event data mirrors the live structure. **No test touches the network or the real firewall**: connector tests mock HTTP / sockets at the boundary, and playbook tests replace the firewall blocker. Keep it that way (the one exception is the `network`-marked pip-audit check).
+The suite covers every sample in `samples/` (uploaded through the API and checked against its `samples/README.md` row), every detection rule, the API surface, multi-tenant isolation, agent runtime cadence, firewall log parsing, IP block-list lifecycle, the auto-update channel, email verification, the security-hardening fixes, scoring, the connectors, and the playbook engine. No real `.evtx` files needed — synthetic event data mirrors the live structure. **No test touches the network or the real firewall**: connector tests mock HTTP / sockets at the boundary, and playbook tests replace the firewall blocker. Keep it that way (the one exception is the `network`-marked pip-audit check).
 
 ---
 

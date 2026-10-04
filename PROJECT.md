@@ -40,7 +40,7 @@ You can also drop a `.evtx` log file straight into the dashboard for a one-off s
 - Sysmon support (process creation, LSASS access, network connections, DNS queries).
 - Multi-event correlation that links separate events into one attack chain.
 - Import of community SIGMA rules.
-- A built-in list of over 100 known-good services to cut false positives.
+- A built-in list of over 100 known-good services to cut false positives on new-service installs. It never hides other alerts, such as antivirus being switched off.
 
 ### Dashboard and triage
 - A single-page web app. The dashboard leads with the security grade and one plain-language line about what's wrong, next to the unreviewed critical and high findings, then four key numbers as tiles, and the score history beside findings by severity. A brand-new account sees a "Run your first scan" prompt instead of empty zeros. The grade ring is the biggest thing on the page. It fits on about one screen, stays a comfortable width on wide monitors, uses the Inter font (bundled, so it works offline), and is built from shared card, spacing and type styles that every page now uses. The page content is one rounded sheet floating on a gray background (a raised charcoal sheet in dark mode), with no divider lines, and every page works on a phone-width screen without scrolling sideways.

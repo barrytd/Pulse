@@ -12,8 +12,11 @@ import { navigate } from './navigation.js';
 
 let selectedFiles = [];
 
-// .evtx files always start with "ElfFile\0" (hex 45 4C 46 46 69 6C 65 00).
-const _EVTX_MAGIC = [0x45, 0x4C, 0x66, 0x46, 0x69, 0x6C, 0x65, 0x00];
+// .evtx files always start with "ElfFile\0" (hex 45 6C 66 46 69 6C 65 00),
+// the same bytes the server checks (_EVTX_MAGIC in api.py). The second byte
+// is a lowercase "l" (0x6C); an uppercase 0x4C here once made the browser
+// reject every real .evtx before it was uploaded.
+const _EVTX_MAGIC = [0x45, 0x6C, 0x66, 0x46, 0x69, 0x6C, 0x65, 0x00];
 const _MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 function _setDropError(msg) {

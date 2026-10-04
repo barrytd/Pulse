@@ -10,8 +10,9 @@
 # tells Pulse to ignore these so your report only shows real anomalies.
 #
 # Two layers stack together:
-#   1. BUILT-IN: pulse/known_good.py lists 100+ known-good services
-#      (anti-cheat, Google, Microsoft, etc.) and is always applied.
+#   1. BUILT-IN: pulse/core/known_good.py lists 100+ known-good services
+#      (anti-cheat, Google, Microsoft, etc.), applied to "Service Installed"
+#      findings only (it names services, not products in other alerts).
 #   2. USER:    the "whitelist" section of pulse.yaml lets each user
 #               add their own accounts, services, IPs, or whole rules.
 #
@@ -21,6 +22,10 @@
 # the CLI entry point — bad news for tests and uvicorn startup.
 
 from pulse.core.known_good import KNOWN_GOOD_SERVICES
+
+# Rules whose findings are about a service being installed: the only kind
+# the built-in KNOWN_GOOD_SERVICES list is meant to quiet.
+BUILTIN_SERVICE_RULES = {"service installed"}
 
 
 def filter_whitelist(findings, whitelist):
@@ -35,7 +40,9 @@ def filter_whitelist(findings, whitelist):
 
     A finding is dropped if:
         - Its rule name is in the "rules" list, OR
-        - Any whitelisted account, service, or IP appears in details text
+        - Any whitelisted account, service, or IP appears in details text.
+          Built-in known-good services only count for "Service Installed"
+          findings; services you list yourself count for any finding.
 
     Parameters:
         findings (list):   Findings from run_all_detections().
@@ -49,10 +56,8 @@ def filter_whitelist(findings, whitelist):
 
     skip_rules    = [r.lower() for r in whitelist.get("rules", []) or []]
     skip_accounts = [a.lower() for a in whitelist.get("accounts", []) or []]
-    skip_services = (
-        KNOWN_GOOD_SERVICES
-        + [s.lower() for s in whitelist.get("services", []) or []]
-    )
+    user_services = [s.lower() for s in whitelist.get("services", []) or []]
+    builtin_plus_user = KNOWN_GOOD_SERVICES + user_services
     skip_ips = whitelist.get("ips", []) or []
 
     filtered = []
@@ -64,7 +69,15 @@ def filter_whitelist(findings, whitelist):
 
         if any(account in details_lower for account in skip_accounts):
             continue
-        if any(service in details_lower for service in skip_services):
+        # The built-in list names legitimate *services*, so it applies only
+        # to findings about a service being installed. Matched against every
+        # rule's wording it silenced unrelated alerts that name a product:
+        # "Windows Defender real-time protection was disabled" (Antivirus
+        # Disabled) matched "windows defender" and was dropped everywhere.
+        services = (builtin_plus_user
+                    if finding["rule"].lower() in BUILTIN_SERVICE_RULES
+                    else user_services)
+        if any(service in details_lower for service in services):
             continue
         if any(ip in finding["details"] for ip in skip_ips):
             continue
