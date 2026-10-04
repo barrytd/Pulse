@@ -5,6 +5,21 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-10-04 — Settings: new Integrations tab
+
+The Notifications tab mixed Pulse's own email alerts with the Slack/Discord webhook, every threat-intel key and the playbook connectors. It's now split by purpose. Every field, endpoint and save action is unchanged; the cards only moved.
+
+- **Notifications** keeps Pulse's own alerting: Threshold Alerts, Live Monitor Emails and the Weekly Threat Brief.
+- **Integrations** is a new tab in the CONFIGURATION group, for everything that connects Pulse to an outside service, in three headed sections:
+  - **Alert webhook:** the Slack/Discord webhook card
+  - **Threat intelligence keys:** AbuseIPDB, VirusTotal, GreyNoise, AlienVault OTX and the GeoIP database
+  - **Playbook connectors:** ClickUp/Jira ticketing and the outbound webhook
+- Links that pointed at those settings now open Integrations: the Automations connectors note, the finding drawer's threat-intel and Investigate "Add keys" links, and the Threat Intel page's Settings button and "lookups are off" banner. The onboarding "Set up email alerts" step still opens Notifications.
+- New kit class `.ui-section-head`, a heading that groups the cards below it.
+- Checked in a browser, in light and dark at 1440px and 420px. Each tab shows exactly its own save and test actions, Integrations sits under CONFIGURATION, and nothing scrolls sideways.
+- Docs: README and `pulse/data/README.md` now point to Settings › Integrations.
+- Tests: `tests/test_frontend_regressions.py` checks the new tab and its group, exactly what each tab holds, the three section headings, that every moved action is still registered, and that no link sends people to Notifications for keys or connectors.
+
 ## 2026-10-04 — Finding drawer overlays instead of squishing the table
 
 - **Findings:** opening the finding drawer at desktop widths used to push the page aside (`padding-right: 460px` on `.findings-page`), squeezing the table so rule names wrapped and right-hand columns were clipped. The drawer now floats over the page at every width, the same way it always did on phones. The table keeps its full column widths, and the page isn't dimmed or locked, so clicking another row still switches the drawer to that finding.

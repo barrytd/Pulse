@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-1916%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1920%20passing-brightgreen)
 ![Release](https://img.shields.io/github/v/release/barrytd/Pulse?label=release)
 ![Stars](https://img.shields.io/github/stars/barrytd/Pulse?style=social)
 
@@ -134,7 +134,7 @@ Open **`http://localhost:8443`** — note the **different port**: the Python qui
 
 **Storage** — All scan history, findings, audit log, agents, notifications, organizations, users, API tokens, IP block list, finding notes, playbooks, playbook runs and per-org connector switches live in one schema ([`pulse/database.py`](pulse/database.py)). Multi-tenant rows carry an `organization_id`; the API helper `_read_scope_kwargs` enforces tenant isolation on every read/write.
 
-**Tests** — 1916 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
+**Tests** — 1920 passing across the suite; one test runs `pip-audit --strict` online and is marked `@pytest.mark.network` (skip offline with `-m "not network"`).
 
 ---
 
@@ -192,7 +192,7 @@ Set `PULSE_HOSTED_SIGNUP=1` to let each signup create its own isolated organizat
 
 ### Threat-intel keys and the GeoIP database
 
-Every outside lookup is bring-your-own and off until you set it up under **Settings › Notifications** (or with environment variables on a hosted deploy): `ABUSEIPDB_API_KEY`, `VIRUSTOTAL_API_KEY`, `GREYNOISE_API_KEY`, `OTX_API_KEY`. Keys stay on the server; the browser only ever sees whether one is set. VirusTotal's free public key is for non-commercial use only.
+Every outside lookup is bring-your-own and off until you set it up under **Settings › Integrations** (or with environment variables on a hosted deploy): `ABUSEIPDB_API_KEY`, `VIRUSTOTAL_API_KEY`, `GREYNOISE_API_KEY`, `OTX_API_KEY`. Keys stay on the server; the browser only ever sees whether one is set. VirusTotal's free public key is for non-commercial use only.
 
 GeoIP needs no setup: Pulse bundles DB-IP's free **IP to Country Lite** database ([`pulse/data/`](pulse/data/README.md), CC BY 4.0, [IP Geolocation by DB-IP](https://db-ip.com)), so country-level lookups work offline on every install. For city-level detail, download DB-IP "IP to City Lite" or MaxMind GeoLite2 City (free account) and set its path in Settings, set `PULSE_GEOIP_DB`, or drop it in the top-level `data/` folder; your file takes priority. (City Lite is too large to bundle, and MaxMind's license forbids redistribution.) Whois and DNS need no key.
 

@@ -139,3 +139,54 @@ def test_system_scan_refreshes_the_page_without_redirecting():
     tail = _scan_done_tail(src, "invalidateScansCache();\n    invalidateFindingsCache();")
     assert "navigate(getCurrentPage())" in tail
     assert "navigate('history')" not in src
+
+
+# ---------------------------------------------------------------------------
+# Settings: Notifications = Pulse's own alerting; Integrations = outside services
+# ---------------------------------------------------------------------------
+
+def _panel(src, key):
+    """The expression a Settings tab panel is composed from (up to the next key)."""
+    start = src.index("    " + key + ":")
+    nxt = re.search(r"\n    [a-z]+:\s", src[start + 5:])
+    return src[start:start + 5 + nxt.start()] if nxt else src[start:]
+
+
+import re  # noqa: E402
+
+
+def test_integrations_tab_sits_in_configuration():
+    src = _read("settings.js")
+    assert re.search(r"\{ id: 'integrations',\s*label: 'Integrations',.*group: 'CONFIGURATION' \}", src)
+
+
+def test_notifications_holds_only_pulse_alerting():
+    notif = _panel(_read("settings.js"), "notifications")
+    for part in ("thresholdAlertsHtml", "liveMonitorEmailsHtml", "weeklyBriefHtml"):
+        assert part in notif
+    for moved in ("webhookHtml", "threatIntelHtml", "_responseConnectorsHtml"):
+        assert moved not in notif, moved
+
+
+def test_integrations_groups_the_outside_services():
+    src = _read("settings.js")
+    integ = _panel(src, "integrations")
+    order = [integ.index(x) for x in (
+        "'Alert webhook'", "webhookHtml",
+        "'Threat intelligence keys'", "threatIntelHtml",
+        "'Playbook connectors'", "_responseConnectorsHtml")]
+    assert order == sorted(order), "sections out of order"
+    # The moved cards keep their save/test actions, still wired in app.js.
+    app = _read("app.js")
+    for action in ("saveWebhookSettings", "sendTestWebhook", "saveThreatIntelSettings",
+                   "testThreatIntelKey", "saveTicketingSettings",
+                   "saveOutboundWebhookSettings", "testResponseConnector"):
+        assert 'data-action="%s"' % action in src, action
+        assert re.search(r"\b%s\b" % action, app), action
+
+
+def test_key_and_connector_links_open_integrations():
+    for name in ("automations.js", "findings.js", "threat-intel.js"):
+        src = _read(name)
+        assert 'data-arg="settings:notifications"' not in src, name
+        assert 'data-arg="settings:integrations"' in src, name

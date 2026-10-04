@@ -11,7 +11,7 @@ The GeoIP connector ([`pulse/connectors/geoip.py`](../connectors/geoip.py)) uses
 
 **IP Geolocation by DB-IP** — https://db-ip.com
 
-Why country and not city: the City Lite database is 127 MB, over GitHub's 100 MB file limit, and refreshing it monthly would add about 60 MB to the repository's history each time. For city-level detail, download DB-IP City Lite or MaxMind GeoLite2 City yourself and set its path under Settings › Notifications › GeoIP database (or `PULSE_GEOIP_DB`, or drop it in the top-level `data/` folder). Your file then takes priority over this one. MaxMind's GeoLite2 can't be bundled at all: its license forbids redistribution.
+Why country and not city: the City Lite database is 127 MB, over GitHub's 100 MB file limit, and refreshing it monthly would add about 60 MB to the repository's history each time. For city-level detail, download DB-IP City Lite or MaxMind GeoLite2 City yourself and set its path under Settings › Integrations › GeoIP database (or `PULSE_GEOIP_DB`, or drop it in the top-level `data/` folder). Your file then takes priority over this one. MaxMind's GeoLite2 can't be bundled at all: its license forbids redistribution.
 
 ### Refreshing (monthly)
 

@@ -2248,8 +2248,8 @@ var _VERDICT_LABEL = {
 var _VERDICT_RANK = { malicious: 3, suspicious: 2, clean: 1, unknown: 0 };
 
 var _SETTINGS_LINK =
-  '<a href="#" data-action="navigate" data-arg="settings:notifications" ' +
-  'style="color:var(--accent); text-decoration:none;">Settings &rsaquo; Notifications</a>';
+  '<a href="#" data-action="navigate" data-arg="settings:integrations" ' +
+  'style="color:var(--accent); text-decoration:none;">Settings &rsaquo; Integrations</a>';
 
 function _intelRow(k, v, extra) {
   return '<div class="intel-meta-row"><span class="k">' + k + '</span>' +
@@ -2465,7 +2465,7 @@ function _invGroupRowsHtml(verdicts) {
   var html = rows.map(_invRowHtml).join('');
   if (notSetUp.length) {
     html += '<div class="inv-quiet muted">Not set up: ' + notSetUp.join(', ') +
-      '. <a href="#" data-action="navigate" data-arg="settings:notifications" class="link">Add keys</a></div>';
+      '. <a href="#" data-action="navigate" data-arg="settings:integrations" class="link">Add keys</a></div>';
   }
   if (off.length) html += '<div class="inv-quiet muted">Switched off: ' + off.join(', ') + '</div>';
   return html;

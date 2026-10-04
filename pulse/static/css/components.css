@@ -1953,6 +1953,8 @@ a.link:hover { text-decoration: underline; }
 /*                      .ui-split-aside-start to put the side first,    */
 /*                      or .ui-split-even for two equal columns         */
 /*   .ui-inset          flat inset block inside a card (no elevation)   */
+/*   .ui-section-head   heading that groups the cards below it          */
+/*                      (.ui-panel-title + .ui-sublabel inside)         */
 /*   .ui-toolbar        a wrapping row of controls (search, selects,    */
 /*                      actions); pair with .ui-card for a filter bar   */
 /*   .ui-card           elevated surface: soft shadow, big radius, no   */
@@ -2049,6 +2051,9 @@ a.link:hover { text-decoration: underline; }
   padding: var(--pad-card);
   min-width: 0;
 }
+
+.ui-section-head { margin: var(--space-6) 0 var(--space-3); }
+.ui-section-head:first-child { margin-top: 0; }
 
 .ui-toolbar {
   display: flex;

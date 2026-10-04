@@ -375,7 +375,7 @@ function _connectorsHtml() {
   }).join('');
   return '<div class="card soar-card"><div class="section-label">Connectors</div>' +
     '<p class="muted" style="margin:0 0 8px 0;">API keys and webhooks are set under ' +
-      '<a href="#" data-action="navigate" data-arg="settings:notifications" class="link">Settings</a>. ' +
+      '<a href="#" data-action="navigate" data-arg="settings:integrations" class="link">Settings › Integrations</a>. ' +
       'Switch a connector off to stop every playbook in your organization from using it.</p>' +
     '<div style="overflow-x:auto;"><table class="data-table soar-table">' +
       '<thead><tr><th>Connector</th><th>Kind</th><th>Status</th><th>Enabled</th></tr></thead>' +

@@ -79,6 +79,7 @@ const SETTINGS_TABS = [
   { id: 'scheduled',     label: 'Scheduled Scans', icon: 'calendar',       group: 'CONFIGURATION' },
   { id: 'tokens',        label: 'API Tokens',      icon: 'key',            group: 'CONFIGURATION' },
   { id: 'agents',        label: 'Agents',          icon: 'monitor',        group: 'CONFIGURATION' },
+  { id: 'integrations',  label: 'Integrations',    icon: 'plug',           group: 'CONFIGURATION' },
   { id: 'advanced',      label: 'Advanced',        icon: 'sliders',        group: 'CONFIGURATION' },
   // TEAM
   { id: 'users',         label: 'Users',           icon: 'users',          group: 'TEAM', adminOnly: true },
@@ -911,8 +912,22 @@ export async function renderSettingsPage() {
     profile:       profileHtml,
     account:       accountHtml,
     billing:       billingHtml,
-    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml + webhookHtml + threatIntelHtml +
-                   _responseConnectorsHtml(config.ticketing || {}, config.outbound_webhook || {}),
+    // Notifications: Pulse's own alerting only.
+    notifications: thresholdAlertsHtml + liveMonitorEmailsHtml + weeklyBriefHtml,
+    // Integrations: everything that connects Pulse to an outside service.
+    // The cards (fields, ids, save actions) are the same ones that used to
+    // sit on Notifications, only regrouped under three headings.
+    integrations:
+      _settingsSectionHead('Alert webhook',
+        'Post findings to a Slack or Discord channel when an alert fires.') +
+      webhookHtml +
+      _settingsSectionHead('Threat intelligence keys',
+        'Bring-your-own keys for AbuseIPDB, VirusTotal, GreyNoise and AlienVault OTX, ' +
+        'plus the GeoIP database. Keys stay on the server.') +
+      threatIntelHtml +
+      _settingsSectionHead('Playbook connectors',
+        'Where approved playbook steps open a ticket (ClickUp or Jira) or send to your own webhook.') +
+      _responseConnectorsHtml(config.ticketing || {}, config.outbound_webhook || {}),
     scheduled:     scheduledHtml,
     appearance:    appearanceHtml,
     tokens:        tokensHtml,
@@ -2264,6 +2279,14 @@ export async function saveThreatIntelSettings() {
 }
 
 // `connector` comes from the button's data-arg: 'abuseipdb' or 'virustotal'.
+// A heading that groups the cards inside a tab (Integrations).
+function _settingsSectionHead(title, sub) {
+  return '<div class="ui-section-head">' +
+    '<h2 class="ui-panel-title">' + escapeHtml(title) + '</h2>' +
+    '<div class="ui-sublabel">' + escapeHtml(sub) + '</div>' +
+  '</div>';
+}
+
 // ----- Playbook response connectors: ticketing + outbound webhook -----
 // Same secret rules as the other keys: a blank field keeps what's saved,
 // and tokens / the webhook URL / its secret never come back from the
