@@ -43,3 +43,24 @@ python -c "from pulse.core.rules_config import RULE_META; print(len(RULE_META))"
 - Keep `.gitignore` covering anything a tool or workflow tends to drop in the tree (for example `Claude outputs/`).
 - Line endings are set by `.gitattributes` (`* text=auto`); don't commit changes that only flip CRLF/LF.
 - Tests never touch the network or the real firewall (except the `network`-marked pip-audit check). Mock at the boundary.
+
+## Clean up what you launch
+
+Headless browsers and preview servers started while working (screenshots, UI checks, `serve.py`-style throwaway servers) must not outlive the task. Left running, they pile up in Task Manager and eat the machine's memory.
+
+- **Close browsers in teardown, every time.** Wrap each launch in `try`/`finally` (or a pytest fixture that `yield`s and closes after), so it closes even when a check fails or is interrupted.
+- **Kill the whole process tree, not just the PID you started.** On Windows, `proc.kill()` ends only that one process. Chrome's browser, GPU and renderer children keep running. Use `taskkill /PID <pid> /T /F`, then remove the temp `--user-data-dir` profile.
+- **A hard-killed run can't clean up after itself** (`finally` and `atexit` never run), so sweep at the end.
+- **Before you say a task is finished,** stop every server you started and confirm no headless Chrome is left:
+
+```powershell
+# Kill headless Chrome running on a temp profile (only automation launches these)
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+  Where-Object { $_.CommandLine -match '--headless' -and $_.CommandLine -like "*--user-data-dir=*$env:TEMP*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
+# Must print 0
+(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -match '--headless' }).Count
+```
+
+  Report the count in your summary. Never kill the user's normal (non-headless) Chrome.
