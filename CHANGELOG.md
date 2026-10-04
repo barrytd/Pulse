@@ -5,6 +5,13 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-10-04 — Uploads land on the Dashboard
+
+- After an uploaded log finishes scanning, Pulse now lands on, or stays on, the **Dashboard** instead of redirecting to History. The scan and findings caches are dropped first, so the new scan's score and findings show right away. When you're already on the Dashboard it re-renders in place (same URL, no extra browser-history entry).
+- **Scan my system** already stayed put: it re-renders whichever page you're on with fresh data and never redirected. Unchanged.
+- Checked end to end in a browser: an upload started on History closed the dialog and landed on `/dashboard` showing the new scan's grade, score and needs-attention list.
+- Tests: two new guards in `tests/test_frontend_regressions.py`. Upload completion navigates to the Dashboard after invalidating the caches, and neither flow redirects to History. With the old redirect restored, the upload test fails. No existing test expected the History redirect.
+
 ## 2026-10-04 — Fix: sample uploads rejected, and "Antivirus Disabled" silently whitelisted
 
 - **Upload dialog rejected every real .evtx.** The browser-side header check in `upload.js` compared against `45 4C 66 46…` ("E**L**fFile") instead of `45 6C 66 46…` ("ElfFile", with a lowercase l). So every file failed with "not a valid .evtx file (header mismatch)" before it was sent. The server's check (`_EVTX_MAGIC` in `api.py`) was always correct, as were the sample files: their magic bytes, their `binary` attribute, and their content all checked out. The line-ending commits never touched them. The bad byte dates from the commit that added client-side upload checks.

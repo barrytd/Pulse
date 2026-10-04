@@ -197,11 +197,12 @@ export async function uploadAndScan() {
   status.className = 'upload-status success';
   invalidateScansCache();
   invalidateFindingsCache();
-  // Land on History after a successful upload — that's where the scan
-  // list lives now (the standalone Scans page got merged in). If the
-  // user was already on History the navigate() collapses to a re-render
-  // so the new row appears without a flash.
-  setTimeout(function () { closeUploadModal(); navigate('history'); }, 1500);
+  // Land on (or stay on) the Dashboard after a successful upload so the
+  // new scan's score and findings show right away. The caches were just
+  // invalidated, so the render fetches fresh data; when the user is
+  // already on the Dashboard, navigate() re-renders it in place (same URL,
+  // replaceState, no extra history entry).
+  setTimeout(function () { closeUploadModal(); navigate('dashboard'); }, 1500);
 }
 
 // Wire up DOM listeners. Module scripts are deferred, so target

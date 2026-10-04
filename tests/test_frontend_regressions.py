@@ -111,3 +111,31 @@ def test_every_spa_page_has_a_server_route(tmp_path):
     client = TestClient(app)
     missing = [p for p in pages if client.get("/" + p).status_code == 404]
     assert missing == [], f"no server route for SPA page(s): {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Upload / system scan: stay on the Dashboard with fresh data
+# ---------------------------------------------------------------------------
+
+def _scan_done_tail(src, marker):
+    """The success branch of a scan handler, from its cache invalidation on."""
+    start = src.index(marker)
+    return src[start:start + 900]
+
+
+def test_upload_lands_on_the_dashboard_with_fresh_data():
+    """After an uploaded log finishes scanning the user stays on (or lands
+    on) the Dashboard, not History, and the caches are dropped first so
+    the new scan's score and findings render right away."""
+    tail = _scan_done_tail(_read("upload.js"), "invalidateScansCache();\n  invalidateFindingsCache();")
+    assert "navigate('dashboard')" in tail
+    assert "navigate('history')" not in _read("upload.js")
+
+
+def test_system_scan_refreshes_the_page_without_redirecting():
+    """"Scan my system" re-renders the page the user is on (fresh data)
+    and never sends them to History."""
+    src = _read("system-scan.js")
+    tail = _scan_done_tail(src, "invalidateScansCache();\n    invalidateFindingsCache();")
+    assert "navigate(getCurrentPage())" in tail
+    assert "navigate('history')" not in src
