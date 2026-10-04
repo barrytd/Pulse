@@ -1802,15 +1802,9 @@
  * list pages can adopt them.
  * ================================================================== */
 
-.findings-page {
-  /* When the detail flyout opens, body.flyout-push-open shifts the
-     page right-padding by the flyout width so the table compresses
-     instead of being overlaid. The transition matches the drawer's
-     own slide so chrome and content move together. */
-  padding-right: 0;
-  transition: padding-right 250ms cubic-bezier(0.1, 0.9, 0.2, 1);
-}
-body.flyout-push-open .findings-page { padding-right: 460px; }
+/* The finding drawer floats over the page at every width (it no longer
+   pushes .findings-page aside), so the table keeps its full column
+   widths when the drawer opens. */
 
 .findings-page-body {
   margin-top: 16px;
@@ -1850,18 +1844,13 @@ body.flyout-push-open .findings-page { padding-right: 460px; }
 .findings-ctx-item-exclude:hover { background: rgba(248, 81, 73, 0.1); }
 
 /* ==================================================================
- * Detail flyout — push layout. The drawer's own slide animation
- * stays as-is (translateX 100%→0 in findings.css base rules); we
- * just stop the backdrop from showing and let .findings-page
- * reflow via padding-right above.
+ * Detail flyout: overlays the page at every width, the same as it
+ * always did on phones. The drawer floats over the table with its own
+ * shadow and the page is not dimmed or locked, so another row can still
+ * be clicked to switch findings. body.flyout-push-open stays as a
+ * marker class (set while the drawer is open) but no longer moves the
+ * page.
  * ================================================================== */
-body.flyout-push-open .finding-drawer-backdrop { display: none; }
-body.flyout-push-open .finding-drawer { box-shadow: none; }
-@media (max-width: 1100px) {
-  body.flyout-push-open .findings-page { padding-right: 0; }
-  body.flyout-push-open .finding-drawer-backdrop { display: block; }
-  body.flyout-push-open .finding-drawer { box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25); }
-}
 
 /* Investigate panel (finding drawer): verdicts from every enrichment
    connector, grouped by indicator. Pills reuse the .soar-pill tones. */

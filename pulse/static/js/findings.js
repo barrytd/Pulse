@@ -2910,10 +2910,11 @@ export function openFindingDrawer(f) {
   // each toggle inside _submitReview.
 
   document.getElementById('finding-drawer').classList.add('open');
-  // Push layout: the table stays interactive (clicking another row
-  // updates the drawer in place), so we don't dim the page or lock
-  // scroll. body.flyout-push-open is the CSS hook that compresses
-  // the findings-page so the drawer no longer overlays the table.
+  // The drawer floats over the page at every width; the table keeps its
+  // full columns and stays interactive (clicking another row updates the
+  // drawer in place), so we don't dim the page or lock scroll.
+  // body.flyout-push-open just marks "drawer open"; it no longer moves
+  // the page.
   document.body.classList.add('flyout-push-open');
 
   // Fire the notes + assignee fetches after the drawer mounts so the

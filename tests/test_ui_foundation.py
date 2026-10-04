@@ -303,11 +303,26 @@ class TestBatch2:
         assert not re.search(r"(?<!-)height:\s*40px", sticky)
         assert "var(--card-edge)" in sticky
 
-    def test_drawer_overlays_where_it_cannot_push(self):
-        f = _css_rules_without_comments(_read(CSS / "findings.css"))
-        m = re.search(r"@media \(max-width: (\d+)px\)\s*\{\s*body\.flyout-push-open \.findings-page\s*\{\s*padding-right:\s*0", f)
-        assert m and int(m.group(1)) >= 900
-        assert "body.flyout-push-open .finding-drawer-backdrop { display: block; }" in f
+    def test_drawer_overlays_at_every_width(self):
+        # The finding drawer floats over the page at desktop widths too, so
+        # the Findings table keeps its full columns when it opens: nothing
+        # pads, margins or shrinks the page while the drawer is open.
+        for f in CSS.glob("*.css"):
+            css = _css_rules_without_comments(_read(f))
+            for sel, body in re.findall(r"([^{}]*flyout-push-open[^{}]*)\{([^}]*)\}", css):
+                assert not re.search(r"padding-right|margin-right|width|max-width", body), (f.name, sel.strip())
+        drawer = _css_rules_without_comments(_read(CSS / "findings.css"))
+        base = re.search(r"\.finding-drawer\s*\{([^}]*)\}", drawer).group(1)
+        assert "position: fixed" in base and "box-shadow" in base
+
+    def test_no_other_drawer_pushes_the_page(self):
+        # The shared drawer (Fleet, Audit Log) and Pip float as fixed layers;
+        # no stylesheet shifts page content to make room for a side panel.
+        for f in CSS.glob("*.css"):
+            css = _css_rules_without_comments(_read(f))
+            assert not re.search(r"(drawer|panel|pip|flyout)[\w-]*-open[^{]*\{[^}]*(padding|margin)-right:\s*[1-9]", css), f.name
+        shared = _css_rules_without_comments(_read(CSS / "modals.css"))
+        assert "position: fixed" in re.search(r"\.drawer-panel\s*\{([^}]*)\}", shared).group(1)
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,13 @@ Format: newest entries at the top, grouped by date.
 
 ---
 
+## 2026-10-04 — Finding drawer overlays instead of squishing the table
+
+- **Findings:** opening the finding drawer at desktop widths used to push the page aside (`padding-right: 460px` on `.findings-page`), squeezing the table so rule names wrapped and right-hand columns were clipped. The drawer now floats over the page at every width, the same way it always did on phones. The table keeps its full column widths, and the page isn't dimmed or locked, so clicking another row still switches the drawer to that finding.
+- **Every other side panel was checked.** The shared drawer (Fleet host drawer, Audit Log details) already overlays with a backdrop, and Pip is a floating panel that only shifts its position beside the drawer. None of them push page content, so no change was needed. The Dashboard is unchanged.
+- Measured in a browser, in light and dark at 1440px and 420px: the Findings table stays the same width with the drawer open (1144px at 1440), so does the Fleet table, and nothing scrolls sideways.
+- Tests: `tests/test_ui_foundation.py` now checks that no rule tied to the open drawer pads, margins or resizes the page, that the drawer is a fixed layer with its own shadow, and that no stylesheet shifts page content for any drawer or side panel. This replaces the old test that expected push-on-desktop.
+
 ## 2026-10-04 — Uploads land on the Dashboard
 
 - After an uploaded log finishes scanning, Pulse now lands on, or stays on, the **Dashboard** instead of redirecting to History. The scan and findings caches are dropped first, so the new scan's score and findings show right away. When you're already on the Dashboard it re-renders in place (same URL, no extra browser-history entry).
